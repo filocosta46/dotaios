@@ -1,0 +1,14 @@
+{
+  "name": "@dotaios/core",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Core schema, memory, and manifest helpers for DotAIOS.",
+  "type": "module",
+  "exports": {
+    "./paths": "./src/paths.mjs",
+    "./schema": "./src/schema.mjs",
+    "./memory": "./src/memory.mjs",
+    "./manifest": "./src/manifest.mjs"
+  },
+  "license": "MIT"
+}

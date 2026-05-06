@@ -1,0 +1,18 @@
+node_modules/
+dist/
+.DS_Store
+
+# Local secrets and generated user memory
+.env
+.env.*
+!.env.example
+credentials.*
+token.*
+*.pem
+*.key
+
+# Runtime output from local AIOS installs
+.aios/
+memory/events.jsonl
+memory/signals/
+memory/errors.jsonl

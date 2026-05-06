@@ -1,0 +1,39 @@
+{
+  "name": "dotaios",
+  "version": "1.0.0",
+  "description": "Dotfiles for AI agents: local-first personal context for Claude Code, Codex, Cursor, and other assistants.",
+  "type": "module",
+  "bin": {
+    "dotaios": "packages/cli/src/index.mjs",
+    "aios": "packages/cli/src/index.mjs"
+  },
+  "files": [
+    "packages/cli/src",
+    "packages/core/src",
+    "templates",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "cli": "node packages/cli/src/index.mjs",
+    "check": "node packages/cli/src/index.mjs --help",
+    "smoke": "node scripts/smoke.mjs",
+    "pack:check": "npm pack --dry-run"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "memory",
+    "cli",
+    "context",
+    "claude-code",
+    "codex",
+    "cursor"
+  ],
+  "packageManager": "pnpm@10.33.4",
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

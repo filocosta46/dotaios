@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+credentials.*
+token.*
+*.pem
+*.key
+
+memory/events.jsonl
+memory/signals/
+memory/errors.jsonl
+
+.DS_Store
+node_modules/

@@ -1,0 +1,51 @@
+# CLAUDE.md
+
+This file guides Claude Code when working with this user's local AIOS.
+
+# {{user_name}}'s AIOS
+
+Local-first personal context for AI agents. Read the files below before making recommendations that depend on identity, priorities, active work, or writing style.
+
+## Where Things Live
+
+| Folder | What |
+|---|---|
+| `context/` | Who the user is, what they are working on, current priorities |
+| `projects/` | Active work, one folder per project |
+| `memory/` | Recent operational memory; load only the routed slices |
+| `vault/` | Long-term knowledge, loaded on demand |
+| `connections/` | Service registry and API notes |
+| `skills/` | Reusable markdown workflows |
+| `plugins/` | Optional extensions with declared permissions |
+| `decisions/log.md` | Append-only architectural and product decisions |
+
+{{#if vault_path}}
+Configured external vault: `{{vault_path}}`
+{{else}}
+Configured vault: `vault/`
+{{/if}}
+
+## Read Order
+
+1. `context/identity.md`
+2. `context/priorities.md`
+3. `context/work.md`
+4. `context/north-star.md`
+5. For project work: `projects/<slug>/README.md`
+6. Load any domain files declared in project frontmatter from `context/domains/`
+
+## Memory Routing
+
+- `memory/events.jsonl`: load the last 50 entries only.
+- `memory/signals/`: load today and yesterday only.
+- `memory/errors.jsonl`: load only when debugging failed operations.
+- `vault/`: load on demand when the task references knowledge, companies, people, writing style, or raw sources.
+
+## Rules
+
+- Keep memory local. Do not introduce cloud sync unless the user explicitly asks.
+- Do not paste secrets in chat. Ask the user to fill `.env` themselves.
+- Durable writes to `context/`, `vault/wiki/`, and `vault/org/` require user approval.
+- Companies and people live only in `vault/org/`; do not duplicate them in `memory/`.
+- Log meaningful decisions in `decisions/log.md`.
+- If a referenced path is missing, flag it before proceeding.

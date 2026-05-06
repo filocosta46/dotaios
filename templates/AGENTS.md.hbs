@@ -1,0 +1,53 @@
+# AGENTS.md
+
+Agent-neutral entrypoint for Codex, Gemini, Cursor, OpenHands, and other repo-aware assistants.
+
+## Purpose
+
+This folder is {{user_name}}'s local AIOS: durable, local-first context that helps AI agents understand identity, active work, priorities, and communication preferences.
+
+{{#if vault_path}}
+Long-term knowledge is configured at `{{vault_path}}`.
+{{else}}
+Long-term knowledge is configured at `vault/`.
+{{/if}}
+
+## Read Order
+
+1. `context/identity.md`
+2. `context/priorities.md`
+3. `context/work.md`
+4. `context/north-star.md`
+5. If working on a project: `projects/<slug>/README.md`
+6. Load declared domain files from `context/domains/<domain>.md`
+
+## Project Convention
+
+Each project should have `projects/<slug>/README.md` with frontmatter:
+
+```yaml
+---
+project: example-project
+domain: [build]
+status: active
+---
+```
+
+Available domains:
+
+- `make`: creative output, content, publishing
+- `sell`: outreach, applications, positioning, proposals
+- `build`: software, systems, automations
+
+## Skills
+
+Skills live in `skills/<name>/SKILL.md`. They are plain markdown instruction sets. Follow them when the user invokes a skill by name or asks for that workflow.
+
+## Rules
+
+- Treat `context/` as always relevant.
+- Treat `memory/` as recent operational state, not an infinite transcript.
+- Treat `vault/` as routed long-term knowledge.
+- Never expose secrets.
+- Ask before writing durable identity, CRM, or wiki knowledge.
+- Suggest a new skill when a workflow repeats.

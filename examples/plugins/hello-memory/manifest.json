@@ -1,0 +1,22 @@
+{
+  "name": "hello-memory",
+  "version": "0.1.0",
+  "description": "Example plugin manifest for validating the DotAIOS permission contract.",
+  "license": "MIT",
+  "aios_version": ">=1.0.0",
+  "requires": {
+    "connections": [],
+    "context": ["identity.md", "priorities.md"]
+  },
+  "provides": {
+    "skills": ["hello-memory"],
+    "memory_writers": ["memory/signals/example"],
+    "scheduled_tasks": []
+  },
+  "permissions": {
+    "read": ["context/*"],
+    "write": ["memory/signals/*"],
+    "write_with_approval": ["memory/events.jsonl"],
+    "connections": []
+  }
+}
