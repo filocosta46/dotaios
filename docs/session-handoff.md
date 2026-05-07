@@ -1,41 +1,50 @@
 # DotAIOS Session Handoff
 
-## Release Checkpoint
+## Release Checkpoint (updated 2026-05-07)
 
-DotAIOS has been published to npm as `dotaios@1.0.0`.
+DotAIOS v1.0.0 is fully released and the distribution story is complete.
 
-- npm package: `dotaios`
+- npm package: `dotaios@1.0.0`
 - binary names: `dotaios`, `aios`
-- published commit: `c97787d`
-- npm page: `https://www.npmjs.com/package/dotaios`
+- npm page: https://www.npmjs.com/package/dotaios
+- GitHub: https://github.com/filocosta46/dotaios (public)
+- release commit: `c97787d` — tagged `v1.0.0`
+- HEAD: `2bc7dcd` (README polish)
+- branch: `main`, tracking `origin/main`, clean
 
-## What Was Done
+## What Was Done This Session (2026-05-07)
 
-- Cleaned packaging so the repo root is the publishable package.
-- Kept `packages/cli` and `packages/core` as internal private workspaces.
-- Removed dead template/package metadata flagged by the audit.
-- Added `pnpm-lock.yaml`.
-- Verified the CLI works from source and from an installed tarball.
-- Published `dotaios@1.0.0` successfully.
+1. Confirmed repo state matched handoff exactly.
+2. Created GitHub repo `filocosta46/dotaios` (public).
+3. Added remote `origin`, pushed `main`.
+4. Tagged `v1.0.0` on `c97787d`, pushed tag.
+5. Polished README: badges, install demo block, folder diagram, commands table, `dotaios` vs `aios` explainer, base skills table, plugin section.
+6. Committed `docs/session-handoff.md` and updated README on `main`.
 
-## Current Verified Repo State
+## Current State
 
-As last checked on 2026-05-07:
+- npm + GitHub fully wired
+- `v1.0.0` tag exists on release commit
+- README is stranger-ready
+- No open issues or broken state
 
-- `git rev-parse --short HEAD` -> `c97787d`
-- no git remote configured
-- no git tag created yet
-- worktree clean
+## Recommended Next Steps (v1.1)
 
-## Recommended Next Steps
-
-1. Add the GitHub remote and push the repo.
-2. Tag `v1.0.0`.
-3. Polish README and public-facing docs.
-4. Define the first post-release milestone, likely around memory routing ergonomics and lifecycle commands (`context`, `upgrade`, `cleanup`).
+1. Scope the v1.1 milestone — pick 1-2 commands from: `aios context`, `aios upgrade`, `aios cleanup`
+2. Gmail OAuth plugin (uses `googleapis` npm, not GWS CLI — designed for public distribution)
+3. Unit tests (smoke-only right now)
+4. Better docs around memory routing and approval boundaries
 
 ## Notes For The Next Agent
 
-- Treat the architecture as established unless there is a clear product reason to change it.
-- The next session should focus on release completion and post-release prioritization, not rebuilding the CLI foundation.
-- For broader background, read the external handoff note in `/Users/filo/Brain/Obsidian-Mind/outputs/aios-product-session/dotaios-release-handoff-2026-05-07.md`.
+- Treat architecture as established. Do not re-scaffold.
+- Repo is live and public. Any push is immediately visible.
+- Next session focus: v1.1 scoping and first feature work, not release cleanup.
+- For broader background, read the external docs listed in read order below.
+
+## Read Order For Fresh Agent
+
+1. `/Users/filo/Brain/Obsidian-Mind/outputs/aios-product-session/dotaios-release-handoff-2026-05-07.md`
+2. `/Users/filo/Brain/Obsidian-Mind/outputs/aios-product-session/dotaios-codex-audit.md.resolved`
+3. `/Users/filo/Brain/Obsidian-Mind/outputs/aios-product-session/aios-product-brief-v2.md`
+4. `/Users/filo/Brain/dotaios/docs/session-handoff.md`
