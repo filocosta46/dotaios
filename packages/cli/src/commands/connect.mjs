@@ -1,11 +1,9 @@
 import fs from "node:fs/promises";
-import { constants as fsConstants } from "node:fs";
 import path from "node:path";
-import { delimiter } from "node:path";
-import { spawnSync } from "node:child_process";
 import { appendEvent } from "../../../core/src/memory.mjs";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { assertAiosFolder, assessGwsAuth, firstLine, printCaptured, resolveAiosTarget, resolveGwsBinary, runGws } from "../lib/gws.mjs";
 
 const googleAliases = new Set(["google", "gmail", "gws"]);
 
@@ -24,7 +22,7 @@ export async function connectCommand(args) {
     throw new Error(`Unsupported connection: ${service}. Supported connections: google`);
   }
 
-  const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+  const target = resolveAiosTarget(options.path);
   await assertAiosFolder(target);
 
   const gwsBin = await resolveGwsBinary(options.gwsBin || process.env.DOTAIOS_GWS_BIN || null);
@@ -59,16 +57,17 @@ export async function connectCommand(args) {
   }
 
   const auth = runGws(gwsBin, ["auth", "status"]);
-  if (auth.status !== 0) {
+  const authState = assessGwsAuth(auth);
+  if (!authState.ready) {
     console.log("[missing] gws auth is not ready");
-    printCaptured(auth);
+    console.log(`      ${authState.summary}`);
+    if (auth.status !== 0) printCaptured(auth);
     printAuthGuidance();
     throw new Error("Google Workspace auth is not ready. Run `gws auth login`, then retry `dotaios connect google --status`.");
   }
 
   console.log("[ok] gws auth status");
-  const authLine = firstLine(auth.stdout);
-  if (authLine) console.log(`      ${authLine}`);
+  console.log(`      ${authState.summary}`);
 
   if (options.status) {
     console.log("\nGoogle Workspace looks ready for DotAIOS.");
@@ -137,44 +136,6 @@ function parseOptions(args = []) {
   }
 
   return { service, options };
-}
-
-async function assertAiosFolder(target) {
-  try {
-    await fs.access(path.join(target, "aios.json"));
-  } catch {
-    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
-  }
-}
-
-async function resolveGwsBinary(explicitPath) {
-  if (explicitPath) {
-    return await isExecutable(explicitPath) ? path.resolve(expandHome(explicitPath)) : null;
-  }
-
-  for (const dir of (process.env.PATH || "").split(delimiter).filter(Boolean)) {
-    const candidate = path.join(dir, "gws");
-    if (await isExecutable(candidate)) return candidate;
-  }
-
-  return null;
-}
-
-async function isExecutable(filePath) {
-  try {
-    await fs.access(filePath, fsConstants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function runGws(gwsBin, args) {
-  return spawnSync(gwsBin, args, {
-    encoding: "utf8",
-    env: process.env,
-    timeout: 15000
-  });
 }
 
 async function writeGoogleConnection(target, { gwsBin, versionText }) {
@@ -255,15 +216,16 @@ DotAIOS does not store Google OAuth credentials. Keep secrets out of chat, conte
 \`\`\`bash
 gws auth status
 dotaios connect google --status
+dotaios google status
 \`\`\`
 
 ## Read-First Commands
 
 \`\`\`bash
-gws gmail +triage
-gws calendar +agenda --today
-gws calendar +agenda --week
-gws drive files list --params '{"pageSize":10}'
+dotaios google inbox
+dotaios google agenda --today
+dotaios google agenda --week
+dotaios google drive --page-size 10
 \`\`\`
 
 ## Safety
@@ -299,10 +261,10 @@ gws auth login
 ## Safe Read-First Commands
 
 \`\`\`bash
-gws gmail +triage
-gws calendar +agenda --today
-gws calendar +agenda --week
-gws drive files list --params '{"pageSize":10}'
+dotaios google inbox
+dotaios google agenda --today
+dotaios google agenda --week
+dotaios google drive --page-size 10
 \`\`\`
 
 ## Approval Rules
@@ -334,15 +296,4 @@ function printAuthGuidance() {
   console.log("2. Complete the browser OAuth flow.");
   console.log("3. Run `gws auth status`.");
   console.log("4. Run `dotaios connect google` again.");
-}
-
-function printCaptured(result) {
-  const stdout = result.stdout?.trim();
-  const stderr = result.stderr?.trim();
-  if (stdout) console.log(stdout);
-  if (stderr) console.log(stderr);
-}
-
-function firstLine(value = "") {
-  return value.trim().split("\n").find(Boolean) || "";
 }

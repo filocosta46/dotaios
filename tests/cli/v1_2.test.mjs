@@ -192,6 +192,93 @@ test("connect google refuses unsupported services and unauthenticated gws", () =
   assert.equal(fs.existsSync(path.join(aiosPath, "connections", "apis", "google-workspace.md")), false);
 });
 
+test("connect google detects unusable gws auth even when status exits zero", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const gwsBin = createFakeGws(tempRoot, { authJsonInvalid: true });
+
+  const notReady = runFail(["connect", "google", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(notReady.stdout, /Could not decrypt/);
+  assert.match(notReady.stderr, /auth is not ready/);
+
+  const status = run(["google", "status", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(status.stdout, /\[missing\] gws auth status/);
+  assert.match(status.stdout, /Could not decrypt/);
+});
+
+test("google status reports connection and auth state", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const gwsBin = createFakeGws(tempRoot);
+
+  const before = run(["google", "status", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(before.stdout, /DotAIOS Google status/);
+  assert.match(before.stdout, /\[missing\] DotAIOS Google connection note/);
+  assert.match(before.stdout, /\[ok\] gws auth status/);
+
+  run(["connect", "google", "--path", aiosPath, "--gws-bin", gwsBin]);
+  const after = run(["google", "status", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(after.stdout, /\[ok\] DotAIOS Google connection note/);
+});
+
+test("google setup explains the nontechnical OAuth path", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const gwsBin = createFakeGws(tempRoot, { authOk: false });
+
+  const result = run(["google", "setup", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(result.stdout, /What this setup really means/);
+  assert.match(result.stdout, /Google requires an OAuth client/);
+  assert.match(result.stdout, /read-only scopes for: gmail,calendar,drive/);
+  assert.match(result.stdout, /gws auth login --readonly --services gmail,calendar,drive/);
+});
+
+test("google setup helps when gws is missing", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const missingGws = path.join(tempRoot, "missing-gws");
+
+  const setup = run(["google", "setup", "--path", aiosPath, "--gws-bin", missingGws]);
+  assert.match(setup.stdout, /\[missing\] gws CLI/);
+  assert.match(setup.stdout, /npm install -g @googleworkspace\/cli/);
+
+  const workflow = runFail(["google", "inbox", "--path", aiosPath, "--gws-bin", missingGws]);
+  assert.match(workflow.stderr, /Google Workspace CLI is required/);
+});
+
+test("google read-first workflows run through gws after connect", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const gwsBin = createFakeGws(tempRoot);
+  run(["connect", "google", "--path", aiosPath, "--gws-bin", gwsBin]);
+
+  const inbox = run(["google", "inbox", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(inbox.stdout, /Running: gws gmail \+triage/);
+  assert.match(inbox.stdout, /Inbox triage: 2 unread messages/);
+
+  const agenda = run(["google", "agenda", "--today", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(agenda.stdout, /Running: gws calendar \+agenda --today/);
+  assert.match(agenda.stdout, /Calendar agenda: today/);
+
+  const drive = run(["google", "drive", "--page-size", "5", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(drive.stdout, /Running: gws drive files list --params/);
+  assert.match(drive.stdout, /Drive files: 5 requested/);
+});
+
+test("google workflows validate setup and safe options", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const gwsBin = createFakeGws(tempRoot);
+
+  const notConnected = runFail(["google", "inbox", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(notConnected.stderr, /not connected/);
+
+  run(["connect", "google", "--path", aiosPath, "--gws-bin", gwsBin]);
+
+  const badRange = runFail(["google", "agenda", "--today", "--week", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(badRange.stderr, /Use only one agenda range/);
+
+  const badPageSize = runFail(["google", "drive", "--page-size", "0", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(badPageSize.stderr, /--page-size must be a positive integer/);
+
+  const badWorkflow = runFail(["google", "send", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(badWorkflow.stderr, /Unsupported Google workflow/);
+});
+
 function setupAios() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-v12-test-"));
   const aiosPath = path.join(tempRoot, "aios");
@@ -200,7 +287,7 @@ function setupAios() {
   return { aiosPath, tempRoot };
 }
 
-function createFakeGws(tempRoot, { authOk = true } = {}) {
+function createFakeGws(tempRoot, { authJsonInvalid = false, authOk = true } = {}) {
   const gwsBin = path.join(tempRoot, "gws");
   fs.writeFileSync(
     gwsBin,
@@ -211,12 +298,37 @@ if (args[0] === "--version") {
   process.exit(0);
 }
 if (args[0] === "auth" && args[1] === "status") {
+  if (${authJsonInvalid ? "true" : "false"}) {
+    console.log(JSON.stringify({
+      auth_method: "oauth2",
+      client_config_exists: true,
+      encrypted_credentials_exists: true,
+      encryption_error: "Could not decrypt",
+      encryption_valid: false,
+      token_cache_exists: true
+    }, null, 2));
+    process.exit(0);
+  }
   if (${authOk ? "true" : "false"}) {
     console.log("Authenticated as beta@example.com");
     process.exit(0);
   }
   console.error("Not authenticated");
   process.exit(1);
+}
+if (args[0] === "gmail" && args[1] === "+triage") {
+  console.log("Inbox triage: 2 unread messages");
+  process.exit(0);
+}
+if (args[0] === "calendar" && args[1] === "+agenda") {
+  console.log("Calendar agenda: " + (args.includes("--today") ? "today" : "upcoming"));
+  process.exit(0);
+}
+if (args[0] === "drive" && args[1] === "files" && args[2] === "list") {
+  const paramsIndex = args.indexOf("--params");
+  const params = paramsIndex >= 0 ? JSON.parse(args[paramsIndex + 1]) : {};
+  console.log("Drive files: " + (params.pageSize || 10) + " requested");
+  process.exit(0);
 }
 console.error("Unexpected gws command: " + args.join(" "));
 process.exit(2);

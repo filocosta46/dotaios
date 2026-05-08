@@ -8,6 +8,7 @@ const commands = {
   cleanup: "./commands/cleanup.mjs",
   connect: "./commands/connect.mjs",
   context: "./commands/context.mjs",
+  google: "./commands/google.mjs",
   import: "./commands/import.mjs",
   init: "./commands/init.mjs",
   ingest: "./commands/ingest.mjs",
@@ -29,6 +30,7 @@ Commands:
   cleanup           Trim stale signals and compact the event log
   connect google    Connect optional local integrations such as Google Workspace
   context [name]    View, edit, or refresh local context files
+  google <cmd>      Run read-first Google Workspace workflows
   import <file>     Preview or apply structured context from old chats
   init              Scaffold ~/.aios with local context templates
   ingest <file>     Copy material into vault/raw and log an event

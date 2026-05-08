@@ -76,6 +76,7 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 | `dotaios cleanup` | Trims stale signals and compacts the event log |
 | `dotaios connect google` | Verifies local `gws` auth and adds read-first Gmail/Calendar guidance |
 | `dotaios context` | Shows, edits, or refreshes the context agents see |
+| `dotaios google <cmd>` | Runs read-first Google Workspace workflows through `gws` |
 | `dotaios import <file>` | Previews or applies structured context from old AI chats |
 | `dotaios search <query>` | Searches across memory, vault, context, and projects |
 | `dotaios status` | Health check — shows what's configured, what's missing |
@@ -122,11 +123,17 @@ DotAIOS can connect to Gmail, Calendar, Drive, Docs, and Sheets through the loca
 
 ```bash
 npx dotaios connect google --dry-run
+npx dotaios google setup
 npx dotaios connect google --status
 npx dotaios connect google
+npx dotaios google status
+npx dotaios google inbox
+npx dotaios google agenda --today
 ```
 
 The beta scope is read-first: Gmail triage/search, Calendar agenda, meeting prep, and Drive/Docs/Sheets lookup. Sending email, creating events, or editing files should require explicit approval.
+
+Google setup is still an assisted beta path. New users install `gws` with `npm install -g @googleworkspace/cli`, `brew install googleworkspace-cli`, or the GitHub release binary. They then need either `gws auth setup` with the Google Cloud CLI (`gcloud`) or a manually created Google Cloud OAuth client. DotAIOS makes the flow visible and safer; it does not yet hide Google Cloud setup behind a hosted OAuth app.
 
 ## Plugins
 

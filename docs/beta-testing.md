@@ -40,6 +40,7 @@ Optional Google Workspace check for testers who already use Gmail or Calendar:
 
 ```bash
 npx dotaios connect google --dry-run
+npx dotaios google setup
 npx dotaios connect google --status
 ```
 
@@ -47,6 +48,9 @@ Only run the final connect after `gws auth status` is working:
 
 ```bash
 npx dotaios connect google
+npx dotaios google status
+npx dotaios google inbox
+npx dotaios google agenda --today
 ```
 
 Useful feedback:
