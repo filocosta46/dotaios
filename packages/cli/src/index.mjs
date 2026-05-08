@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
-const VERSION = "1.2.0";
+const VERSION = "1.2.1";
 
 const commands = {
   activate: "./commands/activate.mjs",
   attach: "./commands/activate.mjs",
   cleanup: "./commands/cleanup.mjs",
+  connect: "./commands/connect.mjs",
   context: "./commands/context.mjs",
   import: "./commands/import.mjs",
   init: "./commands/init.mjs",
@@ -26,6 +27,7 @@ Commands:
   activate          Connect ~/.aios to global agent memory files
   attach <dir>      Connect a project folder to DotAIOS
   cleanup           Trim stale signals and compact the event log
+  connect google    Connect optional local integrations such as Google Workspace
   context [name]    View, edit, or refresh local context files
   import <file>     Preview or apply structured context from old chats
   init              Scaffold ~/.aios with local context templates

@@ -191,12 +191,10 @@ async function createStarterFiles(target, data, writeMode) {
       "# Copy this file to .env when plugins require local secrets.",
       "# Never paste secrets into chat or memory files.",
       "",
-      "# Gmail plugin",
-      "# GOOGLE_CLIENT_ID=",
-      "# GOOGLE_CLIENT_SECRET=",
-      "",
-      "# Calendar plugin",
-      "# GOOGLE_CALENDAR_ID="
+      "# Google Workspace",
+      "# DotAIOS uses the local gws CLI for Gmail/Calendar/Drive beta access.",
+      "# OAuth credentials stay in gws, not in this folder.",
+      "# Run: dotaios connect google --dry-run"
     ].join("\n") + "\n",
     "connections/registry.md": "# Connections\n\n| Service | Status | Notes |\n|---|---|---|\n",
     "decisions/log.md": "# Decision Log\n\n",
@@ -240,8 +238,9 @@ function printSuccess(target, vaultPath, results) {
   console.log("\nNext steps:");
   console.log("1. Read FIRST_SESSION.md");
   console.log("2. Run `npx dotaios activate` to connect DotAIOS to your agent tools");
-  console.log("3. Open Claude Code, Codex, Gemini, Cursor, or another agent-aware tool");
-  console.log("4. Run `npx dotaios context` whenever you want to inspect what agents see");
+  console.log("3. Optional: run `npx dotaios connect google --dry-run` for Gmail/Calendar beta setup");
+  console.log("4. Open Claude Code, Codex, Gemini, Cursor, or another agent-aware tool");
+  console.log("5. Run `npx dotaios context` whenever you want to inspect what agents see");
 }
 
 function firstSessionTemplate() {
@@ -252,6 +251,12 @@ Welcome to {{user_name}}'s local AIOS.
 ## What To Open
 
 Run \`npx dotaios activate\` once to connect DotAIOS to global Claude, Codex, and Gemini memory files.
+
+For Gmail and Calendar beta setup, run:
+
+\`\`\`
+npx dotaios connect google --dry-run
+\`\`\`
 
 For a project you use in Cursor, run:
 

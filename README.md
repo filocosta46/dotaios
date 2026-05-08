@@ -74,6 +74,7 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 | `dotaios activate` | Connects DotAIOS to global Claude, Codex, and Gemini memory files |
 | `dotaios attach <project>` | Adds DotAIOS bridges to a project folder, including Cursor rules |
 | `dotaios cleanup` | Trims stale signals and compacts the event log |
+| `dotaios connect google` | Verifies local `gws` auth and adds read-first Gmail/Calendar guidance |
 | `dotaios context` | Shows, edits, or refreshes the context agents see |
 | `dotaios import <file>` | Previews or applies structured context from old AI chats |
 | `dotaios search <query>` | Searches across memory, vault, context, and projects |
@@ -115,6 +116,18 @@ Five skills ship with DotAIOS, installed at `~/.aios/skills/`:
 
 Invoke them in Claude Code: `/plan-today`, `/audit`, etc.
 
+## Google Workspace beta
+
+DotAIOS can connect to Gmail, Calendar, Drive, Docs, and Sheets through the local Google Workspace CLI (`gws`). DotAIOS does not store Google OAuth credentials; it verifies `gws auth status`, writes a local connection note, and installs a read-first `google-workspace` skill.
+
+```bash
+npx dotaios connect google --dry-run
+npx dotaios connect google --status
+npx dotaios connect google
+```
+
+The beta scope is read-first: Gmail triage/search, Calendar agenda, meeting prep, and Drive/Docs/Sheets lookup. Sending email, creating events, or editing files should require explicit approval.
+
 ## Plugins
 
 DotAIOS has a documented plugin contract. A plugin is a trusted local folder with a `manifest.json`, a `SKILL.md`, and optional source code.
@@ -127,14 +140,15 @@ See [docs/plugin-development.md](docs/plugin-development.md) and [examples/plugi
 
 Do not install third-party plugins you have not reviewed. Permissions are visible before install, but they are not a sandbox.
 
-For beta guidance, context import prompts, schedules, and secrets policy, see:
-[beta-testing](docs/beta-testing.md), [context-import](docs/context-import.md), [schedules](docs/schedules.md), and [security](docs/security.md).
+For beta guidance, Google Workspace setup, context import prompts, schedules, and secrets policy, see:
+[beta-testing](docs/beta-testing.md), [google-workspace](docs/google-workspace.md), [context-import](docs/context-import.md), [schedules](docs/schedules.md), and [security](docs/security.md).
 
-## v1.2 scope
+## v1.2.x scope
 
 - `dotaios init` / `status` / `ingest` / `install`
 - `dotaios activate` / `attach` / `context` / `import` / `schedule`
 - `dotaios search` / `cleanup`
+- `dotaios connect google` for local `gws`-backed Google Workspace setup
 - Auto-generated agent entrypoints (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
 - Agent-native bridges for Claude Code, Codex, Gemini, and Cursor projects
 - Full memory system: append, filter, compact, trim, search
@@ -142,7 +156,7 @@ For beta guidance, context import prompts, schedules, and secrets policy, see:
 - Documented plugin manifest contract
 - Five base skills
 
-Not in v1.2: Gmail OAuth plugin, MCP server, semantic search (SQLite FTS5), `upgrade` command, paid plugins, cloud sync, plugin marketplace.
+Not in v1.2: custom Gmail OAuth plugin, MCP server, semantic search (SQLite FTS5), `upgrade` command, paid plugins, cloud sync, plugin marketplace.
 
 ## Principles
 

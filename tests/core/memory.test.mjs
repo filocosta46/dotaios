@@ -13,6 +13,7 @@ import {
   appendSignal,
   compactEvents,
   trimSignals,
+  searchMemory,
   RECENT_EVENT_LIMIT
 } from "../../packages/core/src/memory.mjs";
 
@@ -145,4 +146,30 @@ test("trimSignals removes files older than retention period", async () => {
   assert.ok(result.freedBytes > 0);
   assert.equal(fs.existsSync(path.join(signalsDir, `${oldDate}.jsonl`)), false);
   assert.equal(fs.existsSync(path.join(signalsDir, `${recentDate}.jsonl`)), true);
+});
+
+test("searchMemory returns matches by timestamp across events archives and signals", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  const signalsDir = path.join(memoryDir, "signals");
+  fs.mkdirSync(signalsDir, { recursive: true });
+
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), [
+    JSON.stringify({ ts: "2026-05-02T12:00:00.000Z", type: "note", summary: "needle older current event" }),
+    JSON.stringify({ ts: "2026-05-04T12:00:00.000Z", type: "note", summary: "needle newest current event" })
+  ].join("\n") + "\n");
+  fs.writeFileSync(path.join(memoryDir, "events-archive.jsonl"), [
+    JSON.stringify({ ts: "2026-05-05T12:00:00.000Z", type: "note", summary: "needle newest archived event" })
+  ].join("\n") + "\n");
+  fs.writeFileSync(path.join(signalsDir, "2026-05-03.jsonl"), [
+    JSON.stringify({ ts: "2026-05-03T12:00:00.000Z", type: "signal", summary: "needle signal event" })
+  ].join("\n") + "\n");
+
+  const results = await searchMemory(memoryDir, "needle");
+  assert.deepEqual(results.map((result) => result.ts), [
+    "2026-05-05T12:00:00.000Z",
+    "2026-05-04T12:00:00.000Z",
+    "2026-05-03T12:00:00.000Z",
+    "2026-05-02T12:00:00.000Z"
+  ]);
 });

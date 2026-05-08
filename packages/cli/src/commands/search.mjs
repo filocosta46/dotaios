@@ -4,6 +4,8 @@ import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { searchMemory, searchVault, searchContext } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
+const validScopes = new Set(["memory", "vault", "context", "all"]);
+
 export async function searchCommand(args) {
   if (hasHelpFlag(args)) {
     printSearchHelp();
@@ -24,6 +26,8 @@ export async function searchCommand(args) {
   const vaultPath = resolveVaultPath(config, target);
   const scope = options.scope || "all";
   const limit = options.limit;
+  validateScope(scope);
+  validateLimit(limit);
 
   console.log(`Searching for "${query}" in ${scope}...\n`);
 
@@ -112,7 +116,8 @@ function parseOptions(args = []) {
       options.scope = readOptionValue(args, index, "--scope");
       index += 1;
     } else if (arg === "--limit") {
-      options.limit = parseInt(readOptionValue(args, index, "--limit"), 10);
+      const value = readOptionValue(args, index, "--limit");
+      options.limit = parseLimit(value);
       index += 1;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
@@ -123,6 +128,25 @@ function parseOptions(args = []) {
   }
 
   return options;
+}
+
+function parseLimit(value) {
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new Error(`Invalid --limit "${value}". Use a positive whole number.`);
+  }
+  return Number(value);
+}
+
+function validateScope(scope) {
+  if (!validScopes.has(scope)) {
+    throw new Error(`Invalid --scope "${scope}". Use one of: memory, vault, context, all.`);
+  }
+}
+
+function validateLimit(limit) {
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error(`Invalid --limit "${limit}". Use a positive whole number.`);
+  }
 }
 
 function printSearchHelp() {

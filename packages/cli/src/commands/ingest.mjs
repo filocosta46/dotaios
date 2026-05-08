@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { appendEvent } from "../../../core/src/memory.mjs";
 
 export async function ingestCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -28,13 +29,12 @@ Options:
 
   await fs.mkdir(rawDir, { recursive: true });
   await fs.copyFile(source, destination);
-  await fs.mkdir(path.join(target, "memory"), { recursive: true });
-  await fs.appendFile(path.join(target, "memory", "events.jsonl"), JSON.stringify({
-    ts: new Date().toISOString(),
+  await appendEvent(path.join(target, "memory", "events.jsonl"), {
     type: "ingest",
     source,
-    destination
-  }) + "\n");
+    destination,
+    summary: `Ingested ${path.basename(source)}`
+  });
 
   console.log(`Ingested ${source} -> ${destination}`);
 }

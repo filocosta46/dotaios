@@ -1,6 +1,6 @@
 # Schedules
 
-DotAIOS v1.1 keeps schedules local and manual. There is no background daemon, cloud provider, bundled model, or automatic email workflow.
+DotAIOS keeps schedules local and manual. There is no background daemon, cloud provider, bundled model, or automatic email workflow.
 
 Schedules live in `~/.aios/schedules.yml`:
 
@@ -39,6 +39,6 @@ Run one schedule:
 npx dotaios schedule run weekly-status
 ```
 
-In v1.1, scheduled commands must start with `dotaios` or `aios`. Use cron, launchd, Task Scheduler, or another local automation tool directly if you want to run arbitrary commands.
+Scheduled commands must start with `dotaios` or `aios`. Use cron, launchd, Task Scheduler, or another local automation tool directly if you want to run arbitrary commands.
 
-Email routines should be installed as optional plugins or skills later. They must confirm before sending mail, creating events, or writing durable memory.
+Google Workspace beta setup lives behind `dotaios connect google`. Email and calendar routines must remain read-first by default, and must confirm before sending mail, creating events, or writing durable memory.

@@ -1,6 +1,6 @@
 {
   "name": "dotaios",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Dotfiles for AI agents: local-first personal context for Claude Code, Codex, Cursor, and other assistants.",
   "type": "module",
   "bin": {
@@ -16,6 +16,7 @@
     "docs/beta-testing.md",
     "docs/context-import.md",
     "docs/getting-started.md",
+    "docs/google-workspace.md",
     "docs/plugin-development.md",
     "docs/schedules.md",
     "docs/security.md",

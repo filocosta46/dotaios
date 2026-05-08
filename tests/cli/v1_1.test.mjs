@@ -60,6 +60,18 @@ test("init creates secret-safe env placeholders", () => {
   assert.match(read(path.join(aiosPath, ".gitignore")), /^token\.\*$/m);
 });
 
+test("status guides beta testers toward activation", () => {
+  const { aiosPath, homePath } = setupAios();
+
+  const before = run(["status", "--path", aiosPath, "--home", homePath]);
+  assert.match(before.stdout, /Agent bridges/);
+  assert.match(before.stdout, /npx dotaios activate/);
+
+  run(["activate", "--path", aiosPath, "--home", homePath]);
+  const after = run(["status", "--path", aiosPath, "--home", homePath]);
+  assert.match(after.stdout, /global agent bridges look ready/);
+});
+
 test("import previews by default and applies with explicit approval", () => {
   const { aiosPath, tempRoot } = setupAios();
   const importPath = path.join(tempRoot, "import.json");

@@ -238,8 +238,10 @@ export async function searchMemory(memoryDir, query, { limit = 20 } = {}) {
     }
   }
 
-  // Return most recent first, capped at limit
-  return results.reverse().slice(0, limit);
+  // Return most recent first across events, archives, and signals.
+  return results
+    .sort((a, b) => compareTimestampsDesc(a.ts, b.ts))
+    .slice(0, limit);
 }
 
 /**
@@ -301,6 +303,13 @@ export async function searchContext(contextDir, query, { limit = 10 } = {}) {
 
 function isoDate(date) {
   return date.toISOString().slice(0, 10);
+}
+
+function compareTimestampsDesc(a, b) {
+  if (!a && !b) return 0;
+  if (!a) return 1;
+  if (!b) return -1;
+  return b.localeCompare(a);
 }
 
 async function listMarkdownFiles(dir) {

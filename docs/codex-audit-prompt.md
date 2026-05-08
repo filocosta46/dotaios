@@ -1,6 +1,6 @@
 # DotAIOS v1.1 — Architecture & Roadmap Audit
 
-You are auditing the DotAIOS project — an open-source CLI tool that scaffolds local-first personal context for AI agents. Think "dotfiles for AI." The package `dotaios@1.0.0` is live on npm. The repo is public at https://github.com/filocosta46/dotaios.
+You are auditing the DotAIOS project — an open-source CLI tool that scaffolds local-first personal context for AI agents. Think "dotfiles for AI." The package `dotaios` is live on npm. The repo is public at https://github.com/filocosta46/dotaios.
 
 Your job is to critically evaluate the v1.1 roadmap, the architectural decisions, and the research that informed them. Prioritize efficiency, simplicity, and alignment with the project's core values. Push back on anything that adds complexity without clear value.
 
@@ -36,7 +36,7 @@ Read these files in order:
 These reference materials inspired the v1.1 roadmap:
 
 20. `docs/reference/chase-agentic-os.md` — Chase Hannegan's Agentic OS architecture (Claude Code-specific, Streamlit dashboard, skill-creator workflow)
-21. `docs/reference/openclaw-gog-skill.md` — OpenClaw skill format for `gog` (Google Workspace CLI). Note the YAML frontmatter structure.
+21. `docs/reference/openclaw-gog-skill.md` — historical OpenClaw skill format for `gog` (Google Workspace CLI). Note the YAML frontmatter structure; current beta implementation uses `gws`.
 22. `docs/reference/ontology-essay.md` — essay on semantics, ontology, and the "one substrate, many lenses" model for agent memory
 23. Also review these repos (read their READMEs):
     - https://github.com/zilliztech/claude-context — semantic code search MCP (10.8k stars, requires Zilliz Cloud + OpenAI API key)
@@ -57,7 +57,7 @@ Three planning documents were produced by the previous agent (Antigravity/Claude
     - Domain-aware routing (domains as active lenses, not passive files)
     - An MCP server (`@dotaios/mcp`) as the universal tool layer for cross-agent search/write
     - SQLite FTS5 search index for vault-scale retrieval (v2.0)
-    - `gog` CLI as the recommended Google Workspace integration instead of building googleapis ourselves
+    - external Google Workspace CLI as the recommended Google integration pattern instead of building googleapis ourselves; current beta path uses `gws`
 
 ## Step 5 — Your audit
 
@@ -75,7 +75,7 @@ Answer these questions with specific, actionable feedback. Be critical. Say what
 5. The proposed v1.1 adds 3 new commands (context, upgrade, cleanup). Is this the right priority order? Would you cut or reorder anything?
 6. The research proposes YAML frontmatter for skills, a CONTEXT_SUMMARY.md router, structured event schemas, and domain-aware routing — all for v1.1. Is this scope creep? What should move to v1.2?
 7. The MCP server is proposed for v1.2. Should it be v1.1 instead? The argument: MCP is the only way to make DotAIOS useful in Codex, Gemini CLI, and Cursor (they can't read CLAUDE.md from ~/.aios/).
-8. Is the `gog` CLI the right path for Google Workspace, or should DotAIOS build its own googleapis plugin?
+8. Is the current `gws`-backed `dotaios connect google` beta path enough for friend testing, or should DotAIOS still plan a custom googleapis plugin later?
 
 ### C. Memory system
 

@@ -1,73 +1,86 @@
 # DotAIOS Session Handoff
 
-## v1.1 Implementation Checkpoint (updated 2026-05-08)
+## v1.2.1 Beta-Hardening Checkpoint (updated 2026-05-08)
 
-DotAIOS v1.1 is now implemented locally but not yet published.
+DotAIOS v1.2.1 is the weekend beta hardening pass on top of the published v1.2.0 release.
 
-- package version in repo: `1.1.0`
-- new commands: `activate`, `attach`, `context`, `import`, `schedule`
-- `activate` writes conservative global bridges for Claude Code, Codex, and Gemini
-- `attach` writes project bridges, including Cursor project rules
-- `context` can summarize, print, edit, and refresh generated agent entrypoints
-- `import` previews by default and applies structured old-chat context only with `--apply`
-- `schedule` lists, checks, and manually runs local DotAIOS-only schedules
-- `node:test` coverage added for render helpers and v1.1 CLI behavior
-- smoke test now covers `context`, `activate`, `import`, and `schedule`
+- package version in repo: `1.2.1`
+- published baseline: `dotaios@1.2.0`
+- release commit/tag for v1.2.0: `31aab7e` / `v1.2.0`
+- v1.2.1 focus: search correctness, CLI validation, structured ingest events, status guidance, beta docs, and a local `gws`-backed Google Workspace beta connector
+- not included: MCP server, semantic search, custom Gmail OAuth, cloud sync, plugin marketplace
 
-Verification run on 2026-05-08:
+Verification target before publishing v1.2.1:
 
 - `npm test`
 - `npm run smoke`
 - `npm run check`
 - `npm pack --dry-run --cache /private/tmp/dotaios-npm-cache`
+- `git ls-remote origin refs/heads/main refs/tags/v1.2.0`
+- `curl -L https://registry.npmjs.org/dotaios`
 
-`npm run pack:check` still uses the default npm cache and may fail on this machine because `~/.npm` contains root-owned files. The package dry-run itself succeeds when pointed at a writable temp cache.
+## Published v1.2.0 State
 
-## Release Checkpoint (updated 2026-05-07)
+DotAIOS v1.2.0 is published and live.
 
-DotAIOS v1.0.0 is fully released and the distribution story is complete.
-
-- npm package: `dotaios@1.0.0`
+- npm package: `dotaios@1.2.0`
 - binary names: `dotaios`, `aios`
 - npm page: https://www.npmjs.com/package/dotaios
-- GitHub: https://github.com/filocosta46/dotaios (public)
-- release commit: `c97787d` — tagged `v1.0.0`
-- HEAD: `2bc7dcd` (README polish)
-- branch: `main`, tracking `origin/main`, clean
+- GitHub: https://github.com/filocosta46/dotaios
+- branch: `main`
+- current shipped commands: `init`, `activate`, `attach`, `context`, `import`, `ingest`, `install`, `schedule`, `status`, `search`, `cleanup`
 
-## What Was Done This Session (2026-05-07)
+What v1.2.0 added:
 
-1. Confirmed repo state matched handoff exactly.
-2. Created GitHub repo `filocosta46/dotaios` (public).
-3. Added remote `origin`, pushed `main`.
-4. Tagged `v1.0.0` on `c97787d`, pushed tag.
-5. Polished README: badges, install demo block, folder diagram, commands table, `dotaios` vs `aios` explainer, base skills table, plugin section.
-6. Committed `docs/session-handoff.md` and updated README on `main`.
+- local keyword search across context, memory, vault, and projects
+- event compaction and stale signal cleanup
+- structured memory append helpers
+- zero-runtime-dependency CLI package
+- node:test coverage for core memory and CLI flows
 
-## Current State
+## Weekend Beta Guidance
 
-- npm + GitHub fully wired
-- `v1.0.0` tag exists on release commit
-- README is stranger-ready
-- No open issues or broken state
+Invite a small group of testers who already use local AI agents and are comfortable running `npx`.
 
-## Recommended Next Steps (v1.1)
+Recommended script:
 
-1. Scope the v1.1 milestone — pick 1-2 commands from: `aios context`, `aios upgrade`, `aios cleanup`
-2. Gmail OAuth plugin (uses `googleapis` npm, not GWS CLI — designed for public distribution)
-3. Unit tests (smoke-only right now)
-4. Better docs around memory routing and approval boundaries
+```bash
+npx dotaios init
+npx dotaios activate
+npx dotaios context
+npx dotaios search "your name"
+npx dotaios status
+```
+
+Optional Gmail/Calendar beta script:
+
+```bash
+npx dotaios connect google --dry-run
+npx dotaios connect google --status
+npx dotaios connect google
+```
+
+Then ask their normal agent:
+
+```text
+What am I working on?
+```
+
+Collect feedback on install friction, activation, context accuracy, search usefulness, status guidance, Google setup clarity, and safety clarity.
+
+## Next Milestone
+
+The next strategic milestone remains `@dotaios/mcp` for v1.3 after the Google Workspace beta path gets friend feedback.
+
+- Keep MCP separate from `dotaios activate`.
+- Use an explicit future command such as `dotaios mcp install --dry-run`.
+- Start with local stdio MCP tools for `search_memory`, `search_vault`, `log_event`, `read_context`, and `list_projects`.
+- Keep any MCP SDK dependency in an optional MCP package, not the zero-dependency root CLI.
 
 ## Notes For The Next Agent
 
-- Treat architecture as established. Do not re-scaffold.
-- Repo is live and public. Any push is immediately visible.
-- Next session focus: v1.1 scoping and first feature work, not release cleanup.
-- For broader background, read the external docs listed in read order below.
-
-## Read Order For Fresh Agent
-
-1. `/Users/filo/Brain/Obsidian-Mind/outputs/aios-product-session/dotaios-release-handoff-2026-05-07.md`
-2. `/Users/filo/Brain/Obsidian-Mind/outputs/aios-product-session/dotaios-codex-audit.md.resolved`
-3. `/Users/filo/Brain/Obsidian-Mind/outputs/aios-product-session/aios-product-brief-v2.md`
-4. `/Users/filo/Brain/dotaios/docs/session-handoff.md`
+- Treat `~/.aios/` as the core product: local files first, no cloud dependency by default.
+- Do not re-scaffold the repo.
+- Public beta docs should use the package-name command form: `npx dotaios`.
+- Do not publish, push tags, or mutate npm without an explicit release instruction.
+- Read this file, `README.md`, `docs/beta-testing.md`, and `Obsidian-Mind/outputs/aios-product-session/dotaios-v1.2-codex-audit.md` before planning v1.3.

@@ -46,7 +46,7 @@ The user never opens AIOS. They open Claude Code, Cursor, Codex, or Antigravity 
 
 ```bash
 # Step 1: One command (requires Node.js — which they already have if using Claude Code)
-npx aios init
+npx dotaios init
 
 # Interactive setup (2 minutes):
 # → What's your name?
@@ -64,10 +64,10 @@ npx aios init
 # Step 2: There is no step 2. Open Claude Code. It just works.
 
 # Optional: check health
-npx aios status
+npx dotaios status
 # ✅ Context: identity.md, priorities.md configured
 # ✅ Agent files: CLAUDE.md, AGENTS.md, .cursorrules generated
-# ⚠️ Vault: empty (run: npx aios ingest <file> to add knowledge)
+# ⚠️ Vault: empty (run: npx dotaios ingest <file> to add knowledge)
 ```
 
 **Critical**: No `npm install -g`. No cloning repos. No editing config files. `npx` handles everything — one command, interactive prompts, done.
@@ -150,11 +150,11 @@ npx aios status
 
 The **frequency** of access is a routing concern, not a storage concern.
 
-#### Fix 2: GWS CLI → googleapis npm for OSS
+#### Fix 2: Google Workspace stays `gws`-first for beta
 
-**Problem**: GWS CLI is unofficial. Can't ship it as a dependency to strangers.
+**Problem**: Custom Google OAuth is too much surface area for the first public beta, and storing credentials inside DotAIOS would weaken the local-first trust story.
 
-**Fix**: Personal AIOS keeps GWS CLI (it works). The OSS Gmail plugin uses `googleapis` npm package + standard OAuth2 flow. This is what every production Google integration uses. The plugin handles auth setup via `npx aios connect gmail` which opens a browser OAuth flow and saves credentials locally.
+**Fix**: DotAIOS uses an explicit `npx dotaios connect google` command that detects and verifies the local Google Workspace CLI (`gws`). OAuth credentials stay in `gws`, not DotAIOS. The shipped beta path writes local read-first Gmail/Calendar/Drive guidance and defers custom OAuth or MCP Google connectors until after friend feedback.
 
 #### Fix 3: Schema versioning
 
@@ -169,7 +169,7 @@ The **frequency** of access is a routing concern, not a storage concern.
   "vault_path": null
 }
 ```
-`npx aios upgrade` command checks version and runs migration scripts if schema changed. Migrations are simple: add new fields to existing files without removing old content.
+`npx dotaios upgrade` command checks version and runs migration scripts if schema changed. Migrations are simple: add new fields to existing files without removing old content.
 
 #### Fix 4: Token-trimmed event log
 
@@ -181,7 +181,7 @@ The **frequency** of access is a routing concern, not a storage concern.
 - events.jsonl: Load last 50 entries. Full history available via /search-memory skill.
 - signals/: Load today + yesterday only. Older signals available on request.
 ```
-Additionally, a `npx aios cleanup` command trims signals older than 30 days and compacts the event log (summarize old events into a `memory/events-archive.jsonl`).
+Additionally, a `npx dotaios cleanup` command trims signals older than 30 days and compacts the event log (summarize old events into a `memory/events-archive.jsonl`).
 
 ---
 
@@ -259,9 +259,9 @@ Additionally, a `npx aios cleanup` command trims signals older than 30 days and 
 
 ### What v1 ships
 
-- `npx aios init` — interactive scaffolding
-- `npx aios status` — health check
-- `npx aios ingest <file>` — save material to vault
+- `npx dotaios init` — interactive scaffolding
+- `npx dotaios status` — health check
+- `npx dotaios ingest <file>` — save material to vault
 - Auto-generated `CLAUDE.md`, `AGENTS.md`, `.cursorrules`
 - 4 base skills (plan-today, audit, ingest, morning-digest)
 - Clean README + MIT LICENSE + CONTRIBUTING.md
@@ -272,25 +272,25 @@ Additionally, a `npx aios cleanup` command trims signals older than 30 days and 
 - Gmail plugin (requires OAuth + googleapis — v1.1, ~week 3)
 - Career Ops paid plugin (requires IP clarification — v1.1+)
 - Payment gate / Gumroad integration
-- `npx aios upgrade` (v1.1)
-- `npx aios cleanup` (v1.1)
+- `npx dotaios upgrade` (v1.1)
+- `npx dotaios cleanup` (v1.1)
 
 ### Day-by-day
 
 | Day | Focus | Deliverable | Acceptance criteria |
 |-----|-------|-------------|-------------------|
-| 1 | Monorepo + CLI skeleton | `packages/cli` + `packages/core`, `npx aios --help` works | Can run `npx aios --version` from anywhere |
+| 1 | Monorepo + CLI skeleton | `packages/cli` + `packages/core`, `npx dotaios --help` works | Can run `npx dotaios --version` from anywhere |
 | 2 | `aios init` + templates | Interactive prompts → `~/.aios/` with filled context files | Fresh directory gets working AIOS in 2 min |
 | 3 | Agent file generation | CLAUDE.md, AGENTS.md, .cursorrules auto-generated from context | Open Claude Code in `~/.aios/` → it reads the context |
 | 4 | `aios status` + `aios ingest` | Health check + file ingestion to vault/raw/ | Status shows ✅/⚠️, ingest copies + indexes files |
 | 5 | Base skills | Port plan-today, audit, ingest, morning-digest (generalized) | Skills run against template context without errors |
-| 6 | aios.json + plugin contract | Schema versioning, documented manifest.json spec, `npx aios install` for local plugins | A developer can create + install a plugin |
+| 6 | aios.json + plugin contract | Schema versioning, documented manifest.json spec, `npx dotaios install` for local plugins | A developer can create + install a plugin |
 | 7 | README + polish + release | README with install demo, LICENSE, CONTRIBUTING, security audit, v1.0.0 tag | A stranger can install + configure AIOS without reading source |
 
 ### Definition of done
 
 A student who uses Claude Code can:
-1. Run `npx aios init` and answer 5 questions
+1. Run `npx dotaios init` and answer 5 questions
 2. Open Claude Code — it reads their context automatically
 3. Ask Claude "what am I working on?" — Claude answers correctly from their `work.md`
 4. Run `/plan-today` — gets a structured day plan
@@ -309,7 +309,7 @@ A student who uses Claude Code can:
 | GTM Research plugin | Commercial | $9/mo |
 | Content Cascade plugin | Commercial | $5/mo |
 
-**Distribution**: npm registry (`npx aios init`). Paid plugins via Gumroad/LemonSqueezy with license key.
+**Distribution**: npm registry (`npx dotaios init`). Paid plugins via Gumroad/LemonSqueezy with license key.
 
 ---
 

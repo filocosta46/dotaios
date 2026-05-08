@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome, requiredAiosFiles, resolveVaultPath } from "../../../core/src/paths.mjs";
+
+const managedStart = "<!-- dotaios-managed:start -->";
 
 export async function statusCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -9,11 +12,14 @@ export async function statusCommand(args) {
 
 Options:
   --path <dir>  Check an AIOS folder other than ~/.aios
+  --home <dir>  Check agent bridges somewhere other than your home
 `);
     return;
   }
 
-  const target = path.resolve(expandHome(parsePath(args) || defaultAiosPath()));
+  const options = parseOptions(args);
+  const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+  const homePath = path.resolve(expandHome(options.home || os.homedir()));
 
   console.log(`DotAIOS status for ${target}`);
   console.log("\nRequired files");
@@ -25,6 +31,9 @@ Options:
   }
 
   const config = await readConfig(target);
+  const pathOption = pathOptionFor(target);
+  const activateCommand = `npx dotaios activate${pathOption}`;
+  const initCommand = `npx dotaios init --force${pathOption}`;
   console.log("\nConfiguration");
   if (!config) {
     console.log("[missing] aios.json could not be read");
@@ -46,17 +55,74 @@ Options:
   const skillCount = await countSkillDirectories(skillsPath);
   console.log(`${skillCount > 0 ? "[ok]" : "[missing]"} ${skillCount} installed skill(s)`);
 
+  console.log("\nConnections");
+  const connections = await readConnections(path.join(target, "connections", "registry.md"));
+  if (connections.length === 0) {
+    console.log("[info] no active connections");
+    console.log("[hint] Run `npx dotaios connect google --dry-run` to preview Gmail/Calendar beta setup.");
+  } else {
+    for (const connection of connections) {
+      console.log(`[${connection.status.toLowerCase()}] ${connection.service} - ${connection.notes}`);
+    }
+  }
+
+  const bridgeResults = await checkAgentBridges(target, homePath);
+  console.log("\nAgent bridges");
+  for (const result of bridgeResults) {
+    const note = result.note ? ` (${result.note})` : "";
+    console.log(`${result.status} ${result.path}${note}`);
+  }
+
+  const hasMissingBridge = bridgeResults.some((result) => result.status === "[missing]");
+  const hasCheckBridge = bridgeResults.some((result) => result.status === "[check]");
+  console.log("\nNext step");
+  if (missingCount > 0 || !config) {
+    console.log(`[action] Run \`${initCommand}\` to add missing base files, or inspect the missing files above.`);
+  } else if (hasMissingBridge || hasCheckBridge) {
+    console.log(`[action] Run \`${activateCommand}\` so Claude Code, Codex, and Gemini can find this AIOS.`);
+    if (hasCheckBridge) {
+      console.log("[note] Inspect [check] bridge files first; pass `--overwrite` only if you want DotAIOS to manage them.");
+    }
+  } else {
+    console.log("[ok] AIOS folder and global agent bridges look ready for beta testing.");
+  }
+
   if (missingCount > 0 || !config) {
     process.exitCode = 1;
   }
 }
 
-function parsePath(args = []) {
-  const index = args.indexOf("--path");
-  if (index === -1) return null;
+function pathOptionFor(target) {
+  const defaultPath = path.resolve(expandHome(defaultAiosPath()));
+  return target === defaultPath ? "" : ` --path ${shellQuote(target)}`;
+}
+
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_./:-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function parseOptions(args = []) {
+  const options = { home: null, path: null };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--path") {
+      options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--home") {
+      options.home = readOptionValue(args, index, "--home");
+      index += 1;
+    }
+  }
+
+  return options;
+}
+
+function readOptionValue(args, index, optionName) {
   const value = args[index + 1];
   if (!value || value.startsWith("--")) {
-    throw new Error("--path requires a value");
+    throw new Error(`${optionName} requires a value`);
   }
   return value;
 }
@@ -94,4 +160,49 @@ async function countSkillDirectories(skillsPath) {
   } catch {
     return 0;
   }
+}
+
+async function readConnections(registryPath) {
+  let content;
+  try {
+    content = await fs.readFile(registryPath, "utf8");
+  } catch {
+    return [];
+  }
+
+  return content
+    .split("\n")
+    .filter((line) => line.startsWith("|") && !line.includes("---") && !line.includes("Service | Status | Notes"))
+    .map((line) => line.split("|").slice(1, -1).map((cell) => cell.trim()))
+    .filter((cells) => cells.length >= 3 && cells[0])
+    .map(([service, status, notes]) => ({ service, status, notes }));
+}
+
+async function checkAgentBridges(target, homePath) {
+  const bridges = [
+    path.join(homePath, ".claude", "CLAUDE.md"),
+    path.join(homePath, ".codex", "AGENTS.md"),
+    path.join(homePath, ".gemini", "GEMINI.md")
+  ];
+  const results = [];
+
+  for (const bridgePath of bridges) {
+    let content;
+    try {
+      content = await fs.readFile(bridgePath, "utf8");
+    } catch {
+      results.push({ status: "[missing]", path: bridgePath });
+      continue;
+    }
+
+    if (content.includes(managedStart) && content.includes(target)) {
+      results.push({ status: "[ok]", path: bridgePath });
+    } else if (content.includes(managedStart)) {
+      results.push({ status: "[check]", path: bridgePath, note: "managed for another AIOS path" });
+    } else {
+      results.push({ status: "[check]", path: bridgePath, note: "existing unmanaged file" });
+    }
+  }
+
+  return results;
 }
