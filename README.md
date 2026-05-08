@@ -148,14 +148,15 @@ See [docs/plugin-development.md](docs/plugin-development.md) and [examples/plugi
 Do not install third-party plugins you have not reviewed. Permissions are visible before install, but they are not a sandbox.
 
 For beta guidance, Google Workspace setup, context import prompts, schedules, and secrets policy, see:
-[beta-testing](docs/beta-testing.md), [google-workspace](docs/google-workspace.md), [context-import](docs/context-import.md), [schedules](docs/schedules.md), and [security](docs/security.md).
+[beta-testing](docs/beta-testing.md), [google-workspace](docs/google-workspace.md), [mcp](docs/mcp.md), [v1.3-plan](docs/v1.3-plan.md), [context-import](docs/context-import.md), [schedules](docs/schedules.md), and [security](docs/security.md).
 
 ## v1.2.x scope
 
 - `dotaios init` / `status` / `ingest` / `install`
 - `dotaios activate` / `attach` / `context` / `import` / `schedule`
 - `dotaios search` / `cleanup`
-- `dotaios connect google` for local `gws`-backed Google Workspace setup
+- `dotaios connect google` and `dotaios google <cmd>` for local `gws`-backed Google Workspace setup and read-first workflows
+- experimental local MCP server package under `packages/mcp`
 - Auto-generated agent entrypoints (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
 - Agent-native bridges for Claude Code, Codex, Gemini, and Cursor projects
 - Full memory system: append, filter, compact, trim, search
@@ -163,7 +164,7 @@ For beta guidance, Google Workspace setup, context import prompts, schedules, an
 - Documented plugin manifest contract
 - Five base skills
 
-Not in v1.2: custom Gmail OAuth plugin, MCP server, semantic search (SQLite FTS5), `upgrade` command, paid plugins, cloud sync, plugin marketplace.
+Not in v1.2: custom Gmail OAuth plugin, published MCP package, semantic search (SQLite FTS5), `upgrade` command, paid plugins, cloud sync, plugin marketplace.
 
 ## Principles
 

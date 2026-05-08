@@ -1,16 +1,16 @@
 # DotAIOS Session Handoff
 
-## v1.2.1 Beta-Hardening Checkpoint (updated 2026-05-08)
+## v1.2.2 Google Readiness Checkpoint (updated 2026-05-08)
 
-DotAIOS v1.2.1 is the weekend beta hardening pass on top of the published v1.2.0 release.
+DotAIOS v1.2.2 is the local Google-readiness pass on top of the published v1.2.1 release.
 
-- package version in repo: `1.2.1`
-- published baseline: `dotaios@1.2.0`
-- release commit/tag for v1.2.0: `31aab7e` / `v1.2.0`
-- v1.2.1 focus: search correctness, CLI validation, structured ingest events, status guidance, beta docs, and a local `gws`-backed Google Workspace beta connector
+- package version in repo: `1.2.2`
+- published baseline: `dotaios@1.2.1`
+- release commit/tag for v1.2.1: `b7eb006` / `v1.2.1`
+- v1.2.2 focus: simple read-first `dotaios google` workflows on top of the `gws`-backed Google Workspace connector, plus a zero-dependency local MCP server prototype
 - not included: MCP server, semantic search, custom Gmail OAuth, cloud sync, plugin marketplace
 
-Verification target before publishing v1.2.1:
+Verification target before publishing v1.2.2:
 
 - `npm test`
 - `npm run smoke`
@@ -56,8 +56,12 @@ Optional Gmail/Calendar beta script:
 
 ```bash
 npx dotaios connect google --dry-run
+npx dotaios google setup
 npx dotaios connect google --status
 npx dotaios connect google
+npx dotaios google status
+npx dotaios google inbox
+npx dotaios google agenda --today
 ```
 
 Then ask their normal agent:
@@ -70,7 +74,7 @@ Collect feedback on install friction, activation, context accuracy, search usefu
 
 ## Next Milestone
 
-The next strategic milestone remains `@dotaios/mcp` for v1.3 after the Google Workspace beta path gets friend feedback.
+The next strategic milestone remains publishing/hardening `@dotaios/mcp` for v1.3 after the local MCP prototype gets tested with real MCP clients.
 
 - Keep MCP separate from `dotaios activate`.
 - Use an explicit future command such as `dotaios mcp install --dry-run`.
@@ -84,3 +88,4 @@ The next strategic milestone remains `@dotaios/mcp` for v1.3 after the Google Wo
 - Public beta docs should use the package-name command form: `npx dotaios`.
 - Do not publish, push tags, or mutate npm without an explicit release instruction.
 - Read this file, `README.md`, `docs/beta-testing.md`, and `Obsidian-Mind/outputs/aios-product-session/dotaios-v1.2-codex-audit.md` before planning v1.3.
+- Use `docs/v1.3-plan.md` as the current plan for Google, MCP, memory/indexing, and external inspiration.

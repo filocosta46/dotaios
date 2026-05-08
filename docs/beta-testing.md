@@ -1,6 +1,6 @@
 # Beta Testing
 
-DotAIOS v1.2.1 is ready for a small weekend beta with terminal-comfortable testers.
+DotAIOS v1.2.2 is the next Google-readiness pass for a small weekend beta with terminal-comfortable testers.
 
 ## Who To Invite
 
