@@ -1,0 +1,166 @@
+# DotAIOS Codex Build — Audit Report
+
+**Audited**: `/Users/filo/Brain/dotaios` (everything GPT 5.5/Codex created)  
+**Compared against**: `aios-product-brief-v2.md` (our consolidated plan)
+
+---
+
+## Verdict: Solid Foundation, Well-Aligned ✅
+
+GPT did a genuinely good job. The scaffold follows our plan closely, the code is clean and zero-dependency (no external npm packages needed at runtime for the core), and the smoke test passes end-to-end. No critical mistakes — but there are gaps and a few deviations worth flagging.
+
+---
+
+## Scorecard
+
+| Area | Score | Notes |
+|------|-------|-------|
+| **Folder structure** | ✅ A | Matches plan exactly: `packages/cli`, `packages/core`, `templates/`, `skills/`, `docs/`, `examples/` |
+| **CLI commands** | ✅ A | All 4 v1 commands implemented: `init`, `status`, `ingest`, `install` |
+| **Templates** | ✅ A | CLAUDE.md, AGENTS.md, .cursorrules, aios.json, all 7 context files, 3 domain files |
+| **Base skills** | ✅ A | All 4 skills: plan-today, audit, ingest, morning-digest |
+| **Memory model** | ✅ A | Entity collision fixed (single source at vault/org/), token trimming (50 events), signal routing |
+| **Plugin contract** | ✅ A | Full manifest validator, example plugin, permissions model, skill registry update |
+| **Agent entrypoints** | ✅ A | CLAUDE.md template has proper routing table, memory rules, vault/org dedup rule |
+| **Docs** | ✅ B+ | Architecture, getting-started, plugin-development — all present and accurate |
+| **Test coverage** | ⚠️ B- | Smoke test only — no unit tests |
+| **Dependencies** | ⚠️ C | `commander`, `handlebars`, `inquirer` declared but **not installed** (no node_modules, no lockfile) |
+| **Git state** | ⚠️ C | Repo initialized but **zero commits** |
+
+---
+
+## What's Good (Aligned with Plan)
+
+### 1. Zero-dependency core CLI
+The `init.mjs` implements its own mini template renderer instead of actually using Handlebars at runtime. It uses `readline` instead of Inquirer. The dependencies are listed in `package.json` but the code doesn't actually import them — it works without `npm install`. This is intentional defensive coding: the CLI works immediately via `node packages/cli/src/index.mjs`.
+
+> [!TIP]
+> This is actually better than expected. Zero runtime deps makes `npx` faster and more reliable.
+
+### 2. Architecture fixes all implemented
+- ✅ **Entity collision**: `vault/org/` is the single CRM source. CLAUDE.md explicitly says "Companies and people live only in `vault/org/`; do not duplicate them in `memory/`."
+- ✅ **Schema versioning**: `aios.json` with `schema_version: 1.0.0`
+- ✅ **Token trimming**: CLAUDE.md template says "load the last 50 entries only"
+- ✅ **Signal routing**: Ingest skill has proper routing rules
+
+### 3. Smart init UX
+- Interactive prompts with sensible defaults
+- `--yes` flag for non-interactive CI/testing
+- `--force` adds missing files without overwriting existing ones
+- `--overwrite` for clean re-scaffolding
+- `--vault-path` for external Obsidian vaults
+- Non-TTY detection (auto-falls back to defaults)
+- `FIRST_SESSION.md` generated — excellent onboarding touch
+
+### 4. Plugin system is complete
+- Manifest validation with clear error messages
+- Permission surface printing (`--dry-run`)
+- Skill registry auto-update
+- Example plugin for developers to copy
+
+### 5. Smoke test covers the full flow
+`init → status → ingest → install` all exercised in one script.
+
+---
+
+## Issues to Fix
+
+### Issue 1: Dependencies declared but never installed (Low Priority)
+`commander`, `handlebars`, and `inquirer` are in `packages/cli/package.json` but aren't used. The code hand-rolls arg parsing, template rendering, and prompts via `readline`.
+
+**Decision needed**: Either remove the unused dependencies from `package.json` (cleaner, honest), or actually refactor to use them (more robust for v1.1+).
+
+**My recommendation**: Remove them for now. The hand-rolled code works. Add Inquirer back when prompts get more complex (e.g., `aios connect gmail` OAuth flow).
+
+### Issue 2: No git commits
+The repo has `.git/` but zero commits. This means no baseline, no safety net.
+
+**Fix**: Make the initial commit now.
+
+### Issue 3: Root package.json uses `workspaces` (npm) + pnpm-workspace.yaml (pnpm)
+Both `"workspaces"` in root `package.json` and `pnpm-workspace.yaml` exist. The `workspaces` key is npm-specific. Since the plan calls for pnpm, the `workspaces` key in root `package.json` is harmless but redundant.
+
+**Fix**: Remove `"workspaces"` from root `package.json` to avoid confusion.
+
+### Issue 4: CLI package uses relative imports to core
+[init.mjs L6](file:///Users/filo/Brain/dotaios/packages/cli/src/commands/init.mjs#L6): `import { createAiosConfig } from "../../../core/src/schema.mjs"`
+
+This works for local development but will break if published as separate npm packages. The `@dotaios/core` package has proper `exports` defined, but the CLI bypasses them.
+
+**Fix for v1**: This is fine for now. The monorepo runs from source. When publishing to npm, switch to `import { createAiosConfig } from "@dotaios/core/schema"`.
+
+### Issue 5: `expandHome` function duplicated in 4 files
+The same `expandHome()` helper is copy-pasted in `init.mjs`, `status.mjs`, `ingest.mjs`, and `install.mjs`.
+
+**Fix**: Move to `@dotaios/core/paths.mjs` (which already exists and is the right location).
+
+### Issue 6: Missing `.env.example` in templates
+The plan calls for a `.env.example` in the scaffolded `~/.aios/`. The code creates a basic one in `createStarterFiles()` ("# Add local secrets here..."), but it's very bare.
+
+**Fix**: Add actual placeholder entries for common plugins:
+```
+# Gmail plugin (v1.1)
+# GOOGLE_CLIENT_ID=
+# GOOGLE_CLIENT_SECRET=
+```
+
+### Issue 7: No `schedules.yml` documentation
+The init creates an empty `schedules.yml` but there's no doc explaining the format. This is fine for v1 — scheduling is v1.1 anyway.
+
+### Issue 8: `aios.json.hbs` template won't actually render
+The template uses `{{#each}}` and `{{#unless}}` Handlebars syntax, but the custom `render()` function in `init.mjs` doesn't support `{{#unless}}`. However, this template is actually **skipped** (line 178: `if (outputRelative === "aios.json") continue;`) and `aios.json` is generated programmatically from `createAiosConfig()`. So the `.hbs` file is dead code.
+
+**Fix**: Delete `templates/aios.json.hbs` — it's never used and will confuse contributors.
+
+---
+
+## What's Missing (Next Steps per Plan)
+
+| Plan item | Status | Priority |
+|-----------|--------|----------|
+| `pnpm install` + lockfile | ❌ Not done | **Do now** — even if deps are unused, the lockfile is part of the repo |
+| Initial git commit | ❌ Not done | **Do now** |
+| `npx dotaios` global execution | ❌ Not tested | **Day 7** — needs `npm publish` or `npm link` to test |
+| `LICENSE` file | ✅ Present | MIT — correct |
+| `README.md` quality | ⚠️ Functional but plain | **Day 7** — needs install demo GIF, badges, cleaner formatting |
+| `.env.example` content | ⚠️ Too bare | **Day 7** — add plugin placeholder keys |
+| Unit tests | ❌ None | **v1.1** — smoke test is sufficient for now |
+| `aios upgrade` command | ❌ Not started | **v1.1** — as planned |
+| `aios cleanup` command | ❌ Not started | **v1.1** — as planned |
+
+---
+
+## Where Codex Deviated from Plan (and whether it matters)
+
+| Deviation | Impact | Verdict |
+|-----------|--------|---------|
+| Named the package `dotaios` instead of `aios` | Neutral — avoids npm name collision | ✅ Good call. Keep `dotaios`. |
+| No `commander.js` — hand-rolled arg parsing | Neutral for now | ✅ Fine for 4 commands. Revisit if commands grow. |
+| No `inquirer` — uses `readline` | Neutral | ✅ Actually better: zero deps for `npx`. |
+| No `handlebars` — custom `render()` | Works but limited | ⚠️ Fine for now. The `{{#unless}}` gap is a latent bug if someone adds templates using it. |
+| `FIRST_SESSION.md` — not in original plan | Positive addition | ✅ Great onboarding idea. Keep it. |
+| `scripts/smoke.mjs` — not in original plan | Positive addition | ✅ Essential for CI. Keep it. |
+| `examples/plugins/hello-memory/` — not in original plan | Positive addition | ✅ Helps plugin devs. Keep it. |
+
+---
+
+## Recommended Next Actions (in order)
+
+```
+1. Fix: Remove unused deps from packages/cli/package.json     [5 min]
+2. Fix: Delete templates/aios.json.hbs (dead code)            [1 min]  
+3. Fix: Remove "workspaces" from root package.json             [1 min]
+4. Fix: Extract expandHome to @dotaios/core/paths.mjs          [10 min]
+5. Run: pnpm install (generates lockfile)                       [2 min]
+6. Git: Initial commit                                          [2 min]
+7. Test: Run full smoke test one more time                      [1 min]
+```
+
+After that, you're at the end of **Day 1-2** of the plan. Day 3 work (agent file generation) is already done — Codex built the templates. Day 4 (`status` + `ingest`) is also done. So you're effectively at **Day 5-6** already.
+
+**What's actually left for v1 release:**
+- Clean up the issues above (~20 min)
+- Polish README with install demo + badges (~1 hour)
+- Test `npx` execution via `npm link` (~30 min)
+- Security review of all file operations (~30 min)
+- Tag v1.0.0 + push to GitHub

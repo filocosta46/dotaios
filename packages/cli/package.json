@@ -1,20 +1,9 @@
 {
   "name": "@dotaios/cli",
-  "private": true,
   "version": "1.1.0",
-  "description": "Internal CLI workspace for the DotAIOS npm package.",
+  "private": true,
+  "description": "CLI commands for DotAIOS. Published via the root package.",
   "type": "module",
-  "bin": {
-    "dotaios": "src/index.mjs",
-    "aios": "src/index.mjs"
-  },
-  "scripts": {
-    "start": "node src/index.mjs",
-    "check": "node src/index.mjs --help"
-  },
-  "dependencies": {
-    "@dotaios/core": "workspace:*"
-  },
   "engines": {
     "node": ">=18"
   },

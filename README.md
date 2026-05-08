@@ -73,8 +73,10 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 | `dotaios init` | Interactive setup — creates `~/.aios/` with your context |
 | `dotaios activate` | Connects DotAIOS to global Claude, Codex, and Gemini memory files |
 | `dotaios attach <project>` | Adds DotAIOS bridges to a project folder, including Cursor rules |
+| `dotaios cleanup` | Trims stale signals and compacts the event log |
 | `dotaios context` | Shows, edits, or refreshes the context agents see |
 | `dotaios import <file>` | Previews or applies structured context from old AI chats |
+| `dotaios search <query>` | Searches across memory, vault, context, and projects |
 | `dotaios status` | Health check — shows what's configured, what's missing |
 | `dotaios ingest <file>` | Saves a document to `vault/raw/` and indexes it |
 | `dotaios install <plugin>` | Installs a local plugin and registers its skills |
@@ -101,7 +103,7 @@ Your notes become agent-readable knowledge. Use `dotaios ingest` to index specif
 
 ## Base skills
 
-Five skills ship with v1.1, installed at `~/.aios/skills/`:
+Five skills ship with DotAIOS, installed at `~/.aios/skills/`:
 
 | Skill | What it does |
 |-------|-------------|
@@ -123,22 +125,24 @@ dotaios install ./my-plugin
 
 See [docs/plugin-development.md](docs/plugin-development.md) and [examples/plugins/hello-memory/](examples/plugins/hello-memory/) for a working example.
 
-Do not install third-party plugins you have not reviewed. v1.1 permissions are visible before install, but they are not a sandbox.
+Do not install third-party plugins you have not reviewed. Permissions are visible before install, but they are not a sandbox.
 
 For beta guidance, context import prompts, schedules, and secrets policy, see:
 [beta-testing](docs/beta-testing.md), [context-import](docs/context-import.md), [schedules](docs/schedules.md), and [security](docs/security.md).
 
-## v1.1 scope
+## v1.2 scope
 
 - `dotaios init` / `status` / `ingest` / `install`
 - `dotaios activate` / `attach` / `context` / `import` / `schedule`
+- `dotaios search` / `cleanup`
 - Auto-generated agent entrypoints (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
 - Agent-native bridges for Claude Code, Codex, Gemini, and Cursor projects
+- Full memory system: append, filter, compact, trim, search
 - Schema versioning via `aios.json`
 - Documented plugin manifest contract
 - Five base skills
 
-Not in v1.1: Gmail OAuth plugin, MCP server, semantic search, `upgrade` / `cleanup` commands, paid plugins, cloud sync, plugin marketplace.
+Not in v1.2: Gmail OAuth plugin, MCP server, semantic search (SQLite FTS5), `upgrade` command, paid plugins, cloud sync, plugin marketplace.
 
 ## Principles
 

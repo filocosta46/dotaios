@@ -7,11 +7,12 @@ import { copyFileSafe, listFiles, pathExists, writeFileSafe } from "../../../cor
 import { renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
 import { createAiosConfig } from "../../../core/src/schema.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
 export async function initCommand(args) {
-  if (args.includes("--help") || args.includes("-h")) {
+  if (hasHelpFlag(args)) {
     printInitHelp();
     return;
   }
@@ -89,13 +90,6 @@ Options:
 `);
 }
 
-function readOptionValue(args, index, optionName) {
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`${optionName} requires a value`);
-  }
-  return value;
-}
 
 async function promptAnswers() {
   if (!process.stdin.isTTY) return defaultAnswers();

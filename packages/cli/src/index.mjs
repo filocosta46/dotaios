@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 
 const commands = {
   activate: "./commands/activate.mjs",
   attach: "./commands/activate.mjs",
+  cleanup: "./commands/cleanup.mjs",
   context: "./commands/context.mjs",
   import: "./commands/import.mjs",
   init: "./commands/init.mjs",
   ingest: "./commands/ingest.mjs",
   install: "./commands/install.mjs",
   schedule: "./commands/schedule.mjs",
+  search: "./commands/search.mjs",
   status: "./commands/status.mjs"
 };
 
@@ -23,12 +25,14 @@ Usage:
 Commands:
   activate          Connect ~/.aios to global agent memory files
   attach <dir>      Connect a project folder to DotAIOS
+  cleanup           Trim stale signals and compact the event log
   context [name]    View, edit, or refresh local context files
   import <file>     Preview or apply structured context from old chats
   init              Scaffold ~/.aios with local context templates
   ingest <file>     Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
   schedule <cmd>    List, inspect, or run local manual schedules
+  search <query>    Search across memory, vault, context, and projects
   status            Check the health of a local AIOS folder
 
 Options:
