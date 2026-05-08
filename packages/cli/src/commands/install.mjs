@@ -22,7 +22,12 @@ Options:
     throw new Error("Usage: dotaios install <plugin-path> [--path <aios-dir>] [--dry-run]");
   }
 
+  if (/^[a-z]+:\/\//i.test(pluginPath)) {
+    throw new Error("Remote plugin installs are not supported in v1.1. Download and review the plugin locally first.");
+  }
+
   const sourcePath = path.resolve(pluginPath);
+  await ensureDirectory(sourcePath, "Plugin path");
   const manifestPath = path.join(sourcePath, "manifest.json");
   const manifest = await readManifest(manifestPath);
   const result = validateManifest(manifest);
@@ -107,10 +112,37 @@ async function ensureAiosFolder(target) {
 }
 
 async function installPlugin(sourcePath, target, manifest) {
-  const pluginTarget = path.join(target, "plugins", manifest.name);
-  await fs.rm(pluginTarget, { recursive: true, force: true });
-  await copyDirectory(sourcePath, pluginTarget);
-  await updateSkillRegistry(target, manifest);
+  const pluginsDir = path.join(target, "plugins");
+  const pluginTarget = path.join(pluginsDir, manifest.name);
+  const tempTarget = path.join(pluginsDir, `.${manifest.name}.tmp-${process.pid}-${Date.now()}`);
+  const backupTarget = path.join(pluginsDir, `.${manifest.name}.backup-${process.pid}-${Date.now()}`);
+
+  await fs.mkdir(pluginsDir, { recursive: true });
+  await copyDirectory(sourcePath, tempTarget);
+
+  let hasBackup = false;
+  try {
+    try {
+      await fs.rename(pluginTarget, backupTarget);
+      hasBackup = true;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+
+    await fs.rename(tempTarget, pluginTarget);
+    await updateSkillRegistry(target, manifest);
+
+    if (hasBackup) {
+      await fs.rm(backupTarget, { recursive: true, force: true });
+    }
+  } catch (error) {
+    await fs.rm(tempTarget, { recursive: true, force: true });
+    if (hasBackup) {
+      await fs.rm(pluginTarget, { recursive: true, force: true });
+      await fs.rename(backupTarget, pluginTarget);
+    }
+    throw error;
+  }
 }
 
 async function copyDirectory(source, destination) {
@@ -123,9 +155,25 @@ async function copyDirectory(source, destination) {
 
     if (entry.isDirectory()) {
       await copyDirectory(sourceEntry, destinationEntry);
+    } else if (entry.isSymbolicLink()) {
+      throw new Error(`Plugin contains unsupported symlink: ${sourceEntry}`);
     } else {
       await fs.copyFile(sourceEntry, destinationEntry);
     }
+  }
+}
+
+async function ensureDirectory(directoryPath, label) {
+  try {
+    const stat = await fs.stat(directoryPath);
+    if (!stat.isDirectory()) {
+      throw new Error(`${label} is not a directory: ${directoryPath}`);
+    }
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      throw new Error(`${label} does not exist: ${directoryPath}`);
+    }
+    throw error;
   }
 }
 

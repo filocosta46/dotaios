@@ -1,11 +1,13 @@
 {
   "name": "@dotaios/core",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Core schema, memory, and manifest helpers for DotAIOS.",
   "type": "module",
   "exports": {
+    "./files": "./src/files.mjs",
     "./paths": "./src/paths.mjs",
+    "./render": "./src/render.mjs",
     "./schema": "./src/schema.mjs",
     "./memory": "./src/memory.mjs",
     "./manifest": "./src/manifest.mjs"

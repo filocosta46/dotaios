@@ -8,9 +8,9 @@
 
 ---
 
-You use Claude Code, Cursor, Codex, or Gemini — but they treat every session as if they've never met you. DotAIOS fixes that. Run one command, answer five questions, and every agent on your machine learns your name, your work, your priorities, and how you write.
+You use Claude Code, Cursor, Codex, or Gemini — but they treat every session as if they've never met you. DotAIOS fixes that. Run setup once, answer five questions, activate your agent bridges, and every agent on your machine can find your name, your work, your priorities, and how you write.
 
-DotAIOS is not a chat app, agent framework, SaaS, or cloud memory service. It's a folder convention (`~/.aios/`) plus a CLI installer. Your context stays on your machine. Agents read it automatically.
+DotAIOS is not a chat app, agent framework, SaaS, or cloud memory service. It's a folder convention (`~/.aios/`) plus a CLI installer. Your context stays on your machine. Agent-native bridge files point your tools at it.
 
 > `.gitconfig` makes Git know your name. `~/.aios/` makes every AI agent know your life.
 
@@ -18,6 +18,7 @@ DotAIOS is not a chat app, agent framework, SaaS, or cloud memory service. It's 
 
 ```bash
 npx dotaios init
+npx dotaios activate
 ```
 
 No global install. No account. No server.
@@ -37,20 +38,20 @@ $ npx dotaios init
 ✅  Generated CLAUDE.md for Claude Code
 ✅  Generated AGENTS.md for Codex / Gemini
 ✅  Generated .cursorrules for Cursor
-ℹ   Open your AI tool — it will read your context automatically.
+ℹ   Run `npx dotaios activate` to connect Claude, Codex, and Gemini.
 ```
 
 Open Claude Code. Ask: **"What am I working on?"** — it answers correctly from your `work.md`.
 
-That's it. There's no step 2.
+For Cursor projects, run `npx dotaios attach /path/to/project` once to create a project rule.
 
 ## How it works
 
 ```
 ~/.aios/
-├── CLAUDE.md           ← auto-loaded by Claude Code every session
-├── AGENTS.md           ← auto-loaded by Codex, Gemini
-├── .cursorrules        ← auto-loaded by Cursor
+├── CLAUDE.md           ← Claude Code entrypoint
+├── AGENTS.md           ← Codex / Gemini / generic agent entrypoint
+├── .cursorrules        ← legacy Cursor entrypoint
 │
 ├── context/            ← who you are (always in context)
 │   ├── identity.md
@@ -63,16 +64,21 @@ That's it. There's no step 2.
 └── skills/             ← what agents can do (/plan-today, /audit, ...)
 ```
 
-`CLAUDE.md` is loaded by Claude Code on every session. `.cursorrules` is loaded by Cursor. You fill in `work.md` once — every future session just knows.
+`dotaios activate` creates small bridge files in the locations each tool actually reads, such as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`. `dotaios attach` adds project-level rules for Cursor and repo-aware agents.
 
 ## Commands
 
 | Command | What it does |
 |---------|-------------|
 | `dotaios init` | Interactive setup — creates `~/.aios/` with your context |
+| `dotaios activate` | Connects DotAIOS to global Claude, Codex, and Gemini memory files |
+| `dotaios attach <project>` | Adds DotAIOS bridges to a project folder, including Cursor rules |
+| `dotaios context` | Shows, edits, or refreshes the context agents see |
+| `dotaios import <file>` | Previews or applies structured context from old AI chats |
 | `dotaios status` | Health check — shows what's configured, what's missing |
 | `dotaios ingest <file>` | Saves a document to `vault/raw/` and indexes it |
 | `dotaios install <plugin>` | Installs a local plugin and registers its skills |
+| `dotaios schedule <cmd>` | Lists, checks, or manually runs local schedules |
 
 ## `dotaios` vs `aios`
 
@@ -95,7 +101,7 @@ Your notes become agent-readable knowledge. Use `dotaios ingest` to index specif
 
 ## Base skills
 
-Four skills ship with v1, installed at `~/.aios/skills/`:
+Five skills ship with v1.1, installed at `~/.aios/skills/`:
 
 | Skill | What it does |
 |-------|-------------|
@@ -103,12 +109,13 @@ Four skills ship with v1, installed at `~/.aios/skills/`:
 | `audit` | Reviews your context files for gaps and staleness |
 | `ingest` | Classifies and routes a document into the right vault folder |
 | `morning-digest` | Summarizes recent signals and surfaces today's priorities |
+| `import-context` | Routes context exported from other AI chats |
 
 Invoke them in Claude Code: `/plan-today`, `/audit`, etc.
 
 ## Plugins
 
-DotAIOS has a documented plugin contract. A plugin is a folder with a `manifest.json`, a `SKILL.md`, and optional source code.
+DotAIOS has a documented plugin contract. A plugin is a trusted local folder with a `manifest.json`, a `SKILL.md`, and optional source code.
 
 ```bash
 dotaios install ./my-plugin
@@ -116,15 +123,22 @@ dotaios install ./my-plugin
 
 See [docs/plugin-development.md](docs/plugin-development.md) and [examples/plugins/hello-memory/](examples/plugins/hello-memory/) for a working example.
 
-## v1 scope
+Do not install third-party plugins you have not reviewed. v1.1 permissions are visible before install, but they are not a sandbox.
+
+For beta guidance, context import prompts, schedules, and secrets policy, see:
+[beta-testing](docs/beta-testing.md), [context-import](docs/context-import.md), [schedules](docs/schedules.md), and [security](docs/security.md).
+
+## v1.1 scope
 
 - `dotaios init` / `status` / `ingest` / `install`
+- `dotaios activate` / `attach` / `context` / `import` / `schedule`
 - Auto-generated agent entrypoints (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
+- Agent-native bridges for Claude Code, Codex, Gemini, and Cursor projects
 - Schema versioning via `aios.json`
 - Documented plugin manifest contract
-- Four base skills
+- Five base skills
 
-Not in v1: Gmail OAuth plugin, `upgrade` / `cleanup` commands, paid plugins, cloud sync.
+Not in v1.1: Gmail OAuth plugin, MCP server, semantic search, `upgrade` / `cleanup` commands, paid plugins, cloud sync, plugin marketplace.
 
 ## Principles
 

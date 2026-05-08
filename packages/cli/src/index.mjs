@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 
 const commands = {
+  activate: "./commands/activate.mjs",
+  attach: "./commands/activate.mjs",
+  context: "./commands/context.mjs",
+  import: "./commands/import.mjs",
   init: "./commands/init.mjs",
-  status: "./commands/status.mjs",
   ingest: "./commands/ingest.mjs",
-  install: "./commands/install.mjs"
+  install: "./commands/install.mjs",
+  schedule: "./commands/schedule.mjs",
+  status: "./commands/status.mjs"
 };
 
 function printHelp() {
@@ -16,10 +21,15 @@ Usage:
   dotaios <command> [options]
 
 Commands:
+  activate          Connect ~/.aios to global agent memory files
+  attach <dir>      Connect a project folder to DotAIOS
+  context [name]    View, edit, or refresh local context files
+  import <file>     Preview or apply structured context from old chats
   init              Scaffold ~/.aios with local context templates
-  status            Check the health of a local AIOS folder
   ingest <file>     Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
+  schedule <cmd>    List, inspect, or run local manual schedules
+  status            Check the health of a local AIOS folder
 
 Options:
   -h, --help        Show help

@@ -3,6 +3,8 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
+import { copyFileSafe, listFiles, pathExists, writeFileSafe } from "../../../core/src/files.mjs";
+import { renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
 import { createAiosConfig } from "../../../core/src/schema.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 
@@ -168,23 +170,10 @@ async function createVaultTree(vaultPath) {
 
 async function renderTemplates(target, data, writeMode) {
   const templateRoot = path.join(repoRoot, "templates");
-  const files = await listFiles(templateRoot);
-  const results = [];
-
-  for (const file of files) {
-    const relative = path.relative(templateRoot, file);
-    let outputRelative = relative.endsWith(".hbs") ? relative.slice(0, -4) : relative;
-    if (outputRelative === "cursorrules") outputRelative = ".cursorrules";
-    if (outputRelative === "aios.json") continue;
-
-    const source = await fs.readFile(file, "utf8");
-    const rendered = relative.endsWith(".hbs") ? render(source, data) : source;
-    const destination = path.join(target, outputRelative);
-    await fs.mkdir(path.dirname(destination), { recursive: true });
-    results.push(await writeFileSafe(destination, rendered, writeMode));
-  }
-
-  return results;
+  return renderTemplateTree(templateRoot, target, data, {
+    writeMode,
+    include: (outputRelative) => outputRelative !== "aios.json"
+  });
 }
 
 async function copySkills(target, writeMode) {
@@ -205,7 +194,8 @@ async function copySkills(target, writeMode) {
 async function createStarterFiles(target, data, writeMode) {
   const files = {
     ".env.example": [
-      "# Add local secrets here when plugins require them.",
+      "# Copy this file to .env when plugins require local secrets.",
+      "# Never paste secrets into chat or memory files.",
       "",
       "# Gmail plugin",
       "# GOOGLE_CLIENT_ID=",
@@ -216,64 +206,31 @@ async function createStarterFiles(target, data, writeMode) {
     ].join("\n") + "\n",
     "connections/registry.md": "# Connections\n\n| Service | Status | Notes |\n|---|---|---|\n",
     "decisions/log.md": "# Decision Log\n\n",
-    "FIRST_SESSION.md": render(firstSessionTemplate(), data),
-    "README.md": render(localReadmeTemplate(), data),
+    "FIRST_SESSION.md": renderTemplate(firstSessionTemplate(), data),
+    "README.md": renderTemplate(localReadmeTemplate(), data),
     "memory/events.jsonl": "",
     "memory/errors.jsonl": "",
-    "schedules.yml": "schedules: []\n",
-    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"audit\", \"ingest\", \"morning-digest\"]\n}\n"
+    "schedules.yml": [
+      "schedules:",
+      "  # - name: weekly-status",
+      "  #   cadence: weekly",
+      "  #   command: \"dotaios status\"",
+      "  #   enabled: true"
+    ].join("\n") + "\n",
+    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"audit\", \"ingest\", \"morning-digest\", \"import-context\"]\n}\n"
   };
   const results = [];
 
   for (const [relative, content] of Object.entries(files)) {
     const destination = path.join(target, relative);
-    await fs.mkdir(path.dirname(destination), { recursive: true });
     results.push(await writeFileSafe(destination, content, writeMode));
   }
 
   return results;
 }
 
-async function listFiles(root) {
-  const entries = await fs.readdir(root, { withFileTypes: true });
-  const files = await Promise.all(entries.map(async (entry) => {
-    const resolved = path.join(root, entry.name);
-    return entry.isDirectory() ? listFiles(resolved) : resolved;
-  }));
-
-  return files.flat();
-}
-
-function render(template, data) {
-  return template.replaceAll(/{{#if vault_path}}([\s\S]*?){{else}}([\s\S]*?){{\/if}}/g, (_match, yes, no) => (
-    data.vault_path ? yes.replaceAll("{{vault_path}}", data.vault_path) : no
-  )).replaceAll(/{{#each ai_tools}}([\s\S]*?){{\/each}}/g, () => (
-    data.ai_tools.map((tool) => `"${tool}"`).join(", ")
-  )).replaceAll(/{{(\w+)}}/g, (_match, key) => data[key] ?? "");
-}
-
 function splitCsv(value) {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
-}
-
-async function writeFileSafe(destination, content, writeMode) {
-  const exists = await pathExists(destination);
-  if (exists && writeMode === "preserve") {
-    return { action: "kept", path: destination };
-  }
-
-  await fs.writeFile(destination, content);
-  return { action: exists ? "updated" : "created", path: destination };
-}
-
-async function copyFileSafe(source, destination, writeMode) {
-  const exists = await pathExists(destination);
-  if (exists && writeMode === "preserve") {
-    return { action: "kept", path: destination };
-  }
-
-  await fs.copyFile(source, destination);
-  return { action: exists ? "updated" : "created", path: destination };
 }
 
 function printSuccess(target, vaultPath, results) {
@@ -288,9 +245,9 @@ function printSuccess(target, vaultPath, results) {
   console.log(`Files: ${counts.created || 0} created, ${counts.updated || 0} updated, ${counts.kept || 0} kept`);
   console.log("\nNext steps:");
   console.log("1. Read FIRST_SESSION.md");
-  console.log("2. Open Claude Code, Codex, Cursor, or another agent-aware tool");
-  console.log("3. Ask it to read CLAUDE.md or AGENTS.md");
-  console.log("4. Run `dotaios status` whenever you want a quick health check");
+  console.log("2. Run `npx dotaios activate` to connect DotAIOS to your agent tools");
+  console.log("3. Open Claude Code, Codex, Gemini, Cursor, or another agent-aware tool");
+  console.log("4. Run `npx dotaios context` whenever you want to inspect what agents see");
 }
 
 function firstSessionTemplate() {
@@ -300,9 +257,13 @@ Welcome to {{user_name}}'s local AIOS.
 
 ## What To Open
 
-- Claude Code: read \`CLAUDE.md\`
-- Codex, Gemini, OpenHands, or generic agents: read \`AGENTS.md\`
-- Cursor: use \`.cursorrules\`
+Run \`npx dotaios activate\` once to connect DotAIOS to global Claude, Codex, and Gemini memory files.
+
+For a project you use in Cursor, run:
+
+\`\`\`
+npx dotaios attach /path/to/project
+\`\`\`
 
 ## First Prompt To Try
 
@@ -329,9 +290,10 @@ Local-first memory and context for AI agents.
 ## Start Here
 
 1. Read \`FIRST_SESSION.md\`.
-2. Keep \`context/\` current.
-3. Add active work under \`projects/<slug>/README.md\`.
-4. Put long-term knowledge in the configured vault.
+2. Run \`npx dotaios activate\` once.
+3. Keep \`context/\` current.
+4. Add active work under \`projects/<slug>/README.md\`.
+5. Put long-term knowledge in the configured vault.
 
 ## Safety
 
@@ -339,13 +301,4 @@ Local-first memory and context for AI agents.
 - Durable writes to identity, wiki, and CRM knowledge should be approved.
 - Companies and people live only in \`vault/org/\`.
 `;
-}
-
-async function pathExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
 }

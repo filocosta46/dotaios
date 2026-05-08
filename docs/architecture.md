@@ -2,6 +2,16 @@
 
 DotAIOS is a local file convention.
 
+## Activation
+
+`~/.aios/` is the source of truth, but most agents do not automatically scan that folder. `dotaios activate` writes small bridge files into the global locations each tool already reads:
+
+- Claude Code: `~/.claude/CLAUDE.md`
+- Codex: `~/.codex/AGENTS.md`
+- Gemini CLI: `~/.gemini/GEMINI.md`
+
+`dotaios attach <project>` writes project-level bridges, including `.cursor/rules/dotaios.mdc` for Cursor. Existing unmanaged files are preserved unless the user passes `--overwrite`.
+
 ## Context
 
 `context/` is loaded every session. It describes identity, active work, priorities, long-term direction, and domain-specific modes.
@@ -14,6 +24,8 @@ DotAIOS is a local file convention.
 - today and yesterday from `signals/`
 - `errors.jsonl` only when debugging
 
+`dotaios import` can route structured context from old AI chats into memory and vault files. It previews by default and requires `--apply` before writing.
+
 ## Vault
 
 `vault/` is long-term knowledge, loaded on demand. Users may keep it inside `~/.aios/vault` or configure an external `vault_path` in `aios.json`, such as an Obsidian vault.
@@ -23,3 +35,9 @@ Company and people profiles live only in `vault/org/`. Access frequency is routi
 ## Skills And Plugins
 
 Skills are markdown instruction sets that any agent can read. Plugins may include code, but must declare permissions in `manifest.json`.
+
+In v1.1, plugins are trusted local folders. Permission declarations are visible to users but are not sandbox enforcement. Remote/plugin marketplace installs are intentionally out of scope until provenance and stronger install controls exist.
+
+## Schedules
+
+`schedules.yml` is a local registry of manual schedules. `dotaios schedule list`, `dotaios schedule due`, and `dotaios schedule run <name>` do not create a daemon or cloud workflow. v1.1 schedules only run DotAIOS commands.

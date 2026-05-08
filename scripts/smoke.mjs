@@ -8,10 +8,25 @@ const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-smoke-"));
 const aiosPath = path.join(tempRoot, "aios");
 const vaultPath = path.join(tempRoot, "vault");
+const homePath = path.join(tempRoot, "home");
+const projectPath = path.join(tempRoot, "project");
+const importPath = path.join(tempRoot, "import.json");
 
 run(["--help"]);
 run(["init", "--path", aiosPath, "--vault-path", vaultPath, "--yes"]);
 run(["status", "--path", aiosPath]);
+run(["context", "--path", aiosPath]);
+run(["context", "identity", "--path", aiosPath]);
+run(["context", "--refresh", "--path", aiosPath]);
+fs.mkdirSync(projectPath, { recursive: true });
+run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath]);
+fs.writeFileSync(importPath, JSON.stringify({
+  context: { work: "Imported smoke context." },
+  events: [{ type: "smoke-import", summary: "Smoke import verified." }]
+}, null, 2));
+run(["import", importPath, "--path", aiosPath]);
+run(["import", importPath, "--path", aiosPath, "--apply"]);
+run(["schedule", "list", "--path", aiosPath]);
 run(["ingest", path.join(repoRoot, "README.md"), "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--dry-run"]);

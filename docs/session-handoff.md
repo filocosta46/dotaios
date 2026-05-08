@@ -1,5 +1,28 @@
 # DotAIOS Session Handoff
 
+## v1.1 Implementation Checkpoint (updated 2026-05-08)
+
+DotAIOS v1.1 is now implemented locally but not yet published.
+
+- package version in repo: `1.1.0`
+- new commands: `activate`, `attach`, `context`, `import`, `schedule`
+- `activate` writes conservative global bridges for Claude Code, Codex, and Gemini
+- `attach` writes project bridges, including Cursor project rules
+- `context` can summarize, print, edit, and refresh generated agent entrypoints
+- `import` previews by default and applies structured old-chat context only with `--apply`
+- `schedule` lists, checks, and manually runs local DotAIOS-only schedules
+- `node:test` coverage added for render helpers and v1.1 CLI behavior
+- smoke test now covers `context`, `activate`, `import`, and `schedule`
+
+Verification run on 2026-05-08:
+
+- `npm test`
+- `npm run smoke`
+- `npm run check`
+- `npm pack --dry-run --cache /private/tmp/dotaios-npm-cache`
+
+`npm run pack:check` still uses the default npm cache and may fail on this machine because `~/.npm` contains root-owned files. The package dry-run itself succeeds when pointed at a writable temp cache.
+
 ## Release Checkpoint (updated 2026-05-07)
 
 DotAIOS v1.0.0 is fully released and the distribution story is complete.
