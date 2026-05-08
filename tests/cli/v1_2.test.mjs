@@ -279,6 +279,28 @@ test("google workflows validate setup and safe options", () => {
   assert.match(badWorkflow.stderr, /Unsupported Google workflow/);
 });
 
+test("mcp status and install print local client config", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const homePath = path.join(tempRoot, "home");
+
+  const status = run(["mcp", "status", "--path", aiosPath]);
+  assert.match(status.stdout, /DotAIOS MCP status/);
+  assert.match(status.stdout, /read_context, search_memory, search_vault, list_projects, log_event/);
+
+  const install = run(["mcp", "install", "--dry-run", "--agent", "cursor", "--path", aiosPath, "--home", homePath]);
+  assert.match(install.stdout, /DotAIOS MCP dry run/);
+  assert.match(install.stdout, /Agent: cursor/);
+  assert.match(install.stdout, /"mcpServers"/);
+  assert.match(install.stdout, /packages\/mcp\/src\/server\.mjs/);
+  assert.match(install.stdout, new RegExp(escapeRegex(path.join(homePath, ".cursor", "mcp.json"))));
+});
+
+test("mcp install validates agents", () => {
+  const { aiosPath } = setupAios();
+  const badAgent = runFail(["mcp", "install", "--dry-run", "--agent", "slack", "--path", aiosPath]);
+  assert.match(badAgent.stderr, /Invalid --agent/);
+});
+
 function setupAios() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-v12-test-"));
   const aiosPath = path.join(tempRoot, "aios");
@@ -362,4 +384,8 @@ function runFail(args) {
   }
 
   return result;
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

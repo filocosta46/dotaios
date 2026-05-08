@@ -5,11 +5,13 @@
   "type": "module",
   "bin": {
     "dotaios": "packages/cli/src/index.mjs",
-    "aios": "packages/cli/src/index.mjs"
+    "aios": "packages/cli/src/index.mjs",
+    "dotaios-mcp": "packages/mcp/src/server.mjs"
   },
   "files": [
     "packages/cli/src",
     "packages/core/src",
+    "packages/mcp/src",
     "templates",
     "skills",
     "docs/architecture.md",
@@ -17,6 +19,7 @@
     "docs/context-import.md",
     "docs/getting-started.md",
     "docs/google-workspace.md",
+    "docs/mcp.md",
     "docs/plugin-development.md",
     "docs/schedules.md",
     "docs/security.md",

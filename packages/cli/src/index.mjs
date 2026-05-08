@@ -13,6 +13,7 @@ const commands = {
   init: "./commands/init.mjs",
   ingest: "./commands/ingest.mjs",
   install: "./commands/install.mjs",
+  mcp: "./commands/mcp.mjs",
   schedule: "./commands/schedule.mjs",
   search: "./commands/search.mjs",
   status: "./commands/status.mjs"
@@ -35,6 +36,7 @@ Commands:
   init              Scaffold ~/.aios with local context templates
   ingest <file>     Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
+  mcp <cmd>         Print local MCP server status and client config
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, and projects
   status            Check the health of a local AIOS folder
