@@ -10,6 +10,7 @@ const commands = {
   context: "./commands/context.mjs",
   google: "./commands/google.mjs",
   import: "./commands/import.mjs",
+  index: "./commands/index.mjs",
   init: "./commands/init.mjs",
   ingest: "./commands/ingest.mjs",
   install: "./commands/install.mjs",
@@ -33,6 +34,7 @@ Commands:
   context [name]    View, edit, or refresh local context files
   google <cmd>      Run read-first Google Workspace workflows
   import <file>     Preview or apply structured context from old chats
+  index             Generate ~/.aios/_index.md — table of contents across context and vault
   init              Scaffold ~/.aios with local context templates
   ingest <file>     Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
