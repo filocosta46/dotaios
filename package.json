@@ -1,8 +1,17 @@
 {
   "name": "dotaios",
-  "version": "1.2.2",
+  "version": "1.3.0",
   "description": "Dotfiles for AI agents: local-first personal context for Claude Code, Codex, Cursor, and other assistants.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/filocosta46/dotaios.git"
+  },
+  "homepage": "https://github.com/filocosta46/dotaios#readme",
+  "bugs": {
+    "url": "https://github.com/filocosta46/dotaios/issues"
+  },
+  "author": "Filippo Costa",
   "bin": {
     "dotaios": "packages/cli/src/index.mjs",
     "aios": "packages/cli/src/index.mjs",
@@ -17,6 +26,7 @@
     "docs/architecture.md",
     "docs/beta-testing.md",
     "docs/context-import.md",
+    "docs/friend-setup.md",
     "docs/getting-started.md",
     "docs/google-workspace.md",
     "docs/mcp.md",

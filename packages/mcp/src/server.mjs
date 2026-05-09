@@ -8,6 +8,7 @@ import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/pa
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_VERSION = "0.1.0";
+const MAX_EVENT_DATA_BYTES = 10000;
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) {
@@ -177,6 +178,12 @@ class DotaiosMcpServer {
 
   async logEvent(args) {
     const type = requireString(args.type, "type");
+    if (args.data !== undefined) {
+      const serialized = JSON.stringify(args.data);
+      if (serialized && serialized.length > MAX_EVENT_DATA_BYTES) {
+        throw protocolError(-32602, `data exceeds ${MAX_EVENT_DATA_BYTES} byte limit (${serialized.length} bytes)`);
+      }
+    }
     const event = await appendEvent(path.join(this.aiosPath, "memory", "events.jsonl"), {
       type,
       project: optionalString(args.project),
