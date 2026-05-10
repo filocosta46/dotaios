@@ -5,7 +5,7 @@
   "description": "CLI commands for DotAIOS. Published via the root package.",
   "type": "module",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "license": "MIT"
 }

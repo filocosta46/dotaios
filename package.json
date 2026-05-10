@@ -56,7 +56,7 @@
   ],
   "packageManager": "pnpm@10.33.4",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "license": "MIT",
   "dependencies": {
