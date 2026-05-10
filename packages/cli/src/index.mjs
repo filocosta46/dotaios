@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const VERSION = "1.3.0";
+const VERSION = "1.3.1";
 
 const commands = {
   activate: "./commands/activate.mjs",
@@ -15,6 +15,7 @@ const commands = {
   ingest: "./commands/ingest.mjs",
   install: "./commands/install.mjs",
   mcp: "./commands/mcp.mjs",
+  reveal: "./commands/reveal.mjs",
   schedule: "./commands/schedule.mjs",
   search: "./commands/search.mjs",
   status: "./commands/status.mjs"
@@ -39,6 +40,7 @@ Commands:
   ingest <file>     Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
   mcp <cmd>         Print local MCP server status and client config
+  reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, and projects
   status            Check the health of a local AIOS folder

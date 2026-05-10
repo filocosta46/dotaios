@@ -30,6 +30,13 @@ run(["schedule", "list", "--path", aiosPath]);
 run(["ingest", path.join(repoRoot, "README.md"), "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--dry-run"]);
+run(["search", "smoke", "--path", aiosPath]);
+run(["index", "--path", aiosPath]);
+run(["index", "--path", aiosPath, "--dry-run"]);
+run(["mcp", "status", "--path", aiosPath]);
+run(["mcp", "install", "--path", aiosPath, "--dry-run", "--agent", "claude"]);
+run(["reveal", "--path", aiosPath, "--dry-run"]);
+run(["cleanup", "--path", aiosPath, "--dry-run"]);
 
 console.log(`Smoke test passed: ${tempRoot}`);
 
