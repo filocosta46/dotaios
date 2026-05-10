@@ -20,6 +20,8 @@ const {
 } = await import(path.join(ingestDir, "frontmatter.mjs"));
 const { ingestUrl, IngestError } = await import(path.join(ingestDir, "web.mjs"));
 const { ingestDocument, detectMarker } = await import(path.join(ingestDir, "pdf.mjs"));
+const { ingestText } = await import(path.join(ingestDir, "text.mjs"));
+const { ingestBinary } = await import(path.join(ingestDir, "binary.mjs"));
 
 // --- classifier ---
 
@@ -602,6 +604,183 @@ test("ingestDocument extracts real text via unpdf default extractor", async () =
   const written = await fsp.readFile(result.destination, "utf8");
   assert.match(written, /Hello DotAIOS Real/);
   assert.match(written, /\nparser: unpdf\n/);
+});
+
+// --- Path C text passthrough ---
+
+test("ingestText wraps .txt with frontmatter", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "note.txt");
+  await fsp.writeFile(src, "Plain text body line one.\nLine two.\n");
+
+  const result = await ingestText(src, {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    now: () => new Date("2026-05-10T12:00:00Z")
+  });
+
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "copy");
+  assert.equal(result.kind, "text");
+
+  const written = await fsp.readFile(result.destination, "utf8");
+  assert.match(written, /^---\n/);
+  assert.match(written, /\nkind: text\n/);
+  assert.match(written, /\nparser: copy\n/);
+  assert.match(written, /\n---\n\nPlain text body line one\.\nLine two\.\n$/);
+});
+
+test("ingestText prepends frontmatter to .md without one", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "bookmark.md");
+  await fsp.writeFile(src, "# A markdown note\n\nBody.\n");
+
+  const result = await ingestText(src, { rawDir: ws.rawDir, eventsPath: ws.eventsPath });
+  const written = await fsp.readFile(result.destination, "utf8");
+  assert.match(written, /^---\n/);
+  assert.match(written, /\n# A markdown note\n/);
+});
+
+test("ingestText preserves existing frontmatter on .md", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "preset.md");
+  const original = "---\ntitle: existing\nkind: text\nparser: copy\nsource: x\ntags: []\n---\n\n# body\n";
+  await fsp.writeFile(src, original);
+
+  const result = await ingestText(src, { rawDir: ws.rawDir, eventsPath: ws.eventsPath });
+  const written = await fsp.readFile(result.destination, "utf8");
+  assert.equal(written, original);
+});
+
+test("ingestText fences .json and .csv content", async () => {
+  const ws = makeWorkspace();
+  const jsonPath = path.join(ws.root, "data.json");
+  const csvPath = path.join(ws.root, "table.csv");
+  await fsp.writeFile(jsonPath, `{"a":1,"b":2}`);
+  await fsp.writeFile(csvPath, "col1,col2\n1,2\n3,4");
+
+  const jsonResult = await ingestText(jsonPath, { rawDir: ws.rawDir, eventsPath: ws.eventsPath });
+  const csvResult = await ingestText(csvPath, { rawDir: ws.rawDir, eventsPath: ws.eventsPath });
+
+  const jsonOut = await fsp.readFile(jsonResult.destination, "utf8");
+  const csvOut = await fsp.readFile(csvResult.destination, "utf8");
+
+  assert.match(jsonOut, /```json\n\{"a":1,"b":2\}\n```/);
+  assert.match(csvOut, /```csv\ncol1,col2\n1,2\n3,4\n```/);
+});
+
+test("ingestText skips when destination exists without overwrite", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "skip.txt");
+  await fsp.writeFile(src, "first");
+
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath };
+  await ingestText(src, opts);
+  const second = await ingestText(src, opts);
+  assert.equal(second.action, "skipped");
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 1);
+});
+
+test("ingestText --dry-run performs no writes", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "dry.txt");
+  await fsp.writeFile(src, "dry body");
+
+  const result = await ingestText(src, {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    dryRun: true
+  });
+  assert.equal(result.action, "dry-run");
+  assert.equal(fs.existsSync(ws.rawDir), false);
+});
+
+test("ingestText raises FILE_NOT_FOUND for missing source", async () => {
+  const ws = makeWorkspace();
+  await assert.rejects(
+    () =>
+      ingestText(path.join(ws.root, "absent.txt"), {
+        rawDir: ws.rawDir,
+        eventsPath: ws.eventsPath
+      }),
+    (err) => err instanceof IngestError && err.code === "FILE_NOT_FOUND"
+  );
+});
+
+// --- Path D binary fallthrough ---
+
+test("ingestBinary copies unknown binary into vault/assets", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "blob.bin");
+  await fsp.writeFile(src, Buffer.from([0xde, 0xad, 0xbe, 0xef]));
+
+  const result = await ingestBinary(src, {
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath
+  });
+
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "copy");
+  assert.equal(result.kind, "binary");
+  assert.equal(fs.existsSync(result.asset), true);
+  assert.equal(fs.existsSync(ws.rawDir), false, "binary path must not write to vault/raw");
+
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events[0].kind, "binary");
+  assert.equal(events[0].parser, "copy");
+});
+
+test("ingestBinary preserves bytes verbatim", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "blob.dmg");
+  const payload = Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]);
+  await fsp.writeFile(src, payload);
+
+  const result = await ingestBinary(src, {
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath
+  });
+  const copied = await fsp.readFile(result.asset);
+  assert.deepEqual(copied, payload);
+});
+
+test("ingestBinary skips when asset exists without overwrite", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "blob.zip");
+  await fsp.writeFile(src, Buffer.from("contents"));
+
+  const opts = { assetsDir: ws.assetsDir, eventsPath: ws.eventsPath };
+  await ingestBinary(src, opts);
+  const second = await ingestBinary(src, opts);
+  assert.equal(second.action, "skipped");
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 1);
+});
+
+test("ingestBinary --dry-run performs no copy", async () => {
+  const ws = makeWorkspace();
+  const src = path.join(ws.root, "dry.bin");
+  await fsp.writeFile(src, Buffer.from("x"));
+  const result = await ingestBinary(src, {
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    dryRun: true
+  });
+  assert.equal(result.action, "dry-run");
+  assert.equal(fs.existsSync(ws.assetsDir), false);
+});
+
+test("ingestBinary raises FILE_NOT_FOUND for missing source", async () => {
+  const ws = makeWorkspace();
+  await assert.rejects(
+    () =>
+      ingestBinary(path.join(ws.root, "absent.bin"), {
+        assetsDir: ws.assetsDir,
+        eventsPath: ws.eventsPath
+      }),
+    (err) => err instanceof IngestError && err.code === "FILE_NOT_FOUND"
+  );
 });
 
 test("ingestUrl raises TIMEOUT when fetch is aborted", async () => {

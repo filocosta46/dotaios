@@ -66,7 +66,9 @@ test("ingest writes a structured memory event", () => {
   assert.equal(event.type, "ingest");
   assert.equal(event.source, sourcePath);
   assert.equal(event.destination, path.join(aiosPath, "vault", "raw", "notes.md"));
-  assert.equal(event.summary, "Ingested notes.md");
+  assert.equal(event.summary, "notes");
+  assert.equal(event.kind, "text");
+  assert.equal(event.parser, "copy");
   assert.ok(event.ts);
 });
 

@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { appendEvent } from "../../../core/src/memory.mjs";
 import { classifyInput } from "../ingest/route.mjs";
 import { ingestUrl, IngestError } from "../ingest/web.mjs";
 import { ingestDocument } from "../ingest/pdf.mjs";
+import { ingestText } from "../ingest/text.mjs";
+import { ingestBinary } from "../ingest/binary.mjs";
 
 export async function ingestCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -81,19 +82,40 @@ Privacy:
     return;
   }
 
-  // Other paths (document/text/binary) land in commits 3-4. For now, retain the
-  // previous behavior: copy the file into vault/raw/.
-  const source = classification.target;
-  const destination = path.join(rawDir, path.basename(source));
-  await fs.mkdir(rawDir, { recursive: true });
-  await fs.copyFile(source, destination);
-  await appendEvent(eventsPath, {
-    type: "ingest",
-    source,
-    destination,
-    summary: `Ingested ${path.basename(source)}`
-  });
-  console.log(`Ingested ${source} -> ${destination}`);
+  if (classification.kind === "text") {
+    try {
+      const result = await ingestText(classification.target, { rawDir, eventsPath });
+      if (result.action === "skipped") {
+        console.log(`Already ingested: ${result.destination}`);
+        return;
+      }
+      console.log(`Ingested ${result.canonical} -> ${result.destination}`);
+    } catch (error) {
+      if (error instanceof IngestError) {
+        throw new Error(error.message);
+      }
+      throw error;
+    }
+    return;
+  }
+
+  if (classification.kind === "binary") {
+    try {
+      const result = await ingestBinary(classification.target, { assetsDir, eventsPath });
+      if (result.action === "skipped") {
+        console.log(`Already preserved: ${result.asset}`);
+        return;
+      }
+      console.log(`Preserved ${result.canonical} -> ${result.asset}`);
+      console.log("[note] No markdown was generated. Unknown binary types are stored as assets only.");
+    } catch (error) {
+      if (error instanceof IngestError) {
+        throw new Error(error.message);
+      }
+      throw error;
+    }
+    return;
+  }
 }
 
 function parseOptions(args = []) {
