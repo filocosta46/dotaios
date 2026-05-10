@@ -11,8 +11,12 @@ token.*
 *.pem
 *.key
 
-# Runtime output from local AIOS installs
+# Runtime output from local AIOS installs (visible folder or legacy dotfile)
+aios/
 .aios/
 memory/events.jsonl
 memory/signals/
 memory/errors.jsonl
+vault/
+connections/
+plugins/
