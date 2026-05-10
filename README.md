@@ -66,6 +66,8 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 
 `dotaios activate` creates small bridge files in the locations each tool actually reads, such as `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`. `dotaios attach` adds project-level rules for Cursor and repo-aware agents.
 
+Open `~/aios/` in Finder, Explorer, or any file manager. Drag notes in. Edit Markdown in your editor of choice. Every agent on your machine sees the changes immediately. Run `dotaios reveal` to open the folder from any terminal.
+
 ## Commands
 
 | Command | What it does |
@@ -73,16 +75,34 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 | `dotaios init` | Interactive setup — creates `~/aios/` with your context |
 | `dotaios activate` | Connects DotAIOS to global Claude, Codex, and Gemini memory files |
 | `dotaios attach <project>` | Adds DotAIOS bridges to a project folder, including Cursor rules |
-| `dotaios cleanup` | Trims stale signals and compacts the event log |
-| `dotaios connect google` | Verifies local `gws` auth and adds read-first Gmail/Calendar guidance |
-| `dotaios context` | Shows, edits, or refreshes the context agents see |
-| `dotaios google <cmd>` | Runs read-first Google Workspace workflows through `gws` |
-| `dotaios import <file>` | Previews or applies structured context from old AI chats |
-| `dotaios search <query>` | Searches across memory, vault, context, and projects |
+| `dotaios reveal` | Opens `~/aios/` in Finder, Explorer, or your file manager |
 | `dotaios status` | Health check — shows what's configured, what's missing |
-| `dotaios ingest <input>` | Saves a URL, document, text file, or binary asset into the vault |
+| `dotaios context` | Shows, edits, or refreshes the context agents see |
+| `dotaios index` | Generates `~/aios/_index.md` — a table of contents agents can use to find the right file fast |
+| `dotaios search <query>` | Searches across memory, vault, context, and projects |
+| `dotaios ingest <input>` | Universal Knowledge Router — saves a URL, PDF, document, text file, or binary asset into the vault as clean Markdown |
+| `dotaios import <file>` | Previews or applies structured context from old AI chats |
+| `dotaios connect google` | Verifies local `gws` auth and adds read-first Gmail/Calendar guidance |
+| `dotaios google <cmd>` | Runs read-first Google Workspace workflows through `gws` |
+| `dotaios mcp <cmd>` | Local MCP server — exposes AIOS over Model Context Protocol |
 | `dotaios install <plugin>` | Installs a local plugin and registers its skills |
 | `dotaios schedule <cmd>` | Lists, checks, or manually runs local schedules |
+| `dotaios cleanup` | Trims stale signals and compacts the event log |
+
+## Universal Knowledge Router
+
+Throw any source at AIOS. The router translates it into clean Markdown your agents can read, with full provenance frontmatter (`source`, `ingested_at`, `kind`, `parser`, `title`, `tags`).
+
+```bash
+npx dotaios ingest https://example.com/article   # URL  → article extracted to vault/raw/
+npx dotaios ingest research.pdf                  # PDF  → text + original preserved in vault/assets/
+npx dotaios ingest notes.txt                     # text → frontmatter + body in vault/raw/
+npx dotaios ingest archive.zip                   # unknown binary → vault/assets/ only
+```
+
+Documents are parsed locally — nothing is uploaded to any cloud service. PDFs use the bundled `unpdf` text extractor by default; install [marker-pdf](https://github.com/datalab-to/marker) for high-fidelity PDF / DOCX / PPTX / EPUB parsing with tables and math.
+
+Use `--dry-run` to see exactly where an input would land before you commit. Use `--overwrite` to replace an earlier ingest.
 
 ## `dotaios` vs `aios`
 
@@ -147,24 +167,21 @@ See [docs/plugin-development.md](docs/plugin-development.md) and [examples/plugi
 
 Do not install third-party plugins you have not reviewed. Permissions are visible before install, but they are not a sandbox.
 
-For beta guidance, Google Workspace setup, context import prompts, schedules, and secrets policy, see:
-[beta-testing](docs/beta-testing.md), [google-workspace](docs/google-workspace.md), [mcp](docs/mcp.md), [v1.3-plan](docs/v1.3-plan.md), [context-import](docs/context-import.md), [schedules](docs/schedules.md), and [security](docs/security.md).
+See also: [getting-started](docs/getting-started.md), [friend-setup](docs/friend-setup.md), [architecture](docs/architecture.md), [beta-testing](docs/beta-testing.md), [google-workspace](docs/google-workspace.md), [mcp](docs/mcp.md), [context-import](docs/context-import.md), [plugin-development](docs/plugin-development.md), [schedules](docs/schedules.md), [security](docs/security.md).
 
-## v1.2.x scope
+## What's in v1.4
 
-- `dotaios init` / `status` / `ingest` / `install`
-- `dotaios activate` / `attach` / `context` / `import` / `schedule`
-- `dotaios search` / `cleanup`
-- `dotaios connect google` and `dotaios google <cmd>` for local `gws`-backed Google Workspace setup and read-first workflows
-- experimental local MCP server package under `packages/mcp`
-- Auto-generated agent entrypoints (`CLAUDE.md`, `AGENTS.md`, `.cursorrules`)
-- Agent-native bridges for Claude Code, Codex, Gemini, and Cursor projects
-- Full memory system: append, filter, compact, trim, search
-- Schema versioning via `aios.json`
-- Documented plugin manifest contract
-- Five base skills
+- **Universal Knowledge Router** — `dotaios ingest <input>` routes URLs, PDFs, documents, text files, and binaries into your vault as clean Markdown (see above).
+- **Visible folder default** — AIOS lives at `~/aios/`. Drag files in, edit in any editor, see what your agents see.
+- **`dotaios reveal`** — opens your AIOS folder in Finder / Explorer / file manager.
+- **`dotaios index`** — generates `~/aios/_index.md`, a table of contents agents can use to navigate your vault fast.
+- **Local MCP server** — `dotaios mcp` exposes AIOS over Model Context Protocol for agent tools that speak it.
+- **Provenance everywhere** — every Markdown file written by ingest carries `source`, `parser`, `kind`, and `ingested_at` frontmatter for auditable memory.
+- **Agent-native bridges** — auto-generated `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, plus per-tool entrypoints under `~/.claude/`, `~/.codex/`, and `~/.gemini/`.
+- **`dotaios connect google`** — verifies local `gws` auth and adds read-first Gmail / Calendar / Drive workflows.
+- **Five base skills** — `plan-today`, `audit`, `ingest`, `morning-digest`, `import-context`.
 
-Not in v1.2: custom Gmail OAuth plugin, published MCP package, semantic search (SQLite FTS5), `upgrade` command, paid plugins, cloud sync, plugin marketplace.
+Not in v1.4: hosted Google OAuth, plugin marketplace, semantic search (SQLite FTS5), `upgrade` command, paid plugins, cloud sync.
 
 ## Principles
 
