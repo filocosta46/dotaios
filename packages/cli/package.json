@@ -1,6 +1,6 @@
 {
   "name": "@dotaios/cli",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "private": true,
   "description": "CLI commands for DotAIOS. Published via the root package.",
   "type": "module",

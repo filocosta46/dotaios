@@ -1,6 +1,6 @@
 # Beta Testing
 
-DotAIOS v1.2.2 is the next Google-readiness pass for a small weekend beta with terminal-comfortable testers.
+DotAIOS v1.4 ships the Universal Knowledge Router, skill bridging into Claude Code, and a visible-folder default at `~/aios/`. This guide covers a small weekend beta with terminal-comfortable testers.
 
 ## Who To Invite
 
