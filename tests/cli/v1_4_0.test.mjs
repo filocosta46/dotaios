@@ -808,6 +808,42 @@ test("ingestBinary raises FILE_NOT_FOUND for missing source", async () => {
   );
 });
 
+// --- Skill mirror ---
+
+test("skills/ingest/SKILL.md mirrors the CLI surface", () => {
+  const skillPath = path.join(repoRoot, "skills", "ingest", "SKILL.md");
+  const content = fs.readFileSync(skillPath, "utf8");
+
+  // All four routing paths must be documented.
+  for (const label of ["Path A", "Path B", "Path C", "Path D"]) {
+    assert.ok(content.includes(label) || content.match(new RegExp(`A — web scraper|B — document parser|C — text passthrough|D — binary fallthrough`)), `skill should describe routing paths (missing ${label})`);
+  }
+  assert.match(content, /web scraper/);
+  assert.match(content, /document parser/);
+  assert.match(content, /text passthrough/);
+  assert.match(content, /binary fallthrough/);
+
+  // All four CLI flags must be documented.
+  for (const flag of ["--path", "--overwrite", "--dry-run", "--timeout"]) {
+    assert.ok(content.includes(flag), `skill should document ${flag}`);
+  }
+
+  // Frontmatter schema fields.
+  for (const field of ["source:", "ingested_at:", "kind:", "parser:", "title:", "tags:"]) {
+    assert.ok(content.includes(field), `skill should list frontmatter field ${field}`);
+  }
+
+  // Marker install prompt must include the disk-cost disclosure.
+  assert.match(content, /~2 GB/);
+  assert.match(content, /marker-pdf/);
+
+  // Privacy disclosure must be present and consistent with CLI --help.
+  assert.match(content, /No content is uploaded to any cloud service/);
+
+  // CLI is the routing authority.
+  assert.match(content, /CLI is the routing authority|CLI wins/);
+});
+
 // --- CLI flags ---
 
 test("ingest --help documents new flags and privacy disclosure", () => {
