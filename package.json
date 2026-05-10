@@ -58,5 +58,11 @@
   "engines": {
     "node": ">=18"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "cheerio": "^1.2.0",
+    "linkedom": "^0.18.12",
+    "turndown": "^7.2.4"
+  }
 }
