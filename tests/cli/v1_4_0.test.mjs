@@ -19,6 +19,7 @@ const {
   disambiguateSlug
 } = await import(path.join(ingestDir, "frontmatter.mjs"));
 const { ingestUrl, IngestError } = await import(path.join(ingestDir, "web.mjs"));
+const { ingestDocument, detectMarker } = await import(path.join(ingestDir, "pdf.mjs"));
 
 // --- classifier ---
 
@@ -218,7 +219,47 @@ function makeWorkspace() {
   return {
     root,
     rawDir: path.join(root, "vault", "raw"),
+    assetsDir: path.join(root, "vault", "assets"),
     eventsPath: path.join(root, "memory", "events.jsonl")
+  };
+}
+
+function buildMinimalPdf(message = "Hello DotAIOS Test") {
+  const stream = `BT /F1 24 Tf 100 700 Td (${message}) Tj ET\n`;
+  const objects = [
+    "<</Type/Catalog/Pages 2 0 R>>",
+    "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+    "<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>/Contents 4 0 R>>",
+    `<</Length ${stream.length}>>stream\n${stream}endstream`
+  ];
+
+  let body = "%PDF-1.4\n";
+  const offsets = [];
+  for (let i = 0; i < objects.length; i += 1) {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefStart = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) {
+    body += `${off.toString().padStart(10, "0")} 00000 n \n`;
+  }
+  body += `trailer\n<</Size ${objects.length + 1}/Root 1 0 R>>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return Buffer.from(body, "binary");
+}
+
+function writePdfFixture(workspaceRoot, name, message) {
+  const filePath = path.join(workspaceRoot, name);
+  fs.writeFileSync(filePath, buildMinimalPdf(message));
+  return filePath;
+}
+
+function makeMockSpawn(markdownOutput) {
+  return async (_cmd, args) => {
+    const outputDirIdx = args.indexOf("--output_dir");
+    const outDir = args[outputDirIdx + 1];
+    await fsp.mkdir(outDir, { recursive: true });
+    await fsp.writeFile(path.join(outDir, "marker-output.md"), markdownOutput);
   };
 }
 
@@ -359,6 +400,208 @@ test("ingestUrl raises READABILITY_NULL on empty SPA shell (no silent body-dump)
     (err) => err instanceof IngestError && err.code === "READABILITY_NULL"
   );
   assert.equal(fs.existsSync(ws.rawDir) && fs.readdirSync(ws.rawDir).length > 0, false, "no file should be written");
+});
+
+// --- Path B document parser ---
+
+test("detectMarker returns null when which fails", async () => {
+  const result = await detectMarker(async () => {
+    throw new Error("not found");
+  });
+  assert.equal(result, null);
+});
+
+test("detectMarker returns the resolved path when which succeeds", async () => {
+  const result = await detectMarker(async () => "/usr/local/bin/marker_single");
+  assert.equal(result, "/usr/local/bin/marker_single");
+});
+
+test("ingestDocument uses marker-local when marker is present (.pdf)", async () => {
+  const ws = makeWorkspace();
+  const pdfPath = writePdfFixture(ws.root, "report.pdf", "Marker would parse this");
+
+  const result = await ingestDocument(pdfPath, {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => "/fake/marker_single",
+    spawnImpl: makeMockSpawn("# Report\n\nMarker output text.\n"),
+    now: () => new Date("2026-05-10T12:00:00Z")
+  });
+
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "marker-local");
+  assert.equal(result.kind, "pdf");
+
+  const written = await fsp.readFile(result.destination, "utf8");
+  assert.match(written, /\nparser: marker-local\n/);
+  assert.match(written, /Marker output text\./);
+
+  assert.equal(fs.existsSync(result.asset), true, "asset copy must exist");
+});
+
+test("ingestDocument uses marker-local for .docx when marker is present", async () => {
+  const ws = makeWorkspace();
+  const docxPath = path.join(ws.root, "memo.docx");
+  await fsp.writeFile(docxPath, "PKfake-docx");
+
+  const result = await ingestDocument(docxPath, {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => "/fake/marker_single",
+    spawnImpl: makeMockSpawn("# Memo\n\nMarker rendered docx body.\n")
+  });
+
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "marker-local");
+  assert.equal(result.kind, "document");
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events[0].kind, "document");
+  assert.equal(events[0].parser, "marker-local");
+});
+
+test("ingestDocument falls back to unpdf for .pdf when marker is absent", async () => {
+  const ws = makeWorkspace();
+  const pdfPath = writePdfFixture(ws.root, "paper.pdf", "Fallback path");
+  let extracted = false;
+
+  const result = await ingestDocument(pdfPath, {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => null,
+    extractPdfImpl: async (sourcePath) => {
+      extracted = true;
+      assert.equal(sourcePath, pdfPath);
+      return "Extracted plain text from PDF.";
+    }
+  });
+
+  assert.equal(extracted, true);
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "unpdf");
+  assert.equal(result.kind, "pdf");
+  assert.match(result.warning || "", /basic text extraction/);
+
+  const written = await fsp.readFile(result.destination, "utf8");
+  assert.match(written, /\nparser: unpdf\n/);
+  assert.match(written, /Extracted plain text from PDF\./);
+});
+
+test("ingestDocument raises MARKER_REQUIRED for .docx when marker is absent", async () => {
+  const ws = makeWorkspace();
+  const docxPath = path.join(ws.root, "memo.docx");
+  await fsp.writeFile(docxPath, "PKfake");
+
+  await assert.rejects(
+    () =>
+      ingestDocument(docxPath, {
+        rawDir: ws.rawDir,
+        assetsDir: ws.assetsDir,
+        eventsPath: ws.eventsPath,
+        whichImpl: async () => null
+      }),
+    (err) => err instanceof IngestError && err.code === "MARKER_REQUIRED"
+  );
+
+  assert.equal(fs.existsSync(ws.rawDir), false, "no raw output should be written");
+  assert.equal(fs.existsSync(ws.assetsDir), false, "no asset copy should be made on rejection");
+});
+
+test("ingestDocument always copies the original to vault/assets/", async () => {
+  const ws = makeWorkspace();
+  const pdfPath = writePdfFixture(ws.root, "preserve.pdf", "Asset preservation");
+
+  const result = await ingestDocument(pdfPath, {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => null,
+    extractPdfImpl: async () => "extracted"
+  });
+
+  const original = await fsp.readFile(pdfPath);
+  const copied = await fsp.readFile(result.asset);
+  assert.deepEqual(copied, original);
+});
+
+test("ingestDocument skips when destination exists without overwrite", async () => {
+  const ws = makeWorkspace();
+  const pdfPath = writePdfFixture(ws.root, "skip.pdf", "Skip me");
+  const opts = {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => null,
+    extractPdfImpl: async () => "first run"
+  };
+
+  await ingestDocument(pdfPath, opts);
+  const second = await ingestDocument(pdfPath, opts);
+  assert.equal(second.action, "skipped");
+
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 1);
+});
+
+test("ingestDocument --dry-run performs no I/O", async () => {
+  const ws = makeWorkspace();
+  const pdfPath = writePdfFixture(ws.root, "dry.pdf", "Should not parse");
+  let calledExtract = false;
+  let calledSpawn = false;
+
+  const result = await ingestDocument(pdfPath, {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => "/fake/marker",
+    spawnImpl: async () => {
+      calledSpawn = true;
+    },
+    extractPdfImpl: async () => {
+      calledExtract = true;
+      return "x";
+    },
+    dryRun: true
+  });
+
+  assert.equal(result.action, "dry-run");
+  assert.equal(calledSpawn, false);
+  assert.equal(calledExtract, false);
+  assert.equal(fs.existsSync(ws.rawDir), false);
+  assert.equal(fs.existsSync(ws.assetsDir), false);
+});
+
+test("ingestDocument raises FILE_NOT_FOUND for missing source", async () => {
+  const ws = makeWorkspace();
+  await assert.rejects(
+    () =>
+      ingestDocument(path.join(ws.root, "absent.pdf"), {
+        rawDir: ws.rawDir,
+        assetsDir: ws.assetsDir,
+        eventsPath: ws.eventsPath,
+        whichImpl: async () => null,
+        extractPdfImpl: async () => "x"
+      }),
+    (err) => err instanceof IngestError && err.code === "FILE_NOT_FOUND"
+  );
+});
+
+test("ingestDocument extracts real text via unpdf default extractor", async () => {
+  const ws = makeWorkspace();
+  const pdfPath = writePdfFixture(ws.root, "real.pdf", "Hello DotAIOS Real");
+
+  const result = await ingestDocument(pdfPath, {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => null
+  });
+
+  const written = await fsp.readFile(result.destination, "utf8");
+  assert.match(written, /Hello DotAIOS Real/);
+  assert.match(written, /\nparser: unpdf\n/);
 });
 
 test("ingestUrl raises TIMEOUT when fetch is aborted", async () => {

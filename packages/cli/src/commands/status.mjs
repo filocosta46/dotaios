@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome, requiredAiosFiles, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { detectMarker } from "../ingest/pdf.mjs";
 
 const managedStart = "<!-- dotaios-managed:start -->";
 
@@ -45,6 +46,16 @@ Options:
   const vaultPath = resolveVaultPath(config || {}, target);
   console.log("\nVault");
   console.log(`${await pathExists(vaultPath) ? "[ok]" : "[missing]"} ${vaultPath}`);
+
+  console.log("\nIngest engines");
+  console.log("[ok] Web scraper           : bundled (linkedom + cheerio + readability + turndown)");
+  console.log("[ok] PDF (Node fallback)   : bundled (unpdf)");
+  const markerPath = await detectMarker();
+  if (markerPath) {
+    console.log(`[ok] Marker (local)         : installed (${markerPath})`);
+  } else {
+    console.log("[info] Marker (local)       : not installed (PDFs use unpdf; .docx/.pptx/.epub require marker)");
+  }
 
   console.log("\nMemory");
   console.log(`[info] events: ${await countLines(path.join(target, "memory", "events.jsonl"))}`);

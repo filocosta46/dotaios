@@ -4,6 +4,7 @@ import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { classifyInput } from "../ingest/route.mjs";
 import { ingestUrl, IngestError } from "../ingest/web.mjs";
+import { ingestDocument } from "../ingest/pdf.mjs";
 
 export async function ingestCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -35,6 +36,7 @@ Privacy:
   const config = await readConfig(aiosPath);
   const vaultRoot = resolveVaultPath(config || {}, aiosPath);
   const rawDir = path.join(vaultRoot, "raw");
+  const assetsDir = path.join(vaultRoot, "assets");
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
 
   const classification = classifyInput(input);
@@ -47,6 +49,29 @@ Privacy:
         return;
       }
       console.log(`Ingested ${result.canonical} -> ${result.destination}`);
+    } catch (error) {
+      if (error instanceof IngestError) {
+        throw new Error(error.message);
+      }
+      throw error;
+    }
+    return;
+  }
+
+  if (classification.kind === "document") {
+    try {
+      const result = await ingestDocument(classification.target, {
+        rawDir,
+        assetsDir,
+        eventsPath
+      });
+      if (result.action === "skipped") {
+        console.log(`Already ingested: ${result.destination}`);
+        return;
+      }
+      if (result.warning) console.log(result.warning);
+      console.log(`Ingested ${result.canonical} -> ${result.destination}`);
+      console.log(`Original preserved at ${result.asset}`);
     } catch (error) {
       if (error instanceof IngestError) {
         throw new Error(error.message);
