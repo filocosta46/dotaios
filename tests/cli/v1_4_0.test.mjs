@@ -1009,6 +1009,48 @@ test("ingestBinary raises FILE_NOT_FOUND for missing source", async () => {
   );
 });
 
+// --- Skill bridging into ~/.claude/skills/ ---
+
+test("activate symlinks AIOS skills into ~/.claude/skills/ for slash-command discovery", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-v141-skills-"));
+  const aiosPath = path.join(tempRoot, "aios");
+  const homePath = path.join(tempRoot, "home");
+
+  runCli(["init", "--path", aiosPath, "--yes"]);
+  runCli(["activate", "--path", aiosPath, "--home", homePath]);
+
+  const claudeSkills = path.join(homePath, ".claude", "skills");
+  assert.equal(fs.existsSync(claudeSkills), true, "~/.claude/skills/ should be created");
+
+  for (const name of ["audit", "ingest", "plan-today", "morning-digest", "import-context"]) {
+    const link = path.join(claudeSkills, name);
+    assert.equal(fs.existsSync(link), true, `expected symlink at ${link}`);
+    const stat = fs.lstatSync(link);
+    assert.equal(stat.isSymbolicLink(), true, `${name} should be a symlink`);
+    const target = fs.readlinkSync(link);
+    assert.equal(target, path.join(aiosPath, "skills", name), `${name} should target the AIOS skill folder`);
+
+    const skillFile = path.join(link, "SKILL.md");
+    assert.equal(fs.existsSync(skillFile), true, `${skillFile} should resolve through the symlink`);
+    const content = fs.readFileSync(skillFile, "utf8");
+    assert.match(content, /^---\nname: /, `${name} SKILL.md should start with YAML frontmatter for Claude Code skill discovery`);
+  }
+});
+
+test("every shipped skill has YAML frontmatter so Claude Code surfaces /skill commands", () => {
+  const skillsRoot = path.join(repoRoot, "skills");
+  const entries = fs.readdirSync(skillsRoot, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const skillPath = path.join(skillsRoot, entry.name, "SKILL.md");
+    if (!fs.existsSync(skillPath)) continue;
+    const content = fs.readFileSync(skillPath, "utf8");
+    assert.match(content, /^---\n/, `${entry.name}/SKILL.md must start with YAML frontmatter`);
+    assert.match(content, /\nname:\s*\S+\n/, `${entry.name}/SKILL.md must declare a name field`);
+    assert.match(content, /\ndescription:\s*\S+/, `${entry.name}/SKILL.md must declare a description field`);
+  }
+});
+
 // --- Skill mirror ---
 
 test("skills/ingest/SKILL.md mirrors the CLI surface", () => {

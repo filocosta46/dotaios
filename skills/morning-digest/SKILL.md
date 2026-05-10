@@ -1,3 +1,8 @@
+---
+name: morning-digest
+description: Produce a daily brief — yesterday's signals + today's priorities. Use when the user asks for a morning review, daily digest, or what they missed.
+---
+
 # morning-digest
 
 Use this skill when the user asks for a daily brief or morning review.

@@ -1,3 +1,8 @@
+---
+name: audit
+description: Weekly health check of the local AIOS — context freshness, project clarity, memory hygiene, connection health, skill coverage. Use when the user asks for a review, audit, or status of their AIOS.
+---
+
 # audit
 
 Use this skill for a weekly health check of the local AIOS.

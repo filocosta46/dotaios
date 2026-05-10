@@ -1,3 +1,8 @@
+---
+name: plan-today
+description: Plan the day from priorities, active work, and recent signals. Use when the user asks what to work on, how to structure today, or what to focus on next.
+---
+
 # plan-today
 
 Use this skill when the user asks to plan the day or choose what to work on next.

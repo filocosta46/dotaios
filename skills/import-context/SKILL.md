@@ -1,3 +1,8 @@
+---
+name: import-context
+description: Route context pasted from another AI chat (ChatGPT, Claude, Gemini, Cursor) into the right DotAIOS files. Use when the user pastes prior conversation knowledge or asks to bring old AI memory in.
+---
+
 # import-context
 
 Use this skill when the user pastes context from another AI chat or asks to bring old ChatGPT, Claude, Gemini, or Cursor conversation knowledge into DotAIOS.

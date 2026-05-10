@@ -1,3 +1,8 @@
+---
+name: ingest
+description: Save a URL, PDF, document, text file, or binary into the AIOS vault as clean Markdown via the Universal Knowledge Router. Use when the user asks to save, archive, ingest, or capture an article, paper, or document.
+---
+
 # ingest
 
 Use this skill when the user asks to save a file, article, URL, PDF, document, note, or external material into AIOS.

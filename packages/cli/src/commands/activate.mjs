@@ -106,11 +106,82 @@ Options:
 }
 
 async function createGlobalBridges(aiosPath, homePath, options) {
-  return Promise.all([
+  const bridges = await Promise.all([
     writeManagedFile(path.join(homePath, ".claude", "CLAUDE.md"), claudeBridge(aiosPath), options),
     writeManagedFile(path.join(homePath, ".codex", "AGENTS.md"), codexBridge(aiosPath), options),
     writeManagedFile(path.join(homePath, ".gemini", "GEMINI.md"), geminiBridge(aiosPath), options)
   ]);
+  const skills = await bridgeSkillsToClaude(aiosPath, homePath, options);
+  return [...bridges, ...skills];
+}
+
+async function bridgeSkillsToClaude(aiosPath, homePath, options) {
+  const aiosSkillsDir = path.join(aiosPath, "skills");
+  if (!await pathExists(aiosSkillsDir)) return [];
+
+  const claudeSkillsDir = path.join(homePath, ".claude", "skills");
+  if (!options.dryRun) {
+    await fs.mkdir(claudeSkillsDir, { recursive: true });
+  }
+
+  let entries;
+  try {
+    entries = await fs.readdir(aiosSkillsDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const results = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const name = entry.name;
+    if (name.startsWith(".") || name.startsWith("_")) continue;
+
+    const source = path.join(aiosSkillsDir, name);
+    const dest = path.join(claudeSkillsDir, name);
+
+    const skillFile = path.join(source, "SKILL.md");
+    if (!await pathExists(skillFile)) {
+      results.push({ action: "skipped", path: dest, note: "no SKILL.md in source" });
+      continue;
+    }
+
+    const existsResult = await readSymlinkOrPath(dest);
+    if (existsResult.kind === "symlink" && existsResult.target === source) {
+      results.push({ action: "skipped", path: dest, note: "already linked to AIOS" });
+      continue;
+    }
+    if (existsResult.kind === "missing") {
+      if (!options.dryRun) {
+        await fs.symlink(source, dest, "dir");
+      }
+      results.push({ action: options.dryRun ? "would link" : "linked", path: dest });
+      continue;
+    }
+    if (!options.overwrite) {
+      results.push({ action: "kept", path: dest, note: "existing unmanaged file or directory" });
+      continue;
+    }
+    if (!options.dryRun) {
+      await fs.rm(dest, { recursive: true, force: true });
+      await fs.symlink(source, dest, "dir");
+    }
+    results.push({ action: options.dryRun ? "would relink" : "relinked", path: dest });
+  }
+  return results;
+}
+
+async function readSymlinkOrPath(filePath) {
+  try {
+    const stat = await fs.lstat(filePath);
+    if (stat.isSymbolicLink()) {
+      const target = await fs.readlink(filePath);
+      return { kind: "symlink", target };
+    }
+    return { kind: "exists" };
+  } catch {
+    return { kind: "missing" };
+  }
 }
 
 async function createProjectBridges(aiosPath, projectPath, options) {

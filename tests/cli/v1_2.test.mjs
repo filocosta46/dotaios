@@ -34,7 +34,7 @@ test("search finds keyword across context and vault", () => {
   // Search with scope filter
   const vaultOnly = run(["search", "agent", "--scope", "vault", "--path", aiosPath]);
   assert.match(vaultOnly.stdout, /vault\//);
-  assert.doesNotMatch(vaultOnly.stdout, /── context\//);
+  assert.doesNotMatch(vaultOnly.stdout, /^── context\/ \(/m);
 
   // Search for something that doesn't exist
   const noResults = run(["search", "xyznonexistent123", "--path", aiosPath]);

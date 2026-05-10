@@ -1,6 +1,6 @@
 {
   "name": "dotaios",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Dotfiles for AI agents: local-first personal context for Claude Code, Codex, Cursor, and other assistants.",
   "type": "module",
   "repository": {
