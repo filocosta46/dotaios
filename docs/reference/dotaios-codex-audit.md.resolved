@@ -95,7 +95,7 @@ The same `expandHome()` helper is copy-pasted in `init.mjs`, `status.mjs`, `inge
 **Fix**: Move to `@dotaios/core/paths.mjs` (which already exists and is the right location).
 
 ### Issue 6: Missing `.env.example` in templates
-The plan calls for a `.env.example` in the scaffolded `~/.aios/`. The code creates a basic one in `createStarterFiles()` ("# Add local secrets here..."), but it's very bare.
+The plan calls for a `.env.example` in the scaffolded `~/aios/`. The code creates a basic one in `createStarterFiles()` ("# Add local secrets here..."), but it's very bare.
 
 **Fix**: Add actual placeholder entries for common plugins:
 ```

@@ -76,7 +76,7 @@ Examples:
   dotaios context --refresh
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/.aios
+  --path <dir>  Use an AIOS folder other than ~/aios
   --edit        Open the selected context file in $EDITOR
   --refresh     Regenerate CLAUDE.md, AGENTS.md, and .cursorrules
 `);

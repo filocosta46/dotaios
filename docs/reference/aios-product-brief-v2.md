@@ -10,9 +10,9 @@
 
 AIOS is **not an app**. It's invisible infrastructure.
 
-The user never opens AIOS. They open Claude Code, Cursor, Codex, or Antigravity — and those tools automatically read `~/.aios/` files. AIOS makes every AI agent smarter because it gives them durable personal context: who you are, what you're working on, how you write, what your priorities are.
+The user never opens AIOS. They open Claude Code, Cursor, Codex, or Antigravity — and those tools automatically read `~/aios/` files. AIOS makes every AI agent smarter because it gives them durable personal context: who you are, what you're working on, how you write, what your priorities are.
 
-**Analogy**: `.gitconfig` makes Git know your name. `~/.aios/` makes every AI agent know your life.
+**Analogy**: `.gitconfig` makes Git know your name. `~/aios/` makes every AI agent know your life.
 
 ---
 
@@ -20,7 +20,7 @@ The user never opens AIOS. They open Claude Code, Cursor, Codex, or Antigravity 
 
 **One-liner**: Dotfiles for AI agents — personal memory that makes every AI tool smarter.
 
-**What it is**: A local-first folder convention (`~/.aios/`) with a CLI installer that scaffolds your personal context, a memory system, and a plugin architecture. Every AI agent reads these files. Knowledge compounds across sessions and tools.
+**What it is**: A local-first folder convention (`~/aios/`) with a CLI installer that scaffolds your personal context, a memory system, and a plugin architecture. Every AI agent reads these files. Knowledge compounds across sessions and tools.
 
 **What it is NOT**:
 - Not an agent framework (not LangChain, not CrewAI)
@@ -55,7 +55,7 @@ npx dotaios init
 # → What AI tools do you use? (Claude Code / Cursor / Codex / Other)
 # → Want to connect Gmail? (y/N — skippable)
 #
-# → ✅ Created ~/.aios/ with your personal context
+# → ✅ Created ~/aios/ with your personal context
 # → ✅ Generated CLAUDE.md for Claude Code
 # → ✅ Generated AGENTS.md for Codex/Gemini
 # → ✅ Generated .cursorrules for Cursor
@@ -67,7 +67,7 @@ npx dotaios init
 npx dotaios status
 # ✅ Context: identity.md, priorities.md configured
 # ✅ Agent files: CLAUDE.md, AGENTS.md, .cursorrules generated
-# ⚠️ Vault: empty (run: npx dotaios ingest <file> to add knowledge)
+# ⚠️ Vault: empty (run: npx dotaios ingest <input> to add knowledge)
 ```
 
 **Critical**: No `npm install -g`. No cloning repos. No editing config files. `npx` handles everything — one command, interactive prompts, done.
@@ -79,7 +79,7 @@ npx dotaios status
 ### Folder structure
 
 ```
-~/.aios/
+~/aios/
 ├── CLAUDE.md                    # Claude Code entrypoint (auto-loaded)
 ├── AGENTS.md                    # Universal agent entrypoint (Codex, Gemini)
 ├── .cursorrules                 # Cursor entrypoint (auto-loaded by Cursor)
@@ -261,7 +261,7 @@ Additionally, a `npx dotaios cleanup` command trims signals older than 30 days a
 
 - `npx dotaios init` — interactive scaffolding
 - `npx dotaios status` — health check
-- `npx dotaios ingest <file>` — save material to vault
+- `npx dotaios ingest <input>` — save material to vault
 - Auto-generated `CLAUDE.md`, `AGENTS.md`, `.cursorrules`
 - 4 base skills (plan-today, audit, ingest, morning-digest)
 - Clean README + MIT LICENSE + CONTRIBUTING.md
@@ -280,8 +280,8 @@ Additionally, a `npx dotaios cleanup` command trims signals older than 30 days a
 | Day | Focus | Deliverable | Acceptance criteria |
 |-----|-------|-------------|-------------------|
 | 1 | Monorepo + CLI skeleton | `packages/cli` + `packages/core`, `npx dotaios --help` works | Can run `npx dotaios --version` from anywhere |
-| 2 | `aios init` + templates | Interactive prompts → `~/.aios/` with filled context files | Fresh directory gets working AIOS in 2 min |
-| 3 | Agent file generation | CLAUDE.md, AGENTS.md, .cursorrules auto-generated from context | Open Claude Code in `~/.aios/` → it reads the context |
+| 2 | `aios init` + templates | Interactive prompts → `~/aios/` with filled context files | Fresh directory gets working AIOS in 2 min |
+| 3 | Agent file generation | CLAUDE.md, AGENTS.md, .cursorrules auto-generated from context | Open Claude Code in `~/aios/` → it reads the context |
 | 4 | `aios status` + `aios ingest` | Health check + file ingestion to vault/raw/ | Status shows ✅/⚠️, ingest copies + indexes files |
 | 5 | Base skills | Port plan-today, audit, ingest, morning-digest (generalized) | Skills run against template context without errors |
 | 6 | aios.json + plugin contract | Schema versioning, documented manifest.json spec, `npx dotaios install` for local plugins | A developer can create + install a plugin |
@@ -373,4 +373,4 @@ aios/                              # New public repo
 | **npm package name** | `aios`, `aios-os`, `dotaios`, `aios-memory` | Check `npm view aios` — if taken, go with `aios-os` |
 | **GitHub org vs personal** | `filocosta46/aios` vs new org `aios-os/aios` | New org looks more professional for an OSS product |
 | **Career-ops IP** | `santifer/career-ops.git` ownership | Must resolve before Day 6. If shared, can't monetize. |
-| **Vault path config** | `vault/` inside `~/.aios/` vs configurable external path | Add `vault_path` to `aios.json` — default `null` means inside `~/.aios/`, or point to e.g. `~/Brain/Obsidian-Mind/` |
+| **Vault path config** | `vault/` inside `~/aios/` vs configurable external path | Add `vault_path` to `aios.json` — default `null` means inside `~/aios/`, or point to e.g. `~/my-vault/` |

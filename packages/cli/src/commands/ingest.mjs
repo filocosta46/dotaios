@@ -15,14 +15,20 @@ const HELP_TEXT = `Usage:
     - A local file path — copied into vault/raw or vault/assets.
 
 Options:
-  --path <dir>      Use an AIOS folder other than ~/.aios
+  --path <dir>      Use an AIOS folder other than ~/aios
   --overwrite       Replace an existing destination (default skips)
   --dry-run         Classify the input and print the plan without writing
   --timeout <secs>  URL fetch timeout (Path A only, default 10)
 
 Privacy:
   URL ingestion fetches the page from your machine to your machine.
+  PDFs and documents are parsed locally with marker (if installed) or unpdf.
   No content is uploaded to any cloud service.
+
+Note:
+  Dynamic or paywalled pages may ingest partial content. If a saved article
+  ends abruptly or misses table-of-contents sections, save the logged-in page
+  as PDF from your browser and re-ingest that PDF.
 `;
 
 export async function ingestCommand(args) {
@@ -55,6 +61,7 @@ export async function ingestCommand(args) {
     if (classification.kind === "web") {
       const result = await ingestUrl(input, {
         rawDir,
+        assetsDir,
         eventsPath,
         ...flags,
         ...(options.timeoutMs != null ? { timeoutMs: options.timeoutMs } : {})

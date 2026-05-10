@@ -91,7 +91,7 @@ vault/
 #### Verdict
 
 > [!IMPORTANT]
-> **The retrieval *concept* (hybrid search over personal files) is exactly right. The *implementation* (cloud vector DB + API keys) violates our values.** We should build something that achieves the same goal — efficient context retrieval from `~/.aios/` — but with a local-first approach.
+> **The retrieval *concept* (hybrid search over personal files) is exactly right. The *implementation* (cloud vector DB + API keys) violates our values.** We should build something that achieves the same goal — efficient context retrieval from `~/aios/` — but with a local-first approach.
 
 ---
 
@@ -123,7 +123,7 @@ This one is the most philosophically aligned with DotAIOS.
 | **Python runtime** | DotAIOS is Node.js/ESM. Adding a Python dependency is a significant complexity jump. Our users may not have Python. |
 | **558 MB ONNX model download** | On first run, memsearch downloads the bge-m3 model. This is a big ask for a "quick install" tool. |
 | **Milvus Lite still needs Python C extensions** | pymilvus requires compilation. Not trivial on all platforms. |
-| **Separate `.memsearch/` directory** | Creates a parallel memory system. We'd have `~/.aios/` AND `~/.memsearch/`. Fragmented. |
+| **Separate `.memsearch/` directory** | Creates a parallel memory system. We'd have `~/aios/` AND `~/.memsearch/`. Fragmented. |
 | **Tight coupling to Zilliz ecosystem** | Despite the local option, the cloud path is the recommended one. The project is ultimately a funnel to Zilliz Cloud. |
 
 #### Verdict
@@ -165,7 +165,7 @@ This is the right instinct. Let me clarify the landscape:
 
 ### Where MCP becomes important
 
-MCP is how we add *capabilities beyond file reading*. Right now, agents can only read `~/.aios/` files. With an MCP server, agents could:
+MCP is how we add *capabilities beyond file reading*. Right now, agents can only read `~/aios/` files. With an MCP server, agents could:
 
 1. **Search memory semantically** — "find events related to job applications" (instead of reading all 500 events)
 2. **Write events** — structured append to `events.jsonl` through a tool call
@@ -183,7 +183,7 @@ Based on the analysis above, here's what I recommend. Three layers, each indepen
 
 **Problem**: The current routing table in CLAUDE.md is static. It says "load last 50 events" but can't say "load events *about this project*".
 
-**Solution**: Add a lightweight context router to `@dotaios/core` that generates a **focused context summary** from `~/.aios/` based on the current working directory and task.
+**Solution**: Add a lightweight context router to `@dotaios/core` that generates a **focused context summary** from `~/aios/` based on the current working directory and task.
 
 ```
 aios context --for <project-slug>
@@ -201,7 +201,7 @@ Outputs a single markdown summary the agent can consume. No vector DB, no embedd
 
 ### Layer 2: MCP Server (optional install, v1.2)
 
-**Problem**: Agents can read files but can't search or write to `~/.aios/` programmatically.
+**Problem**: Agents can read files but can't search or write to `~/aios/` programmatically.
 
 **Solution**: Build `@dotaios/mcp` — an MCP server that exposes tools:
 

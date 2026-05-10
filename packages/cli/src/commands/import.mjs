@@ -39,14 +39,14 @@ export async function importCommand(args) {
 
   if (!options.apply) {
     if (sensitive.length > 0) {
-      console.log("\nSensitive-looking terms found. Review before applying; secrets belong in ~/.aios/.env, not memory files.");
+      console.log("\nSensitive-looking terms found. Review before applying; secrets belong in ~/aios/.env, not memory files.");
     }
     console.log("\nDry run only. Re-run with --apply to write these changes.");
     return;
   }
 
   if (sensitive.length > 0 && !options.allowSensitive) {
-    throw new Error("Sensitive-looking terms found. Move secrets to ~/.aios/.env or re-run with --allow-sensitive if you reviewed the file.");
+    throw new Error("Sensitive-looking terms found. Move secrets to ~/aios/.env or re-run with --allow-sensitive if you reviewed the file.");
   }
 
   const results = [];
@@ -87,7 +87,7 @@ function printImportHelp() {
   dotaios import <file> [options]
 
 Options:
-  --path <dir>        Use an AIOS folder other than ~/.aios
+  --path <dir>        Use an AIOS folder other than ~/aios
   --apply             Write the planned changes
   --dry-run           Preview only (default)
   --allow-sensitive   Allow import content with secret-like terms after review

@@ -4,7 +4,7 @@ DotAIOS is a local file convention.
 
 ## Activation
 
-`~/.aios/` is the source of truth, but most agents do not automatically scan that folder. `dotaios activate` writes small bridge files into the global locations each tool already reads:
+`~/aios/` is the source of truth, but most agents do not automatically scan that folder. `dotaios activate` writes small bridge files into the global locations each tool already reads:
 
 - Claude Code: `~/.claude/CLAUDE.md`
 - Codex: `~/.codex/AGENTS.md`
@@ -28,7 +28,7 @@ DotAIOS is a local file convention.
 
 ## Vault
 
-`vault/` is long-term knowledge, loaded on demand. Users may keep it inside `~/.aios/vault` or configure an external `vault_path` in `aios.json`, such as an Obsidian vault.
+`vault/` is long-term knowledge, loaded on demand. Users may keep it inside `~/aios/vault` or configure an external `vault_path` in `aios.json`, such as an Obsidian vault.
 
 Company and people profiles live only in `vault/org/`. Access frequency is routing logic, not a reason to duplicate storage.
 

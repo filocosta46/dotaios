@@ -10,7 +10,7 @@ The CLI command `dotaios ingest <input>` is the routing authority. This skill mi
 
 | Input | Path | Parser | Output |
 |---|---|---|---|
-| `http://` / `https://` URL | A — web scraper | linkedom + cheerio + readability + turndown (lazy-loaded) | `vault/raw/<slug>.md` with frontmatter |
+| `http://` / `https://` URL | A — web scraper | linkedom + cheerio + readability + turndown (lazy-loaded); PDF responses re-route to Path B | `vault/raw/<slug>.md` with frontmatter |
 | `.pdf` | B — document parser | `marker_single` if installed, otherwise `unpdf` (basic text only) | `vault/raw/<slug>.md` + `vault/assets/<file>` |
 | `.docx` / `.pptx` / `.epub` | B — document parser | `marker_single` required; without marker the command rejects with a `MARKER_REQUIRED` error | `vault/raw/<slug>.md` + `vault/assets/<file>` |
 | `.md` / `.txt` / `.json` / `.csv` | C — text passthrough | copy with frontmatter (json/csv wrapped in fenced code blocks) | `vault/raw/<slug>.md` |
@@ -39,7 +39,7 @@ tags: []
 
 | Flag | Effect |
 |---|---|
-| `--path <dir>` | Use an AIOS folder other than `~/.aios` |
+| `--path <dir>` | Use an AIOS folder other than `~/aios` |
 | `--overwrite` | Replace an existing destination (default behavior is skip-if-exists) |
 | `--dry-run` | Classify the input and print the plan; no fetch, no spawn, no write |
 | `--timeout <secs>` | URL fetch timeout (Path A only, default 10s) |
@@ -47,6 +47,8 @@ tags: []
 ## Privacy
 
 URL ingestion fetches the page from the user's machine to the user's machine. Documents are parsed locally with `marker` or `unpdf`. No content is uploaded to any cloud service. If a future change introduces an outbound parser, mention it in the command's `--help` text and update this skill.
+
+Dynamic or paywalled pages, including some Substack pages, may ingest partial content. If the markdown ends abruptly or table-of-contents sections are missing, ask the user to save the logged-in page as a PDF from their browser and re-ingest that PDF.
 
 ## Bulk ingestion
 

@@ -18,7 +18,7 @@ Use this skill when the user pastes context from another AI chat or asks to brin
 - Route people and companies only to `vault/org/people/` or `vault/org/companies/`.
 - Route short-lived observations to `memory/signals/<date>.jsonl`.
 - Ask the user before durable writes to `context/`, `projects/`, `vault/wiki/`, or `vault/org/`.
-- Tell the user to keep secrets in `~/.aios/.env`, never in pasted context.
+- Tell the user to keep secrets in `~/aios/.env`, never in pasted context.
 
 ## Output
 

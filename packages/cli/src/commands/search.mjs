@@ -163,7 +163,7 @@ Examples:
 Options:
   --scope <s>   Limit search: memory, vault, context, or all (default: all)
   --limit <n>   Max results per scope (default: 20)
-  --path <dir>  Use an AIOS folder other than ~/.aios
+  --path <dir>  Use an AIOS folder other than ~/aios
 `);
 }
 

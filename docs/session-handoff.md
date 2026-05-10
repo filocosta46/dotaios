@@ -83,7 +83,7 @@ The next strategic milestone remains publishing/hardening `@dotaios/mcp` for v1.
 
 ## Notes For The Next Agent
 
-- Treat `~/.aios/` as the core product: local files first, no cloud dependency by default.
+- Treat `~/aios/` as the core product: local files first, no cloud dependency by default.
 - Do not re-scaffold the repo.
 - Public beta docs should use the package-name command form: `npx dotaios`.
 - Do not publish, push tags, or mutate npm without an explicit release instruction.

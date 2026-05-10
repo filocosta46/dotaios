@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEvent } from "../../../core/src/memory.mjs";
-import { disambiguateSlug } from "./frontmatter.mjs";
+import { resolveAssetDestination } from "./destinations.mjs";
 import { IngestError } from "./web.mjs";
 
 /**
@@ -24,10 +24,8 @@ export async function ingestBinary(rawInput, options) {
   } = options;
 
   const sourcePath = path.resolve(rawInput);
-  await assertExists(sourcePath);
-
   const fileName = path.basename(sourcePath);
-  let assetDest = path.join(assetsDir, fileName);
+  const assetDest = path.join(assetsDir, fileName);
 
   if (dryRun) {
     return {
@@ -39,35 +37,32 @@ export async function ingestBinary(rawInput, options) {
     };
   }
 
-  if (await fileExists(assetDest) && !overwrite) {
-    return { action: "skipped", asset: assetDest, parser: "copy", kind: "binary", canonical: sourcePath };
-  }
+  await assertExists(sourcePath);
 
-  // Disambiguate filename collision against an unrelated earlier ingest.
-  if (!(await fileExists(assetDest))) {
-    let probe = assetDest;
-    if (await fileExists(probe)) {
-      const ext = path.extname(fileName);
-      const stem = path.basename(fileName, ext);
-      const newName = `${disambiguateSlug(stem, sourcePath)}${ext}`;
-      probe = path.join(assetsDir, newName);
-    }
-    assetDest = probe;
+  const target = await resolveAssetDestination({
+    assetsDir,
+    fileName,
+    source: sourcePath,
+    eventsPath,
+    overwrite
+  });
+  if (target.action === "skip") {
+    return { action: "skipped", asset: target.asset, parser: "copy", kind: "binary", canonical: sourcePath };
   }
 
   await fs.mkdir(assetsDir, { recursive: true });
-  await fs.copyFile(sourcePath, assetDest);
+  await fs.copyFile(sourcePath, target.asset);
 
   await appendEvent(eventsPath, {
     type: "ingest",
     source: sourcePath,
-    asset: assetDest,
+    asset: target.asset,
     kind: "binary",
     parser: "copy",
     summary: fileName
   });
 
-  return { action: "written", asset: assetDest, parser: "copy", kind: "binary", canonical: sourcePath };
+  return { action: "written", asset: target.asset, parser: "copy", kind: "binary", canonical: sourcePath };
 }
 
 async function assertExists(filePath) {
@@ -75,14 +70,5 @@ async function assertExists(filePath) {
     await fs.access(filePath);
   } catch {
     throw new IngestError(`File not found: ${filePath}`, "FILE_NOT_FOUND");
-  }
-}
-
-async function fileExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
   }
 }

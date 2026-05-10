@@ -10,9 +10,9 @@
 
 You use Claude Code, Cursor, Codex, or Gemini — but they treat every session as if they've never met you. DotAIOS fixes that. Run setup once, answer five questions, activate your agent bridges, and every agent on your machine can find your name, your work, your priorities, and how you write.
 
-DotAIOS is not a chat app, agent framework, SaaS, or cloud memory service. It's a folder convention (`~/.aios/`) plus a CLI installer. Your context stays on your machine. Agent-native bridge files point your tools at it.
+DotAIOS is not a chat app, agent framework, SaaS, or cloud memory service. It's a folder convention (`~/aios/`) plus a CLI installer. Your context stays on your machine. Agent-native bridge files point your tools at it.
 
-> `.gitconfig` makes Git know your name. `~/.aios/` makes every AI agent know your life.
+> `.gitconfig` makes Git know your name. `~/aios/` makes every AI agent know your life.
 
 ## Install
 
@@ -30,11 +30,11 @@ $ npx dotaios init
 
 ✔ What's your name? › Filippo
 ✔ What do you do? › student / researcher
-✔ What are you working on right now? › MSc thesis on distributed systems
+✔ What are you working on right now? › research project and weekly writing
 ✔ Which AI tools do you use? › Claude Code, Cursor
 ✔ Link an external vault (e.g. Obsidian)? › No
 
-✅  Created ~/.aios/
+✅  Created ~/aios/
 ✅  Generated CLAUDE.md for Claude Code
 ✅  Generated AGENTS.md for Codex / Gemini
 ✅  Generated .cursorrules for Cursor
@@ -48,7 +48,7 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 ## How it works
 
 ```
-~/.aios/
+~/aios/
 ├── CLAUDE.md           ← Claude Code entrypoint
 ├── AGENTS.md           ← Codex / Gemini / generic agent entrypoint
 ├── .cursorrules        ← legacy Cursor entrypoint
@@ -70,7 +70,7 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 
 | Command | What it does |
 |---------|-------------|
-| `dotaios init` | Interactive setup — creates `~/.aios/` with your context |
+| `dotaios init` | Interactive setup — creates `~/aios/` with your context |
 | `dotaios activate` | Connects DotAIOS to global Claude, Codex, and Gemini memory files |
 | `dotaios attach <project>` | Adds DotAIOS bridges to a project folder, including Cursor rules |
 | `dotaios cleanup` | Trims stale signals and compacts the event log |
@@ -80,7 +80,7 @@ For Cursor projects, run `npx dotaios attach /path/to/project` once to create a 
 | `dotaios import <file>` | Previews or applies structured context from old AI chats |
 | `dotaios search <query>` | Searches across memory, vault, context, and projects |
 | `dotaios status` | Health check — shows what's configured, what's missing |
-| `dotaios ingest <file>` | Saves a document to `vault/raw/` and indexes it |
+| `dotaios ingest <input>` | Saves a URL, document, text file, or binary asset into the vault |
 | `dotaios install <plugin>` | Installs a local plugin and registers its skills |
 | `dotaios schedule <cmd>` | Lists, checks, or manually runs local schedules |
 
@@ -98,14 +98,14 @@ aios status           # works after: npm install -g dotaios
 If you already use Obsidian, Logseq, or any Markdown-based notes app, point DotAIOS at your existing vault:
 
 ```bash
-npx dotaios init --vault-path ~/Brain/Obsidian-Mind
+npx dotaios init --vault-path ~/my-vault
 ```
 
-Your notes become agent-readable knowledge. Use `dotaios ingest` to index specific files into it.
+Your notes become agent-readable knowledge. Use `dotaios ingest` to index specific files, URLs, and PDFs into it. Dynamic or paywalled pages may ingest partial content; when an article ends abruptly, save the logged-in page as a PDF and ingest that file.
 
 ## Base skills
 
-Five skills ship with DotAIOS, installed at `~/.aios/skills/`:
+Five skills ship with DotAIOS, installed at `~/aios/skills/`:
 
 | Skill | What it does |
 |-------|-------------|

@@ -15,7 +15,7 @@ export const requiredAiosFiles = [
 ];
 
 export function defaultAiosPath() {
-  return path.join(os.homedir(), ".aios");
+  return path.join(os.homedir(), "aios");
 }
 
 export function expandHome(value) {

@@ -67,7 +67,7 @@ Useful feedback:
 ## Safety Boundaries
 
 - Do not install third-party plugins during the first beta.
-- Keep secrets in `~/.aios/.env`, not in chat.
+- Keep secrets in `~/aios/.env`, not in chat.
 - Google OAuth credentials stay in `gws`, not DotAIOS.
 - Treat plugin permissions as descriptive, not sandboxed enforcement.
 - Use `npx dotaios install ./plugin --dry-run` before installing any local plugin.

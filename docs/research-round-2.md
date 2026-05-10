@@ -116,7 +116,7 @@ Storage  →  Semantics  →  Ontology
 "a file"    "a rock"     "a chair" (hiker) / "raw material" (sculptor)
 ```
 
-- **Storage**: Claude's memory stores mount files into agent containers. DotAIOS puts files in `~/.aios/`. Both are storage.
+- **Storage**: Claude's memory stores mount files into agent containers. DotAIOS puts files in `~/aios/`. Both are storage.
 - **Semantics**: What type of thing is this? An event, a person, a company, a decision, a commitment?
 - **Ontology**: What does this thing mean *to you right now*? "Call Ravi" means different things if Ravi is your investor, your doctor, or your co-founder.
 
@@ -124,7 +124,7 @@ Storage  →  Semantics  →  Ontology
 
 | Ashwin's concept | DotAIOS equivalent | Gap |
 |-----------------|--------------------|----|
-| **Storage** | `~/.aios/` folder structure | ✅ Done |
+| **Storage** | `~/aios/` folder structure | ✅ Done |
 | **Semantics** | `events.jsonl` has `type` field. `vault/org/` separates companies from people. | ⚠️ Partial — event types are unstructured strings, no schema |
 | **Ontology** | `context/domains/` (make.md, sell.md, build.md) | ⚠️ Exists but not connected to memory routing |
 | **"One substrate, many lenses"** | Agent reads same files but through different domain filters | ❌ Not implemented — all agents see the same flat view |

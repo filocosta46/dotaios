@@ -1,6 +1,6 @@
 # Getting Started
 
-DotAIOS creates a local `~/.aios/` folder that your AI tools can read.
+DotAIOS creates a local `~/aios/` folder that your AI tools can read.
 
 ```bash
 npx dotaios init
@@ -46,11 +46,14 @@ npx dotaios import ./import.json --dry-run
 npx dotaios import ./import.json --apply
 ```
 
-Save a file into `vault/raw/`:
+Save a file or URL into the vault:
 
 ```bash
 npx dotaios ingest ./notes.md
+npx dotaios ingest https://example.com/article
 ```
+
+Dynamic or paywalled pages may ingest partial content. If the saved markdown ends abruptly or misses expected sections, save the logged-in page as a PDF from your browser and ingest the PDF.
 
 Validate and install a local plugin:
 
@@ -71,4 +74,4 @@ For v1.1, the daily interface is your existing AI tool. You should not need to o
 
 `init` will stop if the target folder already contains files. Use `--force` to add missing generated files while preserving existing files. Use `--overwrite` only when you intentionally want to replace generated files.
 
-Store secrets in `~/.aios/.env`, not in chat or memory files. The generated `.gitignore` ignores `.env`, token files, credentials, and private keys.
+Store secrets in `~/aios/.env`, not in chat or memory files. The generated `.gitignore` ignores `.env`, token files, credentials, and private keys.

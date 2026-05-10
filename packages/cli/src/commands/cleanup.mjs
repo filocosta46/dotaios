@@ -91,7 +91,7 @@ Trims stale signals (>30 days) and compacts events.jsonl (archives entries
 beyond the most recent 50).
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/.aios
+  --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Show what would be cleaned without making changes
 `);
 }

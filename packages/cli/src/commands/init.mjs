@@ -82,7 +82,7 @@ function printInitHelp() {
   dotaios init [options]
 
 Options:
-  --path <dir>        Create AIOS somewhere other than ~/.aios
+  --path <dir>        Create AIOS somewhere other than ~/aios
   --vault-path <dir>  Use an external vault for long-term knowledge
   --yes, -y           Use placeholder answers for non-interactive setup
   --force             Add missing files, preserving existing files

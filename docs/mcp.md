@@ -7,14 +7,14 @@ The server is intentionally separate from the root CLI dependency story. It uses
 ## Local Run
 
 ```bash
-node packages/mcp/src/server.mjs --path ~/.aios
-dotaios-mcp --path ~/.aios
+node packages/mcp/src/server.mjs --path ~/aios
+dotaios-mcp --path ~/aios
 ```
 
 Future published package shape:
 
 ```bash
-npx @dotaios/mcp --path ~/.aios
+npx @dotaios/mcp --path ~/aios
 ```
 
 ## Tools

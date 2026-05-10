@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEvent } from "../../../core/src/memory.mjs";
-import { buildFrontmatter, slugify, disambiguateSlug } from "./frontmatter.mjs";
+import { readFrontmatterSource, resolveMarkdownDestination } from "./destinations.mjs";
+import { buildFrontmatter, slugify } from "./frontmatter.mjs";
 import { IngestError } from "./web.mjs";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -36,12 +37,9 @@ export async function ingestText(rawInput, options) {
     throw new IngestError(`ingestText received unsupported extension: ${ext}`, "UNSUPPORTED_EXT");
   }
 
-  await assertExists(sourcePath);
-
   const baseName = path.basename(sourcePath, ext);
   const baseSlug = slugify(baseName);
-  let slug = baseSlug;
-  let destination = path.join(rawDir, `${slug}.md`);
+  const destination = path.join(rawDir, `${baseSlug}.md`);
 
   if (dryRun) {
     return {
@@ -53,11 +51,30 @@ export async function ingestText(rawInput, options) {
     };
   }
 
-  if (await fileExists(destination) && !overwrite) {
-    return { action: "skipped", destination, slug, parser: "copy", kind: "text", canonical: sourcePath };
+  await assertExists(sourcePath);
+  const sourceContent = await fs.readFile(sourcePath, "utf8");
+  const canonicalSource =
+    ext === ".md" && FRONTMATTER_RE.test(sourceContent)
+      ? readFrontmatterSource(sourceContent) || sourcePath
+      : sourcePath;
+
+  const target = await resolveMarkdownDestination({
+    rawDir,
+    baseSlug,
+    source: canonicalSource,
+    overwrite
+  });
+  if (target.action === "skip") {
+    return {
+      action: "skipped",
+      destination: target.destination,
+      slug: target.slug,
+      parser: "copy",
+      kind: "text",
+      canonical: canonicalSource
+    };
   }
 
-  const sourceContent = await fs.readFile(sourcePath, "utf8");
   const title = baseName;
   const ingestedAt = now().toISOString();
 
@@ -76,30 +93,26 @@ export async function ingestText(rawInput, options) {
     body = `${frontmatter}\n${wrapped}`;
   }
 
-  // Disambiguate collision against an unrelated source if the file did not exist
-  // before this run but a different earlier ingest occupies the slug.
-  if (!(await fileExists(destination))) {
-    let probe = destination;
-    if (await fileExists(probe)) {
-      slug = disambiguateSlug(baseSlug, sourcePath);
-      probe = path.join(rawDir, `${slug}.md`);
-    }
-    destination = probe;
-  }
-
   await fs.mkdir(rawDir, { recursive: true });
-  await fs.writeFile(destination, body.endsWith("\n") ? body : `${body}\n`);
+  await fs.writeFile(target.destination, body.endsWith("\n") ? body : `${body}\n`);
 
   await appendEvent(eventsPath, {
     type: "ingest",
-    source: sourcePath,
-    destination,
+    source: canonicalSource,
+    destination: target.destination,
     kind: "text",
     parser: "copy",
     summary: title
   });
 
-  return { action: "written", destination, slug, parser: "copy", kind: "text", canonical: sourcePath };
+  return {
+    action: "written",
+    destination: target.destination,
+    slug: target.slug,
+    parser: "copy",
+    kind: "text",
+    canonical: canonicalSource
+  };
 }
 
 function wrapBody(ext, content) {
@@ -118,14 +131,5 @@ async function assertExists(filePath) {
     await fs.access(filePath);
   } catch {
     throw new IngestError(`File not found: ${filePath}`, "FILE_NOT_FOUND");
-  }
-}
-
-async function fileExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
   }
 }

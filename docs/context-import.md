@@ -9,7 +9,7 @@ Paste this into the old chat or another LLM that can see the conversation you wa
 ```text
 You are preparing a DotAIOS context import for me.
 
-Read this conversation and extract only stable, useful context. Do not include secrets, API keys, passwords, tokens, private keys, or credentials. If you see anything sensitive, replace it with "[REDACTED]" and note that it belongs in ~/.aios/.env.
+Read this conversation and extract only stable, useful context. Do not include secrets, API keys, passwords, tokens, private keys, or credentials. If you see anything sensitive, replace it with "[REDACTED]" and note that it belongs in ~/aios/.env.
 
 Return valid JSON only, using this shape:
 
@@ -87,4 +87,4 @@ Apply only after reviewing the planned writes:
 npx dotaios import ./import.json --apply
 ```
 
-If the import contains secret-like terms, DotAIOS blocks apply by default. Move real secrets to `~/.aios/.env`; use `--allow-sensitive` only after manual review.
+If the import contains secret-like terms, DotAIOS blocks apply by default. Move real secrets to `~/aios/.env`; use `--allow-sensitive` only after manual review.

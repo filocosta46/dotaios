@@ -9,7 +9,7 @@ export async function installCommand(args) {
   dotaios install <plugin-path> [options]
 
 Options:
-  --path <dir>  Install into an AIOS folder other than ~/.aios
+  --path <dir>  Install into an AIOS folder other than ~/aios
   --dry-run     Validate and display permissions without copying files
 `);
     return;

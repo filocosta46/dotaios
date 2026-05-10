@@ -86,7 +86,7 @@ function printActivateHelp() {
   dotaios activate [options]
 
 Options:
-  --path <dir>     Use an AIOS folder other than ~/.aios
+  --path <dir>     Use an AIOS folder other than ~/aios
   --home <dir>     Write global agent bridges somewhere other than your home
   --project <dir>  Also attach DotAIOS to a project folder
   --dry-run        Show what would be written without changing files
@@ -99,7 +99,7 @@ function printAttachHelp() {
   dotaios attach [project-dir] [options]
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/.aios
+  --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Show what would be written without changing files
   --overwrite   Replace existing unmanaged bridge files
 `);

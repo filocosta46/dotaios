@@ -67,7 +67,7 @@ Commands:
   run <name>    Run one configured DotAIOS command
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/.aios
+  --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Show the command without running it
 `);
 }

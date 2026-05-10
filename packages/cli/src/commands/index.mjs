@@ -198,7 +198,7 @@ function printIndexHelp() {
   console.log(`Usage:
   dotaios index [options]
 
-Generates ~/.aios/_index.md — a table of contents across context, vault, and
+Generates ~/aios/_index.md — a table of contents across context, vault, and
 projects. Reads the YAML frontmatter "description" field for each file's
 summary, falling back to the first H1, falling back to no summary.
 
@@ -208,7 +208,7 @@ Examples:
   dotaios index --path ./test-aios
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/.aios
+  --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Print the index that would be written, without writing it
 `);
 }

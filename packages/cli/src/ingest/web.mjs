@@ -1,8 +1,10 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { canonicalizeUrl } from "./canonical-url.mjs";
-import { buildFrontmatter, slugify, disambiguateSlug } from "./frontmatter.mjs";
+import { resolveMarkdownDestination } from "./destinations.mjs";
+import { buildFrontmatter, slugify } from "./frontmatter.mjs";
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 const STRIP_SELECTORS = ["script", "style", "noscript", "iframe", "nav", "footer", "aside", "header"];
@@ -45,6 +47,7 @@ async function loadDeps() {
  * @param {boolean} [options.dryRun]         print plan only, no I/O
  * @param {number}  [options.timeoutMs]      fetch timeout
  * @param {Function} [options.fetchImpl]     fetch override (testing)
+ * @param {object} [options.documentOptions] Path B overrides (testing)
  * @param {Function} [options.now]           clock override (testing)
  *
  * @returns {Promise<{action:"written"|"skipped"|"dry-run", destination?:string, slug?:string, plan?:object, parser:string, kind:"web", canonical:string}>}
@@ -60,6 +63,7 @@ export async function ingestUrl(rawInput, options) {
     dryRun = false,
     timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
     fetchImpl = globalThis.fetch,
+    documentOptions = {},
     now = () => new Date()
   } = options;
 
@@ -91,40 +95,37 @@ export async function ingestUrl(rawInput, options) {
 
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   if (contentType.includes("application/pdf")) {
-    throw new IngestError(
-      `URL returned a PDF (Content-Type: ${contentType}). Save the file locally and re-ingest as a path.`,
-      "PDF_CONTENT_TYPE"
-    );
+    return await ingestPdfResponse({
+      response,
+      canonical,
+      rawDir,
+      assetsDir: options.assetsDir,
+      eventsPath,
+      overwrite,
+      documentOptions,
+      now
+    });
   }
 
   const html = await response.text();
   const { title, markdown } = await extractArticle(html, canonical);
 
   const baseSlug = slugify(title);
-  let slug = baseSlug;
-  let destination = path.join(rawDir, `${slug}.md`);
-  const exists = await fileExists(destination);
-  if (exists && !overwrite) {
-    return { action: "skipped", destination, slug, parser: "readability+turndown", kind: "web", canonical };
-  }
-  if (exists && overwrite) {
-    // overwrite same destination
-  }
-
-  // Slug collision against unrelated source: only checked when not overwriting an existing match.
-  // We use canonical URL as disambiguation key.
-  if (!exists) {
-    let probe = destination;
-    let probeSlug = slug;
-    let collisions = 0;
-    while (await fileExists(probe)) {
-      probeSlug = disambiguateSlug(baseSlug, canonical);
-      probe = path.join(rawDir, `${probeSlug}.md`);
-      collisions += 1;
-      if (collisions > 1) break;
-    }
-    slug = probeSlug;
-    destination = probe;
+  const target = await resolveMarkdownDestination({
+    rawDir,
+    baseSlug,
+    source: canonical,
+    overwrite
+  });
+  if (target.action === "skip") {
+    return {
+      action: "skipped",
+      destination: target.destination,
+      slug: target.slug,
+      parser: "readability+turndown",
+      kind: "web",
+      canonical
+    };
   }
 
   const frontmatter = buildFrontmatter({
@@ -136,18 +137,25 @@ export async function ingestUrl(rawInput, options) {
   });
 
   await fs.mkdir(rawDir, { recursive: true });
-  await fs.writeFile(destination, `${frontmatter}\n${markdown.trimEnd()}\n`);
+  await fs.writeFile(target.destination, `${frontmatter}\n${markdown.trimEnd()}\n`);
 
   await appendEvent(eventsPath, {
     type: "ingest",
     source: canonical,
-    destination,
+    destination: target.destination,
     kind: "web",
     parser: "readability+turndown",
     summary: title
   });
 
-  return { action: "written", destination, slug, parser: "readability+turndown", kind: "web", canonical };
+  return {
+    action: "written",
+    destination: target.destination,
+    slug: target.slug,
+    parser: "readability+turndown",
+    kind: "web",
+    canonical
+  };
 }
 
 async function fetchWithTimeout(url, { timeoutMs, fetchImpl }) {
@@ -194,11 +202,48 @@ function extractFallbackTitle($) {
   return $("title").first().text().trim() || $("h1").first().text().trim() || "";
 }
 
-async function fileExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
+async function ingestPdfResponse({
+  response,
+  canonical,
+  rawDir,
+  assetsDir,
+  eventsPath,
+  overwrite,
+  documentOptions,
+  now
+}) {
+  if (!assetsDir) {
+    throw new IngestError("URL returned a PDF but ingestUrl was not given options.assetsDir", "ASSETS_DIR_REQUIRED");
   }
+
+  const { ingestDocument } = await import("./pdf.mjs");
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-url-pdf-"));
+  const assetName = assetNameFromUrl(canonical);
+  const tempPath = path.join(tmpRoot, assetName);
+
+  try {
+    const buffer = Buffer.from(await response.arrayBuffer());
+    await fs.writeFile(tempPath, buffer);
+    return await ingestDocument(tempPath, {
+      rawDir,
+      assetsDir,
+      eventsPath,
+      overwrite,
+      sourceOverride: canonical,
+      titleOverride: path.basename(assetName, path.extname(assetName)),
+      assetName,
+      now,
+      ...documentOptions
+    });
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+function assetNameFromUrl(canonical) {
+  const url = new URL(canonical);
+  const baseName = path.basename(url.pathname);
+  if (baseName && baseName.toLowerCase().endsWith(".pdf")) return baseName;
+  const stem = slugify(baseName || url.hostname || "download");
+  return `${stem}.pdf`;
 }

@@ -7,7 +7,7 @@ DotAIOS is local-first, but local files can still contain sensitive data. The sa
 Users should store secrets in:
 
 ```text
-~/.aios/.env
+~/aios/.env
 ```
 
 Generated AIOS folders include a `.gitignore` that ignores:

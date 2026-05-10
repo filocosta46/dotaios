@@ -45,7 +45,7 @@ The CLI validates the manifest and prints the permission surface.
 dotaios install ./my-plugin
 ```
 
-This copies the plugin into `~/.aios/plugins/<name>/` and updates `~/.aios/skills/_registry.json` with the skills the plugin provides.
+This copies the plugin into `~/aios/plugins/<name>/` and updates `~/aios/skills/_registry.json` with the skills the plugin provides.
 
 Use `--path <dir>` to install into a non-default AIOS folder.
 

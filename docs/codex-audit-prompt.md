@@ -74,7 +74,7 @@ Answer these questions with specific, actionable feedback. Be critical. Say what
 
 5. The proposed v1.1 adds 3 new commands (context, upgrade, cleanup). Is this the right priority order? Would you cut or reorder anything?
 6. The research proposes YAML frontmatter for skills, a CONTEXT_SUMMARY.md router, structured event schemas, and domain-aware routing — all for v1.1. Is this scope creep? What should move to v1.2?
-7. The MCP server is proposed for v1.2. Should it be v1.1 instead? The argument: MCP is the only way to make DotAIOS useful in Codex, Gemini CLI, and Cursor (they can't read CLAUDE.md from ~/.aios/).
+7. The MCP server is proposed for v1.2. Should it be v1.1 instead? The argument: MCP is the only way to make DotAIOS useful in Codex, Gemini CLI, and Cursor (they can't read CLAUDE.md from ~/aios/).
 8. Is the current `gws`-backed `dotaios connect google` beta path enough for friend testing, or should DotAIOS still plan a custom googleapis plugin later?
 
 ### C. Memory system

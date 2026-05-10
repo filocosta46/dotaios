@@ -3,10 +3,10 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { buildFrontmatter, slugify } from "./frontmatter.mjs";
+import { resolveAssetDestination, resolveMarkdownDestination } from "./destinations.mjs";
 import { IngestError } from "./web.mjs";
 
 export const DEFAULT_MARKER_TIMEOUT_MS = 300_000;
-const PDF_EXTENSIONS = new Set([".pdf"]);
 const MARKER_DOC_EXTENSIONS = new Set([".pdf", ".docx", ".pptx", ".epub"]);
 const MARKER_BIN = "marker_single";
 
@@ -47,6 +47,9 @@ export async function detectMarker(whichImpl = defaultWhich) {
  * @param {Function} [options.spawnImpl]
  * @param {Function} [options.extractPdfImpl]
  * @param {Function} [options.now]
+ * @param {string} [options.sourceOverride]
+ * @param {string} [options.titleOverride]
+ * @param {string} [options.assetName]
  *
  * @returns {Promise<{action:"written"|"skipped"|"dry-run", destination?:string, slug?:string, parser:string, kind:"pdf"|"document", canonical:string, asset?:string, warning?:string, plan?:object}>}
  */
@@ -64,7 +67,10 @@ export async function ingestDocument(rawInput, options) {
     whichImpl = defaultWhich,
     spawnImpl = defaultSpawn,
     extractPdfImpl = defaultExtractPdf,
-    now = () => new Date()
+    now = () => new Date(),
+    sourceOverride = null,
+    titleOverride = null,
+    assetName = null
   } = options;
 
   const sourcePath = path.resolve(rawInput);
@@ -74,36 +80,65 @@ export async function ingestDocument(rawInput, options) {
     throw new IngestError(`ingestDocument received unsupported extension: ${ext}`, "UNSUPPORTED_EXT");
   }
 
-  await assertExists(sourcePath);
-
   const baseName = path.basename(sourcePath, ext);
-  const slug = slugify(baseName);
-  const destination = path.join(rawDir, `${slug}.md`);
-  const assetDest = path.join(assetsDir, path.basename(sourcePath));
+  const title = titleOverride || baseName;
+  const source = sourceOverride || sourcePath;
+  const baseSlug = slugify(title);
+  const destination = path.join(rawDir, `${baseSlug}.md`);
+  const assetFileName = assetName || path.basename(sourcePath);
+  const assetDest = path.join(assetsDir, assetFileName);
   const kind = ext === ".pdf" ? "pdf" : "document";
 
+  if (dryRun) {
+    const parser = ext === ".pdf" ? "marker-local|unpdf" : "marker-local";
+    return {
+      action: "dry-run",
+      kind,
+      parser,
+      canonical: source,
+      plan: { kind, parser, source, destination, asset: assetDest }
+    };
+  }
+
+  await assertExists(sourcePath);
+
+  const target = await resolveMarkdownDestination({
+    rawDir,
+    baseSlug,
+    source,
+    overwrite
+  });
   const marker = await detectMarker(whichImpl);
   const parser = marker ? "marker-local" : ext === ".pdf" ? "unpdf" : null;
+
+  if (target.action === "skip") {
+    return {
+      action: "skipped",
+      destination: target.destination,
+      slug: target.slug,
+      parser,
+      kind,
+      canonical: source
+    };
+  }
+
+  const assetTarget = await resolveAssetDestination({
+    assetsDir,
+    fileName: assetFileName,
+    source,
+    eventsPath,
+    overwrite
+  });
+  await fs.mkdir(assetsDir, { recursive: true });
+  if (assetTarget.action === "write") {
+    await fs.copyFile(sourcePath, assetTarget.asset);
+  }
 
   if (!marker && !parser) {
     throw new IngestError(
       `marker_single not installed; cannot parse ${ext} files. Install marker via skills/ingest, or convert this file to PDF and re-ingest.`,
       "MARKER_REQUIRED"
     );
-  }
-
-  if (dryRun) {
-    return {
-      action: "dry-run",
-      kind,
-      parser,
-      canonical: sourcePath,
-      plan: { kind, parser, source: sourcePath, destination, asset: assetDest }
-    };
-  }
-
-  if (await fileExists(destination) && !overwrite) {
-    return { action: "skipped", destination, slug, parser, kind, canonical: sourcePath };
   }
 
   let markdown;
@@ -123,30 +158,37 @@ export async function ingestDocument(rawInput, options) {
   }
 
   await fs.mkdir(rawDir, { recursive: true });
-  await fs.mkdir(assetsDir, { recursive: true });
 
   const frontmatter = buildFrontmatter({
-    source: sourcePath,
+    source,
     kind,
     parser,
-    title: baseName,
+    title,
     ingestedAt: now().toISOString()
   });
 
-  await fs.writeFile(destination, `${frontmatter}\n${markdown.trimEnd()}\n`);
-  await fs.copyFile(sourcePath, assetDest);
+  await fs.writeFile(target.destination, `${frontmatter}\n${markdown.trimEnd()}\n`);
 
   await appendEvent(eventsPath, {
     type: "ingest",
-    source: sourcePath,
-    destination,
-    asset: assetDest,
+    source,
+    destination: target.destination,
+    asset: assetTarget.asset,
     kind,
     parser,
-    summary: baseName
+    summary: title
   });
 
-  return { action: "written", destination, slug, parser, kind, canonical: sourcePath, asset: assetDest, warning };
+  return {
+    action: "written",
+    destination: target.destination,
+    slug: target.slug,
+    parser,
+    kind,
+    canonical: source,
+    asset: assetTarget.asset,
+    warning
+  };
 }
 
 async function runMarker({ sourcePath, marker, spawnImpl, timeoutMs }) {
@@ -247,14 +289,5 @@ async function assertExists(filePath) {
     await fs.access(filePath);
   } catch {
     throw new IngestError(`File not found: ${filePath}`, "FILE_NOT_FOUND");
-  }
-}
-
-async function fileExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
   }
 }

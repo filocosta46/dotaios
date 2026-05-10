@@ -47,6 +47,7 @@ const { ingestUrl, IngestError } = await import(path.join(ingestDir, "web.mjs"))
 const { ingestDocument, detectMarker } = await import(path.join(ingestDir, "pdf.mjs"));
 const { ingestText } = await import(path.join(ingestDir, "text.mjs"));
 const { ingestBinary } = await import(path.join(ingestDir, "binary.mjs"));
+const { defaultAiosPath } = await import(path.join(repoRoot, "packages", "core", "src", "paths.mjs"));
 
 // --- classifier ---
 
@@ -290,6 +291,19 @@ function makeMockSpawn(markdownOutput) {
   };
 }
 
+function sameTitleHtml(title = "Same Title") {
+  return `<!doctype html>
+<html>
+  <head><title>${title}</title></head>
+  <body>
+    <article>
+      <h1>${title}</h1>
+      <p>${"Readable article body. ".repeat(80)}</p>
+    </article>
+  </body>
+</html>`;
+}
+
 async function readEvents(eventsPath) {
   try {
     const content = await fsp.readFile(eventsPath, "utf8");
@@ -364,6 +378,23 @@ test("ingestUrl overwrites when overwrite=true", async () => {
   assert.equal(events.length, 2);
 });
 
+test("ingestUrl disambiguates duplicate titles from different URLs", async () => {
+  const ws = makeWorkspace();
+  const fetchImpl = makeFakeFetch({ body: sameTitleHtml("Shared Title") });
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl };
+
+  const first = await ingestUrl("https://example.com/a", opts);
+  const second = await ingestUrl("https://example.org/b", opts);
+
+  assert.equal(first.action, "written");
+  assert.equal(second.action, "written");
+  assert.notEqual(second.destination, first.destination);
+  assert.match(path.basename(second.destination), /^shared-title-[0-9a-f]{8}\.md$/);
+
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 2);
+});
+
 test("ingestUrl --dry-run does not fetch or write", async () => {
   const ws = makeWorkspace();
   let fetched = false;
@@ -399,18 +430,38 @@ test("ingestUrl raises FETCH_FAILED on non-2xx responses", async () => {
   );
 });
 
-test("ingestUrl raises PDF_CONTENT_TYPE when URL serves a PDF", async () => {
+test("ingestUrl routes URL PDFs through Path B with URL source preserved", async () => {
   const ws = makeWorkspace();
-  const fetchImpl = makeFakeFetch({ body: "%PDF-1.4", contentType: "application/pdf" });
-  await assert.rejects(
-    () =>
-      ingestUrl("https://example.com/paper.pdf", {
-        rawDir: ws.rawDir,
-        eventsPath: ws.eventsPath,
-        fetchImpl
-      }),
-    (err) => err instanceof IngestError && err.code === "PDF_CONTENT_TYPE"
-  );
+  const pdfBody = buildMinimalPdf("URL PDF Body");
+  const fetchImpl = makeFakeFetch({ body: pdfBody, contentType: "application/pdf" });
+
+  const result = await ingestUrl("https://example.com/paper.pdf?utm_source=news", {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl,
+    documentOptions: {
+      whichImpl: async () => null,
+      extractPdfImpl: async (sourcePath) => {
+        assert.equal(fs.existsSync(sourcePath), true, "URL PDF should be downloaded to a temp file");
+        return "Extracted URL PDF text.";
+      }
+    }
+  });
+
+  assert.equal(result.action, "written");
+  assert.equal(result.kind, "pdf");
+  assert.equal(result.parser, "unpdf");
+  assert.equal(result.canonical, "https://example.com/paper.pdf");
+  assert.equal(path.basename(result.asset), "paper.pdf");
+
+  const written = await fsp.readFile(result.destination, "utf8");
+  assert.match(written, /\nsource: https:\/\/example\.com\/paper\.pdf\n/);
+  assert.match(written, /Extracted URL PDF text\./);
+
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events[0].source, "https://example.com/paper.pdf");
+  assert.equal(events[0].asset, result.asset);
 });
 
 test("ingestUrl raises READABILITY_NULL on empty SPA shell (no silent body-dump)", async () => {
@@ -533,7 +584,7 @@ test("ingestDocument raises MARKER_REQUIRED for .docx when marker is absent", as
   );
 
   assert.equal(fs.existsSync(ws.rawDir), false, "no raw output should be written");
-  assert.equal(fs.existsSync(ws.assetsDir), false, "no asset copy should be made on rejection");
+  assert.equal(fs.existsSync(path.join(ws.assetsDir, "memo.docx")), true, "asset copy should be preserved before rejection");
 });
 
 test("ingestDocument always copies the original to vault/assets/", async () => {
@@ -572,6 +623,36 @@ test("ingestDocument skips when destination exists without overwrite", async () 
   assert.equal(events.length, 1);
 });
 
+test("ingestDocument disambiguates duplicate basenames from different sources", async () => {
+  const ws = makeWorkspace();
+  const oneDir = path.join(ws.root, "one");
+  const twoDir = path.join(ws.root, "two");
+  await fsp.mkdir(oneDir);
+  await fsp.mkdir(twoDir);
+  const firstPdf = writePdfFixture(oneDir, "report.pdf", "First PDF");
+  const secondPdf = writePdfFixture(twoDir, "report.pdf", "Second PDF");
+  const opts = {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => null,
+    extractPdfImpl: async (sourcePath) => `extracted ${path.dirname(sourcePath)}`
+  };
+
+  const first = await ingestDocument(firstPdf, opts);
+  const second = await ingestDocument(secondPdf, opts);
+
+  assert.equal(first.action, "written");
+  assert.equal(second.action, "written");
+  assert.notEqual(first.destination, second.destination);
+  assert.notEqual(first.asset, second.asset);
+  assert.match(path.basename(second.destination), /^report-[0-9a-f]{8}\.md$/);
+  assert.match(path.basename(second.asset), /^report-[0-9a-f]{8}\.pdf$/);
+
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 2);
+});
+
 test("ingestDocument --dry-run performs no I/O", async () => {
   const ws = makeWorkspace();
   const pdfPath = writePdfFixture(ws.root, "dry.pdf", "Should not parse");
@@ -594,8 +675,30 @@ test("ingestDocument --dry-run performs no I/O", async () => {
   });
 
   assert.equal(result.action, "dry-run");
+  assert.equal(result.parser, "marker-local|unpdf");
   assert.equal(calledSpawn, false);
   assert.equal(calledExtract, false);
+  assert.equal(fs.existsSync(ws.rawDir), false);
+  assert.equal(fs.existsSync(ws.assetsDir), false);
+});
+
+test("ingestDocument --dry-run does not require source file or marker detection", async () => {
+  const ws = makeWorkspace();
+  let calledWhich = false;
+  const result = await ingestDocument(path.join(ws.root, "missing.pdf"), {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    whichImpl: async () => {
+      calledWhich = true;
+      return "/fake/marker";
+    },
+    dryRun: true
+  });
+
+  assert.equal(result.action, "dry-run");
+  assert.equal(result.parser, "marker-local|unpdf");
+  assert.equal(calledWhich, false);
   assert.equal(fs.existsSync(ws.rawDir), false);
   assert.equal(fs.existsSync(ws.assetsDir), false);
 });
@@ -613,6 +716,28 @@ test("ingestDocument raises FILE_NOT_FOUND for missing source", async () => {
       }),
     (err) => err instanceof IngestError && err.code === "FILE_NOT_FOUND"
   );
+});
+
+test("ingestDocument preserves asset when parser returns empty text", async () => {
+  const ws = makeWorkspace();
+  const pdfPath = writePdfFixture(ws.root, "empty.pdf", "Image only maybe");
+
+  await assert.rejects(
+    () =>
+      ingestDocument(pdfPath, {
+        rawDir: ws.rawDir,
+        assetsDir: ws.assetsDir,
+        eventsPath: ws.eventsPath,
+        whichImpl: async () => null,
+        extractPdfImpl: async () => ""
+      }),
+    (err) => err instanceof IngestError && err.code === "EMPTY_PARSE"
+  );
+
+  assert.equal(fs.existsSync(path.join(ws.assetsDir, "empty.pdf")), true);
+  assert.equal(fs.existsSync(path.join(ws.rawDir, "empty.md")), false);
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 0);
 });
 
 test("ingestDocument extracts real text via unpdf default extractor", async () => {
@@ -707,6 +832,30 @@ test("ingestText skips when destination exists without overwrite", async () => {
   assert.equal(events.length, 1);
 });
 
+test("ingestText disambiguates duplicate basenames from different sources", async () => {
+  const ws = makeWorkspace();
+  const oneDir = path.join(ws.root, "one");
+  const twoDir = path.join(ws.root, "two");
+  await fsp.mkdir(oneDir);
+  await fsp.mkdir(twoDir);
+  const firstPath = path.join(oneDir, "same.txt");
+  const secondPath = path.join(twoDir, "same.txt");
+  await fsp.writeFile(firstPath, "alpha");
+  await fsp.writeFile(secondPath, "beta");
+
+  const first = await ingestText(firstPath, { rawDir: ws.rawDir, eventsPath: ws.eventsPath });
+  const second = await ingestText(secondPath, { rawDir: ws.rawDir, eventsPath: ws.eventsPath });
+
+  assert.equal(first.action, "written");
+  assert.equal(second.action, "written");
+  assert.notEqual(first.destination, second.destination);
+  assert.match(path.basename(second.destination), /^same-[0-9a-f]{8}\.md$/);
+  assert.match(await fsp.readFile(second.destination, "utf8"), /beta/);
+
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 2);
+});
+
 test("ingestText --dry-run performs no writes", async () => {
   const ws = makeWorkspace();
   const src = path.join(ws.root, "dry.txt");
@@ -718,6 +867,20 @@ test("ingestText --dry-run performs no writes", async () => {
     dryRun: true
   });
   assert.equal(result.action, "dry-run");
+  assert.equal(fs.existsSync(ws.rawDir), false);
+});
+
+test("ingestText --dry-run does not require source file", async () => {
+  const ws = makeWorkspace();
+  const missing = path.join(ws.root, "missing.txt");
+  const result = await ingestText(missing, {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    dryRun: true
+  });
+
+  assert.equal(result.action, "dry-run");
+  assert.equal(result.canonical, missing);
   assert.equal(fs.existsSync(ws.rawDir), false);
 });
 
@@ -783,6 +946,30 @@ test("ingestBinary skips when asset exists without overwrite", async () => {
   assert.equal(events.length, 1);
 });
 
+test("ingestBinary disambiguates duplicate filenames from different sources", async () => {
+  const ws = makeWorkspace();
+  const oneDir = path.join(ws.root, "one");
+  const twoDir = path.join(ws.root, "two");
+  await fsp.mkdir(oneDir);
+  await fsp.mkdir(twoDir);
+  const firstPath = path.join(oneDir, "same.bin");
+  const secondPath = path.join(twoDir, "same.bin");
+  await fsp.writeFile(firstPath, Buffer.from([1]));
+  await fsp.writeFile(secondPath, Buffer.from([2]));
+
+  const first = await ingestBinary(firstPath, { assetsDir: ws.assetsDir, eventsPath: ws.eventsPath });
+  const second = await ingestBinary(secondPath, { assetsDir: ws.assetsDir, eventsPath: ws.eventsPath });
+
+  assert.equal(first.action, "written");
+  assert.equal(second.action, "written");
+  assert.notEqual(first.asset, second.asset);
+  assert.match(path.basename(second.asset), /^same-[0-9a-f]{8}\.bin$/);
+  assert.deepEqual(await fsp.readFile(second.asset), Buffer.from([2]));
+
+  const events = await readEvents(ws.eventsPath);
+  assert.equal(events.length, 2);
+});
+
 test("ingestBinary --dry-run performs no copy", async () => {
   const ws = makeWorkspace();
   const src = path.join(ws.root, "dry.bin");
@@ -793,6 +980,20 @@ test("ingestBinary --dry-run performs no copy", async () => {
     dryRun: true
   });
   assert.equal(result.action, "dry-run");
+  assert.equal(fs.existsSync(ws.assetsDir), false);
+});
+
+test("ingestBinary --dry-run does not require source file", async () => {
+  const ws = makeWorkspace();
+  const missing = path.join(ws.root, "missing.bin");
+  const result = await ingestBinary(missing, {
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    dryRun: true
+  });
+
+  assert.equal(result.action, "dry-run");
+  assert.equal(result.canonical, missing);
   assert.equal(fs.existsSync(ws.assetsDir), false);
 });
 
@@ -852,6 +1053,11 @@ test("ingest --help documents new flags and privacy disclosure", () => {
   assert.match(result.stdout, /--dry-run/);
   assert.match(result.stdout, /--timeout/);
   assert.match(result.stdout, /No content is uploaded to any cloud service/);
+  assert.match(result.stdout, /Dynamic or paywalled pages may ingest partial content/);
+});
+
+test("default AIOS path is visible ~/aios", () => {
+  assert.equal(defaultAiosPath(), path.join(os.homedir(), "aios"));
 });
 
 test("ingest --dry-run on a text file prints plan and does not write", () => {
@@ -879,6 +1085,26 @@ test("ingest --dry-run on a binary file prints asset target", () => {
   assert.match(result.stdout, /\[dry-run\] kind=binary parser=copy/);
   assert.match(result.stdout, /asset:/);
   assert.equal(fs.existsSync(path.join(aiosPath, "vault", "assets", "blob.bin")), false);
+});
+
+test("ingest --dry-run on nonexistent local inputs performs no file I/O", () => {
+  const { aiosPath, tempRoot } = setupAiosWorkspace();
+  const missingPdf = path.join(tempRoot, "missing.pdf");
+  const missingTxt = path.join(tempRoot, "missing.txt");
+  const missingBin = path.join(tempRoot, "missing.bin");
+
+  const pdf = runCli(["ingest", missingPdf, "--path", aiosPath, "--dry-run"]);
+  assert.match(pdf.stdout, /\[dry-run\] kind=pdf parser=marker-local\|unpdf/);
+
+  const txt = runCli(["ingest", missingTxt, "--path", aiosPath, "--dry-run"]);
+  assert.match(txt.stdout, /\[dry-run\] kind=text parser=copy/);
+
+  const bin = runCli(["ingest", missingBin, "--path", aiosPath, "--dry-run"]);
+  assert.match(bin.stdout, /\[dry-run\] kind=binary parser=copy/);
+
+  assert.equal(fs.existsSync(path.join(aiosPath, "vault", "raw", "missing.md")), false);
+  assert.equal(fs.existsSync(path.join(aiosPath, "vault", "assets", "missing.pdf")), false);
+  assert.equal(fs.existsSync(path.join(aiosPath, "vault", "assets", "missing.bin")), false);
 });
 
 test("ingest skips an existing destination by default and overwrites with --overwrite", () => {

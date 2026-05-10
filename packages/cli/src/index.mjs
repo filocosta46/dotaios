@@ -28,16 +28,16 @@ Usage:
   dotaios <command> [options]
 
 Commands:
-  activate          Connect ~/.aios to global agent memory files
+  activate          Connect ~/aios to global agent memory files
   attach <dir>      Connect a project folder to DotAIOS
   cleanup           Trim stale signals and compact the event log
   connect google    Connect optional local integrations such as Google Workspace
   context [name]    View, edit, or refresh local context files
   google <cmd>      Run read-first Google Workspace workflows
   import <file>     Preview or apply structured context from old chats
-  index             Generate ~/.aios/_index.md — table of contents across context and vault
-  init              Scaffold ~/.aios with local context templates
-  ingest <file>     Copy material into vault/raw and log an event
+  index             Generate ~/aios/_index.md — table of contents across context and vault
+  init              Scaffold ~/aios with local context templates
+  ingest <input>     Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
   mcp <cmd>         Print local MCP server status and client config
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open

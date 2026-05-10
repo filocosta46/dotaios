@@ -12,7 +12,7 @@ export async function statusCommand(args) {
   dotaios status [options]
 
 Options:
-  --path <dir>  Check an AIOS folder other than ~/.aios
+  --path <dir>  Check an AIOS folder other than ~/aios
   --home <dir>  Check agent bridges somewhere other than your home
 `);
     return;

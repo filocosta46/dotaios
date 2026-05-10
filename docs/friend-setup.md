@@ -22,14 +22,14 @@ npx dotaios init
 
 It asks five short questions: your name, what you do, what you're working on, which AI tools you use, and whether to link an external Markdown vault (say "no" if you don't have one).
 
-When it finishes, your context lives in `~/.aios/`. Open it in Finder or any text editor — every file is plain Markdown you can read and edit.
+When it finishes, your context lives in `~/aios/`. Open it in Finder or any text editor — every file is plain Markdown you can read and edit.
 
 **Expected output:**
 
 ```
 DotAIOS initialized
-AIOS path: /Users/you/.aios
-Vault path: /Users/you/.aios/vault
+AIOS path: /Users/you/aios
+Vault path: /Users/you/aios/vault
 Files: 26 created, 0 updated, 0 kept
 
 Next steps:
@@ -67,13 +67,13 @@ If a tool's memory file already existed before, you'll see `[kept]` instead of `
 npx dotaios index
 ```
 
-This generates `~/.aios/_index.md` — a table of contents your agents can use to find the right file fast. Run it whenever you add new notes.
+This generates `~/aios/_index.md` — a table of contents your agents can use to find the right file fast. Run it whenever you add new notes.
 
 **Expected output:**
 
 ```
 Indexed 7 markdown file(s) across 3 section(s).
-Wrote /Users/you/.aios/_index.md
+Wrote /Users/you/aios/_index.md
 ```
 
 (File and section counts grow as you add notes to your vault.)
@@ -90,7 +90,7 @@ You should see green checks and your name from Step 1. Then run a search:
 npx dotaios search "your name"
 ```
 
-You should see results from your `~/.aios/context/` files.
+You should see results from your `~/aios/context/` files.
 
 ### Step 5 — Ask your agent
 
@@ -106,7 +106,7 @@ It should answer using the work description you typed in Step 1. If it does — 
 
 After all 5 steps, you have:
 
-1. A folder at `~/.aios/` with about 8 small Markdown files. You can open them. You can edit them. You own them.
+1. A folder at `~/aios/` with about 8 small Markdown files. You can open them. You can edit them. You own them.
 2. Your AI tool answers personal questions correctly without you re-introducing yourself every session.
 3. A `_index.md` your agents can scan to find specific files.
 
@@ -129,7 +129,7 @@ This is a separate, harder setup that requires installing the Google Workspace C
 - **`npx: command not found`** — Install Node.js first.
 - **`Unknown command`** — Type the command exactly as shown. They are case-sensitive.
 - **Agent doesn't seem to know your context** — Restart the agent app after running `npx dotaios activate`. Most tools only re-read their config on launch.
-- **You want to change something you typed in Step 1** — Open `~/.aios/context/work.md` (or any other file in `context/`) in any text editor and edit it. Save. Done. Run `npx dotaios index` again to refresh the index.
+- **You want to change something you typed in Step 1** — Open `~/aios/context/work.md` (or any other file in `context/`) in any text editor and edit it. Save. Done. Run `npx dotaios index` again to refresh the index.
 
 ## Optional: experimental MCP server
 

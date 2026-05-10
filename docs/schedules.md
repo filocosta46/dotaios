@@ -2,7 +2,7 @@
 
 DotAIOS keeps schedules local and manual. There is no background daemon, cloud provider, bundled model, or automatic email workflow.
 
-Schedules live in `~/.aios/schedules.yml`:
+Schedules live in `~/aios/schedules.yml`:
 
 ```yaml
 schedules:
