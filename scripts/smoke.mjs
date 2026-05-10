@@ -27,7 +27,12 @@ fs.writeFileSync(importPath, JSON.stringify({
 run(["import", importPath, "--path", aiosPath]);
 run(["import", importPath, "--path", aiosPath, "--apply"]);
 run(["schedule", "list", "--path", aiosPath]);
+run(["ingest", "--help"]);
 run(["ingest", path.join(repoRoot, "README.md"), "--path", aiosPath]);
+const binaryFixture = path.join(tempRoot, "sample.bin");
+fs.writeFileSync(binaryFixture, Buffer.from([0xde, 0xad, 0xbe, 0xef]));
+run(["ingest", binaryFixture, "--path", aiosPath, "--dry-run"]);
+run(["ingest", binaryFixture, "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--dry-run"]);
 run(["search", "smoke", "--path", aiosPath]);

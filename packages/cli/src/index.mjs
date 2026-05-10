@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const VERSION = "1.3.1";
+const VERSION = "1.4.0";
 
 const commands = {
   activate: "./commands/activate.mjs",
