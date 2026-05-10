@@ -2,8 +2,33 @@ import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+
+const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
+const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+
+function runCli(args, { expectFail = false } = {}) {
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+  if (!expectFail && result.status !== 0) {
+    throw new Error(`Command failed: dotaios ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  }
+  if (expectFail && result.status === 0) {
+    throw new Error(`Command unexpectedly passed: dotaios ${args.join(" ")}\n${result.stdout}`);
+  }
+  return result;
+}
+
+function setupAiosWorkspace() {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-v140-cli-"));
+  const aiosPath = path.join(tempRoot, "aios");
+  runCli(["init", "--path", aiosPath, "--yes"]);
+  return { aiosPath, tempRoot };
+}
 
 const ingestDir = path.resolve(
   new URL("../../packages/cli/src/ingest/", import.meta.url).pathname
@@ -781,6 +806,93 @@ test("ingestBinary raises FILE_NOT_FOUND for missing source", async () => {
       }),
     (err) => err instanceof IngestError && err.code === "FILE_NOT_FOUND"
   );
+});
+
+// --- CLI flags ---
+
+test("ingest --help documents new flags and privacy disclosure", () => {
+  const result = runCli(["ingest", "--help"]);
+  assert.match(result.stdout, /--overwrite/);
+  assert.match(result.stdout, /--dry-run/);
+  assert.match(result.stdout, /--timeout/);
+  assert.match(result.stdout, /No content is uploaded to any cloud service/);
+});
+
+test("ingest --dry-run on a text file prints plan and does not write", () => {
+  const { aiosPath, tempRoot } = setupAiosWorkspace();
+  const src = path.join(tempRoot, "draft.txt");
+  fs.writeFileSync(src, "hello dry-run");
+
+  const result = runCli(["ingest", src, "--path", aiosPath, "--dry-run"]);
+  assert.match(result.stdout, /\[dry-run\] kind=text parser=copy/);
+  assert.ok(result.stdout.includes(src), "plan should mention source");
+  assert.equal(fs.existsSync(path.join(aiosPath, "vault", "raw", "draft.md")), false);
+
+  const events = fs.existsSync(path.join(aiosPath, "memory", "events.jsonl"))
+    ? fs.readFileSync(path.join(aiosPath, "memory", "events.jsonl"), "utf8")
+    : "";
+  assert.equal(events.includes('"type":"ingest"'), false);
+});
+
+test("ingest --dry-run on a binary file prints asset target", () => {
+  const { aiosPath, tempRoot } = setupAiosWorkspace();
+  const src = path.join(tempRoot, "blob.bin");
+  fs.writeFileSync(src, Buffer.from([0xde, 0xad]));
+
+  const result = runCli(["ingest", src, "--path", aiosPath, "--dry-run"]);
+  assert.match(result.stdout, /\[dry-run\] kind=binary parser=copy/);
+  assert.match(result.stdout, /asset:/);
+  assert.equal(fs.existsSync(path.join(aiosPath, "vault", "assets", "blob.bin")), false);
+});
+
+test("ingest skips an existing destination by default and overwrites with --overwrite", () => {
+  const { aiosPath, tempRoot } = setupAiosWorkspace();
+  const src = path.join(tempRoot, "memo.txt");
+  fs.writeFileSync(src, "memo body");
+
+  runCli(["ingest", src, "--path", aiosPath]);
+  const second = runCli(["ingest", src, "--path", aiosPath]);
+  assert.match(second.stdout, /Already ingested:/);
+
+  const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
+  const beforeOverwriteCount = fs
+    .readFileSync(eventsPath, "utf8")
+    .split("\n")
+    .filter(Boolean).length;
+
+  const overwrite = runCli(["ingest", src, "--path", aiosPath, "--overwrite"]);
+  assert.match(overwrite.stdout, /Ingested /);
+
+  const afterOverwriteCount = fs
+    .readFileSync(eventsPath, "utf8")
+    .split("\n")
+    .filter(Boolean).length;
+  assert.equal(afterOverwriteCount, beforeOverwriteCount + 1);
+});
+
+test("ingest --timeout rejects non-positive values", () => {
+  const { aiosPath, tempRoot } = setupAiosWorkspace();
+  const src = path.join(tempRoot, "x.txt");
+  fs.writeFileSync(src, "x");
+
+  const fail = runCli(["ingest", "https://example.com", "--path", aiosPath, "--timeout", "abc"], {
+    expectFail: true
+  });
+  assert.match(fail.stderr, /--timeout must be a positive number of seconds/);
+
+  const failZero = runCli(["ingest", "https://example.com", "--path", aiosPath, "--timeout", "0"], {
+    expectFail: true
+  });
+  assert.match(failZero.stderr, /--timeout must be a positive number of seconds/);
+});
+
+test("ingest --overwrite is a no-op flag without a value", () => {
+  const { aiosPath, tempRoot } = setupAiosWorkspace();
+  const src = path.join(tempRoot, "first.txt");
+  fs.writeFileSync(src, "body");
+  // Place --overwrite before the path positional to confirm it does not consume the next arg.
+  runCli(["ingest", src, "--overwrite", "--path", aiosPath]);
+  assert.equal(fs.existsSync(path.join(aiosPath, "vault", "raw", "first.md")), true);
 });
 
 test("ingestUrl raises TIMEOUT when fetch is aborted", async () => {
