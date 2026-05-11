@@ -1,7 +1,7 @@
 {
   "name": "@dotaios/core",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.5.0",
   "description": "Core schema, memory, and manifest helpers for DotAIOS.",
   "type": "module",
   "exports": {
