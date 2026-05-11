@@ -36,8 +36,8 @@ Company and people profiles live only in `vault/org/`. Access frequency is routi
 
 Skills are markdown instruction sets that any agent can read. Plugins may include code, but must declare permissions in `manifest.json`.
 
-In v1.1, plugins are trusted local folders. Permission declarations are visible to users but are not sandbox enforcement. Remote/plugin marketplace installs are intentionally out of scope until provenance and stronger install controls exist.
+Plugins are trusted local folders. Permission declarations are visible to users but are not sandbox enforcement. Remote/plugin marketplace installs are intentionally out of scope until provenance and stronger install controls exist.
 
 ## Schedules
 
-`schedules.yml` is a local registry of manual schedules. `dotaios schedule list`, `dotaios schedule due`, and `dotaios schedule run <name>` do not create a daemon or cloud workflow. v1.1 schedules only run DotAIOS commands.
+`schedules.yml` is a local registry of manual schedules. `dotaios schedule list`, `dotaios schedule due`, and `dotaios schedule run <name>` do not create a daemon or cloud workflow. Schedules only run DotAIOS commands.

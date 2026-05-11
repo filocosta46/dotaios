@@ -5,7 +5,7 @@ A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Clau
 ## What you need before starting
 
 - A Mac (Linux works the same way; Windows is not officially tested yet).
-- Node.js 18 or newer. Check with `node --version` in a terminal. If missing, install from [nodejs.org](https://nodejs.org/) — pick the "LTS" download.
+- Node.js 20 or newer. Check with `node --version` in a terminal. If missing, install from [nodejs.org](https://nodejs.org/) — pick the "LTS" download.
 - One AI tool installed already, such as Claude Code or Cursor.
 
 You do **not** need a GitHub account, an npm account, or any cloud service.

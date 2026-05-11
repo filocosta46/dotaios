@@ -25,7 +25,7 @@ Agents should never ask users to paste API keys, passwords, tokens, private keys
 
 ## Plugins
 
-Plugins are trusted local folders in v1.1. The manifest declares permissions, and the CLI prints them before install, but DotAIOS does not sandbox plugin code.
+Plugins are trusted local folders. The manifest declares permissions, and the CLI prints them before install, but DotAIOS does not sandbox plugin code.
 
 Current rule:
 

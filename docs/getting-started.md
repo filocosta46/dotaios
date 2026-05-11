@@ -68,7 +68,7 @@ List local manual schedules:
 npx dotaios schedule list
 ```
 
-For v1.1, the daily interface is your existing AI tool. You should not need to open DotAIOS directly except to check status, inspect context, import material, ingest files, install trusted local plugins, or run manual schedules.
+Your daily interface is your existing AI tool. You should not need to open DotAIOS directly except to check status, inspect context, import material, ingest files, install trusted local plugins, or run manual schedules.
 
 ## Safety Flags
 

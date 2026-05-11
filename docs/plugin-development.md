@@ -1,6 +1,6 @@
 # Plugin Development
 
-Plugins are optional local extensions. In v1.1, DotAIOS supports installing a trusted plugin from a local directory. A plugin contains a `manifest.json`, a `SKILL.md`, and optional source code.
+Plugins are optional local extensions. DotAIOS supports installing a trusted plugin from a local directory. A plugin contains a `manifest.json`, a `SKILL.md`, and optional source code.
 
 Remote plugin installs are not supported yet. Download and review a plugin locally before installing it.
 
