@@ -1,6 +1,6 @@
 # DotAIOS — Friend Setup (5 minutes)
 
-A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Claude Code, Cursor, Codex, Gemini) know who you are and what you're working on.
+A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Claude Code, Cursor, Codex, Gemini) know who you are, what you're working on, and how to help without asking you to re-explain everything.
 
 ## What you need before starting
 
@@ -20,9 +20,11 @@ Open a terminal and run:
 npx dotaios init
 ```
 
-It asks five short questions: your name, what you do, what you're working on, which AI tools you use, and whether to link an external Markdown vault (say "no" if you don't have one).
+It asks five short questions: your name, what you do, what you're working on right now, what matters most this week, and which AI tools you use. To link an external Markdown vault, pass `--vault-path /path/to/vault` (or skip — DotAIOS creates one inside `~/aios/` by default).
 
 When it finishes, your context lives in `~/aios/`. Open it in Finder or any text editor — every file is plain Markdown you can read and edit.
+
+Later, when your work or priorities change, you do not need to hunt through files. Run `npx dotaios interview --review` and answer a few short questions. DotAIOS previews the updates before saving them.
 
 **Expected output:**
 
@@ -106,9 +108,10 @@ It should answer using the work description you typed in Step 1. If it does — 
 
 After all 5 steps, you have:
 
-1. A folder at `~/aios/` with about 8 small Markdown files. You can open them. You can edit them. You own them.
+1. A folder at `~/aios/` with small Markdown files for context, memory, vault notes, and skill folders. You can open them. You can edit them. You own them.
 2. Your AI tool answers personal questions correctly without you re-introducing yourself every session.
 3. A `_index.md` your agents can scan to find specific files.
+4. Skill folders in `~/aios/skills/` that explain what each skill does, what it does not do, and how to trigger it.
 
 You can stop here. Everything below is optional.
 
@@ -129,7 +132,7 @@ This is a separate, harder setup that requires installing the Google Workspace C
 - **`npx: command not found`** — Install Node.js first.
 - **`Unknown command`** — Type the command exactly as shown. They are case-sensitive.
 - **Agent doesn't seem to know your context** — Restart the agent app after running `npx dotaios activate`. Most tools only re-read their config on launch.
-- **You want to change something you typed in Step 1** — Open `~/aios/context/work.md` (or any other file in `context/`) in any text editor and edit it. Save. Done. Run `npx dotaios index` again to refresh the index.
+- **You want to change something you typed in Step 1** — Run `npx dotaios interview --review`. It asks the important questions again and shows the file updates before saving. If you prefer editing by hand, open `~/aios/context/work.md` or another file in `context/`, save it, then run `npx dotaios context --refresh --review`.
 
 ## Optional: experimental MCP server
 

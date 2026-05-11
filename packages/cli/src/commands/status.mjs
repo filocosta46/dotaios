@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome, requiredAiosFiles, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { detectMarker } from "../ingest/pdf.mjs";
+import { readOptionValue } from "../lib/args.mjs";
+import { pathExists } from "../../../core/src/files.mjs";
 
 const managedStart = "<!-- dotaios-managed:start -->";
 
@@ -21,6 +23,12 @@ Options:
   const options = parseOptions(args);
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   const homePath = path.resolve(expandHome(options.home || os.homedir()));
+
+  if (!(await pathExists(target))) {
+    console.error(`No AIOS folder found at ${target}. Run \`npx dotaios init\` first, or pass --path.`);
+    process.exitCode = 1;
+    return;
+  }
 
   console.log(`DotAIOS status for ${target}`);
   console.log("\nRequired files");
@@ -128,23 +136,6 @@ function parseOptions(args = []) {
   }
 
   return options;
-}
-
-function readOptionValue(args, index, optionName) {
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`${optionName} requires a value`);
-  }
-  return value;
-}
-
-async function pathExists(filePath) {
-  try {
-    await fs.access(filePath);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 async function readConfig(target) {

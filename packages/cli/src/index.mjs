@@ -14,6 +14,7 @@ const commands = {
   init: "./commands/init.mjs",
   ingest: "./commands/ingest.mjs",
   install: "./commands/install.mjs",
+  interview: "./commands/interview.mjs",
   mcp: "./commands/mcp.mjs",
   reveal: "./commands/reveal.mjs",
   schedule: "./commands/schedule.mjs",
@@ -37,8 +38,9 @@ Commands:
   import <file>     Preview or apply structured context from old chats
   index             Generate ~/aios/_index.md — table of contents across context and vault
   init              Scaffold ~/aios with local context templates
-  ingest <input>     Copy material into vault/raw and log an event
+  ingest <input>    Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
+  interview         Update your context by answering a few short questions
   mcp <cmd>         Print local MCP server status and client config
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules

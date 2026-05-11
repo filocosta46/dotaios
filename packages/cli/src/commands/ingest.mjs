@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { readOptionValue } from "../lib/args.mjs";
 import { classifyInput } from "../ingest/route.mjs";
 import { ingestUrl, IngestError } from "../ingest/web.mjs";
 import { ingestDocument } from "../ingest/pdf.mjs";
@@ -179,14 +180,6 @@ function parseOptions(args = []) {
   }
 
   return options;
-}
-
-function readOptionValue(args, index, optionName) {
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`${optionName} requires a value`);
-  }
-  return value;
 }
 
 async function readConfig(target) {

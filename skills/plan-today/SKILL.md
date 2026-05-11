@@ -5,23 +5,49 @@ description: Plan the day from priorities, active work, and recent signals. Use 
 
 # plan-today
 
-Use this skill when the user asks to plan the day or choose what to work on next.
+Build today's plan from your priorities, active work, and your stated planning preferences.
 
-## Read
+## What this does
 
-1. `context/priorities.md`
-2. `context/work.md`
+- Reads your priorities, work, and recent signals.
+- Honors your planning preferences (plan style, priority count, time blocks, frog definition).
+- Proposes focused work blocks and one explicit non-priority.
+- Names one "frog" — the task you'd avoid otherwise.
+
+## What this doesn't do
+
+- It does not write to your daily note. Reporting only.
+- It does not read your calendar or email unless a plugin has captured signals.
+- It does not second-guess your priorities. If they are wrong, run `dotaios interview` first.
+
+## How to use it
+
+Try saying:
+
+- "plan my day"
+- "what should I work on today?"
+- "build me today's plan"
+
+## Agent steps
+
+### Read
+
+1. `prompt.md` in this skill directory if present — compiled by `dotaios interview`. Prefer it over reading individual context files.
+2. If `prompt.md` is missing, fall back to:
+   - `context/priorities.md`
+   - `context/work.md`
 3. `memory/events.jsonl` last 50 entries, if present
 4. Today and yesterday in `memory/signals/`, if present
 
-## Process
+### Process
 
-- Identify the user's active priorities and deadlines.
+- Identify active priorities and deadlines.
+- Honor the planning preferences from `prompt.md` (plan style, priority count, time blocks, frog definition).
 - Separate urgent obligations from compounding work.
-- Propose 1-3 focused work blocks.
+- Propose the number of focused work blocks the preferences request (default 1-3).
 - Name one explicit non-priority to avoid.
 
-## Output
+### Output
 
 Return a short plan with:
 

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -189,12 +189,6 @@ function serializeSchedules(schedules) {
 
 function parseCommand(command) {
   return command.match(/"[^"]+"|'[^']+'|\S+/g)?.map(unquote) || [];
-}
-
-async function ensureAiosFolder(target) {
-  if (!await pathExists(path.join(target, "aios.json"))) {
-    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
-  }
 }
 
 function quote(value) {

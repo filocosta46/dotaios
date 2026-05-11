@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { searchMemory, searchVault, searchContext } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -165,12 +165,6 @@ Options:
   --limit <n>   Max results per scope (default: 20)
   --path <dir>  Use an AIOS folder other than ~/aios
 `);
-}
-
-async function ensureAiosFolder(target) {
-  if (!await pathExists(path.join(target, "aios.json"))) {
-    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
-  }
 }
 
 function truncate(value, maxLength) {

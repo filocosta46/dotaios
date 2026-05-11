@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { compactEvents, trimSignals, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -94,12 +94,6 @@ Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Show what would be cleaned without making changes
 `);
-}
-
-async function ensureAiosFolder(target) {
-  if (!await pathExists(path.join(target, "aios.json"))) {
-    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
-  }
 }
 
 function formatBytes(bytes) {

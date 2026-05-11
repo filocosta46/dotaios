@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatJsonlEntry } from "../../../core/src/memory.mjs";
-import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { pathExists, readJson, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -206,12 +206,6 @@ function printImportPlan(plan, mode) {
   console.log(`DotAIOS import plan (${mode})`);
   for (const item of plan) {
     console.log(`[${item.bucket}] append -> ${item.path}`);
-  }
-}
-
-async function ensureAiosFolder(target) {
-  if (!await pathExists(path.join(target, "aios.json"))) {
-    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
   }
 }
 

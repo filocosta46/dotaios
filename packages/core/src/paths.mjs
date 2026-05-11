@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import { pathExists } from "./files.mjs";
 
 export const requiredAiosFiles = [
   "aios.json",
@@ -25,4 +26,10 @@ export function expandHome(value) {
 
 export function resolveVaultPath(config, aiosPath = defaultAiosPath()) {
   return config?.vault_path || path.join(aiosPath, "vault");
+}
+
+export async function ensureAiosFolder(target) {
+  if (!(await pathExists(path.join(target, "aios.json")))) {
+    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
+  }
 }

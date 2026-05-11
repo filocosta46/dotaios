@@ -4,13 +4,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js ≥20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 
-**A folder for your AI agents.** Tell every AI tool on your machine who you are, what you're working on, and how you write — once. Then forget about it.
+**A folder for your AI agents.** Tell every AI tool on your machine who you are, what you're working on, and how you like to work — once. Then keep it fresh with a short interview whenever life changes.
 
 ---
 
 ## What it is
 
 DotAIOS creates **one folder** at `~/aios/` that holds your context, your memory, and your skills. Every AI tool on your machine — Claude Code, Cursor, Codex, Gemini — reads from that same folder. No sign-up, no server, no cloud. Just files you own.
+
+If ChatGPT or Gemini is a conversation, DotAIOS is the notebook your AI companion keeps beside it: who you are, what matters now, and which repeatable skills it can use for you.
 
 > `.gitconfig` makes Git know your name. `~/aios/` makes every AI agent know your life.
 
@@ -23,6 +25,14 @@ npx dotaios reveal     # open the folder in Finder / Explorer
 ```
 
 That's it. Open Claude Code. Ask: **"What am I working on?"** It answers from your `work.md`.
+
+When your role, priorities, or planning style changes, run:
+
+```bash
+npx dotaios interview --review
+```
+
+It asks a few plain-English questions, shows what will change, then updates the files your agents read.
 
 ## Where the folder lives
 
@@ -51,12 +61,15 @@ Run `dotaios status` any time to confirm every bridge is healthy.
 │   ├── identity.md
 │   ├── work.md
 │   ├── priorities.md
-│   └── north-star.md
+│   ├── north-star.md
+│   └── preferences.md    ← created by interview; how you like plans shaped
 │
-├── memory/             ← what happened recently
+├── memory/             ← what happened recently (fast operational notes)
 ├── vault/              ← long-term knowledge (loaded on demand)
-└── skills/             ← reusable workflows agents can run
+└── skills/             ← skill folders agents can run and you can inspect
 ```
+
+Each skill folder contains a `SKILL.md` that explains three things in plain language: what it can do, what it will not do, and how to trigger it.
 
 ## Skills as slash commands
 
@@ -94,6 +107,7 @@ Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `
 | `dotaios attach <project>` | Adds a per-project rule for Cursor |
 | `dotaios reveal` | Opens `~/aios/` in your file manager |
 | `dotaios status` | Health check |
+| `dotaios interview` | Updates your context and planning preferences with guided questions |
 | `dotaios context` | View, edit, or refresh your context files |
 | `dotaios index` | Generates `~/aios/_index.md` table of contents |
 | `dotaios search <query>` | Searches across memory, vault, context, projects |

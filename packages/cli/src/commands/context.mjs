@@ -2,9 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { pathExists, readJson } from "../../../core/src/files.mjs";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
-import { renderTemplateTree } from "../../../core/src/render.mjs";
+import { pathExists, readJson, writeFileSafe } from "../../../core/src/files.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { planTemplateTree } from "../../../core/src/render.mjs";
+import { confirmWrites } from "../../../core/src/review.mjs";
+import { readBullet, readSection } from "../../../core/src/sections.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -21,7 +23,11 @@ export async function contextCommand(args) {
   await ensureAiosFolder(target);
 
   if (options.refresh) {
-    const results = await refreshAgentEntrypoints(target);
+    const results = await refreshAgentEntrypoints(target, options);
+    if (results === null) {
+      console.log("Cancelled. No files written.");
+      return;
+    }
     printRefreshResults(results);
     return;
   }
@@ -46,7 +52,7 @@ export async function contextCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { edit: false, path: null, positionals: [], refresh: false };
+  const options = { edit: false, path: null, positionals: [], refresh: false, review: false };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -54,6 +60,8 @@ function parseOptions(args = []) {
       options.edit = true;
     } else if (arg === "--refresh") {
       options.refresh = true;
+    } else if (arg === "--review") {
+      options.review = true;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
       index += 1;
@@ -79,6 +87,8 @@ Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --edit        Open the selected context file in $EDITOR
   --refresh     Regenerate CLAUDE.md, AGENTS.md, and .cursorrules
+  --review      Show a diff and confirm before writing (use with --refresh).
+                Honors DOTAIOS_AUTO_APPROVE=1 for non-interactive runs.
 `);
 }
 
@@ -128,27 +138,35 @@ async function readPreview(filePath) {
   return truncate(line || "-", 72);
 }
 
-async function refreshAgentEntrypoints(target) {
+async function refreshAgentEntrypoints(target, options) {
   const data = await readTemplateData(target);
   const templateRoot = path.join(repoRoot, "templates");
-  return renderTemplateTree(templateRoot, target, data, {
-    writeMode: "overwrite",
+  const plan = await planTemplateTree(templateRoot, target, data, {
     include: (outputRelative) => ["CLAUDE.md", "AGENTS.md", ".cursorrules"].includes(outputRelative)
   });
+
+  if (options.review) {
+    const ok = await confirmWrites(plan, { autoApprove: process.env.DOTAIOS_AUTO_APPROVE === "1" });
+    if (!ok) return null;
+  }
+
+  return Promise.all(plan.map((item) => writeFileSafe(item.path, item.content, "overwrite")));
 }
 
 async function readTemplateData(target) {
-  const config = await readJson(path.join(target, "aios.json"), {});
-  const identity = await readText(path.join(target, "context", "identity.md"));
-  const work = await readText(path.join(target, "context", "work.md"));
-  const priorities = await readText(path.join(target, "context", "priorities.md"));
+  const [config, identity, work, priorities] = await Promise.all([
+    readJson(path.join(target, "aios.json"), {}),
+    readText(path.join(target, "context", "identity.md")),
+    readText(path.join(target, "context", "work.md")),
+    readText(path.join(target, "context", "priorities.md"))
+  ]);
 
   return {
     created_at: config.created_at || new Date().toISOString(),
     ai_tools: config.ai_tools || [],
     vault_path: config.vault_path || null,
-    user_name: readBulletValue(identity, "Name") || "Your Name",
-    user_role: readBulletValue(identity, "Role") || "student / operator / builder",
+    user_name: readBullet(identity, "Name") || "Your Name",
+    user_role: readBullet(identity, "Role") || "student / operator / builder",
     current_work: readSection(work, "Current Work") || "Add the active work threads agents should keep in mind.",
     priorities: readSection(priorities, "Current Bets") || "Add the current bets and near-term priorities."
   };
@@ -189,31 +207,6 @@ function openEditor(filePath) {
   }
 }
 
-async function ensureAiosFolder(target) {
-  if (!await pathExists(path.join(target, "aios.json"))) {
-    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
-  }
-}
-
-function readBulletValue(content, label) {
-  const pattern = new RegExp(`^- ${escapeRegex(label)}:\\s*(.+)$`, "im");
-  return content.match(pattern)?.[1]?.trim() || "";
-}
-
-function readSection(content, heading) {
-  const lines = content.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
-  if (start === -1) return "";
-
-  const collected = [];
-  for (const line of lines.slice(start + 1)) {
-    if (line.startsWith("## ")) break;
-    collected.push(line);
-  }
-
-  return collected.join("\n").trim();
-}
-
 function printRefreshResults(results) {
   console.log("Regenerated agent entrypoints");
   for (const result of results) {
@@ -227,8 +220,4 @@ function pad(value, size) {
 
 function truncate(value, size) {
   return value.length > size ? `${value.slice(0, size - 3)}...` : value;
-}
-
-function escapeRegex(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -5,9 +5,43 @@ description: Route context pasted from another AI chat (ChatGPT, Claude, Gemini,
 
 # import-context
 
-Use this skill when the user pastes context from another AI chat or asks to bring old ChatGPT, Claude, Gemini, or Cursor conversation knowledge into DotAIOS.
+Take what you told another AI tool (ChatGPT, Claude, Gemini, Cursor) and save it into your AIOS so every future tool sees the same context.
 
-## Read
+## What this does
+
+- Sorts pasted text into the right AIOS file: identity, work, priorities, project, person, company, or wiki.
+- Builds a draft import file you can preview before any write.
+- Flags anything that looks like a secret so you can keep it out of memory.
+
+## What this doesn't do
+
+- It does not connect to ChatGPT, Claude, Gemini, or Cursor. You paste in or upload an export file yourself.
+- It does not overwrite anything without a preview. Import is dry-run by default.
+- It does not store secrets. API keys belong in `~/aios/.env`, never in your context files.
+
+## How to use it
+
+Try saying:
+
+- "I'm switching from ChatGPT — here's what it knew about me: <paste>"
+- "import this old chat into my AIOS"
+- "merge what Gemini had on this project into DotAIOS"
+
+The agent writes a small JSON file. Preview with:
+
+```bash
+npx dotaios import ./import.json --dry-run
+```
+
+When you're happy, apply with:
+
+```bash
+npx dotaios import ./import.json --apply
+```
+
+## Agent steps
+
+### Read
 
 1. `context/identity.md`
 2. `context/work.md`
@@ -15,7 +49,7 @@ Use this skill when the user pastes context from another AI chat or asks to brin
 4. `projects/*/README.md`, if relevant
 5. `docs/context-import.md`, if present
 
-## Process
+### Process
 
 - Separate durable identity, preferences, and values from temporary project status.
 - Route active work to `projects/<slug>/README.md` or `context/work.md`.
@@ -25,16 +59,6 @@ Use this skill when the user pastes context from another AI chat or asks to brin
 - Ask the user before durable writes to `context/`, `projects/`, `vault/wiki/`, or `vault/org/`.
 - Tell the user to keep secrets in `~/aios/.env`, never in pasted context.
 
-## Output
+### Output
 
-Return a proposed DotAIOS import JSON object and tell the user to preview it with:
-
-```bash
-npx dotaios import ./import.json --dry-run
-```
-
-Only suggest applying it after the user has reviewed the preview:
-
-```bash
-npx dotaios import ./import.json --apply
-```
+Return a proposed DotAIOS import JSON object. Tell the user to preview it with `dotaios import ./import.json --dry-run` before applying.

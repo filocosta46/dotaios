@@ -1,6 +1,6 @@
 # Getting Started
 
-DotAIOS creates a local `~/aios/` folder that your AI tools can read.
+DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of it as the shared notebook for your AI companion: context, memory, and skills stay on your machine as plain files.
 
 ```bash
 npx dotaios init
@@ -9,7 +9,7 @@ npx dotaios activate
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
 
-The init flow asks five questions, then creates agent entrypoints and starter memory files. `activate` creates small bridge files in the global memory locations used by Claude Code, Codex, and Gemini.
+The init flow asks five questions, then creates starter context and memory files. `activate` creates small bridge files in the global memory locations used by Claude Code, Codex, and Gemini.
 
 For Cursor or project-scoped agents, attach a project folder:
 
@@ -31,13 +31,18 @@ Check setup health:
 npx dotaios status
 ```
 
-Inspect or edit context:
+Keep your context fresh:
 
 ```bash
+npx dotaios interview --review
 npx dotaios context
 npx dotaios context work --edit
-npx dotaios context --refresh
+npx dotaios context --refresh --review
 ```
+
+Use `interview --review` when your role, active work, priorities, or planning style changes. It asks plain-English questions, previews the files it will update, and creates `context/preferences.md` plus planning prompts for supported skills.
+
+Use `context` when you want to inspect the files directly. Use `context --refresh --review` after manual edits when you want to regenerate the agent entrypoints with a preview first.
 
 Import context from old AI chats:
 
@@ -68,7 +73,9 @@ List local manual schedules:
 npx dotaios schedule list
 ```
 
-Your daily interface is your existing AI tool. You should not need to open DotAIOS directly except to check status, inspect context, import material, ingest files, install trusted local plugins, or run manual schedules.
+Your daily interface is your existing AI tool. You should not need to open DotAIOS directly except to check status, refresh your context, import material, ingest files, install trusted local plugins, or run manual schedules.
+
+Skills live in `~/aios/skills/<name>/SKILL.md`. Open any skill folder to see what it does, what it will not do, and how to ask for it. In Claude Code, skills appear as slash commands after `activate`; in other agents, ask naturally, such as "use the audit skill".
 
 ## Safety Flags
 

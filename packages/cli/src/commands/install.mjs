@@ -1,10 +1,12 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { validateManifest, summarizePermissions } from "../../../core/src/manifest.mjs";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { readJson } from "../../../core/src/files.mjs";
+import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 export async function installCommand(args) {
-  if (args.includes("--help") || args.includes("-h")) {
+  if (hasHelpFlag(args)) {
     console.log(`Usage:
   dotaios install <plugin-path> [options]
 
@@ -78,14 +80,6 @@ function parseOptions(args = []) {
   return options;
 }
 
-function readOptionValue(args, index, optionName) {
-  const value = args[index + 1];
-  if (!value || value.startsWith("--")) {
-    throw new Error(`${optionName} requires a value`);
-  }
-  return value;
-}
-
 function printManifestSummary(manifest) {
   const permissions = summarizePermissions(manifest);
 
@@ -100,15 +94,6 @@ function printManifestSummary(manifest) {
 
 function formatList(items) {
   return items.length > 0 ? items.join(", ") : "none";
-}
-
-async function ensureAiosFolder(target) {
-  const configPath = path.join(target, "aios.json");
-  try {
-    await fs.access(configPath);
-  } catch {
-    throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
-  }
 }
 
 async function installPlugin(sourcePath, target, manifest) {
@@ -195,12 +180,4 @@ async function updateSkillRegistry(target, manifest) {
 
   await fs.mkdir(path.dirname(registryPath), { recursive: true });
   await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
-}
-
-async function readJson(filePath, fallback) {
-  try {
-    return JSON.parse(await fs.readFile(filePath, "utf8"));
-  } catch {
-    return fallback;
-  }
 }

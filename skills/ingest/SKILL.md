@@ -5,23 +5,50 @@ description: Save a URL, PDF, document, text file, or binary into the AIOS vault
 
 # ingest
 
-Use this skill when the user asks to save a file, article, URL, PDF, document, note, or external material into AIOS.
+Drop any URL or file into your AIOS and get a clean Markdown copy you can search later.
 
-The CLI command `dotaios ingest <input>` is the routing authority. This skill mirrors that command and adds bulk and curation guidance for agents. If anything in this skill conflicts with the CLI, the CLI wins — flag the conflict and update this file.
+## What this does
 
-## Routing
+- Saves articles from URLs as clean Markdown (strips ads and chrome).
+- Extracts text from PDFs, `.docx`, `.pptx`, `.epub` (richer when `marker` is installed).
+- Copies plain text, JSON, and CSV files verbatim with frontmatter.
+- Keeps the original file in `vault/assets/` so you never lose fidelity.
+- Logs each ingest in `memory/events.jsonl` so it's searchable later.
 
-`dotaios ingest <input>` classifies the input and writes to one of two locations:
+## What this doesn't do
+
+- It does not upload anything to a cloud service. Everything happens on your machine.
+- It does not bulk-ingest in one call (v1.4). Loop the command in a shell for batches.
+- It does not auto-tag, summarize, or promote to `vault/wiki/`. Those are separate skills.
+- It does not fetch pages behind a login. For paywalled content, save as PDF first and ingest that.
+
+## How to use it
+
+Try saying:
+
+- "save this URL: <url>"
+- "ingest this PDF: <path>"
+- "capture this article into my vault"
+
+Or run it directly:
+
+```bash
+dotaios ingest <url-or-path>
+dotaios ingest <input> --dry-run     # preview the plan
+dotaios ingest <input> --overwrite   # replace existing
+```
+
+## Routing (what goes where)
+
+The CLI command `dotaios ingest <input>` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins — flag the conflict and update this file.
 
 | Input | Path | Parser | Output |
 |---|---|---|---|
 | `http://` / `https://` URL | A — web scraper | linkedom + cheerio + readability + turndown (lazy-loaded); PDF responses re-route to Path B | `vault/raw/<slug>.md` with frontmatter |
 | `.pdf` | B — document parser | `marker_single` if installed, otherwise `unpdf` (basic text only) | `vault/raw/<slug>.md` + `vault/assets/<file>` |
-| `.docx` / `.pptx` / `.epub` | B — document parser | `marker_single` required; without marker the command rejects with a `MARKER_REQUIRED` error | `vault/raw/<slug>.md` + `vault/assets/<file>` |
+| `.docx` / `.pptx` / `.epub` | B — document parser | `marker_single` required; without marker rejects with `MARKER_REQUIRED` | `vault/raw/<slug>.md` + `vault/assets/<file>` |
 | `.md` / `.txt` / `.json` / `.csv` | C — text passthrough | copy with frontmatter (json/csv wrapped in fenced code blocks) | `vault/raw/<slug>.md` |
 | anything else | D — binary fallthrough | byte-exact copy, no parse | `vault/assets/<file>` (no markdown) |
-
-The original document is preserved at `vault/assets/` for every Path B and Path D ingest so users never lose fidelity.
 
 ## Frontmatter schema
 
@@ -45,7 +72,7 @@ tags: []
 | Flag | Effect |
 |---|---|
 | `--path <dir>` | Use an AIOS folder other than `~/aios` |
-| `--overwrite` | Replace an existing destination (default behavior is skip-if-exists) |
+| `--overwrite` | Replace an existing destination (default is skip-if-exists) |
 | `--dry-run` | Classify the input and print the plan; no fetch, no spawn, no write |
 | `--timeout <secs>` | URL fetch timeout (Path A only, default 10s) |
 
@@ -65,9 +92,9 @@ for f in ~/Downloads/*.pdf; do
 done
 ```
 
-Each invocation appends one entry to `memory/events.jsonl`. Failures stop only that one item; the next invocation continues.
+Each invocation appends one entry to `memory/events.jsonl`. Failures stop only that item; the next invocation continues.
 
-## Marker install (optional, power-user)
+## Marker install (optional, power user)
 
 `marker_single` is a Python package from the Datalab project. It produces high-fidelity markdown for PDFs (tables, math, layout) and is the only way to ingest `.docx` / `.pptx` / `.epub` locally without going through PDF.
 
@@ -83,21 +110,21 @@ pip install marker-pdf
 
 Then verify with `dotaios status` — the **Ingest engines** section should show `Marker (local) : installed (<path>)`.
 
-If the user declines or installation fails, PDFs continue to use the bundled `unpdf` text fallback. `.docx` / `.pptx` / `.epub` will still reject with `MARKER_REQUIRED` until marker is available.
+If declined or installation fails, PDFs continue to use the bundled `unpdf` text fallback. `.docx` / `.pptx` / `.epub` will still reject with `MARKER_REQUIRED` until marker is available.
 
-## Output guidance for agents
+## Agent steps
 
-When the user asks you to ingest something:
+When the user asks to ingest:
 
 - Run `dotaios ingest <input>` and report the destination path.
 - If the result is `Already ingested:`, ask whether the user wants `--overwrite` rather than re-running unprompted.
 - If the result is a `MARKER_REQUIRED` error, offer the install prompt above before suggesting alternatives.
 - For Path D (binary fallthrough), make it explicit that no markdown was generated and the file lives in `vault/assets/` only.
-- Append a short event to `memory/events.jsonl` is handled by the CLI; do not duplicate the entry.
+- Do not duplicate the event log — the CLI handles `memory/events.jsonl`.
 
 ## Curation routing (post-ingest)
 
-Once a file lives in `vault/raw/`, downstream skills may decide to:
+Once a file is in `vault/raw/`, downstream skills may decide to:
 
 - Promote it to `vault/wiki/<topic>/_index.md` as a durable topic summary.
 - Extract a company profile to `vault/org/companies/`.

@@ -5,24 +5,48 @@ description: Produce a daily brief — yesterday's signals + today's priorities.
 
 # morning-digest
 
-Use this skill when the user asks for a daily brief or morning review.
+Quick morning brief: what changed yesterday, what to focus on today.
 
-## Read
+## What this does
 
-1. `context/priorities.md`
-2. `context/work.md`
-3. last 50 entries from `memory/events.jsonl`, if present
-4. today and yesterday from `memory/signals/`, if present
-5. project README files for active priorities
+- Surfaces deadlines, blockers, and open loops from recent activity.
+- Connects the day back to your stated priorities and planning preferences.
+- Suggests one small AIOS maintenance action when something needs attention.
 
-## Process
+## What this doesn't do
+
+- It does not read your email, calendar, or messages unless a plugin has written signals for them.
+- It does not plan your day in detail — that is `/plan-today`.
+- It does not write into your daily note. Reporting only.
+
+## How to use it
+
+Try saying:
+
+- "morning brief"
+- "what did I miss yesterday?"
+- "give me a daily digest"
+
+## Agent steps
+
+### Read
+
+1. `prompt.md` in this skill directory if present — compiled by `dotaios interview`. Prefer it over reading individual context files.
+2. If `prompt.md` is missing, fall back to:
+   - `context/priorities.md`
+   - `context/work.md`
+3. Last 50 entries from `memory/events.jsonl`, if present
+4. Today and yesterday from `memory/signals/`, if present
+5. Project README files for active priorities
+
+### Process
 
 - Summarize what changed since the last digest.
 - Surface deadlines, blockers, and open loops.
-- Connect the day back to the user's stated priorities.
+- Connect the day back to the user's stated priorities and planning preferences.
 - Avoid inventing external news or email context unless a plugin has written signals for it.
 
-## Output
+### Output
 
 Return:
 

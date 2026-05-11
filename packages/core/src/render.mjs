@@ -16,12 +16,9 @@ export function templateOutputPath(relativePath) {
   return outputRelative;
 }
 
-export async function renderTemplateTree(templateRoot, target, data, {
-  writeMode = "preserve",
-  include = () => true
-} = {}) {
+export async function planTemplateTree(templateRoot, target, data, { include = () => true } = {}) {
   const files = await listFiles(templateRoot);
-  const results = [];
+  const plan = [];
 
   for (const file of files) {
     const relative = path.relative(templateRoot, file);
@@ -29,9 +26,19 @@ export async function renderTemplateTree(templateRoot, target, data, {
     if (!include(outputRelative, relative)) continue;
 
     const source = await fs.readFile(file, "utf8");
-    const rendered = relative.endsWith(".hbs") ? renderTemplate(source, data) : source;
-    results.push(await writeFileSafe(path.join(target, outputRelative), rendered, writeMode));
+    const content = relative.endsWith(".hbs") ? renderTemplate(source, data) : source;
+    plan.push({ path: path.join(target, outputRelative), content });
   }
 
+  return plan;
+}
+
+export async function renderTemplateTree(templateRoot, target, data, options = {}) {
+  const { writeMode = "preserve" } = options;
+  const plan = await planTemplateTree(templateRoot, target, data, options);
+  const results = [];
+  for (const item of plan) {
+    results.push(await writeFileSafe(item.path, item.content, writeMode));
+  }
   return results;
 }

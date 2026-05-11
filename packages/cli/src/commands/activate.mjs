@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "../../../core/src/files.mjs";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = "<!-- dotaios-managed:start -->";
@@ -277,12 +277,6 @@ function bridgeFile(title, lines) {
     managedEnd,
     ""
   ].join("\n");
-}
-
-async function ensureAiosFolder(aiosPath) {
-  if (!await pathExists(path.join(aiosPath, "aios.json"))) {
-    throw new Error(`No AIOS folder found at ${aiosPath}. Run dotaios init first, or pass --path.`);
-  }
 }
 
 function resolvePath(value) {
