@@ -78,6 +78,8 @@ After `dotaios activate`, every DotAIOS skill becomes a slash command in Claude 
 | Slash command | What it does |
 |---|---|
 | `/plan-today` | Plans your day from priorities + recent work |
+| `/today` | Builds today's plan and saves it as a daily note |
+| `/closeday` | Closes out today's note and stages carry-overs for tomorrow |
 | `/audit` | Weekly health check of your AIOS |
 | `/morning-digest` | Yesterday's signals + today's priorities |
 | `/ingest` | Saves a URL, PDF, or document into your vault |

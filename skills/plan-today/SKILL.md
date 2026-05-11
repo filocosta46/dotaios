@@ -16,7 +16,7 @@ Build today's plan from your priorities, active work, and your stated planning p
 
 ## What this doesn't do
 
-- It does not write to your daily note. Reporting only.
+- It does not write a daily note — that is `/today`. Use `/today` when you want to save the plan and close it out at the end of the day.
 - It does not read your calendar or email unless a plugin has captured signals.
 - It does not second-guess your priorities. If they are wrong, run `dotaios interview` first.
 

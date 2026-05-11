@@ -27,17 +27,7 @@ Try saying:
 - "import this old chat into my AIOS"
 - "merge what Gemini had on this project into DotAIOS"
 
-The agent writes a small JSON file. Preview with:
-
-```bash
-npx dotaios import ./import.json --dry-run
-```
-
-When you're happy, apply with:
-
-```bash
-npx dotaios import ./import.json --apply
-```
+The agent will propose what to write and where. Review the proposed changes before confirming any write. There is no `dotaios import` shell command — the agent handles the routing directly in the conversation.
 
 ## Agent steps
 

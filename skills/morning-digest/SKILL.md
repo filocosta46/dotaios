@@ -17,7 +17,7 @@ Quick morning brief: what changed yesterday, what to focus on today.
 
 - It does not read your email, calendar, or messages unless a plugin has written signals for them.
 - It does not plan your day in detail — that is `/plan-today`.
-- It does not write into your daily note. Reporting only.
+- It does not write a daily note — that is `/today`. Use `/today` after your morning digest when you want to commit the plan to disk.
 
 ## How to use it
 
