@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { validateManifest, summarizePermissions } from "../../../core/src/manifest.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { readJson } from "../../../core/src/files.mjs";
+import { readJson, pathExists } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 export async function installCommand(args) {
@@ -31,7 +31,38 @@ Options:
   const sourcePath = path.resolve(pluginPath);
   await ensureDirectory(sourcePath, "Plugin path");
   const manifestPath = path.join(sourcePath, "manifest.json");
-  const manifest = await readManifest(manifestPath);
+  
+  let manifest;
+  let isRawSkill = false;
+  try {
+    manifest = await readManifest(manifestPath);
+  } catch (error) {
+    if (error.message.includes("No manifest.json found")) {
+      const skillFile = path.join(sourcePath, "SKILL.md");
+      if (await pathExists(skillFile)) {
+        isRawSkill = true;
+      } else {
+        throw new Error(`Directory ${sourcePath} is neither a Plugin (missing manifest.json) nor a Raw Skill (missing SKILL.md).`);
+      }
+    } else {
+      throw error;
+    }
+  }
+
+  if (isRawSkill) {
+    const skillName = path.basename(sourcePath);
+    console.log(`Valid Raw Skill detected: ${skillName}`);
+    if (options.dryRun) {
+      console.log("\nDry run only. Would copy raw skill directory. No permissions required.");
+      return;
+    }
+    const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+    await ensureAiosFolder(target);
+    await installRawSkill(sourcePath, target, skillName);
+    console.log(`\nInstalled skill '${skillName}' into ${path.join(target, "skills", skillName)}`);
+    return;
+  }
+
   const result = validateManifest(manifest);
 
   if (!result.valid) {
@@ -181,3 +212,18 @@ async function updateSkillRegistry(target, manifest) {
   await fs.mkdir(path.dirname(registryPath), { recursive: true });
   await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
 }
+
+async function installRawSkill(sourcePath, target, skillName) {
+  const skillsDir = path.join(target, "skills");
+  const skillTarget = path.join(skillsDir, skillName);
+  
+  await fs.mkdir(skillsDir, { recursive: true });
+  await fs.rm(skillTarget, { recursive: true, force: true });
+  await copyDirectory(sourcePath, skillTarget);
+  
+  const registryPath = path.join(target, "skills", "_registry.json");
+  const registry = await readJson(registryPath, { skills: [], plugins: [] });
+  registry.skills = Array.from(new Set([...(registry.skills || []), skillName])).sort();
+  await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+}
+
