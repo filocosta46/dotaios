@@ -84,6 +84,10 @@ After `dotaios activate`, every DotAIOS skill becomes a slash command in Claude 
 | `/morning-digest` | Yesterday's signals + today's priorities |
 | `/ingest` | Saves a URL, PDF, or document into your vault |
 | `/import-context` | Routes pasted context from another AI chat |
+| `/daily-brief` | Builds a short operating brief from priorities and recent memory |
+| `/privacy-brief` | Distills sensitive local context into a cloud-safe brief |
+| `/summarize-source` | Turns ingested raw material into a useful local summary |
+| `/weekly-review` | Reviews recent memory and proposes context/project updates |
 
 Codex, Gemini, and Cursor read the same skills inline from `~/aios/AGENTS.md`. Just say *"use the audit skill"* — they find it.
 

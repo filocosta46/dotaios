@@ -241,6 +241,21 @@ test("google status reports connection and auth state", () => {
   assert.match(after.stdout, /\[ok\] DotAIOS Google connection note/);
 });
 
+test("google doctor reports OAuth blockers and json status", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const gwsBin = createFakeGws(tempRoot, { authOk: false });
+
+  const doctor = run(["google", "doctor", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(doctor.stdout, /DotAIOS Google doctor/);
+  assert.match(doctor.stdout, /gws auth: Not authenticated/);
+  assert.match(doctor.stdout, /Security lanes/);
+
+  const json = run(["google", "doctor", "--json", "--path", aiosPath, "--gws-bin", gwsBin]);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.workflow, "doctor");
+  assert.equal(parsed.checks.some((check) => check.name === "gws auth" && check.ok === false), true);
+});
+
 test("google setup explains the nontechnical OAuth path", () => {
   const { aiosPath, tempRoot } = setupAios();
   const gwsBin = createFakeGws(tempRoot, { authOk: false });
@@ -280,6 +295,26 @@ test("google read-first workflows run through gws after connect", () => {
   const drive = run(["google", "drive", "--page-size", "5", "--path", aiosPath, "--gws-bin", gwsBin]);
   assert.match(drive.stdout, /Running: gws drive files list --params/);
   assert.match(drive.stdout, /Drive files: 5 requested/);
+
+  const gmailSearch = run(["google", "gmail", "search", "from:alice@example.com", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(gmailSearch.stdout, /Running: gws gmail messages list --params/);
+  assert.match(gmailSearch.stdout, /Gmail search: from:alice@example.com/);
+
+  const gmailRead = run(["google", "gmail", "read", "msg-123", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(gmailRead.stdout, /Running: gws gmail messages get --params/);
+  assert.match(gmailRead.stdout, /Gmail read: msg-123/);
+
+  const calendarPrep = run(["google", "calendar", "prep", "--today", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(calendarPrep.stdout, /Running: gws calendar \+agenda --today/);
+
+  const driveFind = run(["google", "drive", "find", "budget", "--path", aiosPath, "--gws-bin", gwsBin]);
+  assert.match(driveFind.stdout, /Running: gws drive files list --params/);
+  assert.match(driveFind.stdout, /Drive search: name contains 'budget'/);
+
+  const json = run(["google", "gmail", "search", "from:alice@example.com", "--json", "--path", aiosPath, "--gws-bin", gwsBin]);
+  const parsed = JSON.parse(json.stdout);
+  assert.equal(parsed.workflow, "gmail-search");
+  assert.equal(parsed.source, "gws");
 });
 
 test("google workflows validate setup and safe options", () => {
@@ -307,7 +342,8 @@ test("mcp status and install print local client config", () => {
 
   const status = run(["mcp", "status", "--path", aiosPath]);
   assert.match(status.stdout, /DotAIOS MCP status/);
-  assert.match(status.stdout, /read_context, search_memory, search_vault, search_aios, list_projects, log_event/);
+  assert.match(status.stdout, /read_context, search_memory, search_vault, search_aios, google_status/);
+  assert.match(status.stdout, /google_gmail_search, google_calendar_agenda, google_drive_search/);
 
   const install = run(["mcp", "install", "--dry-run", "--agent", "cursor", "--path", aiosPath, "--home", homePath]);
   assert.match(install.stdout, /DotAIOS MCP dry run/);
@@ -364,6 +400,18 @@ if (args[0] === "gmail" && args[1] === "+triage") {
   console.log("Inbox triage: 2 unread messages");
   process.exit(0);
 }
+if (args[0] === "gmail" && args[1] === "messages" && args[2] === "list") {
+  const paramsIndex = args.indexOf("--params");
+  const params = paramsIndex >= 0 ? JSON.parse(args[paramsIndex + 1]) : {};
+  console.log("Gmail search: " + params.q);
+  process.exit(0);
+}
+if (args[0] === "gmail" && args[1] === "messages" && args[2] === "get") {
+  const paramsIndex = args.indexOf("--params");
+  const params = paramsIndex >= 0 ? JSON.parse(args[paramsIndex + 1]) : {};
+  console.log("Gmail read: " + params.id);
+  process.exit(0);
+}
 if (args[0] === "calendar" && args[1] === "+agenda") {
   console.log("Calendar agenda: " + (args.includes("--today") ? "today" : "upcoming"));
   process.exit(0);
@@ -371,7 +419,11 @@ if (args[0] === "calendar" && args[1] === "+agenda") {
 if (args[0] === "drive" && args[1] === "files" && args[2] === "list") {
   const paramsIndex = args.indexOf("--params");
   const params = paramsIndex >= 0 ? JSON.parse(args[paramsIndex + 1]) : {};
-  console.log("Drive files: " + (params.pageSize || 10) + " requested");
+  if (params.q) {
+    console.log("Drive search: " + params.q);
+  } else {
+    console.log("Drive files: " + (params.pageSize || 10) + " requested");
+  }
   process.exit(0);
 }
 console.error("Unexpected gws command: " + args.join(" "));

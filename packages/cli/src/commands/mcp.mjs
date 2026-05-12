@@ -91,7 +91,7 @@ async function printStatus(target) {
   console.log(`AIOS path: ${target}`);
   console.log(`[ok] MCP server: ${serverPath()}`);
   console.log("[info] Transport: stdio");
-  console.log("[info] Tools: read_context, search_memory, search_vault, search_aios, list_projects, log_event");
+  console.log("[info] Tools: read_context, search_memory, search_vault, search_aios, google_status, google_gmail_search, google_calendar_agenda, google_drive_search, list_projects, log_event");
   console.log("[next] Run `dotaios mcp install --dry-run --agent claude` to print client config.");
 }
 

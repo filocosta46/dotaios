@@ -12,10 +12,19 @@ export async function googleCommand(args) {
   const target = resolveAiosTarget(options.path);
   await assertAiosFolder(target);
 
-  const action = parseAction(positional);
+  const action = parseAction(positional, options);
   const gwsBin = await resolveGwsBinary(options.gwsBin || process.env.DOTAIOS_GWS_BIN || null);
   if (!gwsBin) {
-    if (action.kind === "setup" || action.kind === "status") {
+    if (action.kind === "setup" || action.kind === "status" || action.kind === "doctor") {
+      if (options.json) {
+        printJson({
+          ok: false,
+          workflow: action.kind,
+          gws: { found: false },
+          next: "Install Google Workspace CLI, then run dotaios google doctor."
+        });
+        return;
+      }
       printMissingGws({ target });
       return;
     }
@@ -23,7 +32,12 @@ export async function googleCommand(args) {
   }
 
   if (action.kind === "status") {
-    await printStatus({ target, gwsBin });
+    await printStatus({ target, gwsBin, json: options.json });
+    return;
+  }
+
+  if (action.kind === "doctor") {
+    await printDoctor({ target, gwsBin, json: options.json });
     return;
   }
 
@@ -36,12 +50,24 @@ export async function googleCommand(args) {
   await assertAuthenticated(gwsBin);
 
   const gwsArgs = buildGwsArgs(action, options);
-  console.log(`DotAIOS Google: ${action.label}`);
-  console.log(`Running: gws ${gwsArgs.join(" ")}`);
-  console.log("");
-
   const result = runGws(gwsBin, gwsArgs);
-  printCaptured(result);
+  if (options.json) {
+    printJson({
+      ok: result.status === 0,
+      workflow: action.kind,
+      label: action.label,
+      source: "gws",
+      command: ["gws", ...gwsArgs],
+      stdout: result.stdout || "",
+      stderr: result.stderr || "",
+      status: result.status
+    });
+  } else {
+    console.log(`DotAIOS Google: ${action.label}`);
+    console.log(`Running: gws ${gwsArgs.join(" ")}`);
+    console.log("");
+    printCaptured(result);
+  }
   if (result.status !== 0) {
     throw new Error(`gws command failed with status ${result.status}`);
   }
@@ -50,10 +76,15 @@ export async function googleCommand(args) {
 function printGoogleHelp() {
   console.log(`Usage:
   dotaios google status [options]
+  dotaios google doctor [options]
   dotaios google setup [options]
   dotaios google inbox [options]
+  dotaios google gmail search <query> [options]
+  dotaios google gmail read <message-id> [options]
   dotaios google agenda [options]
+  dotaios google calendar prep [options]
   dotaios google drive [options]
+  dotaios google drive find <query> [options]
 
 Read-first Google Workspace workflows powered by the local gws CLI.
 
@@ -67,6 +98,9 @@ Options:
   --calendar <id>    Agenda: filter to a calendar name or ID
   --timezone <tz>    Agenda: override timezone
   --page-size <n>    Drive: number of files to list (default: 10)
+  --query <q>        Gmail/Drive search query
+  --message-id <id>  Gmail message ID to read
+  --json            Print a JSON envelope for agent/MCP callers
   --project <id>     Setup: use a specific Google Cloud project
   --services <csv>   Setup: login services (default: gmail,calendar,drive)
   --scopes <csv>     Setup: custom OAuth scopes
@@ -75,11 +109,16 @@ Options:
 
 Examples:
   dotaios google status
+  dotaios google doctor
   dotaios google setup
   dotaios google inbox
+  dotaios google gmail search "from:alice@example.com newer_than:7d"
+  dotaios google gmail read 187abc123
   dotaios google agenda --today
+  dotaios google calendar prep --today
   dotaios google agenda --week
   dotaios google drive --page-size 5
+  dotaios google drive find "budget"
 `);
 }
 
@@ -91,12 +130,15 @@ function parseOptions(args = []) {
     pageSize: 10,
     path: null,
     project: null,
+    query: null,
+    messageId: null,
     scopes: null,
     services: "gmail,calendar,drive",
     timezone: null,
     today: false,
     tomorrow: false,
     week: false,
+    json: false,
     run: false
   };
   const positional = [];
@@ -127,6 +169,14 @@ function parseOptions(args = []) {
     } else if (arg === "--page-size") {
       options.pageSize = readPositiveInteger(args, index, "--page-size");
       index += 1;
+    } else if (arg === "--query") {
+      options.query = readOptionValue(args, index, "--query");
+      index += 1;
+    } else if (arg === "--message-id" || arg === "--id") {
+      options.messageId = readOptionValue(args, index, arg);
+      index += 1;
+    } else if (arg === "--json") {
+      options.json = true;
     } else if (arg === "--project") {
       options.project = readOptionValue(args, index, "--project");
       index += 1;
@@ -143,16 +193,20 @@ function parseOptions(args = []) {
     } else if (arg.startsWith("--")) {
       throw new Error(`Unknown option: ${arg}`);
     } else {
-      positional.push(arg.toLowerCase());
+      positional.push(arg);
     }
   }
 
   return { positional, options };
 }
 
-function parseAction(positional) {
-  const [area, subcommand] = positional;
+function parseAction(positional, options = {}) {
+  const [areaRaw, subcommandRaw, ...rest] = positional;
+  const area = areaRaw?.toLowerCase();
+  const subcommand = subcommandRaw?.toLowerCase();
+  const restText = rest.join(" ");
   if (!area || area === "status") return { kind: "status", label: "status" };
+  if (area === "doctor") return { kind: "doctor", label: "Google doctor" };
   if (area === "setup") return { kind: "setup", label: "Google setup" };
 
   if (area === "inbox" || area === "triage") {
@@ -162,6 +216,12 @@ function parseAction(positional) {
   if (area === "gmail") {
     if (!subcommand || subcommand === "triage" || subcommand === "inbox") {
       return { kind: "gmail-triage", label: "Gmail inbox triage" };
+    }
+    if (subcommand === "search") {
+      return { kind: "gmail-search", label: "Gmail search", query: options.query || restText };
+    }
+    if (subcommand === "read") {
+      return { kind: "gmail-read", label: "Gmail message read", messageId: options.messageId || restText };
     }
     throw new Error("Unsupported Gmail workflow. Try `dotaios google inbox`.");
   }
@@ -174,12 +234,18 @@ function parseAction(positional) {
     if (!subcommand || subcommand === "agenda") {
       return { kind: "calendar-agenda", label: "Calendar agenda" };
     }
+    if (subcommand === "prep") {
+      return { kind: "calendar-prep", label: "Calendar meeting prep" };
+    }
     throw new Error("Unsupported Calendar workflow. Try `dotaios google agenda --today`.");
   }
 
   if (area === "drive") {
     if (!subcommand || subcommand === "list") {
       return { kind: "drive-list", label: "Drive files" };
+    }
+    if (subcommand === "find" || subcommand === "search") {
+      return { kind: "drive-find", label: "Drive file search", query: options.query || restText };
     }
     throw new Error("Unsupported Drive workflow. Try `dotaios google drive`.");
   }
@@ -203,26 +269,43 @@ function printMissingGws({ target }) {
   console.log("3. `dotaios google inbox`");
 }
 
-async function printStatus({ target, gwsBin }) {
+async function printStatus({ target, gwsBin, json = false }) {
+  const version = runGws(gwsBin, ["--version"]);
+  const connected = await hasGoogleConnection(target);
+  const auth = runGws(gwsBin, ["auth", "status"]);
+  const authState = assessGwsAuth(auth);
+
+  if (json) {
+    printJson({
+      ok: Boolean(version.status === 0 && connected && authState.ready),
+      workflow: "status",
+      aiosPath: target,
+      gws: {
+        found: true,
+        binary: gwsBin,
+        version: firstLine(version.stdout) || null
+      },
+      connected,
+      auth: authState
+    });
+    return;
+  }
+
   console.log("DotAIOS Google status");
   console.log(`AIOS path: ${target}`);
   console.log(`[ok] gws: ${gwsBin}`);
 
-  const version = runGws(gwsBin, ["--version"]);
   if (version.status === 0) {
     console.log(`[ok] ${firstLine(version.stdout) || "gws version detected"}`);
   } else {
     console.log("[check] Could not read gws version");
   }
 
-  const connected = await hasGoogleConnection(target);
   console.log(`${connected ? "[ok]" : "[missing]"} DotAIOS Google connection note`);
   if (!connected) {
     console.log("[action] Run `dotaios connect google` before read-first workflows.");
   }
 
-  const auth = runGws(gwsBin, ["auth", "status"]);
-  const authState = assessGwsAuth(auth);
   if (authState.ready) {
     console.log("[ok] gws auth status");
     console.log(`      ${authState.summary}`);
@@ -232,6 +315,63 @@ async function printStatus({ target, gwsBin }) {
     if (auth.status !== 0) printCaptured(auth);
     console.log("[action] Run `gws auth login`, then `dotaios connect google`.");
   }
+}
+
+async function printDoctor({ target, gwsBin, json = false }) {
+  const version = runGws(gwsBin, ["--version"]);
+  const connected = await hasGoogleConnection(target);
+  const auth = runGws(gwsBin, ["auth", "status"]);
+  const authState = assessGwsAuth(auth);
+  const gcloudBin = await resolveBinary("gcloud");
+  const checks = [
+    { name: "gws binary", ok: true, detail: gwsBin },
+    { name: "gws version", ok: version.status === 0, detail: firstLine(version.stdout) || firstLine(version.stderr) || "unknown" },
+    { name: "gws auth", ok: authState.ready, detail: authState.summary },
+    { name: "DotAIOS connection", ok: connected, detail: connected ? "connections/apis/google-workspace.md exists" : "run dotaios connect google" },
+    { name: "gcloud helper", ok: Boolean(gcloudBin), detail: gcloudBin || "optional; needed for easiest OAuth setup" }
+  ];
+  const next = nextGoogleDoctorAction({ connected, authReady: authState.ready, gcloudReady: Boolean(gcloudBin) });
+
+  if (json) {
+    printJson({
+      ok: checks.every((check) => check.ok || check.name === "gcloud helper"),
+      workflow: "doctor",
+      aiosPath: target,
+      checks,
+      services: ["gmail", "calendar", "drive"],
+      security: {
+        green: "local DotAIOS reads",
+        yellow: "read Google data into terminal output",
+        red: "send/edit/delete Google data or durable context writes",
+        black: "OAuth secrets, refresh tokens, credential files, private keys"
+      },
+      next
+    });
+    return;
+  }
+
+  console.log("DotAIOS Google doctor");
+  console.log(`AIOS path: ${target}`);
+  console.log("");
+  for (const check of checks) {
+    console.log(`${check.ok ? "[ok]" : "[missing]"} ${check.name}: ${check.detail}`);
+  }
+  console.log("");
+  console.log("Available read-first DotAIOS wrappers:");
+  console.log("- dotaios google inbox");
+  console.log("- dotaios google gmail search <query>");
+  console.log("- dotaios google gmail read <message-id>");
+  console.log("- dotaios google agenda --today");
+  console.log("- dotaios google calendar prep --today");
+  console.log("- dotaios google drive find <query>");
+  console.log("");
+  console.log("Security lanes:");
+  console.log("- Green: local DotAIOS reads");
+  console.log("- Yellow: read Google data into terminal output");
+  console.log("- Red: send/edit/delete Google data or durable context writes");
+  console.log("- Black: OAuth secrets, refresh tokens, credential files, private keys");
+  console.log("");
+  console.log(`[next] ${next}`);
 }
 
 async function printSetup({ target, gwsBin, options }) {
@@ -303,6 +443,13 @@ function setupArgs(options) {
   return options.project ? ["--project", options.project] : [];
 }
 
+function nextGoogleDoctorAction({ connected, authReady, gcloudReady }) {
+  if (!authReady && gcloudReady) return "Run dotaios google setup, then dotaios connect google.";
+  if (!authReady) return "Install/authenticate gcloud or create a Desktop OAuth client, then run gws auth login.";
+  if (!connected) return "Run dotaios connect google.";
+  return "Try dotaios google inbox or dotaios google agenda --today.";
+}
+
 function loginArgs(options) {
   if (options.scopes) return ["--scopes", options.scopes];
   const args = options.full ? ["--full"] : ["--readonly"];
@@ -334,6 +481,16 @@ function buildGwsArgs(action, options) {
     return ["gmail", "+triage"];
   }
 
+  if (action.kind === "gmail-search") {
+    if (!action.query) throw new Error("Usage: dotaios google gmail search <query>");
+    return ["gmail", "messages", "list", "--params", JSON.stringify({ q: action.query, maxResults: options.pageSize })];
+  }
+
+  if (action.kind === "gmail-read") {
+    if (!action.messageId) throw new Error("Usage: dotaios google gmail read <message-id>");
+    return ["gmail", "messages", "get", "--params", JSON.stringify({ id: action.messageId, format: "full" })];
+  }
+
   if (action.kind === "calendar-agenda") {
     const periodFlags = [options.today, options.tomorrow, options.week, Boolean(options.days)].filter(Boolean);
     if (periodFlags.length > 1) {
@@ -350,11 +507,31 @@ function buildGwsArgs(action, options) {
     return args;
   }
 
+  if (action.kind === "calendar-prep") {
+    return buildGwsArgs({ kind: "calendar-agenda" }, options);
+  }
+
   if (action.kind === "drive-list") {
     return ["drive", "files", "list", "--params", JSON.stringify({ pageSize: options.pageSize })];
   }
 
+  if (action.kind === "drive-find") {
+    if (!action.query) throw new Error("Usage: dotaios google drive find <query>");
+    return ["drive", "files", "list", "--params", JSON.stringify({
+      q: `name contains '${escapeGoogleQueryLiteral(action.query)}'`,
+      pageSize: options.pageSize
+    })];
+  }
+
   throw new Error(`Unsupported Google workflow: ${action.kind}`);
+}
+
+function printJson(payload) {
+  console.log(JSON.stringify(payload, null, 2));
+}
+
+function escapeGoogleQueryLiteral(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 function readPositiveInteger(args, index, optionName) {

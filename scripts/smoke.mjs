@@ -36,10 +36,13 @@ run(["ingest", binaryFixture, "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--path", aiosPath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--dry-run"]);
 run(["search", "smoke", "--path", aiosPath]);
+run(["search", "cloud-safe", "--scope", "skills", "--path", aiosPath]);
 run(["index", "--path", aiosPath]);
 run(["index", "--path", aiosPath, "--dry-run"]);
 run(["mcp", "status", "--path", aiosPath]);
 run(["mcp", "install", "--path", aiosPath, "--dry-run", "--agent", "claude"]);
+run(["schedule", "doctor", "--path", aiosPath]);
+run(["schedule", "install", "--dry-run", "--target", "cron", "--path", aiosPath]);
 run(["reveal", "--path", aiosPath, "--dry-run"]);
 run(["cleanup", "--path", aiosPath, "--dry-run"]);
 

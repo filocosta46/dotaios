@@ -40,4 +40,6 @@ Plugins are trusted local folders. Permission declarations are visible to users 
 
 ## Schedules
 
-`schedules.yml` is a local registry of manual schedules. `dotaios schedule list`, `dotaios schedule due`, and `dotaios schedule run <name>` do not create a daemon or cloud workflow. Schedules only run DotAIOS commands.
+`schedules.yml` is a local registry of schedules. `dotaios schedule list`, `dotaios schedule due`, `dotaios schedule run-due`, and `dotaios schedule run <name>` do not create a DotAIOS daemon or cloud workflow. Schedules only run DotAIOS commands.
+
+`dotaios schedule install --dry-run --target launchd|cron|task-scheduler` prints an OS scheduler handoff. A real local install requires explicit `--yes` and does not run arbitrary commands.

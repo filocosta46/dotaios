@@ -23,6 +23,10 @@ npx @dotaios/mcp --path ~/aios
 - `search_memory` — search memory events, archives, and signals
 - `search_vault` — search vault markdown files
 - `search_aios` — search local DotAIOS scopes: memory, vault, context, skills, references, plugins, and projects when using `all`
+- `google_status` — read Google Workspace connection and `gws` auth status
+- `google_gmail_search` — read-only Gmail search through the approved DotAIOS wrapper
+- `google_calendar_agenda` — read-only Calendar agenda through the approved DotAIOS wrapper
+- `google_drive_search` — read-only Drive search through the approved DotAIOS wrapper
 - `list_projects` — list local project folders
 - `log_event` — append an approved structured event
 
@@ -43,4 +47,5 @@ DotAIOS prints the stdio config and a suggested client path. It does not edit cl
 - The server is local stdio only.
 - It does not mutate MCP client config automatically.
 - It exposes `log_event` as an explicit tool; clients should ask before durable memory writes.
-- Google Workspace is not exposed through MCP yet. Keep Google read-first CLI workflows separate until beta feedback proves the right tool surface.
+- Google Workspace MCP tools are read-only and call fixed DotAIOS wrappers, never arbitrary `gws` commands.
+- Write actions in Google Workspace still require explicit user approval outside MCP.

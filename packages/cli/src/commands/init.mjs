@@ -209,7 +209,7 @@ async function createStarterFiles(target, data, writeMode) {
       "  #   command: \"dotaios status\"",
       "  #   enabled: true"
     ].join("\n") + "\n",
-    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"audit\", \"ingest\", \"morning-digest\", \"import-context\"]\n}\n"
+    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"audit\", \"ingest\", \"morning-digest\", \"import-context\", \"daily-brief\", \"privacy-brief\", \"summarize-source\", \"weekly-review\"]\n}\n"
   };
   const results = [];
 

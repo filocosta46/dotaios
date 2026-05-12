@@ -141,6 +141,45 @@ test("schedule lists due schedules and runs DotAIOS commands only", () => {
   assert.match(unsafe.stderr, /only run DotAIOS commands/);
 });
 
+test("schedule doctor and install dry-run explain local OS handoff", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(path.join(aiosPath, "schedules.yml"), [
+    "schedules:",
+    "  - name: weekly-status",
+    "    cadence: weekly",
+    "    command: \"dotaios status\"",
+    "    enabled: true",
+    ""
+  ].join("\n"));
+
+  const doctor = run(["schedule", "doctor", "--path", aiosPath]);
+  assert.match(doctor.stdout, /DotAIOS schedule doctor/);
+  assert.match(doctor.stdout, /dotaios schedule run-due/);
+
+  const cron = run(["schedule", "install", "--dry-run", "--target", "cron", "--path", aiosPath]);
+  assert.match(cron.stdout, /Target: cron/);
+  assert.match(cron.stdout, /schedule run-due --path/);
+
+  const launchd = run(["schedule", "install", "--dry-run", "--target", "launchd", "--path", aiosPath]);
+  assert.match(launchd.stdout, /com\.dotaios\.schedule/);
+  assert.match(launchd.stdout, /<string>run-due<\/string>/);
+});
+
+test("schedule run-due runs due DotAIOS schedules", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(path.join(aiosPath, "schedules.yml"), [
+    "schedules:",
+    "  - name: weekly-status",
+    "    cadence: weekly",
+    "    command: \"dotaios status\"",
+    "    enabled: true",
+    ""
+  ].join("\n"));
+
+  run(["schedule", "run-due", "--path", aiosPath]);
+  assert.match(read(path.join(aiosPath, "schedules.yml")), /last_run:/);
+});
+
 test("install refuses remote plugin URLs", () => {
   const result = runFail(["install", "https://example.com/plugin"]);
   assert.match(result.stderr, /Remote plugin installs are not supported/);

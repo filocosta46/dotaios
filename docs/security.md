@@ -34,3 +34,12 @@ Current rule:
 - Do not treat the current plugin system as a public marketplace.
 
 Future marketplace work must add provenance, package verification, permission review, and stronger install failure recovery before remote installs are allowed.
+
+## Integration Safety Lanes
+
+Use these lanes for Google Workspace, MCP tools, schedules, plugins, and agent workflows:
+
+- Green: local DotAIOS reads such as context, search, schedules, skills, and memory inspection.
+- Yellow: read external data into terminal or agent output, with source attribution and no automatic durable write.
+- Red: send, edit, delete, move, label, archive, create events, or write durable context/wiki/org/CRM memory. Ask first.
+- Black: OAuth secrets, refresh tokens, credential files, private keys, passwords, and API keys. Never paste these into chat or memory.

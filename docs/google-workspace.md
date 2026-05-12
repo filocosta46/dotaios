@@ -8,13 +8,18 @@ DotAIOS does not implement Google OAuth or store Google credentials. OAuth setup
 
 ```bash
 npx dotaios connect google --dry-run
+npx dotaios google doctor
 npx dotaios google setup
 npx dotaios connect google --status
 npx dotaios connect google
 npx dotaios google status
 npx dotaios google inbox
+npx dotaios google gmail search "from:alice@example.com newer_than:7d"
+npx dotaios google gmail read <message-id>
 npx dotaios google agenda --today
+npx dotaios google calendar prep --today
 npx dotaios google drive --page-size 5
+npx dotaios google drive find "budget"
 ```
 
 ## Setup Shape
@@ -46,13 +51,18 @@ After connection, use these small wrappers instead of asking testers to remember
 
 ```bash
 npx dotaios google status
+npx dotaios google doctor
 npx dotaios google inbox
+npx dotaios google gmail search "from:alice@example.com newer_than:7d"
+npx dotaios google gmail read <message-id>
 npx dotaios google agenda --today
+npx dotaios google calendar prep --today
 npx dotaios google agenda --week
 npx dotaios google drive --page-size 10
+npx dotaios google drive find "budget"
 ```
 
-These commands only call read-first `gws` workflows. Write actions are intentionally not wrapped.
+These commands only call read-first `gws` workflows. Use `--json` when an agent or MCP client needs a bounded structured result. Write actions are intentionally not wrapped.
 
 ## Beta Scope
 
@@ -70,4 +80,4 @@ Ask for explicit approval before:
 
 ## Why Not MCP First?
 
-MCP is still the right later connector layer for multi-agent tooling. Google Workspace is different: the hard part is user trust, OAuth setup, and safe daily workflows. Wrapping `gws` gives weekend testers a useful path without adding a running server or storing secrets in DotAIOS.
+MCP is useful only after a workflow is proven safe. DotAIOS exposes read-only MCP tools for status, Gmail search, Calendar agenda, and Drive search. These tools call fixed DotAIOS wrappers and never expose arbitrary `gws` command execution.

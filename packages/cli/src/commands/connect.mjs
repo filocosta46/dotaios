@@ -223,9 +223,13 @@ dotaios google status
 
 \`\`\`bash
 dotaios google inbox
+dotaios google gmail search "from:alice@example.com newer_than:7d"
+dotaios google gmail read <message-id>
 dotaios google agenda --today
+dotaios google calendar prep --today
 dotaios google agenda --week
 dotaios google drive --page-size 10
+dotaios google drive find "budget"
 \`\`\`
 
 ## Safety
@@ -262,16 +266,31 @@ gws auth login
 
 \`\`\`bash
 dotaios google inbox
+dotaios google gmail search "from:alice@example.com newer_than:7d"
+dotaios google gmail read <message-id>
 dotaios google agenda --today
+dotaios google calendar prep --today
 dotaios google agenda --week
 dotaios google drive --page-size 10
+dotaios google drive find "budget"
 \`\`\`
+
+Use \`--json\` on safe read commands when another agent or MCP client needs structured output.
+
+## Source Attribution
+
+When using Google output in an answer, name the source service and command, such as:
+
+- Source: Gmail via \`dotaios google gmail search\`
+- Source: Calendar via \`dotaios google calendar prep\`
+- Source: Drive via \`dotaios google drive find\`
 
 ## Approval Rules
 
 - Ask before sending, replying, forwarding, labeling, archiving, or deleting email.
 - Ask before creating, editing, moving, or deleting calendar events.
 - Ask before writing to Docs, Sheets, or Drive.
+- Ask before saving Google-derived facts into \`context/\`, \`vault/wiki/\`, \`vault/org/\`, or CRM notes.
 - Never request or expose OAuth client secrets, refresh tokens, or credential files in chat.
 `;
 }

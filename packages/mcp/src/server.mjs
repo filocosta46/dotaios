@@ -6,10 +6,12 @@ import readline from "node:readline";
 import { appendEvent, searchMemory, searchVault } from "../../core/src/memory.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
+import { assessGwsAuth, hasGoogleConnection, resolveGwsBinary, runGws } from "../../cli/src/lib/gws.mjs";
 
 const PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "1.6.0";
+const SERVER_VERSION = "1.7.0";
 const MAX_EVENT_DATA_BYTES = 10000;
+const MAX_GOOGLE_OUTPUT_BYTES = 20000;
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) {
@@ -103,6 +105,10 @@ class DotaiosMcpServer {
     if (name === "search_memory") return await this.searchMemory(args);
     if (name === "search_vault") return await this.searchVault(args);
     if (name === "search_aios") return await this.searchAios(args);
+    if (name === "google_status") return await this.googleStatus(args);
+    if (name === "google_gmail_search") return await this.googleGmailSearch(args);
+    if (name === "google_calendar_agenda") return await this.googleCalendarAgenda(args);
+    if (name === "google_drive_search") return await this.googleDriveSearch(args);
     if (name === "list_projects") return await this.listProjects();
     if (name === "log_event") return await this.logEvent(args);
 
@@ -189,6 +195,96 @@ class DotaiosMcpServer {
       .map((entry) => ({ name: entry.name, path: path.join(projectsDir, entry.name) }))
       .sort((a, b) => a.name.localeCompare(b.name));
     return JSON.stringify({ projects }, null, 2);
+  }
+
+  async googleStatus(args) {
+    const gwsBin = await this.resolveGoogleTool(args);
+    const connected = await hasGoogleConnection(this.aiosPath);
+    const auth = runGws(gwsBin, ["auth", "status"]);
+    const authState = assessGwsAuth(auth);
+    const version = runGws(gwsBin, ["--version"]);
+    return JSON.stringify({
+      connected,
+      gws: {
+        binary: gwsBin,
+        version: firstLine(version.stdout) || null
+      },
+      auth: authState
+    }, null, 2);
+  }
+
+  async googleGmailSearch(args) {
+    const query = requireString(args.query, "query");
+    const limit = positiveInteger(args.limit || 10, "limit");
+    const gwsBin = await this.assertGoogleReady(args);
+    return this.runGoogleReadTool(gwsBin, ["gmail", "messages", "list", "--params", JSON.stringify({ q: query, maxResults: limit })], {
+      service: "gmail",
+      workflow: "search"
+    });
+  }
+
+  async googleCalendarAgenda(args) {
+    const days = args.days === undefined ? null : positiveInteger(args.days, "days");
+    const ranges = [args.today, args.tomorrow, args.week, Boolean(days)].filter(Boolean);
+    if (ranges.length > 1) {
+      throw protocolError(-32602, "Use only one agenda range: today, tomorrow, week, or days.");
+    }
+    const gwsBin = await this.assertGoogleReady(args);
+    const gwsArgs = ["calendar", "+agenda"];
+    if (args.today) gwsArgs.push("--today");
+    if (args.tomorrow) gwsArgs.push("--tomorrow");
+    if (args.week) gwsArgs.push("--week");
+    if (days) gwsArgs.push("--days", String(days));
+    if (optionalString(args.calendar)) gwsArgs.push("--calendar", args.calendar);
+    return this.runGoogleReadTool(gwsBin, gwsArgs, {
+      service: "calendar",
+      workflow: "agenda"
+    });
+  }
+
+  async googleDriveSearch(args) {
+    const query = requireString(args.query, "query");
+    const limit = positiveInteger(args.limit || 10, "limit");
+    const gwsBin = await this.assertGoogleReady(args);
+    return this.runGoogleReadTool(gwsBin, ["drive", "files", "list", "--params", JSON.stringify({
+      q: `name contains '${escapeGoogleQueryLiteral(query)}'`,
+      pageSize: limit
+    })], {
+      service: "drive",
+      workflow: "search"
+    });
+  }
+
+  async resolveGoogleTool(args) {
+    const gwsBin = await resolveGwsBinary(optionalString(args.gwsBin) || process.env.DOTAIOS_GWS_BIN || null);
+    if (!gwsBin) throw protocolError(-32602, "Google Workspace CLI is required. Run dotaios google doctor.");
+    return gwsBin;
+  }
+
+  async assertGoogleReady(args) {
+    if (!await hasGoogleConnection(this.aiosPath)) {
+      throw protocolError(-32602, "Google Workspace is not connected. Run dotaios connect google first.");
+    }
+    const gwsBin = await this.resolveGoogleTool(args);
+    const auth = runGws(gwsBin, ["auth", "status"]);
+    const authState = assessGwsAuth(auth);
+    if (!authState.ready) {
+      throw protocolError(-32602, `Google Workspace auth is not ready: ${authState.summary}`);
+    }
+    return gwsBin;
+  }
+
+  runGoogleReadTool(gwsBin, gwsArgs, metadata) {
+    const result = runGws(gwsBin, gwsArgs);
+    return JSON.stringify({
+      ok: result.status === 0,
+      source: "gws",
+      ...metadata,
+      command: ["gws", ...gwsArgs],
+      stdout: truncateBytes(result.stdout || "", MAX_GOOGLE_OUTPUT_BYTES),
+      stderr: truncateBytes(result.stderr || "", MAX_GOOGLE_OUTPUT_BYTES),
+      status: result.status
+    }, null, 2);
   }
 
   async logEvent(args) {
@@ -282,6 +378,61 @@ function tools() {
       }
     },
     {
+      name: "google_status",
+      title: "Google Status",
+      description: "Read DotAIOS Google Workspace connection and gws auth status.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          gwsBin: { type: "string", description: "Optional path to a gws binary." }
+        }
+      }
+    },
+    {
+      name: "google_gmail_search",
+      title: "Google Gmail Search",
+      description: "Read-only Gmail search through DotAIOS-approved gws workflow.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          limit: { type: "integer", minimum: 1, default: 10 },
+          gwsBin: { type: "string" }
+        },
+        required: ["query"]
+      }
+    },
+    {
+      name: "google_calendar_agenda",
+      title: "Google Calendar Agenda",
+      description: "Read-only Calendar agenda through DotAIOS-approved gws workflow.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          today: { type: "boolean" },
+          tomorrow: { type: "boolean" },
+          week: { type: "boolean" },
+          days: { type: "integer", minimum: 1 },
+          calendar: { type: "string" },
+          gwsBin: { type: "string" }
+        }
+      }
+    },
+    {
+      name: "google_drive_search",
+      title: "Google Drive Search",
+      description: "Read-only Drive file search through DotAIOS-approved gws workflow.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          limit: { type: "integer", minimum: 1, default: 10 },
+          gwsBin: { type: "string" }
+        },
+        required: ["query"]
+      }
+    },
+    {
       name: "list_projects",
       title: "List Projects",
       description: "List local DotAIOS projects.",
@@ -360,6 +511,20 @@ function positiveInteger(value, name) {
     throw protocolError(-32602, `${name} must be a positive integer`);
   }
   return Number(value);
+}
+
+function firstLine(value = "") {
+  return value.trim().split("\n").find(Boolean) || "";
+}
+
+function truncateBytes(value, maxBytes) {
+  const buffer = Buffer.from(value);
+  if (buffer.byteLength <= maxBytes) return value;
+  return `${buffer.subarray(0, maxBytes).toString("utf8")}\n[truncated]`;
+}
+
+function escapeGoogleQueryLiteral(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 function safeRelativePath(value) {
