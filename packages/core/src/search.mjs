@@ -140,7 +140,8 @@ export async function searchMarkdownDir(dir, query, {
     let content;
     try {
       content = await fs.readFile(filePath, "utf8");
-    } catch {
+    } catch (err) {
+      console.warn(`[dotaios] Warning: Could not read file ${filePath} (${err.message})`);
       continue;
     }
 
