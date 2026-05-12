@@ -60,6 +60,12 @@ npx dotaios ingest https://example.com/article
 
 Dynamic or paywalled pages may ingest partial content. If the saved markdown ends abruptly or misses expected sections, save the logged-in page as a PDF from your browser and ingest the PDF.
 
+Search your local AIOS files:
+
+```bash
+npx dotaios search "daily planning" --scope skills
+```
+
 Validate and install a local plugin:
 
 ```bash

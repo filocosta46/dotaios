@@ -5,9 +5,10 @@ import path from "node:path";
 import readline from "node:readline";
 import { appendEvent, searchMemory, searchVault } from "../../core/src/memory.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
+import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
 
 const PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "1.6.0";
 const MAX_EVENT_DATA_BYTES = 10000;
 
 async function main(argv = process.argv.slice(2)) {
@@ -78,7 +79,7 @@ class DotaiosMcpServer {
           title: "DotAIOS MCP",
           version: SERVER_VERSION
         },
-        instructions: "Use DotAIOS tools to read local context, search memory/vault, list projects, and log approved events."
+        instructions: "Use DotAIOS tools to read local context, search local memory/vault/skills/references/plugins, list projects, and log approved events."
       };
     }
 
@@ -101,6 +102,7 @@ class DotaiosMcpServer {
     if (name === "read_context") return await this.readContext(args);
     if (name === "search_memory") return await this.searchMemory(args);
     if (name === "search_vault") return await this.searchVault(args);
+    if (name === "search_aios") return await this.searchAios(args);
     if (name === "list_projects") return await this.listProjects();
     if (name === "log_event") return await this.logEvent(args);
 
@@ -158,6 +160,19 @@ class DotaiosMcpServer {
     const vaultPath = resolveVaultPath(config, this.aiosPath);
     const results = await searchVault(vaultPath, query, { limit });
     return JSON.stringify({ query, vaultPath, results }, null, 2);
+  }
+
+  async searchAios(args) {
+    const query = requireString(args.query, "query");
+    const limit = positiveInteger(args.limit || 10, "limit");
+    const scope = optionalString(args.scope) || "all";
+    if (!SEARCH_SCOPES.includes(scope)) {
+      throw protocolError(-32602, `scope must be one of: ${SEARCH_SCOPES.join(", ")}`);
+    }
+    const config = await this.readConfig();
+    const vaultPath = resolveVaultPath(config, this.aiosPath);
+    const groups = await searchAios({ aiosPath: this.aiosPath, vaultPath, query, scope, limit });
+    return JSON.stringify({ query, scope, results: groups }, null, 2);
   }
 
   async listProjects() {
@@ -242,6 +257,25 @@ function tools() {
         type: "object",
         properties: {
           query: { type: "string" },
+          limit: { type: "integer", minimum: 1, default: 10 }
+        },
+        required: ["query"]
+      }
+    },
+    {
+      name: "search_aios",
+      title: "Search AIOS",
+      description: "Search DotAIOS local files across memory, vault, context, skills, references, plugins, and projects included in all.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string" },
+          scope: {
+            type: "string",
+            enum: SEARCH_SCOPES,
+            default: "all",
+            description: "Search scope. Projects are included when scope is all."
+          },
           limit: { type: "integer", minimum: 1, default: 10 }
         },
         required: ["query"]

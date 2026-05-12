@@ -112,7 +112,7 @@ Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `
 | `dotaios interview` | Updates your context and planning preferences with guided questions |
 | `dotaios context` | View, edit, or refresh your context files |
 | `dotaios index` | Generates `~/aios/_index.md` table of contents |
-| `dotaios search <query>` | Searches across memory, vault, context, projects |
+| `dotaios search <query>` | Searches across memory, vault, context, projects, skills, references, and plugins |
 | `dotaios ingest <input>` | Universal Knowledge Router (see above) |
 | `dotaios import <file>` | Apply structured context from old AI chats |
 | `dotaios connect google` | Add read-first Gmail / Calendar via local `gws` |

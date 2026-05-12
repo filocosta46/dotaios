@@ -1,10 +1,10 @@
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { pathExists, readJson } from "../../../core/src/files.mjs";
-import { searchMemory, searchVault, searchContext } from "../../../core/src/memory.mjs";
+import { readJson } from "../../../core/src/files.mjs";
+import { markMatches, SEARCH_SCOPES, searchAios } from "../../../core/src/search.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
-const validScopes = new Set(["memory", "vault", "context", "all"]);
+const validScopes = new Set(SEARCH_SCOPES);
 
 export async function searchCommand(args) {
   if (hasHelpFlag(args)) {
@@ -16,7 +16,7 @@ export async function searchCommand(args) {
   const query = options.positionals.join(" ");
 
   if (!query) {
-    throw new Error("Usage: dotaios search <query> [--scope memory|vault|context|all]");
+    throw new Error("Usage: dotaios search <query> [--scope memory|vault|context|skills|references|plugins|all]");
   }
 
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
@@ -32,72 +32,11 @@ export async function searchCommand(args) {
   console.log(`Searching for "${query}" in ${scope}...\n`);
 
   let totalResults = 0;
-
-  // Search context
-  if (scope === "all" || scope === "context") {
-    const contextDir = path.join(target, "context");
-    const results = await searchContext(contextDir, query, { limit });
-    if (results.length > 0) {
-      console.log(`── context/ (${results.length} match${results.length > 1 ? "es" : ""}) ──`);
-      for (const result of results) {
-        console.log(`  ${result.file}`);
-        for (const match of result.matches) {
-          console.log(`    L${match.line}: ${truncate(match.content, 100)}`);
-        }
-      }
-      console.log();
-      totalResults += results.length;
-    }
-  }
-
-  // Search memory
-  if (scope === "all" || scope === "memory") {
-    const memoryDir = path.join(target, "memory");
-    const results = await searchMemory(memoryDir, query, { limit });
-    if (results.length > 0) {
-      console.log(`── memory/ (${results.length} match${results.length > 1 ? "es" : ""}) ──`);
-      for (const result of results) {
-        const { source, ...entry } = result;
-        const summary = entry.summary || entry.type || JSON.stringify(entry).slice(0, 100);
-        console.log(`  [${entry.ts?.slice(0, 10) || "?"}] ${entry.type || "?"} — ${truncate(summary, 80)}`);
-        console.log(`    source: ${source}`);
-      }
-      console.log();
-      totalResults += results.length;
-    }
-  }
-
-  // Search vault
-  if (scope === "all" || scope === "vault") {
-    const results = await searchVault(vaultPath, query, { limit });
-    if (results.length > 0) {
-      console.log(`── vault/ (${results.length} match${results.length > 1 ? "es" : ""}) ──`);
-      for (const result of results) {
-        console.log(`  ${result.title} (${result.file})`);
-        for (const match of result.matches) {
-          console.log(`    L${match.line}: ${truncate(match.content, 100)}`);
-        }
-      }
-      console.log();
-      totalResults += results.length;
-    }
-  }
-
-  // Search projects
-  if (scope === "all") {
-    const projectsDir = path.join(target, "projects");
-    const results = await searchVault(projectsDir, query, { limit });
-    if (results.length > 0) {
-      console.log(`── projects/ (${results.length} match${results.length > 1 ? "es" : ""}) ──`);
-      for (const result of results) {
-        console.log(`  ${result.title} (${result.file})`);
-        for (const match of result.matches) {
-          console.log(`    L${match.line}: ${truncate(match.content, 100)}`);
-        }
-      }
-      console.log();
-      totalResults += results.length;
-    }
+  const groups = await searchAios({ aiosPath: target, vaultPath, query, scope, limit });
+  for (const group of groups) {
+    if (group.results.length === 0) continue;
+    printGroup(group.scope, group.results, query);
+    totalResults += group.results.length;
   }
 
   if (totalResults === 0) {
@@ -139,7 +78,7 @@ function parseLimit(value) {
 
 function validateScope(scope) {
   if (!validScopes.has(scope)) {
-    throw new Error(`Invalid --scope "${scope}". Use one of: memory, vault, context, all.`);
+    throw new Error(`Invalid --scope "${scope}". Use one of: memory, vault, context, skills, references, plugins, all.`);
   }
 }
 
@@ -153,18 +92,50 @@ function printSearchHelp() {
   console.log(`Usage:
   dotaios search <query> [options]
 
-Searches across your AIOS memory, vault, context, and projects for a keyword.
+Searches across your AIOS memory, vault, context, projects, skills, references, and plugins for a keyword.
 
 Examples:
   dotaios search "job application"
   dotaios search onomondo --scope vault
   dotaios search thesis --scope memory --limit 5
+  dotaios search "daily planning" --scope skills
 
 Options:
-  --scope <s>   Limit search: memory, vault, context, or all (default: all)
+  --scope <s>   Limit search: memory, vault, context, skills, references, plugins, or all (default: all)
   --limit <n>   Max results per scope (default: 20)
   --path <dir>  Use an AIOS folder other than ~/aios
 `);
+}
+
+function printGroup(scope, results, query) {
+  console.log(`── ${scope}/ (${results.length} match${results.length > 1 ? "es" : ""}) ──`);
+  for (const result of results) {
+    if (scope === "memory") {
+      printMemoryResult(result, query);
+    } else {
+      printMarkdownResult(result, query);
+    }
+  }
+  console.log();
+}
+
+function printMemoryResult(result, query) {
+  const summary = result.summary || result.type || JSON.stringify(result).slice(0, 100);
+  const metadata = [result.project, result.domain].filter(Boolean).join(" / ");
+  const suffix = metadata ? ` (${metadata})` : "";
+  console.log(`  [${result.ts?.slice(0, 10) || "?"}] ${result.type || "?"}${suffix} — ${markMatches(truncate(summary, 100), query)}`);
+  if (result.matchedField) {
+    console.log(`    match: ${result.matchedField} = ${markMatches(truncate(result.matchedSnippet, 100), query)}`);
+  }
+  console.log(`    source: ${result.source}`);
+}
+
+function printMarkdownResult(result, query) {
+  console.log(`  ${result.title} (${result.file})`);
+  for (const match of result.matches) {
+    const lineLabel = match.lineEnd && match.lineEnd !== match.line ? `L${match.line}-${match.lineEnd}` : `L${match.line}`;
+    console.log(`    ${lineLabel}: ${markMatches(truncate(match.content, 140), query)}`);
+  }
 }
 
 function truncate(value, maxLength) {

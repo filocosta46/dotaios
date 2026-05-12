@@ -22,6 +22,7 @@ npx @dotaios/mcp --path ~/aios
 - `read_context` — read one or all files under `context/`
 - `search_memory` — search memory events, archives, and signals
 - `search_vault` — search vault markdown files
+- `search_aios` — search local DotAIOS scopes: memory, vault, context, skills, references, plugins, and projects when using `all`
 - `list_projects` — list local project folders
 - `log_event` — append an approved structured event
 

@@ -54,6 +54,26 @@ test("search validates scope and limit", () => {
   assert.match(badNumericLimit.stderr, /Invalid --limit/);
 });
 
+test("search supports skills references and plugins scopes", () => {
+  const { aiosPath } = setupAios();
+  fs.mkdirSync(path.join(aiosPath, "references"), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "references", "framework.md"), "# Framework\n\nCaveman operating notes.\n");
+  fs.mkdirSync(path.join(aiosPath, "plugins", "demo"), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "plugins", "demo", "manifest.json"), "{\n  \"name\": \"demo-search-plugin\"\n}\n");
+
+  const skills = run(["search", "AIOS health", "--scope", "skills", "--path", aiosPath]);
+  assert.match(skills.stdout, /skills\//);
+  assert.match(skills.stdout, /audit\/SKILL\.md/);
+
+  const references = run(["search", "caveman", "--scope", "references", "--path", aiosPath]);
+  assert.match(references.stdout, /references\//);
+  assert.match(references.stdout, /framework\.md/);
+
+  const plugins = run(["search", "demo-search-plugin", "--scope", "plugins", "--path", aiosPath]);
+  assert.match(plugins.stdout, /plugins\//);
+  assert.match(plugins.stdout, /manifest\.json/);
+});
+
 test("ingest writes a structured memory event", () => {
   const { aiosPath, tempRoot } = setupAios();
   const sourcePath = path.join(tempRoot, "notes.md");
@@ -287,7 +307,7 @@ test("mcp status and install print local client config", () => {
 
   const status = run(["mcp", "status", "--path", aiosPath]);
   assert.match(status.stdout, /DotAIOS MCP status/);
-  assert.match(status.stdout, /read_context, search_memory, search_vault, list_projects, log_event/);
+  assert.match(status.stdout, /read_context, search_memory, search_vault, search_aios, list_projects, log_event/);
 
   const install = run(["mcp", "install", "--dry-run", "--agent", "cursor", "--path", aiosPath, "--home", homePath]);
   assert.match(install.stdout, /DotAIOS MCP dry run/);

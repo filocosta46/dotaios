@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const VERSION = "1.4.3";
+const VERSION = "1.6.0";
 
 const commands = {
   activate: "./commands/activate.mjs",
@@ -44,7 +44,7 @@ Commands:
   mcp <cmd>         Print local MCP server status and client config
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
-  search <query>    Search across memory, vault, context, and projects
+  search <query>    Search across memory, vault, context, projects, skills, references, and plugins
   status            Check the health of a local AIOS folder
 
 Options:

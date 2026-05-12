@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { searchMarkdownDir, searchMemoryDir } from "./search.mjs";
 
 export const RECENT_EVENT_LIMIT = 50;
 export const SIGNAL_RETENTION_DAYS = 30;
@@ -200,48 +201,7 @@ export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_D
  * Returns matched entries with their source.
  */
 export async function searchMemory(memoryDir, query, { limit = 20 } = {}) {
-  const results = [];
-  const q = query.toLowerCase();
-
-  // Search events
-  const eventsPath = path.join(memoryDir, "events.jsonl");
-  const events = await readJsonl(eventsPath);
-  for (const event of events) {
-    if (JSON.stringify(event).toLowerCase().includes(q)) {
-      results.push({ source: "memory/events.jsonl", ...event });
-    }
-  }
-
-  // Search archived events
-  const archivePath = path.join(memoryDir, "events-archive.jsonl");
-  const archived = await readJsonl(archivePath);
-  for (const event of archived) {
-    if (JSON.stringify(event).toLowerCase().includes(q)) {
-      results.push({ source: "memory/events-archive.jsonl", ...event });
-    }
-  }
-
-  // Search signals
-  const signalsDir = path.join(memoryDir, "signals");
-  let signalFiles;
-  try {
-    signalFiles = (await fs.readdir(signalsDir)).filter((f) => f.endsWith(".jsonl")).sort().reverse();
-  } catch {
-    signalFiles = [];
-  }
-  for (const file of signalFiles) {
-    const signals = await readJsonl(path.join(signalsDir, file));
-    for (const signal of signals) {
-      if (JSON.stringify(signal).toLowerCase().includes(q)) {
-        results.push({ source: `memory/signals/${file}`, ...signal });
-      }
-    }
-  }
-
-  // Return most recent first across events, archives, and signals.
-  return results
-    .sort((a, b) => compareTimestampsDesc(a.ts, b.ts))
-    .slice(0, limit);
+  return searchMemoryDir(memoryDir, query, { limit });
 }
 
 /**
@@ -249,85 +209,18 @@ export async function searchMemory(memoryDir, query, { limit = 20 } = {}) {
  * Returns matched files with line-level context.
  */
 export async function searchVault(vaultDir, query, { limit = 20 } = {}) {
-  const results = [];
-  const q = query.toLowerCase();
-
-  let allFiles;
-  try {
-    allFiles = await listMarkdownFiles(vaultDir);
-  } catch {
-    return [];
-  }
-
-  for (const filePath of allFiles) {
-    let content;
-    try {
-      content = await fs.readFile(filePath, "utf8");
-    } catch {
-      continue;
-    }
-
-    if (!content.toLowerCase().includes(q)) continue;
-
-    const relative = path.relative(vaultDir, filePath);
-    const lines = content.split("\n");
-    const matchingLines = [];
-
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].toLowerCase().includes(q)) {
-        matchingLines.push({ line: i + 1, content: lines[i].trim() });
-      }
-    }
-
-    results.push({
-      source: `vault/${relative}`,
-      file: relative,
-      matches: matchingLines.slice(0, 5),
-      title: lines.find((l) => l.startsWith("# "))?.replace(/^#\s+/, "") || relative
-    });
-
-    if (results.length >= limit) break;
-  }
-
-  return results;
+  return searchMarkdownDir(vaultDir, query, { limit, sourcePrefix: "vault" });
 }
 
 /**
  * Search across context files for a keyword.
  */
 export async function searchContext(contextDir, query, { limit = 10 } = {}) {
-  return searchVault(contextDir, query, { limit });
+  return searchMarkdownDir(contextDir, query, { limit, sourcePrefix: "context" });
 }
 
 // --- Helpers ---
 
 function isoDate(date) {
   return date.toISOString().slice(0, 10);
-}
-
-function compareTimestampsDesc(a, b) {
-  if (!a && !b) return 0;
-  if (!a) return 1;
-  if (!b) return -1;
-  return b.localeCompare(a);
-}
-
-async function listMarkdownFiles(dir) {
-  const results = [];
-  let entries;
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return results;
-  }
-
-  for (const entry of entries) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...await listMarkdownFiles(full));
-    } else if (entry.name.endsWith(".md") || entry.name.endsWith(".jsonl")) {
-      results.push(full);
-    }
-  }
-  return results;
 }

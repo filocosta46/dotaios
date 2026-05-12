@@ -33,7 +33,8 @@ test("mcp server exposes DotAIOS tools over newline JSON-RPC", () => {
     { jsonrpc: "2.0", id: 4, method: "tools/call", params: { name: "search_vault", arguments: { query: "gmail" } } },
     { jsonrpc: "2.0", id: 5, method: "tools/call", params: { name: "list_projects", arguments: {} } },
     { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "log_event", arguments: { type: "mcp-test", summary: "MCP test event" } } },
-    { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "search_memory", arguments: { query: "mcp-test" } } }
+    { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "search_memory", arguments: { query: "mcp-test" } } },
+    { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "search_aios", arguments: { query: "gmail", scope: "vault" } } }
   ];
 
   const responses = runMcp(aiosPath, messages);
@@ -41,13 +42,14 @@ test("mcp server exposes DotAIOS tools over newline JSON-RPC", () => {
   assert.equal(responses[0].result.serverInfo.name, "dotaios-mcp");
 
   const tools = responses[1].result.tools.map((tool) => tool.name);
-  assert.deepEqual(tools, ["read_context", "search_memory", "search_vault", "list_projects", "log_event"]);
+  assert.deepEqual(tools, ["read_context", "search_memory", "search_vault", "search_aios", "list_projects", "log_event"]);
 
   assert.match(toolText(responses[2]), /Building Google and MCP integration/);
   assert.match(toolText(responses[3]), /Gmail setup notes/);
   assert.match(toolText(responses[4]), /"name": "demo"/);
   assert.match(toolText(responses[5]), /"type": "mcp-test"/);
   assert.match(toolText(responses[6]), /"summary": "MCP test event"/);
+  assert.match(toolText(responses[7]), /Gmail setup notes/);
 });
 
 test("mcp server validates tool inputs", () => {
