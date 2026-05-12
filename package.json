@@ -37,6 +37,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "build": "echo 'static site — no build step'",
     "cli": "node packages/cli/src/index.mjs",
     "check": "node packages/cli/src/index.mjs --help",
     "smoke": "node scripts/smoke.mjs",
