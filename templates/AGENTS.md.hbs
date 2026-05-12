@@ -43,6 +43,14 @@ Available domains:
 
 Skills live in `skills/<name>/SKILL.md`. They are plain markdown instruction sets. Follow them when the user invokes a skill by name or asks for that workflow.
 
+### Installing new skills
+
+If the user gives you a repository URL and asks you to install a skill or plugin:
+1. Clone the repository to a temporary folder: `git clone <url> /tmp/dotaios-plugin`
+2. Install it locally: `npx dotaios install /tmp/dotaios-plugin`
+3. Clean up: `rm -rf /tmp/dotaios-plugin`
+4. Confirm to the user that it is installed and summarize what the new skill does.
+
 ## Rules
 
 - Treat `context/` as always relevant.

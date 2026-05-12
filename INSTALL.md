@@ -122,4 +122,10 @@ Instead, say something like this (adapt to what they told you):
 
 If a user pointed you at `https://github.com/filocosta46/dotaios` and asked you to set up DotAIOS, this is the file to follow. Start at Step 1 above.
 
+### Installing third-party plugins
+If the user already has DotAIOS set up and gives you a link to a different repository to install a skill/plugin:
+1. `git clone <url> /tmp/dotaios-plugin`
+2. `npx dotaios install /tmp/dotaios-plugin`
+3. `rm -rf /tmp/dotaios-plugin`
+
 The full documentation is in the `docs/` folder. The skills are in `skills/`. Everything is plain Markdown — you can read it all.
