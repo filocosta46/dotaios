@@ -98,10 +98,10 @@ async function promptAnswers() {
   try {
     console.log("DotAIOS creates local memory files for the AI tools you already use.\n");
     return {
-      user_name: await ask(rl, "Name", "Your Name"),
-      user_role: await ask(rl, "What do you do?", "student / operator / builder"),
-      current_work: await ask(rl, "What are you working on right now?", "Your active work threads"),
-      priorities: await ask(rl, "What matters most this week?", "Your current bets and next actions"),
+      user_name: await ask(rl, "Name", "<!-- Your Name -->"),
+      user_role: await ask(rl, "What do you do?", "<!-- Your Role -->"),
+      current_work: await ask(rl, "What are you working on right now?", "<!-- Add the active work threads agents should keep in mind. -->"),
+      priorities: await ask(rl, "What matters most this week?", "<!-- Add the current bets and near-term priorities. -->"),
       ai_tools: await ask(rl, "AI tools you use", "claude-code,codex,cursor")
     };
   } finally {
@@ -110,16 +110,18 @@ async function promptAnswers() {
 }
 
 async function ask(rl, label, fallback) {
-  const answer = await rl.question(`${label} [${fallback}]: `);
+  // If fallback is an HTML comment, don't show it as the default in the prompt
+  const displayFallback = fallback.startsWith("<!--") ? "" : ` [${fallback}]`;
+  const answer = await rl.question(`${label}${displayFallback}: `);
   return answer.trim() || fallback;
 }
 
 function defaultAnswers() {
   return {
-    user_name: "Your Name",
-    user_role: "student / operator / builder",
-    current_work: "Add the active work threads agents should keep in mind.",
-    priorities: "Add the current bets and near-term priorities.",
+    user_name: "<!-- Your Name -->",
+    user_role: "<!-- Your Role -->",
+    current_work: "<!-- Add the active work threads agents should keep in mind. -->",
+    priorities: "<!-- Add the current bets and near-term priorities. -->",
     ai_tools: "claude-code,codex,cursor"
   };
 }
