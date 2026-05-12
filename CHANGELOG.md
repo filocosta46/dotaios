@@ -2,11 +2,15 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
-## [Unreleased] (v1.8.0-draft)
+## [1.8.0] - 2026-05-12
 ### Added
 - Agent-native onboarding via `INSTALL.md`
 - Progressive `init` command that generates empty hint-based context files instead of placeholder strings
-- Support for marketplace plugin registry (`--from-url` via checksum validation)
+- Added `LICENSE` files to all built-in skills
+
+### Fixed
+- Fixed timezone inaccuracy in signal generation (now uses local timezone instead of UTC)
+- Added debug warnings when vault search encounters unreadable files
 
 ## [1.7.0] - 2026-05-12
 ### Added
