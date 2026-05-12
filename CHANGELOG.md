@@ -2,6 +2,13 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.9.0] - 2026-05-12
+### Added
+- Official static landing page deployed via Vercel (`website/` directory)
+- Support for installing third-party raw skills (without manifests)
+- Taught agents how to install plugins directly from repository URLs
+- Removed dashes and hyphens from README to simplify reading for non-technical users
+
 ## [1.8.0] - 2026-05-12
 ### Added
 - Agent-native onboarding via `INSTALL.md`

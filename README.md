@@ -4,13 +4,13 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js ≥20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 
-**A folder for your AI agents.** Tell every AI tool on your machine who you are, what you're working on, and how you like to work — once. Then keep it fresh with a short interview whenever life changes.
+**A folder for your AI agents.** Tell every AI tool on your machine who you are, what you're working on, and how you like to work, once. Then keep it fresh with a short interview whenever life changes.
 
----
+***
 
 ## What it is
 
-DotAIOS creates **one folder** at `~/aios/` that holds your context, your memory, and your skills. Every AI tool on your machine — Claude Code, Cursor, Codex, Gemini — reads from that same folder. No sign-up, no server, no cloud. Just files you own.
+DotAIOS creates **one folder** at `~/aios/` that holds your context, your memory, and your skills. Every AI tool on your machine, Claude Code, Cursor, Codex, Gemini, reads from that same folder. No sign up, no server, no cloud. Just files you own.
 
 If ChatGPT or Gemini is a conversation, DotAIOS is the notebook your AI companion keeps beside it: who you are, what matters now, and which repeatable skills it can use for you.
 
@@ -32,7 +32,7 @@ When your role, priorities, or planning style changes, run:
 npx dotaios interview --review
 ```
 
-It asks a few plain-English questions, shows what will change, then updates the files your agents read.
+It asks a few plain English questions, shows what will change, then updates the files your agents read.
 
 ## Where the folder lives
 
@@ -61,7 +61,7 @@ Run `dotaios status` any time to confirm every bridge is healthy.
 │   ├── identity.md
 │   ├── work.md
 │   ├── priorities.md
-│   ├── north-star.md
+│   ├── north star.md
 │   └── preferences.md    ← created by interview; how you like plans shaped
 │
 ├── memory/             ← what happened recently (fast operational notes)
@@ -79,17 +79,17 @@ After `dotaios activate`, every DotAIOS skill becomes a slash command in Claude 
 |---|---|
 | `/plan-today` | Plans your day from priorities + recent work |
 | `/today` | Builds today's plan and saves it as a daily note |
-| `/closeday` | Closes out today's note and stages carry-overs for tomorrow |
+| `/closeday` | Closes out today's note and stages carryovers for tomorrow |
 | `/audit` | Weekly health check of your AIOS |
 | `/morning-digest` | Yesterday's signals + today's priorities |
 | `/ingest` | Saves a URL, PDF, or document into your vault |
 | `/import-context` | Routes pasted context from another AI chat |
 | `/daily-brief` | Builds a short operating brief from priorities and recent memory |
-| `/privacy-brief` | Distills sensitive local context into a cloud-safe brief |
+| `/privacy-brief` | Distills sensitive local context into a cloud safe brief |
 | `/summarize-source` | Turns ingested raw material into a useful local summary |
 | `/weekly-review` | Reviews recent memory and proposes context/project updates |
 
-Codex, Gemini, and Cursor read the same skills inline from `~/aios/AGENTS.md`. Just say *"use the audit skill"* — they find it.
+Codex, Gemini, and Cursor read the same skills inline from `~/aios/AGENTS.md`. Just say *"use the audit skill"*, they find it.
 
 ## Universal Knowledge Router
 
@@ -102,13 +102,13 @@ npx dotaios ingest notes.txt                     # text → wrapped in Markdown
 npx dotaios ingest archive.zip                   # unknown binary → vault/assets/
 ```
 
-Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `kind`, `parser`, `title`). Documents are parsed locally — nothing is uploaded. PDFs use the bundled `unpdf` extractor by default. Install [marker-pdf](https://github.com/datalab-to/marker) for high-fidelity PDF / DOCX / PPTX / EPUB parsing.
+Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `kind`, `parser`, `title`). Documents are parsed locally, nothing is uploaded. PDFs use the bundled `unpdf` extractor by default. Install [marker-pdf](https://github.com/datalab-to/marker) for high-fidelity PDF / DOCX / PPTX / EPUB parsing.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `dotaios init` | Interactive setup — creates `~/aios/` |
+| `dotaios init` | Interactive setup, creates `~/aios/` |
 | `dotaios activate` | Connects Claude Code, Codex, Gemini, and registers skills |
 | `dotaios attach <project>` | Adds a per-project rule for Cursor |
 | `dotaios reveal` | Opens `~/aios/` in your file manager |
@@ -119,7 +119,7 @@ Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `
 | `dotaios search <query>` | Searches across memory, vault, context, projects, skills, references, and plugins |
 | `dotaios ingest <input>` | Universal Knowledge Router (see above) |
 | `dotaios import <file>` | Apply structured context from old AI chats |
-| `dotaios connect google` | Add read-first Gmail / Calendar via local `gws` |
+| `dotaios connect google` | Add read first Gmail / Calendar via local `gws` |
 | `dotaios google <cmd>` | Run Google Workspace workflows |
 | `dotaios mcp <cmd>` | Local MCP server status / config |
 | `dotaios install <plugin>` | Install a local plugin |
@@ -136,13 +136,13 @@ If you already use Obsidian, Logseq, or any Markdown notes app, point DotAIOS at
 npx dotaios init --vault-path ~/my-vault
 ```
 
-Your existing notes become agent-readable knowledge.
+Your existing notes become agent readable knowledge.
 
 ## Principles
 
-- **Local first** — no accounts, no server, no cloud sync
-- **File based** — Markdown and JSONL, not databases
-- **Agent native** — your AI tools read directly; DotAIOS is invisible infrastructure
+* **Local first**, no accounts, no server, no cloud sync
+* **File based**, Markdown and JSONL, not databases
+* **Agent native**, your AI tools read directly; DotAIOS is invisible infrastructure
 
 ## More docs
 
