@@ -2,6 +2,18 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.11.0] - 2026-05-14
+### Added
+- `skills/INDEX.md` — an auto-generated, agent-neutral list of every installed skill with a one-line description and run instructions. Regenerated on `init`, `activate`, raw-skill install, and `skill remove`, so every connected agent (not just Claude Code) can discover and run skills.
+- `packages/core/src/agents.json` — editable registry of supported AI tools (name, detect path, bridge path, include syntax). Extendable per-user via `<aios>/agents.json`, merged by name. Adding a new AI tool no longer requires a code change.
+- `dotaios activate --all` — connect every known AI tool even when not detected on the machine.
+- `dotaios activate` and `dotaios doctor` print a copy-paste line for AI tools not in the registry: "Read <aios>/AGENTS.md first and follow it."
+
+### Changed
+- `dotaios activate` now connects only AI tools actually installed on the machine (detected by their config folder), and reports skipped tools clearly. Use `--all` to override.
+- `AGENTS.md` inside the AIOS folder is now the single canonical, agent-neutral front door — folder map, read order, memory routing, rules, and skills. `CLAUDE.md` shrinks to a one-line pointer at it. Every agent bridge points at `AGENTS.md`.
+- `dotaios doctor` and `dotaios status` report not-installed AI tools as informational, not warnings.
+
 ## [1.10.0] - 2026-05-14
 ### Added
 - `dotaios setup` — one-shot onboarding wizard (init + activate + reveal).
