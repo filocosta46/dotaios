@@ -1,9 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { appendEvent } from "../../../core/src/memory.mjs";
 import { buildFrontmatter, slugify } from "./frontmatter.mjs";
 import { resolveAssetDestination, resolveMarkdownDestination } from "./destinations.mjs";
+import { describeShelfTarget, placeMarkdown } from "./placement.mjs";
 import { IngestError } from "./web.mjs";
 
 export const DEFAULT_MARKER_TIMEOUT_MS = 300_000;
@@ -70,7 +70,13 @@ export async function ingestDocument(rawInput, options) {
     now = () => new Date(),
     sourceOverride = null,
     titleOverride = null,
-    assetName = null
+    assetName = null,
+    shelf = "raw",
+    name = null,
+    vaultRoot = null,
+    signalsDir = null,
+    apply = false,
+    interactive = false
   } = options;
 
   const sourcePath = path.resolve(rawInput);
@@ -84,7 +90,6 @@ export async function ingestDocument(rawInput, options) {
   const title = titleOverride || baseName;
   const source = sourceOverride || sourcePath;
   const baseSlug = slugify(title);
-  const destination = path.join(rawDir, `${baseSlug}.md`);
   const assetFileName = assetName || path.basename(sourcePath);
   const assetDest = path.join(assetsDir, assetFileName);
   const kind = ext === ".pdf" ? "pdf" : "document";
@@ -96,30 +101,36 @@ export async function ingestDocument(rawInput, options) {
       kind,
       parser,
       canonical: source,
-      plan: { kind, parser, source, destination, asset: assetDest }
+      plan: {
+        kind,
+        parser,
+        source,
+        shelf,
+        destination: describeShelfTarget({ shelf, vaultRoot, rawDir, signalsDir, name, baseSlug }),
+        asset: assetDest
+      }
     };
   }
 
   await assertExists(sourcePath);
 
-  const target = await resolveMarkdownDestination({
-    rawDir,
-    baseSlug,
-    source,
-    overwrite
-  });
   const marker = await detectMarker(whichImpl);
   const parser = marker ? "marker-local" : ext === ".pdf" ? "unpdf" : null;
 
-  if (target.action === "skip") {
-    return {
-      action: "skipped",
-      destination: target.destination,
-      slug: target.slug,
-      parser,
-      kind,
-      canonical: source
-    };
+  // Raw shelf keeps the early-skip optimization: if the destination already
+  // exists for this source, don't spend time parsing the document.
+  if (shelf === "raw") {
+    const earlyTarget = await resolveMarkdownDestination({ rawDir, baseSlug, source, overwrite });
+    if (earlyTarget.action === "skip") {
+      return {
+        action: "skipped",
+        destination: earlyTarget.destination,
+        slug: earlyTarget.slug,
+        parser,
+        kind,
+        canonical: source
+      };
+    }
   }
 
   const assetTarget = await resolveAssetDestination({
@@ -157,8 +168,6 @@ export async function ingestDocument(rawInput, options) {
     );
   }
 
-  await fs.mkdir(rawDir, { recursive: true });
-
   const frontmatter = buildFrontmatter({
     source,
     kind,
@@ -167,28 +176,26 @@ export async function ingestDocument(rawInput, options) {
     ingestedAt: now().toISOString()
   });
 
-  await fs.writeFile(target.destination, `${frontmatter}\n${markdown.trimEnd()}\n`);
-
-  await appendEvent(eventsPath, {
-    type: "ingest",
+  return await placeMarkdown({
+    shelf,
+    name,
+    vaultRoot,
+    rawDir,
+    signalsDir,
+    eventsPath,
+    baseSlug,
     source,
-    destination: target.destination,
-    asset: assetTarget.asset,
+    title,
+    body: `${frontmatter}\n${markdown.trimEnd()}`,
     kind,
     parser,
-    summary: title
+    overwrite,
+    apply,
+    interactive,
+    asset: assetTarget.asset,
+    warning,
+    now
   });
-
-  return {
-    action: "written",
-    destination: target.destination,
-    slug: target.slug,
-    parser,
-    kind,
-    canonical: source,
-    asset: assetTarget.asset,
-    warning
-  };
 }
 
 async function runMarker({ sourcePath, marker, spawnImpl, timeoutMs }) {

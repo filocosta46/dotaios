@@ -224,12 +224,12 @@ async function createStarterFiles(target, data, writeMode) {
     "memory/errors.jsonl": "",
     "schedules.yml": [
       "schedules:",
-      "  # - name: weekly-status",
-      "  #   cadence: weekly",
-      "  #   command: \"dotaios status\"",
-      "  #   enabled: true"
+      "  - name: daily-brief",
+      "    cadence: daily",
+      "    command: \"dotaios brief\"",
+      "    enabled: false"
     ].join("\n") + "\n",
-    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"audit\", \"ingest\", \"morning-digest\", \"import-context\", \"daily-brief\", \"privacy-brief\", \"summarize-source\", \"weekly-review\"]\n}\n"
+    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"privacy-brief\", \"summarize-source\", \"weekly-review\"]\n}\n"
   };
   const results = [];
 
@@ -261,6 +261,7 @@ function printSuccess(target, vaultPath, results) {
   console.log("3. Optional: run `npx dotaios connect google --dry-run` for Gmail/Calendar beta setup");
   console.log("4. Open Claude Code, Codex, Gemini, Cursor, or another agent-aware tool");
   console.log("5. Run `npx dotaios context` whenever you want to inspect what agents see");
+  console.log("6. Run `npx dotaios brief` whenever you want today's local brief written down");
 }
 
 function firstSessionTemplate() {

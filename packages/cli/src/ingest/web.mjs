@@ -1,10 +1,9 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { appendEvent } from "../../../core/src/memory.mjs";
 import { canonicalizeUrl } from "./canonical-url.mjs";
-import { resolveMarkdownDestination } from "./destinations.mjs";
 import { buildFrontmatter, slugify } from "./frontmatter.mjs";
+import { describeShelfTarget, placeMarkdown } from "./placement.mjs";
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 const STRIP_SELECTORS = ["script", "style", "noscript", "iframe", "nav", "footer", "aside", "header"];
@@ -64,6 +63,12 @@ export async function ingestUrl(rawInput, options) {
     timeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
     fetchImpl = globalThis.fetch,
     documentOptions = {},
+    shelf = "raw",
+    name = null,
+    vaultRoot = null,
+    signalsDir = null,
+    apply = false,
+    interactive = false,
     now = () => new Date()
   } = options;
 
@@ -79,6 +84,7 @@ export async function ingestUrl(rawInput, options) {
         kind: "web",
         parser: "readability+turndown",
         canonical,
+        shelf,
         rawDir
       }
     };
@@ -103,6 +109,12 @@ export async function ingestUrl(rawInput, options) {
       eventsPath,
       overwrite,
       documentOptions,
+      shelf,
+      name,
+      vaultRoot,
+      signalsDir,
+      apply,
+      interactive,
       now
     });
   }
@@ -111,23 +123,6 @@ export async function ingestUrl(rawInput, options) {
   const { title, markdown } = await extractArticle(html, canonical);
 
   const baseSlug = slugify(title);
-  const target = await resolveMarkdownDestination({
-    rawDir,
-    baseSlug,
-    source: canonical,
-    overwrite
-  });
-  if (target.action === "skip") {
-    return {
-      action: "skipped",
-      destination: target.destination,
-      slug: target.slug,
-      parser: "readability+turndown",
-      kind: "web",
-      canonical
-    };
-  }
-
   const frontmatter = buildFrontmatter({
     source: canonical,
     kind: "web",
@@ -136,26 +131,24 @@ export async function ingestUrl(rawInput, options) {
     ingestedAt: now().toISOString()
   });
 
-  await fs.mkdir(rawDir, { recursive: true });
-  await fs.writeFile(target.destination, `${frontmatter}\n${markdown.trimEnd()}\n`);
-
-  await appendEvent(eventsPath, {
-    type: "ingest",
+  return await placeMarkdown({
+    shelf,
+    name,
+    vaultRoot,
+    rawDir,
+    signalsDir,
+    eventsPath,
+    baseSlug,
     source: canonical,
-    destination: target.destination,
+    title,
+    body: `${frontmatter}\n${markdown.trimEnd()}`,
     kind: "web",
     parser: "readability+turndown",
-    summary: title
+    overwrite,
+    apply,
+    interactive,
+    now
   });
-
-  return {
-    action: "written",
-    destination: target.destination,
-    slug: target.slug,
-    parser: "readability+turndown",
-    kind: "web",
-    canonical
-  };
 }
 
 async function fetchWithTimeout(url, { timeoutMs, fetchImpl }) {
@@ -210,6 +203,12 @@ async function ingestPdfResponse({
   eventsPath,
   overwrite,
   documentOptions,
+  shelf,
+  name,
+  vaultRoot,
+  signalsDir,
+  apply,
+  interactive,
   now
 }) {
   if (!assetsDir) {
@@ -232,6 +231,12 @@ async function ingestPdfResponse({
       sourceOverride: canonical,
       titleOverride: path.basename(assetName, path.extname(assetName)),
       assetName,
+      shelf,
+      name,
+      vaultRoot,
+      signalsDir,
+      apply,
+      interactive,
       now,
       ...documentOptions
     });

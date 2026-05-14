@@ -58,7 +58,23 @@ npx dotaios ingest ./notes.md
 npx dotaios ingest https://example.com/article
 ```
 
+Route by purpose with `--to` to put things in the right place from the start:
+
+```bash
+npx dotaios ingest research.pdf --to wiki --name ai-research           # lasting reference
+npx dotaios ingest brief.pdf --to company --name acme --apply          # org record
+npx dotaios ingest call-notes.txt --to signal                          # working note
+```
+
+Durable shelves (`wiki`, `company`, `person`) preview without `--apply` and will not write. A human picking the shelf interactively counts as approval.
+
 Dynamic or paywalled pages may ingest partial content. If the saved markdown ends abruptly or misses expected sections, save the logged-in page as a PDF from your browser and ingest the PDF.
+
+Write today's local brief into your daily note:
+
+```bash
+npx dotaios brief
+```
 
 Search your local AIOS files:
 

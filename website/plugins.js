@@ -94,62 +94,6 @@ window.AIOS_PLUGINS = [
     ],
   },
   {
-    id: "daily-brief",
-    name: "Daily brief",
-    slash: "/daily-brief",
-    glyph: "Db",
-    tagline: "A short operating brief from your priorities and recent memory.",
-    category: "Planning",
-    author: "DotAIOS",
-    price: "Included",
-    version: "1.0",
-    longDescription:
-      "A concise daily brief so you don't have to reread your whole AIOS. Pulls together current priorities, work, north star, recent memory, and (optionally) calendar output. Returns a short plan with open loops and one suggested next action.",
-    does: [
-      "Surfaces top focus, open loops, and time constraints",
-      "Suggests one small next action",
-      "Optionally uses Google agenda output if you've connected it",
-    ],
-    doesnt: [
-      "Does not contact Google directly without your command",
-      "Does not create calendar events or send mail",
-      "Does not update context without approval",
-    ],
-    tryit: [
-      "make my daily brief",
-      "what should I pay attention to today?",
-      "use daily-brief",
-    ],
-  },
-  {
-    id: "morning-digest",
-    name: "Morning digest",
-    slash: "/morning-digest",
-    glyph: "Md",
-    tagline: "Yesterday's signals, today's priorities. A quick morning review.",
-    category: "Planning",
-    author: "DotAIOS",
-    price: "Included",
-    version: "1.0",
-    longDescription:
-      "What changed yesterday, what to focus on today. Surfaces deadlines, blockers, and open loops from recent activity and connects them back to your stated priorities.",
-    does: [
-      "Summarizes what changed since the last digest",
-      "Connects the day back to your priorities",
-      "Suggests one small AIOS maintenance action if something looks off",
-    ],
-    doesnt: [
-      "Does not read email, calendar, or messages unless a plugin captured them",
-      "Does not plan the day in detail — that's /plan-today",
-      "Does not invent external news",
-    ],
-    tryit: [
-      "morning brief",
-      "what did I miss yesterday?",
-      "give me a daily digest",
-    ],
-  },
-  {
     id: "weekly-review",
     name: "Weekly review",
     slash: "/weekly-review",

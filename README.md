@@ -97,10 +97,8 @@ After `dotaios activate`, every DotAIOS skill becomes a slash command in Claude 
 | `/today` | Builds today's plan and saves it as a daily note |
 | `/closeday` | Closes out today's note and stages carryovers for tomorrow |
 | `/audit` | Weekly health check of your AIOS |
-| `/morning-digest` | Yesterday's signals + today's priorities |
 | `/ingest` | Saves a URL, PDF, or document into your vault |
 | `/import-context` | Routes pasted context from another AI chat |
-| `/daily-brief` | Builds a short operating brief from priorities and recent memory |
 | `/privacy-brief` | Distills sensitive local context into a cloud safe brief |
 | `/summarize-source` | Turns ingested raw material into a useful local summary |
 | `/weekly-review` | Reviews recent memory and proposes context/project updates |
@@ -118,13 +116,38 @@ npx dotaios ingest notes.txt                     # text → wrapped in Markdown
 npx dotaios ingest archive.zip                   # unknown binary → vault/assets/
 ```
 
+Route by purpose with `--to` to put things in the right place from the start:
+
+```bash
+npx dotaios ingest research.pdf --to wiki --name ai-research           # lasting reference → vault/wiki/
+npx dotaios ingest brief.pdf --to company --name acme --apply          # org record → vault/org/companies/
+npx dotaios ingest call-notes.txt --to signal                          # working note → memory/signals/
+```
+
+| `--to` | Where it lands | Notes |
+|---|---|---|
+| `raw` (default) | `vault/raw/<slug>.md` | Rough source, no questions asked |
+| `wiki` | `vault/wiki/<name>/_index.md` | Lasting reference. Appends if exists. Previews first; add `--apply` to write. |
+| `company` | `vault/org/companies/<name>.md` | Org record. `--name` required. Appends. Needs `--apply`. |
+| `person` | `vault/org/people/<name>.md` | Org record. `--name` required. Appends. Needs `--apply`. |
+| `signal` | `memory/signals/<date>.jsonl` | Working note. Short texts inline, long sources linked from `vault/raw`. |
+
 Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `kind`, `parser`, `title`). Documents are parsed locally, nothing is uploaded. PDFs use the bundled `unpdf` extractor by default. Install [marker-pdf](https://github.com/datalab-to/marker) for high-fidelity PDF / DOCX / PPTX / EPUB parsing.
+
+## Daily Brief
+
+```bash
+npx dotaios brief
+```
+
+Writes today's brief into `memory/daily/YYYY-MM-DD.md` as a `## Brief` section. Reads your priorities, recent open loops from memory, and carry-over from yesterday. No AI, no network, no external service. Run it each morning or enable the pre-wired schedule in `~/aios/schedules.yml` with your local automation tool.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
 | `dotaios setup` | One-shot: init + activate + reveal (best for first-time users) |
+| `dotaios brief` | Writes today's local brief into `memory/daily/YYYY-MM-DD.md` |
 | `dotaios doctor` | One-stop health check |
 | `dotaios init` | Interactive setup, creates `~/aios/` |
 | `dotaios activate` | Connects Claude Code, Codex, Gemini, and registers skills |

@@ -8,7 +8,7 @@ This document explains how the marketplace works for users, and how vendors (you
 
 The marketplace is a single static JSON file served from the DotAIOS website at `https://dotaios.com/registry.json`. The CLI reads it on `dotaios market list` and never modifies it. No DotAIOS server. No accounts. Vendors can publish their own registries by pointing users at `--registry <url>`.
 
-The bundled free skills (`audit`, `plan-today`, `daily-brief`, `morning-digest`, `closeday`, `today`, `weekly-review`, `privacy-brief`, `summarize-source`, `ingest`, `import-context`) ship with the CLI itself and are NOT listed in the marketplace. They are installed automatically during `dotaios init`.
+The bundled free skills (`audit`, `plan-today`, `closeday`, `today`, `weekly-review`, `privacy-brief`, `summarize-source`, `ingest`, `import-context`) ship with the CLI itself and are NOT listed in the marketplace. They are installed automatically during `dotaios init`.
 
 ## For users
 

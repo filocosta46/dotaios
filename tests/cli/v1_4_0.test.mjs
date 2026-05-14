@@ -1022,7 +1022,7 @@ test("activate symlinks AIOS skills into ~/.claude/skills/ for slash-command dis
   const claudeSkills = path.join(homePath, ".claude", "skills");
   assert.equal(fs.existsSync(claudeSkills), true, "~/.claude/skills/ should be created");
 
-  for (const name of ["audit", "ingest", "plan-today", "morning-digest", "import-context"]) {
+  for (const name of ["audit", "ingest", "plan-today", "today", "closeday", "import-context"]) {
     const link = path.join(claudeSkills, name);
     assert.equal(fs.existsSync(link), true, `expected symlink at ${link}`);
     const stat = fs.lstatSync(link);

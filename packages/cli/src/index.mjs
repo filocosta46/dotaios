@@ -10,6 +10,7 @@ const VERSION = pkg.version;
 const commands = {
   activate: "./commands/activate.mjs",
   attach: "./commands/activate.mjs",
+  brief: "./commands/brief.mjs",
   cleanup: "./commands/cleanup.mjs",
   connect: "./commands/connect.mjs",
   context: "./commands/context.mjs",
@@ -43,6 +44,7 @@ Commands:
   doctor            One-stop health check
   activate          Connect ~/aios to global agent memory files
   attach <dir>      Connect a project folder to DotAIOS
+  brief             Write today's brief into memory/daily/YYYY-MM-DD.md
   cleanup           Trim stale signals and compact the event log
   connect google    Connect optional local integrations such as Google Workspace
   context [name]    View, edit, or refresh local context files

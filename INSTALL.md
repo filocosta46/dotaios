@@ -95,17 +95,19 @@ Instead, say something like this (adapt to what they told you):
 >
 > **Skills you can use right now** (just ask me, or type `/` in Claude Code):
 >
-> - `/daily-brief` — a quick snapshot of where things stand based on your priorities
-> - `/morning-digest` — what happened recently + what to focus on today
 > - `/plan-today` — a structured plan for the day (works best after a few sessions)
+> - `/today` — save today's plan to a daily note
+> - `/closeday` — close the day and carry unfinished work forward
 > - `/ingest` — save any article, PDF, or document into your memory vault
 > - `/weekly-review` — review the week and update your context
 > - `/audit` — check that your setup is healthy
 >
+> **A brief you can run any time:** `npx dotaios brief` writes today's local brief into your daily note.
+>
 > **How the system grows with you:**
 > The more you use it, the more useful it gets. When a project changes, tell me and I'll update `work.md`. When your priorities shift, just say so. You can also drag any document in at any time and I'll save it to your vault.
 >
-> **One good first thing to try:** Ask me to run `/daily-brief`. It'll show you what I currently know about you — good way to check that everything looks right."
+> **One good first thing to try:** Ask me to run `npx dotaios brief`. It'll show you what DotAIOS can already give back from your local context."
 
 ---
 

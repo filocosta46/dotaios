@@ -139,27 +139,13 @@ test("buildPlan skips compiled prompt when content matches existing", () => {
   assert.deepEqual(prompts, []);
 });
 
-test("buildPlan emits both compiled prompts when both skills are installed", () => {
+test("buildPlan ignores removed brief skills even if old folders exist", () => {
   const sources = makeSources({ withPreferences: true, installedSkills: ["plan-today", "morning-digest"] });
   const answers = { ...defaultAnswers(sources), planStyle: "balanced" };
   const plan = buildPlan("/aios", sources, answers);
 
   const prompts = plan.filter((item) => item.path.endsWith("prompt.md"));
-  assert.equal(prompts.length, 2);
-  assert.ok(prompts.some((item) => item.path.includes("plan-today")));
-  assert.ok(prompts.some((item) => item.path.includes("morning-digest")));
-  for (const p of prompts) assert.match(p.content, /Plan style: balanced/);
-});
-
-test("buildPlan deduplicates morning-digest prompt on re-run", () => {
-  const sources = makeSources({ withPreferences: true, installedSkills: ["morning-digest"] });
-  const answers = defaultAnswers(sources);
-  const firstPlan = buildPlan("/aios", sources, answers);
-  const initialPrompt = firstPlan.find((item) => item.path.endsWith("morning-digest/prompt.md"));
-  assert.ok(initialPrompt);
-
-  sources.currentPrompts["morning-digest"] = initialPrompt.content;
-  const secondPlan = buildPlan("/aios", sources, answers);
-  const prompts = secondPlan.filter((item) => item.path.endsWith("prompt.md"));
-  assert.deepEqual(prompts, []);
+  assert.equal(prompts.length, 1);
+  assert.ok(prompts[0].path.includes("plan-today"));
+  assert.doesNotMatch(prompts[0].path, /morning-digest/);
 });

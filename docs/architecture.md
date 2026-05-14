@@ -24,7 +24,7 @@ DotAIOS is a local file convention.
 - today and yesterday from `signals/`
 - `errors.jsonl` only when debugging
 
-**Daily notes** live in `memory/daily/YYYY-MM-DD.md`. The `/today` skill writes today's note (focus, plan, frog). The `/closeday` skill fills the close-out section (done, carry-over, reflection) and stages carry-overs into the next day's note. Daily notes are operational memory, not long-term knowledge — they belong in `memory/`, not `vault/`.
+**Daily notes** live in `memory/daily/YYYY-MM-DD.md`. `dotaios brief` writes the deterministic `## Brief` section. The `/today` skill writes today's plan (focus, plan, frog). The `/closeday` skill fills the close-out section (done, carry-over, reflection) and stages carry-overs into the next day's note. Daily notes are operational memory, not long-term knowledge — they belong in `memory/`, not `vault/`.
 
 ## Vault
 

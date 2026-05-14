@@ -2,6 +2,24 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.12.0] - 2026-05-14
+### Added
+- `dotaios brief` — writes today's deterministic local brief into `memory/daily/YYYY-MM-DD.md` as a `## Brief` section. It reads priorities, recent open loops, and carry-over; no LLM or external service required.
+- New AIOS folders now include a disabled daily brief schedule in `schedules.yml` (`dotaios brief`, daily), so the output loop is visible and can be enabled once.
+- `dotaios ingest --to raw|wiki|company|person|signal` — route an ingested item to a shelf by purpose instead of always landing in `vault/raw`. `--name <name>` sets the record name (required for `company`/`person`, optional for `wiki`).
+- Interactive shelf routing: `dotaios ingest <input>` with no `--to` in a Terminal now asks one plain question (rough source / lasting reference / company / person / working note); Enter defaults to `vault/raw`.
+- `--apply` flag on `ingest`. Durable shelves (`wiki`, `company`, `person`) require approval: a non-interactive caller (an agent or script) gets a preview and writes nothing unless `--apply` is passed. A human picking the shelf interactively counts as approval.
+- `packages/cli/src/ingest/placement.mjs` — shared shelf router used by the web, document, and text ingest paths.
+
+### Changed
+- `dotaios ingest` with no `--to` and no Terminal (agent/script) keeps today's behavior — saves to `vault/raw` — and prints a note pointing at `--to`.
+- Ingesting onto a durable shelf that already has a record for that name now **appends** the new content under a dated heading instead of overwriting.
+- `--to signal` appends a working note to `memory/signals/<date>.jsonl`; long parsed documents are preserved as markdown in `vault/raw` and linked from the signal.
+- `skills/ingest/SKILL.md` documents `--to`, `--name`, `--apply`, and the durable-shelf approval gate so every agent routes by purpose.
+
+### Removed
+- Removed the overlapping `daily-brief` and `morning-digest` skills. `dotaios brief` is now the single brief path, and it writes the result down instead of printing into the void.
+
 ## [1.11.0] - 2026-05-14
 ### Added
 - `skills/INDEX.md` — an auto-generated, agent-neutral list of every installed skill with a one-line description and run instructions. Regenerated on `init`, `activate`, raw-skill install, and `skill remove`, so every connected agent (not just Claude Code) can discover and run skills.

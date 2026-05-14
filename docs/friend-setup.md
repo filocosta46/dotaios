@@ -131,6 +131,8 @@ After all 5 steps, you have:
 3. A `_index.md` your agents can scan to find specific files.
 4. Skill folders in `~/aios/skills/` that explain what each skill does, what it does not do, and how to trigger it.
 
+Each morning you can run `npx dotaios brief` to get a local summary of today's priorities, open loops, and carry-over from yesterday, written directly into `memory/daily/`. Your `~/aios/schedules.yml` has a pre-wired daily schedule you can enable whenever you're ready.
+
 You can stop here. Everything below is optional.
 
 ## Optional: link a Cursor project

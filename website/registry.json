@@ -1,6 +1,6 @@
 {
   "version": "1.0",
   "generated_at": "2026-05-13",
-  "registry_notes": "The DotAIOS marketplace. Bundled free skills (audit, plan-today, daily-brief, etc) ship with the CLI itself and are NOT listed here. This file only advertises paid packs and curated third-party skills you can install on top.",
+  "registry_notes": "The DotAIOS marketplace. Bundled free skills (audit, plan-today, today, closeday, etc) ship with the CLI itself and are NOT listed here. This file only advertises paid packs and curated third-party skills you can install on top.",
   "skills": []
 }

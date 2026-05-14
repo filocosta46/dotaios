@@ -45,7 +45,7 @@ const SCRIPT = [
   { t: 13.8, id: "skills",     parent: "self",      cat: "skill",   label: "skills" },
   { t: 14.5, id: "today",      parent: "skills",    cat: "skill",   label: "/today" },
   { t: 15.2, id: "closeday",   parent: "skills",    cat: "skill",   label: "/closeday" },
-  { t: 15.9, id: "brief",      parent: "skills",    cat: "skill",   label: "/daily-brief" },
+  { t: 15.9, id: "brief",      parent: "daily",     cat: "memory",  label: "brief" },
   { t: 16.6, id: "ingest",     parent: "skills",    cat: "skill",   label: "/ingest" },
   { t: 17.3, id: "audit",      parent: "skills",    cat: "skill",   label: "/audit" },
 

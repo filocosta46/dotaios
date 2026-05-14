@@ -27,7 +27,6 @@ Files updated:
   context/priorities.md         (## Current Bets)
   context/preferences.md        (Planning preferences — created on first run)
   skills/plan-today/prompt.md   (Compiled personalization — auto-generated)
-  skills/morning-digest/prompt.md (Compiled personalization — auto-generated)
 `;
 
 const PREFERENCE_FIELDS = [
@@ -37,7 +36,7 @@ const PREFERENCE_FIELDS = [
   { key: "frogDefinition", currentKey: "currentFrogDefinition", label: "Frog definition", prompt: "What counts as a 'frog' (hard / overdue / avoided task)", default: "overdue tasks" }
 ];
 
-const COMPILED_SKILLS = ["plan-today", "morning-digest"];
+const COMPILED_SKILLS = ["plan-today"];
 
 export async function interviewCommand(args) {
   if (hasHelpFlag(args)) {
@@ -183,7 +182,7 @@ async function askAll(rl, sources) {
   }
 
   console.log("Planning preferences");
-  console.log("These shape how /plan-today and /morning-digest think about your day.\n");
+  console.log("These shape how /plan-today thinks about your day.\n");
 
   for (const field of PREFERENCE_FIELDS) {
     const current = sources[field.currentKey] || field.default;
@@ -302,4 +301,3 @@ function renderCompiledPrompt(skill, sources, answers) {
     ""
   ].join("\n");
 }
-

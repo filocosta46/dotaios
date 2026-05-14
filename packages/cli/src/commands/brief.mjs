@@ -1,0 +1,263 @@
+import fs from "node:fs/promises";
+import path from "node:path";
+import { appendEvent, readRecentEvents, readRecentSignals } from "../../../core/src/memory.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { readSection, replaceSection } from "../../../core/src/sections.mjs";
+import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+
+const HELP_TEXT = `Usage:
+  dotaios brief [daily] [options]
+
+Writes today's brief into memory/daily/YYYY-MM-DD.md as a ## Brief section.
+The brief is deterministic: priorities, open loops, and carry-over. No AI or
+external services required.
+
+Options:
+  --path <dir>  Use an AIOS folder other than ~/aios
+  --dry-run     Print the brief without writing the daily note
+`;
+
+const OPEN_LOOP_RE = /\b(open|loop|blocker|blocked|waiting|follow[- ]?up|todo|to do|next action|deadline|due|carry[- ]?over)\b/i;
+
+export async function briefCommand(args) {
+  if (hasHelpFlag(args)) {
+    console.log(HELP_TEXT);
+    return;
+  }
+
+  const options = parseOptions(args);
+  const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+  await ensureAiosFolder(target);
+
+  const now = new Date();
+  const date = localDate(now);
+  const dailyPath = path.join(target, "memory", "daily", `${date}.md`);
+  const brief = await buildDailyBrief(target, date, now);
+
+  if (options.dryRun) {
+    console.log(`(dry run — would update ${dailyPath})\n`);
+    console.log(brief);
+    return;
+  }
+
+  const existing = await readOrEmpty(dailyPath);
+  const updated = upsertBriefSection(existing, { date, brief, now });
+  await fs.mkdir(path.dirname(dailyPath), { recursive: true });
+  await fs.writeFile(dailyPath, updated, "utf8");
+
+  await appendEvent(path.join(target, "memory", "events.jsonl"), {
+    type: "brief",
+    summary: `Daily brief written for ${date}.`,
+    source: "dotaios brief"
+  });
+
+  console.log(`Brief saved at ${dailyPath}`);
+}
+
+function parseOptions(args = []) {
+  const options = { dryRun: false, path: null };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "daily") {
+      continue;
+    } else if (arg === "--dry-run") {
+      options.dryRun = true;
+    } else if (arg === "--path") {
+      options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+
+  return options;
+}
+
+export async function buildDailyBrief(aiosPath, date = localDate(new Date()), now = new Date()) {
+  const [priorities, events, signals, carryOver] = await Promise.all([
+    readPriorities(aiosPath),
+    readRecentEvents(path.join(aiosPath, "memory", "events.jsonl")),
+    readRecentSignals(path.join(aiosPath, "memory", "signals")),
+    readCarryOver(aiosPath, date, now)
+  ]);
+
+  const openLoops = extractOpenLoops([...signals, ...events]);
+
+  return renderBrief({
+    date,
+    priorities,
+    openLoops,
+    carryOver
+  });
+}
+
+async function readPriorities(aiosPath) {
+  const content = await readOrEmpty(path.join(aiosPath, "context", "priorities.md"));
+  const currentBets = readSection(content, "Current Bets");
+  return compactLines(currentBets || stripFrontmatter(content)).slice(0, 5);
+}
+
+async function readCarryOver(aiosPath, date, now) {
+  const dailyDir = path.join(aiosPath, "memory", "daily");
+  const yesterday = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+
+  const [todayNote, yesterdayNote] = await Promise.all([
+    readOrEmpty(path.join(dailyDir, `${date}.md`)),
+    readOrEmpty(path.join(dailyDir, `${yesterday}.md`))
+  ]);
+
+  const todayCarry = compactLines(extractCarriedOverPlan(todayNote));
+  const close = readSection(yesterdayNote, "Close");
+  const yesterdayCarry = compactLines(readSubsection(close, "Carry-over"));
+
+  return dedupe([...todayCarry, ...yesterdayCarry]).slice(0, 5);
+}
+
+function extractOpenLoops(entries) {
+  const candidates = [];
+  for (const entry of entries.slice().reverse()) {
+    const summary = String(entry.summary || entry.note || "").trim();
+    if (!summary || !OPEN_LOOP_RE.test(summary)) continue;
+    candidates.push(summary);
+  }
+  return dedupe(candidates).slice(0, 5);
+}
+
+function extractCarriedOverPlan(content) {
+  const plan = readSection(content, "Plan");
+  const marker = "Carried over from ";
+  const index = plan.indexOf(marker);
+  return index === -1 ? "" : plan.slice(index);
+}
+
+function readSubsection(content, heading) {
+  const lines = content.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `### ${heading}`);
+  if (start === -1) return "";
+
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (line.startsWith("### ") || line.startsWith("## ")) break;
+    body.push(line);
+  }
+  return body.join("\n").trim();
+}
+
+function renderBrief({ date, priorities, openLoops, carryOver }) {
+  return [
+    `Generated by \`dotaios brief\` on ${date}.`,
+    "",
+    "### Priorities",
+    renderList(priorities, "No priorities found. Run `dotaios interview` when your week changes."),
+    "",
+    "### Open Loops",
+    renderList(openLoops, "No obvious open loops found in recent memory."),
+    "",
+    "### Carry-over",
+    renderList(carryOver, "No carry-over found from yesterday or today's plan.")
+  ].join("\n");
+}
+
+function renderList(items, emptyText) {
+  if (items.length === 0) return `- ${emptyText}`;
+  return items.map((item) => `- ${item}`).join("\n");
+}
+
+export function upsertBriefSection(content, { date, brief, now = new Date() }) {
+  if (!content.trim()) {
+    return newDailyNote({ date, brief, now });
+  }
+
+  if (/^## Brief\s*$/m.test(content)) {
+    return ensureTrailingNewline(replaceSection(content, "Brief", brief));
+  }
+
+  const lines = content.split("\n");
+  const h1Index = lines.findIndex((line) => /^#\s+/.test(line));
+  const section = ["", "## Brief", "", brief, ""];
+
+  if (h1Index !== -1) {
+    lines.splice(h1Index + 1, 0, ...section);
+    return ensureTrailingNewline(lines.join("\n"));
+  }
+
+  return ensureTrailingNewline(`${content.replace(/\s*$/, "")}\n\n## Brief\n\n${brief}\n`);
+}
+
+function newDailyNote({ date, brief, now }) {
+  return `---
+date: ${date}
+created_at: ${now.toISOString()}
+source: dotaios brief
+---
+
+# ${date}
+
+## Brief
+
+${brief}
+
+## Focus
+
+
+## Plan
+
+
+## Close
+<!-- Run /closeday to fill this section at the end of the day -->
+
+### Done
+
+### Carry-over
+
+### Reflection
+`;
+}
+
+function compactLines(content) {
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("<!--"))
+    .map((line) => line.replace(/^- \[[ x]\]\s*/i, "").replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function dedupe(items) {
+  const seen = new Set();
+  const result = [];
+  for (const item of items) {
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+function stripFrontmatter(content) {
+  if (!content.startsWith("---\n")) return content;
+  const end = content.indexOf("\n---", 4);
+  if (end === -1) return content;
+  return content.slice(end + 4);
+}
+
+async function readOrEmpty(filePath) {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function ensureTrailingNewline(content) {
+  return content.endsWith("\n") ? content : `${content}\n`;
+}
+
+function localDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}

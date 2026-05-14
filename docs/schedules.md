@@ -6,11 +6,15 @@ Schedules live in `~/aios/schedules.yml`:
 
 ```yaml
 schedules:
-  - name: weekly-status
-    cadence: weekly
-    command: "dotaios status"
-    enabled: true
+  - name: daily-brief
+    cadence: daily
+    command: "dotaios brief"
+    enabled: false
 ```
+
+New AIOS folders include that disabled daily brief schedule. Change
+`enabled: false` to `enabled: true` when you want DotAIOS to write a local
+brief on cadence.
 
 Supported cadence values:
 
@@ -42,7 +46,7 @@ npx dotaios schedule run-due
 Run one schedule:
 
 ```bash
-npx dotaios schedule run weekly-status
+npx dotaios schedule run daily-brief
 ```
 
 Check local automation setup:

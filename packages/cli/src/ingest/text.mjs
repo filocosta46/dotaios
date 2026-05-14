@@ -1,8 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { appendEvent } from "../../../core/src/memory.mjs";
-import { readFrontmatterSource, resolveMarkdownDestination } from "./destinations.mjs";
+import { readFrontmatterSource } from "./destinations.mjs";
 import { buildFrontmatter, slugify } from "./frontmatter.mjs";
+import { describeShelfTarget, placeMarkdown } from "./placement.mjs";
 import { IngestError } from "./web.mjs";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
@@ -27,6 +27,12 @@ export async function ingestText(rawInput, options) {
     eventsPath,
     overwrite = false,
     dryRun = false,
+    shelf = "raw",
+    name = null,
+    vaultRoot = null,
+    signalsDir = null,
+    apply = false,
+    interactive = false,
     now = () => new Date()
   } = options;
 
@@ -39,7 +45,6 @@ export async function ingestText(rawInput, options) {
 
   const baseName = path.basename(sourcePath, ext);
   const baseSlug = slugify(baseName);
-  const destination = path.join(rawDir, `${baseSlug}.md`);
 
   if (dryRun) {
     return {
@@ -47,7 +52,13 @@ export async function ingestText(rawInput, options) {
       kind: "text",
       parser: "copy",
       canonical: sourcePath,
-      plan: { kind: "text", parser: "copy", source: sourcePath, destination }
+      plan: {
+        kind: "text",
+        parser: "copy",
+        source: sourcePath,
+        shelf,
+        destination: describeShelfTarget({ shelf, vaultRoot, rawDir, signalsDir, name, baseSlug })
+      }
     };
   }
 
@@ -57,23 +68,6 @@ export async function ingestText(rawInput, options) {
     ext === ".md" && FRONTMATTER_RE.test(sourceContent)
       ? readFrontmatterSource(sourceContent) || sourcePath
       : sourcePath;
-
-  const target = await resolveMarkdownDestination({
-    rawDir,
-    baseSlug,
-    source: canonicalSource,
-    overwrite
-  });
-  if (target.action === "skip") {
-    return {
-      action: "skipped",
-      destination: target.destination,
-      slug: target.slug,
-      parser: "copy",
-      kind: "text",
-      canonical: canonicalSource
-    };
-  }
 
   const title = baseName;
   const ingestedAt = now().toISOString();
@@ -93,26 +87,24 @@ export async function ingestText(rawInput, options) {
     body = `${frontmatter}\n${wrapped}`;
   }
 
-  await fs.mkdir(rawDir, { recursive: true });
-  await fs.writeFile(target.destination, body.endsWith("\n") ? body : `${body}\n`);
-
-  await appendEvent(eventsPath, {
-    type: "ingest",
+  return await placeMarkdown({
+    shelf,
+    name,
+    vaultRoot,
+    rawDir,
+    signalsDir,
+    eventsPath,
+    baseSlug,
     source: canonicalSource,
-    destination: target.destination,
+    title,
+    body,
     kind: "text",
     parser: "copy",
-    summary: title
+    overwrite,
+    apply,
+    interactive,
+    now
   });
-
-  return {
-    action: "written",
-    destination: target.destination,
-    slug: target.slug,
-    parser: "copy",
-    kind: "text",
-    canonical: canonicalSource
-  };
 }
 
 function wrapBody(ext, content) {
