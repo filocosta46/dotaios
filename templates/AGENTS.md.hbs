@@ -1,16 +1,33 @@
-# AGENTS.md
+# {{user_name}}'s AIOS
 
-Agent-neutral entrypoint for Codex, Gemini, Cursor, OpenHands, and other repo-aware assistants.
+If you are an AI agent and this folder was just opened, read this file top to
+bottom first. It is the single source of truth for this folder — it works for
+any agent (Claude Code, Codex, Gemini, Cursor, and ones not listed here).
 
-## Purpose
+## What This Is
 
-This folder is {{user_name}}'s local AIOS: durable, local-first context that helps AI agents understand identity, active work, priorities, and communication preferences.
+This folder is {{user_name}}'s local AIOS: durable, local-first context that
+helps AI agents understand who the user is, their active work, priorities, and
+communication preferences. It is plain text the user owns. No servers, no cloud.
 
 {{#if vault_path}}
 Long-term knowledge is configured at `{{vault_path}}`.
 {{else}}
 Long-term knowledge is configured at `vault/`.
 {{/if}}
+
+## Where Things Live
+
+| Folder | What |
+|---|---|
+| `context/` | Who the user is, what they are working on, current priorities |
+| `projects/` | Active work, one folder per project |
+| `memory/` | Recent operational memory; load only the routed slices |
+| `vault/` | Long-term knowledge, loaded on demand |
+| `connections/` | Service registry and API notes |
+| `skills/` | Reusable markdown workflows |
+| `plugins/` | Optional extensions with declared permissions |
+| `decisions/log.md` | Append-only architectural and product decisions |
 
 ## Read Order
 
@@ -20,6 +37,13 @@ Long-term knowledge is configured at `vault/`.
 4. `context/north-star.md`
 5. If working on a project: `projects/<slug>/README.md`
 6. Load declared domain files from `context/domains/<domain>.md`
+
+## Memory Routing
+
+- `memory/events.jsonl`: load the last 50 entries only.
+- `memory/signals/`: load today and yesterday only.
+- `memory/errors.jsonl`: load only when debugging failed operations.
+- `vault/`: load on demand when the task references knowledge, companies, people, writing style, or raw sources.
 
 ## Project Convention
 
@@ -41,7 +65,9 @@ Available domains:
 
 ## Skills
 
-Skills live in `skills/<name>/SKILL.md`. They are plain markdown instruction sets. Follow them when the user invokes a skill by name or asks for that workflow.
+Skills live in `skills/<name>/SKILL.md`. They are plain markdown instruction
+sets — any agent can run one by reading its `SKILL.md` and following it. Follow
+a skill when the user invokes it by name or asks for that workflow.
 
 ### Installing new skills
 

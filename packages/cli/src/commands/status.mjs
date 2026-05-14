@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome, requiredAiosFiles, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { AGENT_BRIDGES, MANAGED_START, bridgePath } from "../../../core/src/bridges.mjs";
+import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
 import { detectMarker } from "../ingest/pdf.mjs";
 import { parsePathHomeOptions } from "../lib/args.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
@@ -164,9 +164,16 @@ async function readConnections(registryPath) {
 
 async function checkAgentBridges(target, homePath) {
   const results = [];
+  const registry = await loadAgentRegistry(target);
 
-  for (const agent of AGENT_BRIDGES) {
+  for (const agent of registry) {
     const filePath = bridgePath(homePath, agent);
+
+    if (!await isAgentInstalled(homePath, agent)) {
+      results.push({ status: "[info]", path: filePath, note: `${agent.name} not installed` });
+      continue;
+    }
+
     let content;
     try {
       content = await fs.readFile(filePath, "utf8");

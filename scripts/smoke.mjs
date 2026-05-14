@@ -19,7 +19,7 @@ run(["context", "--path", aiosPath]);
 run(["context", "identity", "--path", aiosPath]);
 run(["context", "--refresh", "--path", aiosPath]);
 fs.mkdirSync(projectPath, { recursive: true });
-run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath]);
+run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath, "--all"]);
 fs.writeFileSync(importPath, JSON.stringify({
   context: { work: "Imported smoke context." },
   events: [{ type: "smoke-import", summary: "Smoke import verified." }]

@@ -1,0 +1,22 @@
+{
+  "agents": [
+    {
+      "name": "Claude Code",
+      "detect": ".claude",
+      "bridge": ".claude/CLAUDE.md",
+      "include": "@"
+    },
+    {
+      "name": "Codex",
+      "detect": ".codex",
+      "bridge": ".codex/AGENTS.md",
+      "include": ""
+    },
+    {
+      "name": "Gemini",
+      "detect": ".gemini",
+      "bridge": ".gemini/GEMINI.md",
+      "include": "@"
+    }
+  ]
+}

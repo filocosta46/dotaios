@@ -1,40 +1,45 @@
 # DotAIOS Project State & Handover
 
-> **Date:** 2026-05-12
-> **Latest Release:** `v1.9.0` (Live on npm and GitHub)
+> **Date:** 2026-05-14
+> **Latest Release:** `v1.10.0` (Live on npm and GitHub)
 
-This document is meant to be read by the next AI Agent that resumes work on the DotAIOS project. It contains the exact state of the repository, recent architectural decisions, and the immediate next steps.
+This document is meant to be read by the next AI Agent that resumes work on the DotAIOS project. It contains the exact state of the repository, recent decisions, and the immediate next steps.
 
 ---
 
 ## 1. Current State of the Codebase
 
-- **Core CLI (`packages/cli/`)**: The CLI is stable at `v1.9.0`. It now supports installing plugins from local folders AND directly from external URLs (`git clone ...`). It also supports installing "raw skills" (folders with just a `SKILL.md` and no manifest).
-- **Documentation (`README.md`)**: The README has been completely rewritten to be non-technical and ICP-friendly. All dashes and hyphens have been removed from the prose to ensure it reads cleanly as plain English text. Markdown tables have been replaced with bulleted lists.
-- **Website (`website/`)**: A modern, static React-based landing page has been integrated directly into the monorepo under the `website/` directory.
+- **Core CLI (`packages/cli/`)**: Stable at `v1.10.0`. Ships the one-shot `setup` wizard, the `doctor` health check, the `skill`/`market`/`license` command surfaces, git-URL plugin installs, and the monetization manifest fields.
+- **Document ingestion**: The Universal Knowledge Router (`dotaios ingest`) is implemented and working. PDF/DOCX/PPTX/EPUB use Marker (`marker_single`) when installed, with a built-in `unpdf` fallback for PDF only. See `packages/cli/src/ingest/pdf.mjs`.
+- **Website (`website/`)**: Static landing page in the monorepo, deployed to Vercel (Root Directory `website`, Framework Preset `Other`, no `vercel.json`, no fake `build` script).
 
-## 2. Vercel Deployment Architecture
+## 2. Built Ahead Of Need — Keep Frozen
 
-The DotAIOS landing page is successfully deployed to Vercel. 
-**Crucial Context for Agents:**
-- We **do not** use a `vercel.json` file in the repo root.
-- We **do not** use a fake `build` script in `package.json`.
-- The Vercel project is configured entirely via the Vercel Dashboard:
-  - **Framework Preset**: `Other`
-  - **Root Directory**: `website`
-- **Workflow**: Any changes made to the `website/` directory and pushed to the `main` branch will automatically trigger a clean, static deployment on Vercel without attempting to install the CLI's npm dependencies. 
-- To test the website locally, run: `npx serve website` from the repo root.
+The skill **marketplace**, **license-key system**, and **Windows installer** were built ahead of demand. There are no paid skills yet. Do not extend or refactor these — leave them alone and focus elsewhere. This is a go-to-market sequencing call for Filippo, not an engineering problem.
 
-## 3. What Was Just Completed
+## 3. Active Work — Make The Folder Agent-Agnostic
 
-1. **Vercel Troubleshooting:** Resolved a 404 NOT_FOUND error by correcting the Vercel Dashboard settings to point the Root Directory to `website/` instead of overriding it via `vercel.json`.
-2. **README Polish:** Stripped all technical artifacts (dashes, complex tables) from the public-facing documentation.
-3. **v1.9.0 Release:** Bumped the version, updated the `CHANGELOG.md`, tagged the release on GitHub, and published the package to the npm registry.
+The current focus. Today DotAIOS only knows how to connect three AI tools (Claude Code, Codex, Gemini) — the list is frozen in code, so a new agent gets nothing, a mid-task tool switch hits a wall, and installed skills only ever reach Claude.
 
-## 4. Next Steps / Future Roadmap
+Approved direction: **Approach C built on A.**
+- **A** — move the frozen tool list out of code into an editable registry (`packages/core/src/agents.json`, extendable per-user via `~/aios/agents.json`); only connect tools actually installed on the machine.
+- **C** — make `AGENTS.md` inside the AIOS folder the single canonical, agent-neutral front door; `CLAUDE.md` shrinks to a one-line pointer at it. Every bridge file points at `AGENTS.md`.
 
-*(Add your immediate thoughts or tasks here before your next session)*
+Shipping in two releases:
+- **Release 1 (shipped):** editable registry, connect-only-installed, `AGENTS.md` as canonical front door, `CLAUDE.md` thin pointer. Plus housekeeping.
+- **Release 2 (in progress):** a live skills section in `AGENTS.md` so *every* agent can discover and run installed skills (today only Claude can) — this is the non-negotiable give-back-loop requirement — plus a copy-paste line for tools DotAIOS has never heard of.
 
-- [ ] Delete the experimental `filocosta46/dotaios-web` GitHub repository (it is redundant since the website is now hosted in the main CLI repo).
-- [ ] Monitor the Vercel deployment for any caching or CDN issues.
-- [ ] Continue building out the plugin ecosystem and marketplace (which can now be installed via raw URLs thanks to the v1.9.0 updates).
+> **Framing rule — do not let this drift.** `agents.json` is **Filippo's lever and a power-user escape hatch — never the user's job.** Our ICP is non-technical; hand-editing JSON is unsafe (a missing comma breaks it silently). The honest story: new AI tools are added by Filippo in shipped updates, and the user just re-runs `dotaios setup`. Never pitch "any user can add a tool by editing agents.json." If user-added tools ever become a real need, it must be a guided command (`dotaios agents add` asking plain questions), not hand-edited JSON.
+
+> **Pillar status — not done until Release 2 lands.** Release 1 sets up the agent-agnostic pillar but does not yet deliver it. Until Release 2 ships, a person opening an unconnected or unknown agent still gets nothing and has no signal to act. Do not describe the pillar as done until Release 2 is shipped.
+
+## 4. After That — Smarter Memory Routing (investigate, do not start)
+
+Today a dropped PDF/document always lands in `vault/raw` — it routes by file *type*, not by *purpose*. Goal: a dropped source should land on the right shelf (transient/operational note vs lasting reference) with minimal friction for a non-technical person. Marker already handles the file conversion; the gap is the "which shelf" decision. Investigate and propose only after the agent-agnostic work is shipped and approved.
+
+## 5. Guardrails
+
+- Stay narrow. No web app, no GUI framework, no multi-agent orchestration.
+- Do not touch the frozen marketplace / license / installer code.
+- Keep `npm test` and `npm run smoke` green.
+- Filippo is the non-technical founder. Lead updates with user/business impact, not file names.

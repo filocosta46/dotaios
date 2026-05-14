@@ -8,16 +8,37 @@ import assert from "node:assert/strict";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
-test("activate creates global and project agent bridges", () => {
+test("activate creates global and project agent bridges for installed tools", () => {
   const { aiosPath, homePath, projectPath } = setupAios();
+  installAgents(homePath);
 
   run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath]);
 
-  assert.match(read(path.join(homePath, ".claude", "CLAUDE.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "CLAUDE.md"))}`));
+  assert.match(read(path.join(homePath, ".claude", "CLAUDE.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
   assert.match(read(path.join(homePath, ".codex", "AGENTS.md")), new RegExp(escapeRegex(path.join(aiosPath, "AGENTS.md"))));
   assert.match(read(path.join(homePath, ".gemini", "GEMINI.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
   assert.match(read(path.join(projectPath, ".cursor", "rules", "dotaios.mdc")), /alwaysApply: true/);
   assert.match(read(path.join(projectPath, "AGENTS.md")), /DotAIOS Project Bridge/);
+});
+
+test("activate skips AI tools that are not installed on the machine", () => {
+  const { aiosPath, homePath } = setupAios();
+
+  const result = run(["activate", "--path", aiosPath, "--home", homePath]);
+
+  assert.equal(fs.existsSync(path.join(homePath, ".claude", "CLAUDE.md")), false);
+  assert.equal(fs.existsSync(path.join(homePath, ".codex", "AGENTS.md")), false);
+  assert.match(result.stdout, /No known AI tools were detected/);
+});
+
+test("activate --all connects every known tool even when not detected", () => {
+  const { aiosPath, homePath } = setupAios();
+
+  run(["activate", "--path", aiosPath, "--home", homePath, "--all"]);
+
+  assert.match(read(path.join(homePath, ".claude", "CLAUDE.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
+  assert.match(read(path.join(homePath, ".codex", "AGENTS.md")), new RegExp(escapeRegex(path.join(aiosPath, "AGENTS.md"))));
+  assert.match(read(path.join(homePath, ".gemini", "GEMINI.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
 });
 
 test("activate preserves unmanaged files by default", () => {
@@ -48,7 +69,8 @@ test("context prints files and refreshes generated entrypoints", () => {
   assert.match(contextResult.stdout, /- Name: Ada/);
 
   run(["context", "--refresh", "--path", aiosPath]);
-  assert.match(read(path.join(aiosPath, "CLAUDE.md")), /Ada's AIOS/);
+  assert.match(read(path.join(aiosPath, "AGENTS.md")), /Ada's AIOS/);
+  assert.match(read(path.join(aiosPath, "CLAUDE.md")), /@AGENTS\.md/);
 });
 
 test("init creates secret-safe env placeholders", () => {
@@ -62,6 +84,7 @@ test("init creates secret-safe env placeholders", () => {
 
 test("status guides beta testers toward activation", () => {
   const { aiosPath, homePath } = setupAios();
+  installAgents(homePath);
 
   const before = run(["status", "--path", aiosPath, "--home", homePath]);
   assert.match(before.stdout, /Agent bridges/);
@@ -195,6 +218,14 @@ function setupAios() {
   run(["init", "--path", aiosPath, "--yes"]);
 
   return { aiosPath, homePath, projectPath, tempRoot };
+}
+
+// Simulate the per-tool config folders that DotAIOS uses to detect an
+// installed AI tool. Without these, `activate` correctly skips the tool.
+function installAgents(homePath) {
+  for (const dir of [".claude", ".codex", ".gemini"]) {
+    fs.mkdirSync(path.join(homePath, dir), { recursive: true });
+  }
 }
 
 function run(args) {

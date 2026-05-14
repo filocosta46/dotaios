@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
-import { AGENT_BRIDGES, MANAGED_START, bridgePath } from "../../../core/src/bridges.mjs";
+import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
 const MIN_NODE_MAJOR = 20;
@@ -129,9 +129,22 @@ async function checkAiosConfig(target) {
 async function checkAgentBridges(target, homePath) {
   const results = [];
   let foundBridge = false;
+  let anyInstalled = false;
 
-  for (const agent of AGENT_BRIDGES) {
+  const registry = await loadAgentRegistry(target);
+  for (const agent of registry) {
     const filePath = bridgePath(homePath, agent);
+
+    if (!await isAgentInstalled(homePath, agent)) {
+      results.push({
+        name: `${agent.name} (not installed)`,
+        status: "ok",
+        detail: "Not detected on this machine — nothing to connect."
+      });
+      continue;
+    }
+    anyInstalled = true;
+
     let content;
     try {
       content = await fs.readFile(filePath, "utf8");
@@ -139,8 +152,8 @@ async function checkAgentBridges(target, homePath) {
       results.push({
         name: `${agent.name} bridge`,
         status: "warn",
-        detail: `Not found at ${filePath}.`,
-        fix: `Run \`npx dotaios activate\` after installing ${agent.name}.`
+        detail: `${agent.name} is installed but not connected yet (no bridge at ${filePath}).`,
+        fix: "Run `npx dotaios activate`."
       });
       continue;
     }
@@ -165,12 +178,19 @@ async function checkAgentBridges(target, homePath) {
     }
   }
 
-  if (!foundBridge) {
+  if (!anyInstalled) {
+    results.push({
+      name: "At least one AI tool installed",
+      status: "warn",
+      detail: "No known AI tools detected on this machine.",
+      fix: "Install Claude Code, Cursor, Codex, or Gemini, then run `npx dotaios activate`."
+    });
+  } else if (!foundBridge) {
     results.push({
       name: "At least one AI tool connected",
       status: "warn",
-      detail: "No managed bridge points at this AIOS folder yet.",
-      fix: "Install Claude Code, Cursor, Codex, or Gemini, then run `npx dotaios activate`."
+      detail: "An AI tool is installed but no managed bridge points at this AIOS folder yet.",
+      fix: "Run `npx dotaios activate`."
     });
   }
 

@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import { pathExists } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { MANAGED_END, MANAGED_START } from "../../../core/src/bridges.mjs";
+import {
+  MANAGED_END,
+  MANAGED_START,
+  bridgeContent,
+  bridgePath,
+  isAgentInstalled,
+  loadAgentRegistry
+} from "../../../core/src/bridges.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = MANAGED_START;
@@ -20,14 +27,21 @@ export async function activateCommand(args) {
   const homePath = resolvePath(options.home || os.homedir());
   await ensureAiosFolder(aiosPath);
 
-  const results = [];
-  results.push(...await createGlobalBridges(aiosPath, homePath, options));
+  const global = await createGlobalBridges(aiosPath, homePath, options);
+  const results = [...global.results];
 
   if (options.project) {
     results.push(...await createProjectBridges(aiosPath, resolvePath(options.project), options));
   }
 
   printResults("DotAIOS activated", results);
+
+  if (global.installedCount === 0) {
+    console.log("\nNo known AI tools were detected on this machine.");
+    console.log("DotAIOS connects a tool automatically once it is installed — re-run `dotaios activate` then.");
+    console.log("To connect every known tool anyway, run `dotaios activate --all`.");
+  }
+
   if (!options.project) {
     console.log("\nFor Cursor project rules, run `dotaios attach <project-dir>` inside a project.");
   }
@@ -51,6 +65,7 @@ export async function attachCommand(args) {
 
 function parseOptions(args = []) {
   const options = {
+    all: false,
     dryRun: false,
     home: null,
     overwrite: false,
@@ -61,7 +76,9 @@ function parseOptions(args = []) {
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--dry-run") {
+    if (arg === "--all") {
+      options.all = true;
+    } else if (arg === "--dry-run") {
       options.dryRun = true;
     } else if (arg === "--overwrite") {
       options.overwrite = true;
@@ -90,6 +107,7 @@ Options:
   --path <dir>     Use an AIOS folder other than ~/aios
   --home <dir>     Write global agent bridges somewhere other than your home
   --project <dir>  Also attach DotAIOS to a project folder
+  --all            Connect every known AI tool, even ones not detected yet
   --dry-run        Show what would be written without changing files
   --overwrite      Replace existing unmanaged bridge files
 `);
@@ -107,13 +125,26 @@ Options:
 }
 
 async function createGlobalBridges(aiosPath, homePath, options) {
-  const bridges = await Promise.all([
-    writeManagedFile(path.join(homePath, ".claude", "CLAUDE.md"), claudeBridge(aiosPath), options),
-    writeManagedFile(path.join(homePath, ".codex", "AGENTS.md"), codexBridge(aiosPath), options),
-    writeManagedFile(path.join(homePath, ".gemini", "GEMINI.md"), geminiBridge(aiosPath), options)
-  ]);
+  const registry = await loadAgentRegistry(aiosPath);
+  const results = [];
+  let installedCount = 0;
+
+  for (const agent of registry) {
+    const destination = bridgePath(homePath, agent);
+    const installed = options.all || await isAgentInstalled(homePath, agent);
+
+    if (!installed) {
+      results.push({ action: "skipped", path: destination, note: `${agent.name} not detected on this machine` });
+      continue;
+    }
+    installedCount += 1;
+
+    const result = await writeManagedFile(destination, bridgeContent(agent, aiosPath), options);
+    results.push(result);
+  }
+
   const skills = await bridgeSkillsToClaude(aiosPath, homePath, options);
-  return [...bridges, ...skills];
+  return { results: [...results, ...skills], installedCount };
 }
 
 async function bridgeSkillsToClaude(aiosPath, homePath, options) {
@@ -214,32 +245,6 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
   }
 
   return { action: dryRun ? "would update" : "updated", path: destination };
-}
-
-function claudeBridge(aiosPath) {
-  return bridgeFile("DotAIOS Claude Bridge", [
-    "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
-    "",
-    `@${path.join(aiosPath, "CLAUDE.md")}`
-  ]);
-}
-
-function codexBridge(aiosPath) {
-  return bridgeFile("DotAIOS Codex Bridge", [
-    "When a task depends on the user's identity, priorities, active work, memory, or writing style, read the DotAIOS entrypoint first.",
-    "",
-    `DotAIOS entrypoint: ${path.join(aiosPath, "AGENTS.md")}`,
-    "",
-    "Follow DotAIOS approval rules before durable writes to identity, wiki, CRM, or long-term knowledge."
-  ]);
-}
-
-function geminiBridge(aiosPath) {
-  return bridgeFile("DotAIOS Gemini Bridge", [
-    "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
-    "",
-    `@${path.join(aiosPath, "AGENTS.md")}`
-  ]);
 }
 
 function projectAgentsBridge(aiosPath) {
