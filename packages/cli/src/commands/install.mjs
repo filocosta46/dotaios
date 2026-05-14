@@ -6,6 +6,7 @@ import { isPaidManifest, manifestProductId, summarizePermissions, validateManife
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { hasLicense } from "../../../core/src/licenses.mjs";
+import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 export async function installCommand(args) {
@@ -89,7 +90,9 @@ async function runInstall(sourcePath, options) {
     const target = path.resolve(expandHome(options.path || defaultAiosPath()));
     await ensureAiosFolder(target);
     await installRawSkill(sourcePath, target, skillName);
+    await writeSkillsIndex(target);
     console.log(`\nInstalled skill '${skillName}' into ${path.join(target, "skills", skillName)}`);
+    console.log("Refreshed skills/INDEX.md so every connected agent can see it.");
     return;
   }
 

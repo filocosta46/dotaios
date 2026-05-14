@@ -11,6 +11,7 @@ import {
   isAgentInstalled,
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
+import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = MANAGED_START;
@@ -34,13 +35,19 @@ export async function activateCommand(args) {
     results.push(...await createProjectBridges(aiosPath, resolvePath(options.project), options));
   }
 
+  const skillsIndex = await writeSkillsIndex(aiosPath);
+
   printResults("DotAIOS activated", results);
+  console.log(`[refreshed] ${skillsIndex.path} (${skillsIndex.count} skill(s) any agent can run)`);
 
   if (global.installedCount === 0) {
     console.log("\nNo known AI tools were detected on this machine.");
     console.log("DotAIOS connects a tool automatically once it is installed — re-run `dotaios activate` then.");
     console.log("To connect every known tool anyway, run `dotaios activate --all`.");
   }
+
+  console.log("\nUsing an AI tool DotAIOS does not know yet? Paste this line into it:");
+  console.log(`  Read ${path.join(aiosPath, "AGENTS.md")} first and follow it.`);
 
   if (!options.project) {
     console.log("\nFor Cursor project rules, run `dotaios attach <project-dir>` inside a project.");

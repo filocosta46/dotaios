@@ -25,13 +25,13 @@ Approved direction: **Approach C built on A.**
 - **A** — move the frozen tool list out of code into an editable registry (`packages/core/src/agents.json`, extendable per-user via `~/aios/agents.json`); only connect tools actually installed on the machine.
 - **C** — make `AGENTS.md` inside the AIOS folder the single canonical, agent-neutral front door; `CLAUDE.md` shrinks to a one-line pointer at it. Every bridge file points at `AGENTS.md`.
 
-Shipping in two releases:
+Shipped in two releases:
 - **Release 1 (shipped):** editable registry, connect-only-installed, `AGENTS.md` as canonical front door, `CLAUDE.md` thin pointer. Plus housekeeping.
-- **Release 2 (in progress):** a live skills section in `AGENTS.md` so *every* agent can discover and run installed skills (today only Claude can) — this is the non-negotiable give-back-loop requirement — plus a copy-paste line for tools DotAIOS has never heard of.
+- **Release 2 (shipped):** `skills/INDEX.md` — an auto-generated live skill list every agent can read and run (regenerated on `init`, `activate`, `skill add`, `skill remove`); `AGENTS.md` points at it. Plus a copy-paste line printed by `activate` and `doctor` for tools DotAIOS has never heard of.
+
+The agent-agnostic pillar is now **delivered**: any agent — known, unknown, or switched-to mid-task — can read the folder, understand it, and run the installed skills.
 
 > **Framing rule — do not let this drift.** `agents.json` is **Filippo's lever and a power-user escape hatch — never the user's job.** Our ICP is non-technical; hand-editing JSON is unsafe (a missing comma breaks it silently). The honest story: new AI tools are added by Filippo in shipped updates, and the user just re-runs `dotaios setup`. Never pitch "any user can add a tool by editing agents.json." If user-added tools ever become a real need, it must be a guided command (`dotaios agents add` asking plain questions), not hand-edited JSON.
-
-> **Pillar status — not done until Release 2 lands.** Release 1 sets up the agent-agnostic pillar but does not yet deliver it. Until Release 2 ships, a person opening an unconnected or unknown agent still gets nothing and has no signal to act. Do not describe the pillar as done until Release 2 is shipped.
 
 ## 4. After That — Smarter Memory Routing (investigate, do not start)
 

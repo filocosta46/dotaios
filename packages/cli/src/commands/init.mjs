@@ -6,6 +6,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { copyFileSafe, listFiles, pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
 import { createAiosConfig } from "../../../core/src/schema.mjs";
+import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -49,6 +50,7 @@ export async function initCommand(args) {
   results.push(await writeFileSafe(path.join(target, "aios.json"), `${JSON.stringify(config, null, 2)}\n`, writeMode));
   results.push(...await copySkills(target, writeMode));
   results.push(...await createStarterFiles(target, data, writeMode));
+  await writeSkillsIndex(target);
 
   printSuccess(target, resolveVaultPath(config, target), results);
 }

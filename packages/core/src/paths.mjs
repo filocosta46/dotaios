@@ -9,6 +9,7 @@ export const requiredAiosFiles = [
   "CLAUDE.md",
   "AGENTS.md",
   ".cursorrules",
+  "skills/INDEX.md",
   "context/identity.md",
   "context/work.md",
   "context/priorities.md",

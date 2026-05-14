@@ -47,6 +47,10 @@ export async function doctorCommand(args) {
   }
 
   console.log("");
+  console.log("Using an AI tool DotAIOS does not know yet? Paste this line into it:");
+  console.log(`  Read ${path.join(target, "AGENTS.md")} first and follow it.`);
+  console.log("");
+
   const failed = checks.filter((c) => c.status === "fail");
   const warned = checks.filter((c) => c.status === "warn");
 

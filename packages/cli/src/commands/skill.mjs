@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { readJson } from "../../../core/src/files.mjs";
+import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { installCommand } from "./install.mjs";
 
@@ -134,5 +135,7 @@ async function removeSkill(name, options) {
   registry.skills = (registry.skills || []).filter((skill) => !removedSkillSet.has(skill));
 
   await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
+  await writeSkillsIndex(target);
   console.log(`Removed ${name} from ${pluginDir}.`);
+  console.log("Refreshed skills/INDEX.md.");
 }

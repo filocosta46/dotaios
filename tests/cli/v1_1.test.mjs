@@ -52,6 +52,28 @@ test("activate preserves unmanaged files by default", () => {
   assert.equal(read(codexPath), "# Existing\n\nKeep me.\n");
 });
 
+test("init generates a skills index every agent can read", () => {
+  const { aiosPath } = setupAios();
+
+  const index = read(path.join(aiosPath, "skills", "INDEX.md"));
+  assert.match(index, /# Installed Skills/);
+  assert.match(index, /Any AI agent can run one/i);
+  assert.match(index, /## audit/);
+  assert.match(index, /skills\/audit\/SKILL\.md/);
+});
+
+test("activate refreshes the skills index and prints the unknown-tool paste line", () => {
+  const { aiosPath, homePath } = setupAios();
+  installAgents(homePath);
+
+  const result = run(["activate", "--path", aiosPath, "--home", homePath]);
+
+  assert.match(result.stdout, /refreshed/i);
+  assert.match(result.stdout, /Paste this line into it/);
+  assert.match(result.stdout, new RegExp(escapeRegex(path.join(aiosPath, "AGENTS.md"))));
+  assert.match(read(path.join(aiosPath, "skills", "INDEX.md")), /## audit/);
+});
+
 test("context prints files and refreshes generated entrypoints", () => {
   const { aiosPath } = setupAios();
   const identityPath = path.join(aiosPath, "context", "identity.md");
