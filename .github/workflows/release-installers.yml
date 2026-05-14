@@ -1,9 +1,9 @@
 name: Release Installers
 
+# The Windows MSI is a future, optional install path. The supported install
+# path for every OS is `npx dotaios`. This workflow is manual-only so a broken
+# MSI build never blocks a release. Run it from the Actions tab when needed.
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       version_override:
