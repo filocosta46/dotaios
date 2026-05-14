@@ -2,11 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome, requiredAiosFiles, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { AGENT_BRIDGES, MANAGED_START, bridgePath } from "../../../core/src/bridges.mjs";
 import { detectMarker } from "../ingest/pdf.mjs";
-import { readOptionValue } from "../lib/args.mjs";
+import { parsePathHomeOptions } from "../lib/args.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
-
-const managedStart = "<!-- dotaios-managed:start -->";
 
 export async function statusCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -20,7 +19,7 @@ Options:
     return;
   }
 
-  const options = parseOptions(args);
+  const options = parsePathHomeOptions(args);
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   const homePath = path.resolve(expandHome(options.home || os.homedir()));
 
@@ -121,23 +120,6 @@ function shellQuote(value) {
   return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
-function parseOptions(args = []) {
-  const options = { home: null, path: null };
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === "--path") {
-      options.path = readOptionValue(args, index, "--path");
-      index += 1;
-    } else if (arg === "--home") {
-      options.home = readOptionValue(args, index, "--home");
-      index += 1;
-    }
-  }
-
-  return options;
-}
-
 async function readConfig(target) {
   try {
     return JSON.parse(await fs.readFile(path.join(target, "aios.json"), "utf8"));
@@ -181,28 +163,24 @@ async function readConnections(registryPath) {
 }
 
 async function checkAgentBridges(target, homePath) {
-  const bridges = [
-    path.join(homePath, ".claude", "CLAUDE.md"),
-    path.join(homePath, ".codex", "AGENTS.md"),
-    path.join(homePath, ".gemini", "GEMINI.md")
-  ];
   const results = [];
 
-  for (const bridgePath of bridges) {
+  for (const agent of AGENT_BRIDGES) {
+    const filePath = bridgePath(homePath, agent);
     let content;
     try {
-      content = await fs.readFile(bridgePath, "utf8");
+      content = await fs.readFile(filePath, "utf8");
     } catch {
-      results.push({ status: "[missing]", path: bridgePath });
+      results.push({ status: "[missing]", path: filePath });
       continue;
     }
 
-    if (content.includes(managedStart) && content.includes(target)) {
-      results.push({ status: "[ok]", path: bridgePath });
-    } else if (content.includes(managedStart)) {
-      results.push({ status: "[check]", path: bridgePath, note: "managed for another AIOS path" });
+    if (content.includes(MANAGED_START) && content.includes(target)) {
+      results.push({ status: "[ok]", path: filePath });
+    } else if (content.includes(MANAGED_START)) {
+      results.push({ status: "[check]", path: filePath, note: "managed for another AIOS path" });
     } else {
-      results.push({ status: "[check]", path: bridgePath, note: "existing unmanaged file" });
+      results.push({ status: "[check]", path: filePath, note: "existing unmanaged file" });
     }
   }
 

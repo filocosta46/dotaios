@@ -66,12 +66,31 @@ Search your local AIOS files:
 npx dotaios search "daily planning" --scope skills
 ```
 
-Validate and install a local plugin:
+Validate and install a plugin (local folder or git URL):
 
 ```bash
 npx dotaios install ./my-plugin --dry-run
 npx dotaios install ./my-plugin
+npx dotaios install https://github.com/example/my-plugin.git
+npx dotaios install https://github.com/owner/repo.git --subdir packages/my-plugin
 ```
+
+Browse the public skill registry and install paid or free packs:
+
+```bash
+npx dotaios market list
+npx dotaios market info <id>
+npx dotaios market install <id>
+```
+
+Paid skills need a license key (delivered by the vendor's checkout, e.g. Gumroad):
+
+```bash
+npx dotaios license add <product-id> <license-key>
+npx dotaios license list
+```
+
+See [marketplace.md](marketplace.md) for the full publishing flow.
 
 List local manual schedules:
 

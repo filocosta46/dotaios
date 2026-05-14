@@ -92,7 +92,23 @@ Options:
 
 
 async function promptAnswers() {
-  if (!process.stdin.isTTY) return defaultAnswers();
+  if (!process.stdin.isTTY) {
+    console.error("");
+    console.error("DotAIOS could not find an interactive terminal.");
+    console.error("");
+    console.error("This usually means the command was pasted into a chat window");
+    console.error("(like ChatGPT or Gemini on the web) instead of the Terminal app.");
+    console.error("");
+    console.error("How to fix:");
+    console.error("  Mac:     press cmd+space, type 'Terminal', press Enter.");
+    console.error("  Windows: press the Windows key, type 'cmd', press Enter.");
+    console.error("  Linux:   open your usual shell.");
+    console.error("");
+    console.error("Then paste the same command into that Terminal window.");
+    console.error("");
+    console.error("Running this in a script? Re-run with --yes to use defaults.");
+    throw new Error("interactive terminal required (or pass --yes for non-interactive)");
+  }
 
   const rl = readline.createInterface({ input, output });
   try {

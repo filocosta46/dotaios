@@ -10,11 +10,29 @@ A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Clau
 
 You do **not** need a GitHub account, an npm account, or any cloud service.
 
-## The 5 steps
+## Before you paste anything: open Terminal
+
+The commands below run inside the **Terminal app** on your computer. They will not work if you paste them into ChatGPT, Gemini in a browser, or any chat window.
+
+- **Mac:** press `⌘ + space`, type `Terminal`, press Enter.
+- **Windows:** press the Windows key, type `cmd`, press Enter.
+- **Linux:** open whichever shell you normally use.
+
+A small black-and-white window opens. Every command in this guide is pasted into that window, one line at a time.
+
+## The fast path (one command)
+
+```bash
+npx dotaios setup
+```
+
+This runs the three steps below in sequence and opens your new folder when finished. If you want to understand each step or troubleshoot, follow the manual path instead.
+
+## The manual path (5 steps)
 
 ### Step 1 — Create your DotAIOS folder
 
-Open a terminal and run:
+In the Terminal you just opened, run:
 
 ```bash
 npx dotaios init
@@ -129,8 +147,18 @@ This is a separate, harder setup that requires installing the Google Workspace C
 
 ## When something goes wrong
 
-- **`npx: command not found`** — Install Node.js first.
+Run this first — it tells you what is missing in one screen:
+
+```bash
+npx dotaios doctor
+```
+
+Common issues:
+
+- **Nothing happens / the command outputs strange characters** — You probably pasted it into ChatGPT, Gemini in a browser, or another chat window. Open the Terminal app (Mac: `⌘+space` → Terminal. Windows: `cmd`). Re-paste there.
+- **`npx: command not found`** — Install Node.js first from [nodejs.org](https://nodejs.org/).
 - **`Unknown command`** — Type the command exactly as shown. They are case-sensitive.
+- **`interactive terminal required`** — Same fix as the first item. Use the real Terminal app.
 - **Agent doesn't seem to know your context** — Restart the agent app after running `npx dotaios activate`. Most tools only re-read their config on launch.
 - **You want to change something you typed in Step 1** — Run `npx dotaios interview --review`. It asks the important questions again and shows the file updates before saving. If you prefer editing by hand, open `~/aios/context/work.md` or another file in `context/`, save it, then run `npx dotaios context --refresh --review`.
 

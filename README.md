@@ -18,13 +18,29 @@ If ChatGPT or Gemini is a conversation, DotAIOS is the notebook your AI companio
 
 ## Install in 60 seconds
 
+**Step 1. Open your Terminal app.** This is where the commands below run. It is NOT a chat window like ChatGPT or Gemini.
+
+- **Mac:** press `⌘ + space`, type `Terminal`, press Enter.
+- **Windows:** press the Windows key, type `cmd`, press Enter.
+- **Linux:** open whichever shell you normally use.
+
+A small black-and-white window opens. That is your Terminal.
+
+**Step 2. Paste these three commands into the Terminal**, one at a time, pressing Enter after each:
+
+```bash
+npx dotaios setup      # full setup in one step (init + connect agents + open folder)
+```
+
+Prefer it manual? Run the three steps yourself:
+
 ```bash
 npx dotaios init       # answer 5 questions, your folder appears
 npx dotaios activate   # connect Claude Code, Codex, and Gemini
 npx dotaios reveal     # open the folder in Finder / Explorer
 ```
 
-That's it. Open Claude Code. Ask: **"What am I working on?"** It answers from your `work.md`.
+**Step 3.** Open Claude Code (or whichever AI tool you use). Ask: **"What am I working on?"** It answers from your `work.md`.
 
 When your role, priorities, or planning style changes, run:
 
@@ -108,12 +124,17 @@ Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `
 
 | Command | What it does |
 |---|---|
+| `dotaios setup` | One-shot: init + activate + reveal (best for first-time users) |
+| `dotaios doctor` | One-stop health check |
 | `dotaios init` | Interactive setup, creates `~/aios/` |
 | `dotaios activate` | Connects Claude Code, Codex, Gemini, and registers skills |
 | `dotaios attach <project>` | Adds a per-project rule for Cursor |
 | `dotaios reveal` | Opens `~/aios/` in your file manager |
 | `dotaios status` | Health check |
 | `dotaios interview` | Updates your context and planning preferences with guided questions |
+| `dotaios skill <cmd>` | Add, list, or remove skills (friendly alias for install) |
+| `dotaios market <cmd>` | Browse and install skills from the public registry |
+| `dotaios license <cmd>` | Add or remove license keys for paid skills |
 | `dotaios context` | View, edit, or refresh your context files |
 | `dotaios index` | Generates `~/aios/_index.md` table of contents |
 | `dotaios search <query>` | Searches across memory, vault, context, projects, skills, references, and plugins |
@@ -143,6 +164,23 @@ Your existing notes become agent readable knowledge.
 * **Local first**, no accounts, no server, no cloud sync
 * **File based**, Markdown and JSONL, not databases
 * **Agent native**, your AI tools read directly; DotAIOS is invisible infrastructure
+
+## Skill marketplace
+
+DotAIOS itself is and always will be free. On top of it you can install free or paid skills curated by vendors:
+
+```bash
+npx dotaios market list
+npx dotaios market install <id>
+```
+
+Paid skills require a license key from the vendor's checkout (Gumroad, etc):
+
+```bash
+npx dotaios license add <product-id> <license-key>
+```
+
+See [marketplace.md](docs/marketplace.md) for the full flow and how to publish your own pack.
 
 ## More docs
 

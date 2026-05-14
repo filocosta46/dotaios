@@ -3,10 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { pathExists } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { MANAGED_END, MANAGED_START } from "../../../core/src/bridges.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
-const managedStart = "<!-- dotaios-managed:start -->";
-const managedEnd = "<!-- dotaios-managed:end -->";
+const managedStart = MANAGED_START;
+const managedEnd = MANAGED_END;
 
 export async function activateCommand(args) {
   if (hasHelpFlag(args)) {

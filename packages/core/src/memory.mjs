@@ -25,8 +25,9 @@ export async function readJsonl(filePath) {
   let content;
   try {
     content = await fs.readFile(filePath, "utf8");
-  } catch {
-    return [];
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
   }
   return content
     .split("\n")

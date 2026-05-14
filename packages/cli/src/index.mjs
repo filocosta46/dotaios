@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 
-const VERSION = "1.7.0";
+import { readFileSync } from "node:fs";
+
+const pkg = JSON.parse(
+  readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
+);
+const VERSION = pkg.version;
 
 const commands = {
   activate: "./commands/activate.mjs",
@@ -8,6 +13,7 @@ const commands = {
   cleanup: "./commands/cleanup.mjs",
   connect: "./commands/connect.mjs",
   context: "./commands/context.mjs",
+  doctor: "./commands/doctor.mjs",
   google: "./commands/google.mjs",
   import: "./commands/import.mjs",
   index: "./commands/index.mjs",
@@ -15,10 +21,14 @@ const commands = {
   ingest: "./commands/ingest.mjs",
   install: "./commands/install.mjs",
   interview: "./commands/interview.mjs",
+  license: "./commands/license.mjs",
+  market: "./commands/market.mjs",
   mcp: "./commands/mcp.mjs",
   reveal: "./commands/reveal.mjs",
   schedule: "./commands/schedule.mjs",
   search: "./commands/search.mjs",
+  setup: "./commands/setup.mjs",
+  skill: "./commands/skill.mjs",
   status: "./commands/status.mjs"
 };
 
@@ -29,6 +39,8 @@ Usage:
   dotaios <command> [options]
 
 Commands:
+  setup             One-shot: init + activate + reveal (recommended for new users)
+  doctor            One-stop health check
   activate          Connect ~/aios to global agent memory files
   attach <dir>      Connect a project folder to DotAIOS
   cleanup           Trim stale signals and compact the event log
@@ -41,10 +53,13 @@ Commands:
   ingest <input>    Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
   interview         Update your context by answering a few short questions
+  license <cmd>     Add, list, or remove license keys for paid skills
+  market <cmd>      Browse and install skills from the public registry
   mcp <cmd>         Print local MCP server status and client config
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins
+  skill <cmd>       Add, list, or remove skills (friendly alias for install)
   status            Check the health of a local AIOS folder
 
 Options:

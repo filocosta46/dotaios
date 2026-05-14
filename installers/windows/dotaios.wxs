@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+  <Package
+    Name="DotAIOS"
+    Manufacturer="filocosta"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="C1F0E8A1-2B5F-4E2D-9C84-A2B7C5E3D4F1"
+    Scope="perUser"
+    InstallerVersion="500"
+    Compressed="yes">
+
+    <SummaryInformation
+      Description="DotAIOS first-run setup launcher"
+      Manufacturer="filocosta" />
+
+    <MajorUpgrade
+      DowngradeErrorMessage="A newer version of DotAIOS is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Core" Title="DotAIOS Setup" Level="1">
+      <ComponentGroupRef Id="DotAIOSFiles" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="DotAIOS" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="StartMenuFolder" Name="DotAIOS" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="DotAIOSFiles" Directory="INSTALLFOLDER">
+      <Component Id="SetupScript" Guid="A4B5C2D8-7E9F-4C13-8F6E-1A3B5C7D9E11">
+        <File Id="setupBat" Source="setup.bat" KeyPath="yes" />
+        <File Id="readmeTxt" Source="README.txt" />
+      </Component>
+    </ComponentGroup>
+
+    <Component Id="StartMenuShortcut" Directory="StartMenuFolder" Guid="6D7E8F90-1234-5678-9ABC-DEF012345678">
+      <Shortcut Id="DotAIOSShortcut"
+                Name="Set up DotAIOS"
+                Target="[INSTALLFOLDER]setup.bat"
+                WorkingDirectory="INSTALLFOLDER"
+                Description="Run the DotAIOS first-time setup wizard." />
+      <Shortcut Id="DotAIOSReadme"
+                Name="DotAIOS Readme"
+                Target="[INSTALLFOLDER]README.txt"
+                WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveStartMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKCU"
+                     Key="Software\filocosta\DotAIOS"
+                     Name="installed"
+                     Type="integer"
+                     Value="1"
+                     KeyPath="yes" />
+    </Component>
+
+  </Package>
+</Wix>

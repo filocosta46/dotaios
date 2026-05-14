@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-05-13",
+  "skills": [
+    {
+      "id": "hello-memory",
+      "name": "Hello Memory (example)",
+      "vendor": "filocosta",
+      "paid": false,
+      "git_url": "https://github.com/filocosta46/dotaios.git",
+      "subdir": "examples/plugins/hello-memory",
+      "description": "Reference plugin used by smoke and integration tests.",
+      "tags": ["example", "test"]
+    }
+  ]
+}

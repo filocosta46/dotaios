@@ -100,8 +100,9 @@ test("appendSignal writes to date-named file", async () => {
   const entry = await appendSignal(signalsDir, { type: "email", summary: "Got a reply" });
   assert.ok(entry.ts);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const filePath = path.join(signalsDir, `${today}.jsonl`);
+  const now = new Date();
+  const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const filePath = path.join(signalsDir, `${localDate}.jsonl`);
   assert.ok(fs.existsSync(filePath));
   const entries = await readJsonl(filePath);
   assert.equal(entries.length, 1);

@@ -1,18 +1,27 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { validateManifest, summarizePermissions } from "../../../core/src/manifest.mjs";
+import { spawnSync } from "node:child_process";
+import { isPaidManifest, manifestProductId, summarizePermissions, validateManifest } from "../../../core/src/manifest.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { readJson, pathExists } from "../../../core/src/files.mjs";
+import { pathExists, readJson } from "../../../core/src/files.mjs";
+import { hasLicense } from "../../../core/src/licenses.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 export async function installCommand(args) {
   if (hasHelpFlag(args)) {
     console.log(`Usage:
-  dotaios install <plugin-path> [options]
+  dotaios install <plugin-path-or-url> [options]
+
+Accepts:
+  - A local folder containing manifest.json (plugin) or SKILL.md (raw skill).
+  - An https:// git URL (cloned into a temp folder, then installed).
+  - A git@host:owner/repo.git SSH URL.
 
 Options:
-  --path <dir>  Install into an AIOS folder other than ~/aios
-  --dry-run     Validate and display permissions without copying files
+  --path <dir>     Install into an AIOS folder other than ~/aios
+  --dry-run        Validate and display permissions without copying files
+  --subdir <path>  After cloning/resolving, install from this subdirectory
 `);
     return;
   }
@@ -21,14 +30,35 @@ Options:
   const [pluginPath] = options.positionals;
 
   if (!pluginPath) {
-    throw new Error("Usage: dotaios install <plugin-path> [--path <aios-dir>] [--dry-run]");
+    throw new Error("Usage: dotaios install <plugin-path-or-url> [--path <aios-dir>] [--dry-run]");
   }
 
-  if (/^[a-z]+:\/\//i.test(pluginPath)) {
-    throw new Error("Remote plugin installs are not supported in v1.1. Download and review the plugin locally first.");
+  let sourcePath;
+  let cleanupClone = null;
+
+  if (isGitUrl(pluginPath)) {
+    const cloneResult = await cloneRepo(pluginPath);
+    cleanupClone = cloneResult.cleanup;
+    sourcePath = options.subdir
+      ? path.join(cloneResult.path, options.subdir)
+      : cloneResult.path;
+    console.log(`Cloned ${pluginPath} to ${cloneResult.path}${options.subdir ? `/${options.subdir}` : ""}`);
+  } else if (/^[a-z]+:\/\//i.test(pluginPath)) {
+    throw new Error(`Unsupported URL scheme. Use https:// or git@ remotes, or a local folder.`);
+  } else {
+    sourcePath = options.subdir
+      ? path.join(path.resolve(pluginPath), options.subdir)
+      : path.resolve(pluginPath);
   }
 
-  const sourcePath = path.resolve(pluginPath);
+  try {
+    await runInstall(sourcePath, options);
+  } finally {
+    if (cleanupClone) await cleanupClone();
+  }
+}
+
+async function runInstall(sourcePath, options) {
   await ensureDirectory(sourcePath, "Plugin path");
   const manifestPath = path.join(sourcePath, "manifest.json");
   
@@ -71,6 +101,20 @@ Options:
 
   printManifestSummary(manifest);
 
+  if (isPaidManifest(manifest)) {
+    const productId = manifestProductId(manifest);
+    const licensed = await hasLicense(productId);
+    if (!licensed) {
+      throw new Error([
+        `This plugin is paid: ${manifest.vendor}/${productId}.`,
+        `Add a license first:`,
+        `  dotaios license add ${productId} <license-key>`,
+        `Buy a key (if you do not have one) from the vendor's checkout page.`
+      ].join("\n"));
+    }
+    console.log(`[ok] License for ${productId} verified locally.`);
+  }
+
   if (options.dryRun) {
     console.log("\nDry run only. Nothing copied.");
     return;
@@ -80,6 +124,35 @@ Options:
   await ensureAiosFolder(target);
   await installPlugin(sourcePath, target, manifest);
   console.log(`\nInstalled ${manifest.name}@${manifest.version} into ${path.join(target, "plugins", manifest.name)}`);
+}
+
+// A remote source is a git@ SSH URL or an https URL ending in .git.
+// Requiring the .git suffix keeps the rule unambiguous: a plain
+// https://github.com/owner/repo link to a file or release is not cloned.
+function isGitUrl(input) {
+  if (typeof input !== "string") return false;
+  if (input.startsWith("git@")) return true;
+  return /^https?:\/\//i.test(input) && input.endsWith(".git");
+}
+
+async function cloneRepo(url) {
+  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-plugin-"));
+  const result = spawnSync("git", ["clone", "--depth", "1", "--", url, tmpDir], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  if (result.error) {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    throw new Error(`git clone failed to start: ${result.error.message}. Install git first.`);
+  }
+  if (result.status !== 0) {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    throw new Error(`git clone failed (status ${result.status}): ${(result.stderr || "").trim()}`);
+  }
+  return {
+    path: tmpDir,
+    cleanup: () => fs.rm(tmpDir, { recursive: true, force: true })
+  };
 }
 
 async function readManifest(manifestPath) {
@@ -94,7 +167,7 @@ async function readManifest(manifestPath) {
 }
 
 function parseOptions(args = []) {
-  const options = { dryRun: false, path: null, positionals: [] };
+  const options = { dryRun: false, path: null, subdir: null, positionals: [] };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -102,6 +175,9 @@ function parseOptions(args = []) {
       options.dryRun = true;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--subdir") {
+      options.subdir = readOptionValue(args, index, "--subdir");
       index += 1;
     } else {
       options.positionals.push(arg);

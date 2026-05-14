@@ -5,7 +5,7 @@ import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from 
 import { pathExists, readJson, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
-const sensitivePattern = /(api[_-]?key|secret|password|token|private[_-]?key|client[_-]?secret)/i;
+const sensitivePattern = /api[_-]?key|client[_-]?secret|private[_-]?key|secret|password|token|bearer\s+[A-Za-z0-9._-]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ya29\.[A-Za-z0-9_-]+|xox[abpros]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----/i;
 const contextTargets = {
   identity: "context/identity.md",
   work: "context/work.md",

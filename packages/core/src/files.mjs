@@ -11,11 +11,14 @@ export async function pathExists(filePath) {
 }
 
 export async function readJson(filePath, fallback = null) {
+  let content;
   try {
-    return JSON.parse(await fs.readFile(filePath, "utf8"));
-  } catch {
-    return fallback;
+    content = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return fallback;
+    throw error;
   }
+  return JSON.parse(content);
 }
 
 export async function writeFileSafe(destination, content, writeMode = "preserve") {
