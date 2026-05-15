@@ -4,17 +4,27 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js ≥20](https://img.shields.io/badge/node-%3E%3D20-brightgreen)](https://nodejs.org/)
 
-**A folder for your AI agents.** Tell every AI tool on your machine who you are, what you're working on, and how you like to work, once. Then keep it fresh with a short interview whenever life changes.
+**One folder on your computer. Every AI agent reads from it.** Tell your AI who you are, what you're working on, and how you like to work — once. Every tool on your machine knows.
 
 ***
 
 ## What it is
 
-DotAIOS creates **one folder** at `~/aios/` that holds your context, your memory, and your skills. Every AI tool on your machine, Claude Code, Cursor, Codex, Gemini, reads from that same folder. No sign up, no server, no cloud. Just files you own.
-
-If ChatGPT or Gemini is a conversation, DotAIOS is the notebook your AI companion keeps beside it: who you are, what matters now, and which repeatable skills it can use for you.
+DotAIOS creates **one folder** at `~/aios/` that holds your context, your memory, and your skills. Claude Code, Cursor, Codex, Gemini — they all read from the same place. No sign-up, no server, no cloud. Just files you own.
 
 > `.gitconfig` makes Git know your name. `~/aios/` makes every AI agent know your life.
+
+## Before you start
+
+DotAIOS works with **AI agent apps** — tools that run on your computer and can read your files. A browser chatbot like ChatGPT or Gemini on the web is not enough.
+
+**Supported agents (pick one):**
+- [Claude Code](https://claude.ai/download) — recommended
+- [Codex CLI](https://github.com/openai/codex) by OpenAI
+- [Cursor](https://www.cursor.com) — code editor with AI
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
+
+Download and open one of these first, then run the install commands below inside it.
 
 ## Install in 60 seconds
 
@@ -87,23 +97,23 @@ Run `dotaios status` any time to confirm every bridge is healthy.
 
 Each skill folder contains a `SKILL.md` that explains three things in plain language: what it can do, what it will not do, and how to trigger it.
 
-## Skills as slash commands
+## Skills
 
-After `dotaios activate`, every DotAIOS skill becomes a slash command in Claude Code. Type `/` and pick one:
+Skills are plain-language instructions your agent follows. Every agent reads them from `~/aios/skills/`. Ask by name — "use the plan-today skill" — or in Claude Code type `/plan-today`.
 
-| Slash command | What it does |
+| Skill | What it does |
 |---|---|
-| `/plan-today` | Plans your day from priorities + recent work |
-| `/today` | Builds today's plan and saves it as a daily note |
-| `/closeday` | Closes out today's note and stages carryovers for tomorrow |
-| `/audit` | Weekly health check of your AIOS |
-| `/ingest` | Saves a URL, PDF, or document into your vault |
-| `/import-context` | Routes pasted context from another AI chat |
-| `/privacy-brief` | Distills sensitive local context into a cloud safe brief |
-| `/summarize-source` | Turns ingested raw material into a useful local summary |
-| `/weekly-review` | Reviews recent memory and proposes context/project updates |
+| `plan-today` | Plans your day from priorities + recent work |
+| `today` | Builds today's plan and saves it as a daily note |
+| `closeday` | Closes out today's note and stages carryovers for tomorrow |
+| `audit` | Weekly health check of your AIOS |
+| `ingest` | Saves a URL, PDF, or document into your vault |
+| `import-context` | Routes pasted context from another AI chat |
+| `privacy-brief` | Distills sensitive local context into a cloud-safe brief |
+| `summarize-source` | Turns ingested raw material into a useful local summary |
+| `weekly-review` | Reviews recent memory and proposes context/project updates |
 
-Codex, Gemini, and Cursor read the same skills inline from `~/aios/AGENTS.md`. Just say *"use the audit skill"*, they find it.
+Run `dotaios skills` to see all installed skills with descriptions. Run `dotaios skills <name>` to read one in full.
 
 ## Universal Knowledge Router
 
@@ -140,7 +150,15 @@ Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `
 npx dotaios brief
 ```
 
-Writes today's brief into `memory/daily/YYYY-MM-DD.md` as a `## Brief` section. Reads your priorities, recent open loops from memory, and carry-over from yesterday. No AI, no network, no external service. Run it each morning or enable the pre-wired schedule in `~/aios/schedules.yml` with your local automation tool.
+Writes today's brief into `memory/daily/YYYY-MM-DD.md`. Reads your priorities, recent open loops, and carry-over from yesterday. No AI, no network. Run it each morning or enable the pre-wired schedule in `~/aios/schedules.yml`.
+
+## Quick memory capture
+
+```bash
+npx dotaios update "met Sarah, decided to push launch to next Thursday"
+```
+
+Logs a note to memory instantly — no need to know which file to edit. Run with no arguments for an interactive prompt. Saved to `memory/signals/` and `memory/events.jsonl`.
 
 ## Commands
 
@@ -155,6 +173,8 @@ Writes today's brief into `memory/daily/YYYY-MM-DD.md` as a `## Brief` section. 
 | `dotaios reveal` | Opens `~/aios/` in your file manager |
 | `dotaios status` | Health check |
 | `dotaios interview` | Updates your context and planning preferences with guided questions |
+| `dotaios update [text]` | Log a quick note to memory (decision, meeting, anything) |
+| `dotaios skills [name]` | List installed skills; show full instructions for one |
 | `dotaios skill <cmd>` | Add, list, or remove skills (friendly alias for install) |
 | `dotaios market <cmd>` | Browse and install skills from the public registry |
 | `dotaios license <cmd>` | Add or remove license keys for paid skills |
