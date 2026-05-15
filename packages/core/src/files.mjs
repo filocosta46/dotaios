@@ -18,7 +18,11 @@ export async function readJson(filePath, fallback = null) {
     if (error.code === "ENOENT") return fallback;
     throw error;
   }
-  return JSON.parse(content);
+  try {
+    return JSON.parse(content);
+  } catch {
+    return fallback;
+  }
 }
 
 export async function writeFileSafe(destination, content, writeMode = "preserve") {

@@ -100,7 +100,7 @@ async function readPriorities(aiosPath) {
 
 async function readCarryOver(aiosPath, date, now) {
   const dailyDir = path.join(aiosPath, "memory", "daily");
-  const yesterday = localDate(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  const yesterday = localDate(new Date(now.getTime() - 86400000));
 
   const [todayNote, yesterdayNote] = await Promise.all([
     readOrEmpty(path.join(dailyDir, `${date}.md`)),

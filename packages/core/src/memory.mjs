@@ -32,7 +32,13 @@ export async function readJsonl(filePath) {
   return content
     .split("\n")
     .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
 }
 
 /**
