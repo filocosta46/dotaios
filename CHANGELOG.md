@@ -2,6 +2,13 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.13.1] - 2026-05-15
+### Fixed
+- `brief.mjs`: yesterday calculation broke at month boundaries (day 1 → day 0); now uses `getTime() - 86400000`
+- `memory.mjs`: malformed JSONL line crashed all memory reads; invalid lines now skipped silently
+- `files.mjs`: malformed `aios.json` crashed every command; now returns fallback value instead
+- `init.mjs`: `memory/daily/` not created at init time; caused silent failures in brief, closeday, and today commands on fresh installs
+
 ## [1.13.0] - 2026-05-15
 ### Added
 - `dotaios update [text]` — log a quick update (decision, meeting, note) directly to memory. Writes to `memory/signals/<date>.jsonl` and `memory/events.jsonl`. With no argument, prompts interactively. Designed for non-technical users who should not need to know which file to edit.
