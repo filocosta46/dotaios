@@ -59,7 +59,9 @@ export function renderSkillsIndex(skills) {
     "",
     "Skills are reusable workflows. **Any AI agent can run one**: open that",
     "skill's `SKILL.md` file and follow it. The user invokes a skill by name",
-    "(for example \"run audit\" or \"/audit\").",
+    "(for example: \"use the audit skill\" or \"run plan-today\").",
+    "",
+    "When the user seems stuck or asks what you can help with, suggest a relevant skill from this list.",
     ""
   ];
 

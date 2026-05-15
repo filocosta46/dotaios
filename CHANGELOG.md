@@ -2,6 +2,18 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.13.0] - 2026-05-15
+### Added
+- `dotaios update [text]` — log a quick update (decision, meeting, note) directly to memory. Writes to `memory/signals/<date>.jsonl` and `memory/events.jsonl`. With no argument, prompts interactively. Designed for non-technical users who should not need to know which file to edit.
+- `dotaios skills [name]` — list all installed skills with one-line descriptions. `dotaios skills <name>` prints the full skill instructions. Works with any agent, not just Claude Code.
+- `closeday` skill now opens with an optional capture step: "anything to capture before we close?" — agent appends the note directly to signals, no CLI required.
+
+### Changed
+- `dotaios setup` now asks once after onboarding whether to enable the daily brief schedule (Y/n), enables it in `schedules.yml`, and prints `dotaios schedule install` as the next step for full OS automation. Default: yes.
+- `dotaios setup` prints a preview of the top 3 installed skills and how to invoke them after setup completes.
+- Setup completion message is now agent-agnostic — names Claude Code, Codex, Gemini CLI, and Cursor, and uses plain English prompts that work with any of them.
+- `skills/INDEX.md` preamble updated: removed Claude Code-specific `/skillname` slash syntax; invocation examples now read "use the audit skill" or "run plan-today" so any agent understands. Added: "When the user seems stuck or asks what you can help with, suggest a relevant skill."
+
 ## [1.12.0] - 2026-05-14
 ### Added
 - `dotaios brief` — writes today's deterministic local brief into `memory/daily/YYYY-MM-DD.md` as a `## Brief` section. It reads priorities, recent open loops, and carry-over; no LLM or external service required.

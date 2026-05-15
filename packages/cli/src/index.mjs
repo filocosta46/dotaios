@@ -30,7 +30,9 @@ const commands = {
   search: "./commands/search.mjs",
   setup: "./commands/setup.mjs",
   skill: "./commands/skill.mjs",
-  status: "./commands/status.mjs"
+  skills: "./commands/skills.mjs",
+  status: "./commands/status.mjs",
+  update: "./commands/update.mjs"
 };
 
 function printHelp() {
@@ -62,7 +64,9 @@ Commands:
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins
   skill <cmd>       Add, list, or remove skills (friendly alias for install)
+  skills [name]     List installed skills or show full instructions for one skill
   status            Check the health of a local AIOS folder
+  update [text]     Log a quick update — decision, meeting, note — to memory
 
 Options:
   -h, --help        Show help

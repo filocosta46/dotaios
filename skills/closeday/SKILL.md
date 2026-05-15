@@ -31,6 +31,20 @@ Try saying:
 
 ## Agent steps
 
+### Capture (optional — before questions)
+
+Before the end-of-day questions, ask once:
+
+**"Before we close — anything to capture from today? A decision, meeting, contact, or something you learned. (Press Enter to skip.)"**
+
+If the user provides something:
+- Append it as a signal to `memory/signals/YYYY-MM-DD.jsonl` with `type: "update"` and the text as `summary`. Use today's date.
+- Confirm: "Saved to memory."
+
+If the user skips or presses Enter: proceed directly to the Read section.
+
+---
+
 ### Read
 
 1. `memory/daily/YYYY-MM-DD.md` where YYYY-MM-DD is today's date.
