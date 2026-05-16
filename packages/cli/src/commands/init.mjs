@@ -151,6 +151,7 @@ async function createBaseTree(target, usesExternalVault) {
     "connections/apis",
     "memory/signals",
     "memory/daily",
+    "memory/sessions",
     "skills",
     "plugins",
     "decisions",

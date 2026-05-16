@@ -16,7 +16,7 @@ export async function searchCommand(args) {
   const query = options.positionals.join(" ");
 
   if (!query) {
-    throw new Error("Usage: dotaios search <query> [--scope memory|vault|context|skills|references|plugins|all]");
+    throw new Error("Usage: dotaios search <query> [--scope memory|vault|context|sessions|skills|references|plugins|all]");
   }
 
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
@@ -31,8 +31,13 @@ export async function searchCommand(args) {
 
   console.log(`Searching for "${query}" in ${scope}...\n`);
 
+  const sessionFilters = {};
+  if (options.agent) sessionFilters.agent = options.agent;
+  if (options.project) sessionFilters.project = options.project;
+  if (options.since) sessionFilters.since = options.since;
+
   let totalResults = 0;
-  const groups = await searchAios({ aiosPath: target, vaultPath, query, scope, limit });
+  const groups = await searchAios({ aiosPath: target, vaultPath, query, scope, limit, sessionFilters });
   for (const group of groups) {
     if (group.results.length === 0) continue;
     printGroup(group.scope, group.results, query);
@@ -47,7 +52,7 @@ export async function searchCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { limit: 20, path: null, positionals: [], scope: null };
+  const options = { limit: 20, path: null, positionals: [], scope: null, agent: null, project: null, since: null };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -60,6 +65,15 @@ function parseOptions(args = []) {
       index += 1;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--agent") {
+      options.agent = readOptionValue(args, index, "--agent");
+      index += 1;
+    } else if (arg === "--project") {
+      options.project = readOptionValue(args, index, "--project");
+      index += 1;
+    } else if (arg === "--since") {
+      options.since = readOptionValue(args, index, "--since");
       index += 1;
     } else {
       options.positionals.push(arg);
@@ -92,18 +106,22 @@ function printSearchHelp() {
   console.log(`Usage:
   dotaios search <query> [options]
 
-Searches across your AIOS memory, vault, context, projects, skills, references, and plugins for a keyword.
+Searches across your AIOS sessions, memory, vault, context, projects, skills, references, and plugins.
 
 Examples:
   dotaios search "job application"
+  dotaios search "session memory" --scope sessions
   dotaios search onomondo --scope vault
   dotaios search thesis --scope memory --limit 5
-  dotaios search "daily planning" --scope skills
+  dotaios search "launch timing" --agent claude-code --since 7d
 
 Options:
-  --scope <s>   Limit search: memory, vault, context, skills, references, plugins, or all (default: all)
-  --limit <n>   Max results per scope (default: 20)
-  --path <dir>  Use an AIOS folder other than ~/aios
+  --scope <s>      Limit search: sessions, memory, vault, context, skills, references, plugins, or all (default: all)
+  --agent <name>   Filter sessions by agent (e.g. claude-code, manual)
+  --project <name> Filter sessions by project tag
+  --since <n>d     Filter sessions by age (e.g. 7d, 30d, 2w)
+  --limit <n>      Max results per scope (default: 20)
+  --path <dir>     Use an AIOS folder other than ~/aios
 `);
 }
 
@@ -112,6 +130,8 @@ function printGroup(scope, results, query) {
   for (const result of results) {
     if (scope === "memory") {
       printMemoryResult(result, query);
+    } else if (scope === "sessions") {
+      printSessionResult(result, query);
     } else {
       printMarkdownResult(result, query);
     }
@@ -128,6 +148,17 @@ function printMemoryResult(result, query) {
     console.log(`    match: ${result.matchedField} = ${markMatches(truncate(result.matchedSnippet, 100), query)}`);
   }
   console.log(`    source: ${result.source}`);
+}
+
+function printSessionResult(result, query) {
+  const project = result.project ? `  [${result.project}]` : "";
+  console.log(`  [${result.date || "?"}] ${result.agent || "manual"}${project}  ${result.session_id || ""}`);
+  console.log(`    ${markMatches(truncate(result.title, 80), query)}`);
+  for (const match of result.matches) {
+    if (match.content) {
+      console.log(`    ${markMatches(truncate(match.content, 140), query)}`);
+    }
+  }
 }
 
 function printMarkdownResult(result, query) {

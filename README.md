@@ -60,6 +60,20 @@ npx dotaios interview --review
 
 It asks a few plain English questions, shows what will change, then updates the files your agents read.
 
+## Save your AI conversations
+
+DotAIOS can save your AI conversations locally so every agent on your machine can remember what you've discussed — across tools, across sessions.
+
+```bash
+dotaios capture enable claude-code   # auto-save every Claude Code session
+dotaios capture import paste         # paste in any conversation manually
+dotaios search "launch timing"       # search across all saved conversations
+```
+
+All conversations save to `~/aios/memory/sessions/` as plain Markdown files you can open and read. Nothing leaves your machine.
+
+→ [How it works and which tools are supported](docs/sessions.md)
+
 ## Where the folder lives
 
 `~/aios/` is a normal, visible folder in your home directory. **You can open it.** Drag notes in. Edit Markdown in any text editor. Move files around. It's yours.

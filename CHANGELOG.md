@@ -2,6 +2,30 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.14.0] - 2026-05-16
+### Added
+- **Session memory** — DotAIOS can now save your AI conversations locally so every agent on your machine can remember them. All sessions saved to `~/aios/memory/sessions/` as plain Markdown files.
+- `dotaios capture` command tree — `import`, `list`, `delete`, `status`, `enable`, `disable`, `hook`.
+- `dotaios capture import file <path>` — save any conversation file.
+- `dotaios capture import paste` — paste a conversation in your editor; any tool supported.
+- `dotaios capture import claude-code [--all]` — backfill past Claude Code sessions (last 30 days by default).
+- `dotaios capture list [--agent] [--project] [--since]` — browse saved conversations in plain English.
+- `dotaios capture delete <id>` — remove a saved conversation.
+- `dotaios capture enable claude-code` — enable automatic saving when a Claude Code session closes.
+- `dotaios capture disable claude-code` — turn off automatic saving.
+- `dotaios capture status` — per-tool capability: auto-save / import only / paste only.
+- `dotaios search` now searches saved sessions in addition to memory, vault, and context.
+- `dotaios search --agent`, `--project`, `--since` — filter session results.
+- Universal session format: agent-neutral Markdown + YAML frontmatter, one file per conversation, human-readable in any editor.
+- `memory/sessions/index.jsonl` — lightweight catalog with `content_hash` for v1.6 semantic indexer.
+- `docs/sessions.md` — plain-English guide: where conversations save, how to delete, how to turn off.
+- `docs/adapters.md` — per-tool capability levels in plain English.
+
+### Changed
+- `dotaios init` now creates `memory/sessions/` in the base folder tree.
+- Help text updated to include `capture` command.
+- README updated with session memory section.
+
 ## [1.13.1] - 2026-05-15
 ### Fixed
 - `brief.mjs`: yesterday calculation broke at month boundaries (day 1 → day 0); now uses `getTime() - 86400000`

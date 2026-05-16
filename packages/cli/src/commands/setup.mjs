@@ -58,19 +58,23 @@ export async function setupCommand(args) {
 
   // Brief schedule prompt — skip in non-interactive or non-TTY mode
   if (!nonInteractive && process.stdin.isTTY) {
-    console.log("");
     const rl = readline.createInterface({ input, output });
     try {
-      const answer = await rl.question(
+      console.log("");
+      const briefAnswer = await rl.question(
         "Set up a daily brief? It runs every morning and shows your priorities and active work. (Y/n): "
       );
-      if (!answer.trim() || answer.trim().toLowerCase() === "y") {
+      if (!briefAnswer.trim() || briefAnswer.trim().toLowerCase() === "y") {
         const enabled = await enableSchedule(aiosPath, "daily-brief");
         if (enabled) {
           console.log("Daily brief enabled. Your agent will find it in memory/daily/ each morning.");
           console.log("To have it run fully automatically: dotaios schedule install");
         }
       }
+
+      // Session memory prompt
+      console.log("");
+      await promptSessionMemory(rl, aiosPath, nonInteractive);
     } finally {
       rl.close();
     }
@@ -96,6 +100,68 @@ export async function setupCommand(args) {
   console.log("  2. Open the ~/aios folder or make it your working directory.");
   console.log('  3. Ask: "Read my context and tell me what I am working on."');
   console.log("  4. Update context any time: dotaios interview --review");
+}
+
+async function promptSessionMemory(rl, aiosPath, nonInteractive) {
+  if (nonInteractive) return;
+
+  let detected;
+  try {
+    const { detectAdapters } = await import("../adapters/detect.mjs");
+    detected = await detectAdapters();
+  } catch {
+    return;
+  }
+
+  const capable = Object.entries(detected).filter(([, info]) => info.detected);
+  if (capable.length === 0) {
+    console.log("Tip: save any AI conversation manually any time: dotaios capture import paste");
+    return;
+  }
+
+  const autoSave = capable.filter(([, info]) => info.level === "full-auto").map(([n]) => n);
+  const importOnly = capable.filter(([, info]) => info.level === "backfill-only").map(([n]) => n);
+  const manualOnly = capable.filter(([, info]) => info.level === "manual-assist").map(([n]) => n);
+
+  const foundParts = [];
+  if (autoSave.length) foundParts.push(`${autoSave.join(", ")} (auto-save)`);
+  if (importOnly.length) foundParts.push(`${importOnly.join(", ")} (import only)`);
+  if (manualOnly.length) foundParts.push(`${manualOnly.join(", ")} (paste/import only)`);
+
+  console.log(`Save AI conversations locally so other agents can remember them?`);
+  console.log(`  Found on this machine: ${foundParts.join(", ")}`);
+
+  const answer = await rl.question("  Enable conversation saving? (Y/n): ");
+  if (answer.trim() && answer.trim().toLowerCase() !== "y") return;
+
+  for (const name of autoSave) {
+    try {
+      const { enableAdapter } = await import("../adapters/detect.mjs");
+      await enableAdapter(name, aiosPath);
+    } catch (err) {
+      console.log(`  (could not enable ${name}: ${err.message})`);
+    }
+  }
+
+  if (autoSave.length > 0) {
+    const backfillAnswer = await rl.question("  Import past conversations from the last 30 days? (y/N): ");
+    if (backfillAnswer.trim().toLowerCase() === "y") {
+      for (const name of autoSave) {
+        try {
+          if (name === "claude-code") {
+            const { importClaudeCode } = await import("../adapters/claude-code.mjs");
+            await importClaudeCode(aiosPath);
+          }
+        } catch (err) {
+          console.log(`  (could not import ${name}: ${err.message})`);
+        }
+      }
+    }
+  }
+
+  if (importOnly.length > 0 || manualOnly.length > 0) {
+    console.log("  Tip: save any conversation manually: dotaios capture import paste");
+  }
 }
 
 // Find the value of --path in the args array.

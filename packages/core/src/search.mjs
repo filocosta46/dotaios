@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export const SEARCH_SCOPES = ["memory", "vault", "context", "skills", "references", "plugins", "all"];
+export const SEARCH_SCOPES = ["memory", "vault", "context", "skills", "references", "plugins", "sessions", "all"];
 
 const DEFAULT_LIMIT = 20;
 const SKIP_DIR_NAMES = new Set([".git", "node_modules", ".obsidian", ".trash"]);
@@ -18,21 +18,25 @@ export async function searchAios({
   vaultPath,
   query,
   scope = "all",
-  limit = DEFAULT_LIMIT
+  limit = DEFAULT_LIMIT,
+  sessionFilters = {}
 }) {
   const scopes = scope === "all"
-    ? ["context", "memory", "vault", "projects", "skills", "references", "plugins"]
+    ? ["sessions", "context", "memory", "vault", "projects", "skills", "references", "plugins"]
     : [scope];
 
   const groups = [];
   for (const name of scopes) {
-    const results = await searchScope(name, { aiosPath, vaultPath, query, limit });
+    const results = await searchScope(name, { aiosPath, vaultPath, query, limit, sessionFilters });
     groups.push({ scope: name, results });
   }
   return groups;
 }
 
-export async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_LIMIT }) {
+export async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_LIMIT, sessionFilters = {} }) {
+  if (scope === "sessions") {
+    return searchSessionsScope(aiosPath, query, { limit, ...sessionFilters });
+  }
   if (scope === "memory") {
     return searchMemoryDir(path.join(aiosPath, "memory"), query, { limit });
   }
@@ -445,6 +449,21 @@ function termLineIndexes(lines, query) {
     }
   }
   return indexes.sort((a, b) => a - b);
+}
+
+async function searchSessionsScope(aiosPath, query, { limit = DEFAULT_LIMIT, agent, project, since } = {}) {
+  const { searchSessions } = await import("./sessions.mjs");
+  const hits = await searchSessions(aiosPath, query, { agent, project, since, limit });
+  return hits.map(({ entry, bodyMatch, snippet }) => ({
+    source: `sessions/${entry.path}`,
+    file: entry.path,
+    title: entry.title || "(untitled)",
+    agent: entry.agent,
+    date: entry.captured_at?.slice(0, 10),
+    session_id: entry.session_id,
+    project: entry.project,
+    matches: snippet ? [{ line: 0, content: snippet, match: "phrase", area: "body" }] : [],
+  }));
 }
 
 function compareTimestampsDesc(a, b) {

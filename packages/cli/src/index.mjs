@@ -11,6 +11,7 @@ const commands = {
   activate: "./commands/activate.mjs",
   attach: "./commands/activate.mjs",
   brief: "./commands/brief.mjs",
+  capture: "./commands/capture.mjs",
   cleanup: "./commands/cleanup.mjs",
   connect: "./commands/connect.mjs",
   context: "./commands/context.mjs",
@@ -43,6 +44,7 @@ Usage:
 
 Commands:
   setup             One-shot: init + activate + reveal (recommended for new users)
+  capture <cmd>     Save, browse, and search your AI conversations
   doctor            One-stop health check
   activate          Connect ~/aios to global agent memory files
   attach <dir>      Connect a project folder to DotAIOS
