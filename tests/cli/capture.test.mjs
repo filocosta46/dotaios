@@ -264,8 +264,8 @@ test("capture import does not write to memory/events.jsonl", () => {
 
 // ---------- capture status ----------
 
-test("capture status prints adapter summary", () => {
-  const result = run(["capture", "status"]);
+test("capture status --all prints adapter summary including unsupported", () => {
+  const result = run(["capture", "status", "--all"]);
   assert.match(result.stdout, /capture status/i);
   assert.match(result.stdout, /claude-code/);
 });
