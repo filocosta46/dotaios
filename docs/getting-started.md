@@ -70,6 +70,19 @@ Durable shelves (`wiki`, `company`, `person`) preview without `--apply` and will
 
 Dynamic or paywalled pages may ingest partial content. If the saved markdown ends abruptly or misses expected sections, save the logged-in page as a PDF from your browser and ingest the PDF.
 
+Save your AI conversations locally so every agent on your machine can remember what you've discussed:
+
+```bash
+dotaios capture enable claude-code     # auto-save every Claude Code session
+dotaios capture import paste           # paste any conversation manually
+dotaios capture import claude-code     # backfill past sessions (last 30 days)
+dotaios capture list                   # browse saved conversations
+dotaios capture list --agent claude-code --since 7d
+dotaios search "any topic"             # search includes saved sessions
+```
+
+All conversations save to `~/aios/memory/sessions/` as plain Markdown files. See [sessions.md](sessions.md) and [adapters.md](adapters.md) for supported tools and capability levels.
+
 Write today's local brief into your daily note:
 
 ```bash

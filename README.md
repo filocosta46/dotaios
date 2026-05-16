@@ -105,6 +105,7 @@ Run `dotaios status` any time to confirm every bridge is healthy.
 │   └── preferences.md    ← created by interview; how you like plans shaped
 │
 ├── memory/             ← what happened recently (fast operational notes)
+│   └── sessions/       ← saved AI conversations (one Markdown file each)
 ├── vault/              ← long-term knowledge (loaded on demand)
 └── skills/             ← skill folders agents can run and you can inspect
 ```
@@ -179,6 +180,7 @@ Logs a note to memory instantly — no need to know which file to edit. Run with
 | Command | What it does |
 |---|---|
 | `dotaios setup` | One-shot: init + activate + reveal (best for first-time users) |
+| `dotaios capture <cmd>` | Save, browse, search, and manage saved AI conversations |
 | `dotaios brief` | Writes today's local brief into `memory/daily/YYYY-MM-DD.md` |
 | `dotaios doctor` | One-stop health check |
 | `dotaios init` | Interactive setup, creates `~/aios/` |

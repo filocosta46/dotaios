@@ -50,7 +50,7 @@ Later, when your work or priorities change, you do not need to hunt through file
 DotAIOS initialized
 AIOS path: /Users/you/aios
 Vault path: /Users/you/aios/vault
-Files: 26 created, 0 updated, 0 kept
+Files: 27 created, 0 updated, 0 kept
 
 Next steps:
 1. Read FIRST_SESSION.md
@@ -132,6 +132,33 @@ After all 5 steps, you have:
 4. Skill folders in `~/aios/skills/` that explain what each skill does, what it does not do, and how to trigger it.
 
 Each morning you can run `npx dotaios brief` to get a local summary of today's priorities, open loops, and carry-over from yesterday, written directly into `memory/daily/`. Your `~/aios/schedules.yml` has a pre-wired daily schedule you can enable whenever you're ready.
+
+## Optional: save your AI conversations
+
+If you use Claude Code, you can enable automatic saving so every session is remembered across tools:
+
+```bash
+dotaios capture enable claude-code
+```
+
+After this, every Claude Code conversation is saved to `~/aios/memory/sessions/` as a plain Markdown file you can open and search. To bring in past sessions:
+
+```bash
+dotaios capture import claude-code    # last 30 days
+dotaios capture import claude-code --all   # everything
+```
+
+Search across all saved conversations:
+
+```bash
+dotaios search "topic you discussed"
+```
+
+For other tools (Cursor, Gemini, ChatGPT), paste any conversation manually:
+
+```bash
+dotaios capture import paste
+```
 
 You can stop here. Everything below is optional.
 

@@ -1,6 +1,6 @@
 # Beta Testing
 
-DotAIOS v1.4 ships the Universal Knowledge Router, skill bridging into Claude Code, and a visible-folder default at `~/aios/`. This guide covers a small weekend beta with terminal-comfortable testers.
+DotAIOS ships a local folder (`~/aios/`) that makes every AI tool on your machine context-aware — shared memory, skills, and saved conversations, all as plain files. This guide covers onboarding terminal-comfortable testers.
 
 ## Who To Invite
 
@@ -11,9 +11,8 @@ DotAIOS v1.4 ships the Universal Knowledge Router, skill bridging into Claude Co
 ## Friend Beta Script
 
 ```bash
-npx dotaios init
-npx dotaios activate
-npx dotaios context
+npx dotaios setup        # init + activate + open folder (one command)
+npx dotaios context      # confirm what agents can see
 npx dotaios search "your name"
 npx dotaios status
 ```
@@ -22,6 +21,24 @@ Then open the agent they normally use and ask:
 
 ```text
 What am I working on?
+```
+
+If they use Claude Code, enable session memory so past conversations are remembered:
+
+```bash
+dotaios capture enable claude-code
+```
+
+Backfill the last 30 days:
+
+```bash
+dotaios capture import claude-code
+```
+
+Search across saved conversations:
+
+```bash
+dotaios search "any topic you discussed"
 ```
 
 If they use Cursor for a project, also run:
@@ -61,6 +78,7 @@ Useful feedback:
 - Did `dotaios context` make it clear what agents can see?
 - Did `dotaios search` find something useful without making them read folders manually?
 - Did `dotaios status` make the next step obvious?
+- Did `dotaios capture enable claude-code` work, and did sessions appear in `~/aios/memory/sessions/`?
 - If they tried Google Workspace, did the `gws` setup/auth guidance feel safe and doable?
 - Was any safety or secrets guidance confusing?
 

@@ -17,7 +17,7 @@ All notable changes to DotAIOS will be documented in this file.
 - `dotaios search` now searches saved sessions in addition to memory, vault, and context.
 - `dotaios search --agent`, `--project`, `--since` — filter session results.
 - Universal session format: agent-neutral Markdown + YAML frontmatter, one file per conversation, human-readable in any editor.
-- `memory/sessions/index.jsonl` — lightweight catalog with `content_hash` for v1.6 semantic indexer.
+- `memory/sessions/index.jsonl` — lightweight catalog enabling fast search and deduplication across all saved sessions.
 - `docs/sessions.md` — plain-English guide: where conversations save, how to delete, how to turn off.
 - `docs/adapters.md` — per-tool capability levels in plain English.
 
