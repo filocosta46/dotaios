@@ -86,18 +86,20 @@ export async function searchScope(scope, { aiosPath, vaultPath, query, limit = D
 export function matchQuery(text, query) {
   const haystack = String(text || "").toLowerCase();
   const phrase = normalizeQuery(query);
-  if (!phrase) return { matched: false, kind: null };
+  if (!phrase) return { matched: false, kind: null, score: 0 };
 
   if (haystack.includes(phrase)) {
-    return { matched: true, kind: "phrase" };
+    const freq = countOccurrences(haystack, phrase);
+    return { matched: true, kind: "phrase", score: 10 + Math.min(freq - 1, 5) };
   }
 
   const terms = queryTerms(query);
   if (terms.length > 1 && terms.every((term) => haystack.includes(term))) {
-    return { matched: true, kind: "terms" };
+    const freq = terms.reduce((sum, term) => sum + countOccurrences(haystack, term), 0);
+    return { matched: true, kind: "terms", score: 5 + Math.min(freq - terms.length, 5) };
   }
 
-  return { matched: false, kind: null };
+  return { matched: false, kind: null, score: 0 };
 }
 
 export async function searchMemoryDir(memoryDir, query, { limit = DEFAULT_LIMIT } = {}) {
@@ -297,7 +299,7 @@ function matchJsonEntry(entry, query) {
       field: field.name,
       value: truncate(field.value, 160),
       kind: match.kind,
-      score: match.kind === "phrase" ? 2 : 1
+      score: match.score
     };
     if (!best || candidate.score > best.score || (best.field !== "summary" && candidate.field === "summary")) {
       best = candidate;
@@ -471,6 +473,16 @@ function compareTimestampsDesc(a, b) {
   if (!a) return 1;
   if (!b) return -1;
   return b.localeCompare(a);
+}
+
+function countOccurrences(haystack, needle) {
+  let count = 0;
+  let pos = 0;
+  while ((pos = haystack.indexOf(needle, pos)) !== -1) {
+    count++;
+    pos += needle.length;
+  }
+  return count;
 }
 
 function escapeRegExp(value) {

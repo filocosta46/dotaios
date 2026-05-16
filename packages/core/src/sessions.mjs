@@ -137,6 +137,8 @@ export async function writeSession(aiosPath, session) {
     title: session.title || null,
     path: relativePath,
     content_hash: bodyHash,
+    last_accessed: null,
+    access_count: 0,
   };
 
   await appendIndexEntry(aiosPath, indexEntry);
@@ -158,6 +160,18 @@ export async function filterSessions(aiosPath, { agent, project, since } = {}) {
     if (sinceTs && entry.captured_at < sinceTs) return false;
     return true;
   });
+}
+
+export async function touchSession(aiosPath, sessionId) {
+  const entries = await readSessionIndex(aiosPath);
+  const idx = entries.findIndex((e) => e.session_id === sessionId);
+  if (idx === -1) return;
+  entries[idx] = {
+    ...entries[idx],
+    last_accessed: new Date().toISOString(),
+    access_count: (entries[idx].access_count || 0) + 1,
+  };
+  await writeSessionIndex(aiosPath, entries);
 }
 
 export async function deleteSession(aiosPath, sessionId) {
