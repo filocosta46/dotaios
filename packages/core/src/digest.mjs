@@ -1,12 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { readSignals } from "./memory.mjs";
+import { isoDate, readSignals } from "./memory.mjs";
+import { readSection, readSubsection } from "./sections.mjs";
 import { readSessionIndex } from "./sessions.mjs";
 
-/**
- * Build a compact context digest for cross-agent handoff.
- * Returns a Markdown string any agent can read to get up to speed instantly.
- */
 export async function buildSessionDigest(aiosPath, { project, limit = 3 } = {}) {
   const now = new Date();
   const today = isoDate(now);
@@ -22,8 +19,8 @@ export async function buildSessionDigest(aiosPath, { project, limit = 3 } = {}) 
     readSessionIndex(aiosPath),
   ]);
 
-  const focus = readDailySection(todayNote, "Focus");
-  const plan = readDailySection(todayNote, "Plan");
+  const focus = readSection(todayNote, "Focus");
+  const plan = readSection(todayNote, "Plan");
   const carryOver = extractCarryOver(todayNote, yesterdayNote);
 
   const sessions = allSessions
@@ -32,7 +29,7 @@ export async function buildSessionDigest(aiosPath, { project, limit = 3 } = {}) 
     .slice(0, limit);
 
   const activeProject = project || inferActiveProject(allSessions);
-  const recentSignals = signals.slice().reverse().slice(0, 8);
+  const recentSignals = signals.reverse().slice(0, 8);
 
   return renderDigest({ today, focus, plan, carryOver, signals: recentSignals, sessions, activeProject });
 }
@@ -95,55 +92,31 @@ function renderDigest({ today, focus, plan, carryOver, signals, sessions, active
 }
 
 function inferActiveProject(sessions) {
-  const recent = sessions
-    .slice()
-    .sort((a, b) => (b.captured_at || "").localeCompare(a.captured_at || ""))
-    .slice(0, 10);
-
+  const latest = {};
   const counts = {};
-  for (const s of recent) {
-    if (s.project) counts[s.project] = (counts[s.project] || 0) + 1;
+  for (const s of sessions) {
+    if (!s.project) continue;
+    counts[s.project] = (counts[s.project] || 0) + 1;
+    const ts = s.captured_at || "";
+    if (!latest[s.project] || ts > latest[s.project]) latest[s.project] = ts;
   }
-
-  return Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || null;
+  return Object.keys(latest).sort((a, b) =>
+    latest[b].localeCompare(latest[a]) || counts[b] - counts[a]
+  )[0] || null;
 }
 
 function extractCarryOver(todayNote, yesterdayNote) {
-  const todayPlan = readDailySection(todayNote, "Plan");
+  const todayPlan = readSection(todayNote, "Plan");
   const carriedLines = todayPlan
     .split("\n")
     .filter((l) => l.includes("Carried over from"))
     .map((l) => l.trim().replace(/^[-*]\s*/, ""))
     .filter(Boolean);
 
-  const closeSection = readDailySection(yesterdayNote, "Close");
+  const closeSection = readSection(yesterdayNote, "Close");
   const yesterdayCarry = readSubsection(closeSection, "Carry-over");
 
   return dedupe([...carriedLines, ...compactLines(yesterdayCarry)]).slice(0, 5);
-}
-
-function readDailySection(content, heading) {
-  const lines = content.split("\n");
-  const start = lines.findIndex((l) => l.trim() === `## ${heading}`);
-  if (start === -1) return "";
-  const body = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^## /.test(line.trim())) break;
-    body.push(line);
-  }
-  return body.join("\n").trim();
-}
-
-function readSubsection(content, heading) {
-  const lines = content.split("\n");
-  const start = lines.findIndex((l) => l.trim() === `### ${heading}`);
-  if (start === -1) return "";
-  const body = [];
-  for (const line of lines.slice(start + 1)) {
-    if (/^#{2,3} /.test(line.trim())) break;
-    body.push(line);
-  }
-  return body.join("\n").trim();
 }
 
 function compactLines(content) {
@@ -175,8 +148,4 @@ async function readOrEmpty(filePath) {
   } catch {
     return "";
   }
-}
-
-function isoDate(date) {
-  return date.toISOString().slice(0, 10);
 }
