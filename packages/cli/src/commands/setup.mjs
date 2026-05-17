@@ -50,14 +50,12 @@ export async function setupCommand(args) {
   }
 
   // Step 2: activate (only if init succeeded — activate needs aios.json)
-  let activateOk = false;
   if (initOk) {
     console.log("");
     console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
     console.log("");
     try {
       await activateCommand(passthrough);
-      activateOk = true;
     } catch (err) {
       console.error(`Step 2 failed: ${err.message}`);
       console.error("Re-run: dotaios activate to retry connecting your tools.");

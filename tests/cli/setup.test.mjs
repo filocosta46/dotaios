@@ -44,8 +44,8 @@ describe("setupCommand — step isolation", () => {
     const allOutput = messages.map(([, m]) => m).join("\n");
     // Should have a message indicating activate had issues
     assert.ok(
-      allOutput.includes("step 2") || allOutput.includes("activate") || allOutput.includes("skip") || allOutput.includes("re-run"),
-      `Expected failure guidance in output, got: ${allOutput.slice(0, 500)}`
+      allOutput.includes("Step 2 failed:") || allOutput.includes("Re-run: dotaios activate"),
+      `Expected activate failure message in output, got: ${allOutput.slice(0, 500)}`
     );
   });
 });
