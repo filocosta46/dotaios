@@ -105,6 +105,7 @@ class DotaiosMcpServer {
 
     if (name === "read_context") return await this.readContext(args);
     if (name === "read_session_digest") return await this.readSessionDigest(args);
+    if (name === "list_skills") return await this.listSkills();
     if (name === "search_memory") return await this.searchMemory(args);
     if (name === "search_vault") return await this.searchVault(args);
     if (name === "search_aios") return await this.searchAios(args);
@@ -161,6 +162,17 @@ class DotaiosMcpServer {
     const { digest, sessionIds } = await buildSessionDigest(this.aiosPath, { project, limit });
     await Promise.all(sessionIds.map((id) => touchSession(this.aiosPath, id)));
     return JSON.stringify({ digest }, null, 2);
+  }
+
+  async listSkills() {
+    const indexPath = path.join(this.aiosPath, "skills", "INDEX.md");
+    let content;
+    try {
+      content = await fs.readFile(indexPath, "utf8");
+    } catch {
+      return JSON.stringify({ skills: [], message: "No skills installed. Run: dotaios activate" }, null, 2);
+    }
+    return JSON.stringify({ skills: content }, null, 2);
   }
 
   async searchMemory(args) {
@@ -354,6 +366,12 @@ function tools() {
           limit: { type: "integer", minimum: 1, maximum: 10, default: 3, description: "Number of recent sessions to include." }
         }
       }
+    },
+    {
+      name: "list_skills",
+      title: "List Skills",
+      description: "List all installed DotAIOS skills the user can run. Returns the skills/INDEX.md content which describes each skill and how to invoke it.",
+      inputSchema: { type: "object", properties: {} }
     },
     {
       name: "search_memory",

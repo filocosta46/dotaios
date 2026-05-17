@@ -71,6 +71,7 @@ export async function isAgentInstalled(homePath, agent) {
 // canonical AGENTS.md front door inside the AIOS folder.
 export function bridgeContent(agent, aiosPath) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
+  const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
   const pointerLine = agent.include === "@"
     ? `@${entrypoint}`
     : `DotAIOS entrypoint (read this file first): ${entrypoint}`;
@@ -84,6 +85,9 @@ export function bridgeContent(agent, aiosPath) {
     pointerLine,
     "",
     "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
+    "",
+    `Skills: read ${skillsIndex} to see all available skills and how to run them.`,
+    "Working memory: call the `read_session_digest` MCP tool, or run `dotaios brief --compact` to get today's focus, carry-overs, and recent sessions.",
     MANAGED_END,
     ""
   ].join("\n");

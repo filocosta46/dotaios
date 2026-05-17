@@ -52,6 +52,7 @@ test("mcp server exposes DotAIOS tools over newline JSON-RPC", () => {
   assert.deepEqual(tools, [
     "read_context",
     "read_session_digest",
+    "list_skills",
     "search_memory",
     "search_vault",
     "search_aios",
