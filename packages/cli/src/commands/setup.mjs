@@ -205,6 +205,7 @@ async function enableSchedule(aiosPath, scheduleName) {
   const content = await fs.readFile(schedulesPath, "utf8");
   const lines = content.split("\n");
   let inTarget = false;
+  let changed = false;
 
   const updated = lines.map((line) => {
     const trimmed = line.trim();
@@ -214,11 +215,19 @@ async function enableSchedule(aiosPath, scheduleName) {
       inTarget = false;
     }
     if (inTarget && trimmed === "enabled: false") {
+      changed = true;
       return line.replace("enabled: false", "enabled: true");
     }
     return line;
   });
 
+  if (!changed) {
+    console.log(`  (could not enable ${scheduleName} automatically — edit schedules.yml and set enabled: true under the "${scheduleName}" entry)`);
+    return false;
+  }
+
   await fs.writeFile(schedulesPath, updated.join("\n"));
   return true;
 }
+
+export { enableSchedule };

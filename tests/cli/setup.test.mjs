@@ -49,3 +49,58 @@ describe("setupCommand — step isolation", () => {
     );
   });
 });
+
+describe("enableSchedule — fallback when entry missing", () => {
+  it("returns false and prints fallback message when schedule name not found", async () => {
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-enablesched-"));
+    const aiosPath = path.join(tmpBase, "aios");
+    await fs.mkdir(aiosPath, { recursive: true });
+
+    const yamlContent = "schedules:\n  - name: other-schedule\n    enabled: false\n";
+    await fs.writeFile(path.join(aiosPath, "schedules.yml"), yamlContent);
+
+    const { enableSchedule } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/setup.mjs")
+    );
+
+    const messages = [];
+    const originalLog = console.log.bind(console);
+    console.log = (...args) => messages.push(args.join(" "));
+
+    let result;
+    try {
+      result = await enableSchedule(aiosPath, "daily-brief");
+    } finally {
+      console.log = originalLog;
+      await fs.rm(tmpBase, { recursive: true, force: true });
+    }
+
+    assert.equal(result, false, "should return false when schedule not found");
+    assert.ok(
+      messages.some((m) => m.includes("edit schedules.yml")),
+      `should print manual fallback message, got: ${messages.join(" | ")}`
+    );
+  });
+
+  it("returns true and enables schedule when entry found", async () => {
+    const tmpBase = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-enablesched2-"));
+    const aiosPath = path.join(tmpBase, "aios");
+    await fs.mkdir(aiosPath, { recursive: true });
+
+    const yamlContent = "schedules:\n  - name: daily-brief\n    enabled: false\n    cron: '0 8 * * *'\n";
+    await fs.writeFile(path.join(aiosPath, "schedules.yml"), yamlContent);
+
+    const { enableSchedule } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/setup.mjs")
+    );
+
+    const result = await enableSchedule(aiosPath, "daily-brief");
+    const updated = await fs.readFile(path.join(aiosPath, "schedules.yml"), "utf8");
+
+    await fs.rm(tmpBase, { recursive: true, force: true });
+
+    assert.equal(result, true, "should return true when schedule found and enabled");
+    assert.ok(updated.includes("enabled: true"), "should have updated enabled to true");
+    assert.ok(!updated.includes("enabled: false"), "should not still have enabled: false");
+  });
+});
