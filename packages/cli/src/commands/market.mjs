@@ -39,7 +39,20 @@ export async function marketCommand(args) {
   }
 
   const registryUrl = options.registry || process.env.DOTAIOS_REGISTRY_URL || DEFAULT_REGISTRY_URL;
-  const registry = await fetchRegistry(registryUrl);
+  let registry;
+  try {
+    registry = await fetchRegistry(registryUrl);
+  } catch (err) {
+    const isNetwork = err.message.includes("Could not reach") || err.message.includes("fetch");
+    if (isNetwork) {
+      console.error("Could not reach the skill registry. Check your internet connection and try again.");
+      console.error(`(Registry URL: ${registryUrl})`);
+    } else {
+      console.error(`Registry error: ${err.message}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
 
   if (subcommand === "list") {
     printList(registry, registryUrl);

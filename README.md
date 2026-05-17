@@ -28,6 +28,8 @@ DotAIOS needs one AI app installed on your computer so it has somewhere to send 
 
 ## Install in 60 seconds
 
+> **Using an AI agent to set this up?** Skip to [Installing with AI help](#installing-with-ai-help) below.
+
 **Step 1. Open your Terminal app.** This is where the commands below run. It is NOT a chat window like ChatGPT or Gemini.
 
 - **Mac:** press `⌘ + space`, type `Terminal`, press Enter.
@@ -36,13 +38,24 @@ DotAIOS needs one AI app installed on your computer so it has somewhere to send 
 
 A small black-and-white window opens. That is your Terminal.
 
-**Step 2. Paste these three commands into the Terminal**, one at a time, pressing Enter after each:
+**Step 2. Check that Node.js is installed.** Paste this into your Terminal and press Enter:
 
 ```bash
-npx dotaios setup      # full setup in one step (init + connect agents + open folder)
+node --version
 ```
 
-Prefer it manual? Run the three steps yourself:
+- **You see `v20.x.x` or higher** → you're ready. Go to Step 3.
+- **You see a lower version (like `v18`) or get an error** → go to [nodejs.org](https://nodejs.org), click the big green **LTS** button, run the installer, then come back here and run `node --version` again.
+
+**Step 3. Run setup.** Paste this into your Terminal:
+
+```bash
+npx dotaios setup
+```
+
+This does everything in one go: creates your folder, answers 5 short questions about you, and connects your AI tools. Takes about 60 seconds.
+
+Prefer to run it manually? Three separate steps:
 
 ```bash
 npx dotaios init       # answer 5 questions, your folder appears
@@ -50,7 +63,21 @@ npx dotaios activate   # connect Claude Code, Codex, and Gemini
 npx dotaios reveal     # open the folder in Finder / Explorer
 ```
 
-**Step 3.** Open Claude Code (or whichever AI tool you use). Ask: **"What am I working on?"** It answers from your `work.md`.
+**Step 4.** Open Claude Code (or whichever AI tool you use). Ask: **"What am I working on?"** It answers from your `work.md`.
+
+---
+
+## Installing with AI help
+
+If you opened this page inside Claude Code, Codex, or another AI agent — or pasted this URL into a chat — the agent can guide you through the whole installation.
+
+**Say this to your agent:**
+
+> Read the DotAIOS README at this URL and help me install it step by step. First check if I have Node.js 20 or higher installed. If I don't, tell me exactly how to get it for my operating system. Then run the setup commands for me and tell me what to do next.
+
+The agent will check your machine, install anything missing, run `npx dotaios setup`, and walk you through the 5 setup questions. You don't need to understand the Terminal commands — just follow what it says.
+
+---
 
 When your role, priorities, or planning style changes, run:
 
