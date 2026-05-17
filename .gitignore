@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .DS_Store
+.worktrees/
 
 # Local secrets and generated user memory
 .env
