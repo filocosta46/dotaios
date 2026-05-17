@@ -16,15 +16,15 @@ DotAIOS creates **one folder** at `~/aios/` that holds your context, your memory
 
 ## Before you start
 
-DotAIOS works with **AI agent apps** — tools that run on your computer and can read your files. A browser chatbot like ChatGPT or Gemini on the web is not enough.
+DotAIOS needs one AI app installed on your computer so it has somewhere to send your context. Once that's set up, every AI you use — on your computer or in a browser — can read from the same folder.
 
-**Supported agents (pick one):**
+**Pick one app to install (if you haven't already):**
 - [Claude Code](https://claude.ai/download) — recommended
 - [Codex CLI](https://github.com/openai/codex) by OpenAI
 - [Cursor](https://www.cursor.com) — code editor with AI
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
 
-Download and open one of these first, then run the install commands below inside it.
+**Already using Claude.ai, ChatGPT, or Gemini in your browser?** Great — keep using them. After setup, open your `~/aios/AGENTS.md` file and paste it at the start of any web chat. Your AI reads your context immediately, no extra steps.
 
 ## Install in 60 seconds
 
@@ -62,13 +62,16 @@ It asks a few plain English questions, shows what will change, then updates the 
 
 ## Save your AI conversations
 
-DotAIOS can save your AI conversations locally so every agent on your machine can remember what you've discussed — across tools, across sessions.
+DotAIOS can save your AI conversations locally so your context grows over time — across tools and sessions.
 
 ```bash
 dotaios capture enable claude-code   # auto-save every Claude Code session
-dotaios capture import paste         # paste in any conversation manually
+dotaios capture import paste         # paste any conversation in manually (works with any tool)
 dotaios search "launch timing"       # search across all saved conversations
 ```
+
+**Claude Code:** auto-saves after every session once enabled.  
+**Any other tool (ChatGPT, Gemini, Cursor, Claude.ai web):** copy-paste the conversation into `dotaios capture import paste` — takes 10 seconds.
 
 All conversations save to `~/aios/memory/sessions/` as plain Markdown files you can open and read. Nothing leaves your machine.
 
