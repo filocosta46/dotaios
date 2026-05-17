@@ -8,7 +8,7 @@ const repoRoot = new URL("../..", import.meta.url).pathname;
 
 async function makeMinimalAios(base) {
   const aiosPath = path.join(base, "aios");
-  await fs.mkdir(path.join(aiosPath, "context"), { recursive: true });
+  await fs.mkdir(aiosPath, { recursive: true });
   await fs.writeFile(
     path.join(aiosPath, "aios.json"),
     JSON.stringify({ schema_version: "1.0.0", ai_tools: [], created_at: new Date().toISOString() })
