@@ -36,16 +36,37 @@ export async function setupCommand(args) {
   const nonInteractive = args.includes("--yes") || args.includes("-y");
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
 
+  // Step 1: init
   console.log("DotAIOS setup — step 1 of 3: create your folder");
   console.log("");
-  await initCommand(passthrough);
+  let initOk = false;
+  try {
+    await initCommand(passthrough);
+    initOk = true;
+  } catch (err) {
+    console.error(`Step 1 failed: ${err.message}`);
+    console.error("Re-run: dotaios init to retry this step.");
+    console.error("");
+  }
 
-  console.log("");
-  console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
-  console.log("");
-  await activateCommand(passthrough);
+  // Step 2: activate (only if init succeeded — activate needs aios.json)
+  let activateOk = false;
+  if (initOk) {
+    console.log("");
+    console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
+    console.log("");
+    try {
+      await activateCommand(passthrough);
+      activateOk = true;
+    } catch (err) {
+      console.error(`Step 2 failed: ${err.message}`);
+      console.error("Re-run: dotaios activate to retry connecting your tools.");
+      console.error("");
+    }
+  }
 
-  if (!skipReveal) {
+  // Step 3: reveal (best-effort, never blocks)
+  if (!skipReveal && initOk) {
     console.log("");
     console.log("DotAIOS setup — step 3 of 3: open the folder");
     console.log("");
@@ -54,6 +75,12 @@ export async function setupCommand(args) {
     } catch (error) {
       console.error(`(skipped reveal: ${error.message})`);
     }
+  }
+
+  // If init didn't even succeed, bail early with clear message
+  if (!initOk) {
+    console.error("Setup could not complete. Fix the error above, then re-run: dotaios setup");
+    return;
   }
 
   // Brief schedule prompt — skip in non-interactive or non-TTY mode
