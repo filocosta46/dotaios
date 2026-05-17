@@ -16,9 +16,9 @@ function tmpDir() {
 }
 
 test("matchQuery prefers exact phrase and falls back to all terms", () => {
-  assert.deepEqual(matchQuery("alpha beta", "alpha beta"), { matched: true, kind: "phrase" });
-  assert.deepEqual(matchQuery("alpha then beta", "alpha beta"), { matched: true, kind: "terms" });
-  assert.deepEqual(matchQuery("alpha only", "alpha beta"), { matched: false, kind: null });
+  assert.deepEqual(matchQuery("alpha beta", "alpha beta"), { matched: true, kind: "phrase", score: 10 });
+  assert.deepEqual(matchQuery("alpha then beta", "alpha beta"), { matched: true, kind: "terms", score: 5 });
+  assert.deepEqual(matchQuery("alpha only", "alpha beta"), { matched: false, kind: null, score: 0 });
 });
 
 test("searchMarkdownDir orders phrase matches before all-term matches", async () => {

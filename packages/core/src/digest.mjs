@@ -29,9 +29,11 @@ export async function buildSessionDigest(aiosPath, { project, limit = 3 } = {}) 
     .slice(0, limit);
 
   const activeProject = project || inferActiveProject(allSessions);
-  const recentSignals = signals.reverse().slice(0, 8);
+  const recentSignals = [...signals].reverse().slice(0, 8);
 
-  return renderDigest({ today, focus, plan, carryOver, signals: recentSignals, sessions, activeProject });
+  const digest = renderDigest({ today, focus, plan, carryOver, signals: recentSignals, sessions, activeProject });
+  const sessionIds = sessions.map((s) => s.session_id).filter(Boolean);
+  return { digest, sessionIds };
 }
 
 function scoreSession(session) {
@@ -145,7 +147,8 @@ function firstLine(content) {
 async function readOrEmpty(filePath) {
   try {
     return await fs.readFile(filePath, "utf8");
-  } catch {
-    return "";
+  } catch (err) {
+    if (err.code === "ENOENT") return "";
+    throw err;
   }
 }
