@@ -192,7 +192,7 @@ async function bridgeSkillsToClaude(aiosPath, homePath, options) {
     }
     if (existsResult.kind === "missing") {
       if (!options.dryRun) {
-        await fs.symlink(source, dest, "dir");
+        await fs.symlink(source, dest, process.platform === "win32" ? "junction" : "dir");
       }
       results.push({ action: options.dryRun ? "would link" : "linked", path: dest });
       continue;
@@ -203,7 +203,7 @@ async function bridgeSkillsToClaude(aiosPath, homePath, options) {
     }
     if (!options.dryRun) {
       await fs.rm(dest, { recursive: true, force: true });
-      await fs.symlink(source, dest, "dir");
+      await fs.symlink(source, dest, process.platform === "win32" ? "junction" : "dir");
     }
     results.push({ action: options.dryRun ? "would relink" : "relinked", path: dest });
   }
