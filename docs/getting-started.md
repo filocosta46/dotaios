@@ -81,6 +81,8 @@ dotaios capture list --agent claude-code --since 7d
 dotaios search "any topic"             # search includes saved sessions
 ```
 
+For agents that can write local files, you can also ask: "use save-session" or "save this session". It writes a clean summary with decisions, open threads, and action items.
+
 All conversations save to `~/aios/memory/sessions/` as plain Markdown files. See [sessions.md](sessions.md) and [adapters.md](adapters.md) for supported tools and capability levels.
 
 Write today's local brief into your daily note:

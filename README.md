@@ -98,7 +98,8 @@ dotaios search "launch timing"       # search across all saved conversations
 ```
 
 **Claude Code:** auto-saves after every session once enabled.  
-**Any other tool (ChatGPT, Gemini, Cursor, Claude.ai web):** copy-paste the conversation into `dotaios capture import paste` — takes 10 seconds.
+**Any capable agent:** ask it to "use save-session" or "save this session" to write a clean summary into your AIOS.
+**Any other tool (ChatGPT, Gemini, Cursor, Claude.ai web):** copy-paste the conversation into `dotaios capture import paste` if it cannot write local files.
 
 All conversations save to `~/aios/memory/sessions/` as plain Markdown files you can open and read. Nothing leaves your machine.
 
@@ -155,6 +156,7 @@ Skills are plain-language instructions your agent follows. Every agent reads the
 | `ingest` | Saves a URL, PDF, or document into your vault |
 | `import-context` | Routes pasted context from another AI chat |
 | `privacy-brief` | Distills sensitive local context into a cloud-safe brief |
+| `save-session` | Saves the current AI conversation as a session summary |
 | `summarize-source` | Turns ingested raw material into a useful local summary |
 | `weekly-review` | Reviews recent memory and proposes context/project updates |
 

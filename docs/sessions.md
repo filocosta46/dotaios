@@ -14,6 +14,16 @@ Each conversation is a plain text file — you can open it in any text editor. T
 
 ## How to save a conversation
 
+**From any capable AI agent** (clean summary, no CLI needed):
+
+Ask:
+
+```
+save this session
+```
+
+The `save-session` skill writes a readable summary into `~/aios/memory/sessions/` with decisions, open threads, and action items. This is best when you want the next agent to understand what happened without storing a full raw transcript.
+
 **From Claude Code** (saves automatically once enabled):
 
 ```
@@ -28,7 +38,7 @@ This sets up automatic saving. After each Claude Code response, the conversation
 dotaios capture import paste
 ```
 
-Your text editor opens. Paste the conversation, save, and close. Works with Claude.ai, ChatGPT, Gemini, or anything else.
+Your text editor opens. Paste the conversation, save, and close. Works with Claude.ai, ChatGPT, Gemini, or anything else. Use this when the tool cannot write local files or you want a fuller transcript.
 
 **From a saved file:**
 
@@ -81,6 +91,7 @@ Auto-saving stops immediately. Past saved conversations are not deleted.
 - The messages you typed and the AI's replies.
 - The date and which tool you were using.
 - The project folder you were working in (inferred automatically).
+- For `save-session`, a summary with decisions, open threads, and action items instead of a raw transcript.
 
 ## What does NOT get saved
 

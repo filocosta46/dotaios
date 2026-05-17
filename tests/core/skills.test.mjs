@@ -5,6 +5,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { collectSkills, renderSkillsIndex, writeSkillsIndex } from "../../packages/core/src/skills.mjs";
 
+const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
+
 function makeSkill(skillsDir, dir, name, description) {
   fs.mkdirSync(path.join(skillsDir, dir), { recursive: true });
   fs.writeFileSync(
@@ -54,4 +56,17 @@ test("writeSkillsIndex writes skills/INDEX.md from the skills on disk", async ()
 
   const written = fs.readFileSync(path.join(root, "skills", "INDEX.md"), "utf8");
   assert.match(written, /## audit/);
+});
+
+test("bundled save-session skill is shipped and has digest instructions", () => {
+  const skillPath = path.join(repoRoot, "skills", "save-session", "SKILL.md");
+  const content = fs.readFileSync(skillPath, "utf8");
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+
+  assert.ok(packageJson.files.includes("skills"), "npm package must include bundled skills");
+  assert.match(content, /^---\nname: save-session\n/m);
+  assert.match(content, /memory\/sessions\/YYYY-MM-DD/);
+  assert.match(content, /<!-- digest:start -->/);
+  assert.match(content, /<!-- digest:end -->/);
+  assert.match(content, /index\.jsonl/);
 });
