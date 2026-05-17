@@ -42,10 +42,17 @@ describe("setupCommand — step isolation", () => {
     }
 
     const allOutput = messages.map(([, m]) => m).join("\n");
-    // Should have a message indicating activate had issues
     assert.ok(
       allOutput.includes("Step 2 failed:") || allOutput.includes("Re-run: dotaios activate"),
       `Expected activate failure message in output, got: ${allOutput.slice(0, 500)}`
+    );
+    assert.ok(
+      allOutput.includes("Folder created. Tool connection needs attention"),
+      `Expected partial-failure final message, got: ${allOutput.slice(0, 500)}`
+    );
+    assert.ok(
+      !allOutput.includes("All set. To get started:"),
+      `Expected "All set." absent when activate failed, got: ${allOutput.slice(0, 500)}`
     );
   });
 });

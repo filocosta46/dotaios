@@ -2,12 +2,20 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { listFiles, writeFileSafe } from "./files.mjs";
 
+export function isHtmlComment(val) {
+  return typeof val === "string" && val.startsWith("<!--");
+}
+
 export function renderTemplate(template, data) {
-  return template.replaceAll(/{{#if vault_path}}([\s\S]*?){{else}}([\s\S]*?){{\/if}}/g, (_match, yes, no) => (
-    data.vault_path ? yes.replaceAll("{{vault_path}}", data.vault_path) : no
-  )).replaceAll(/{{#each ai_tools}}([\s\S]*?){{\/each}}/g, () => (
+  return template.replaceAll(/{{#if (\w+)}}([\s\S]*?){{else}}([\s\S]*?){{\/if}}/g, (_match, key, yes, no) => {
+    const val = data[key];
+    return (val && !isHtmlComment(val)) ? yes : no;
+  }).replaceAll(/{{#each ai_tools}}([\s\S]*?){{\/each}}/g, () => (
     (data.ai_tools || []).map((tool) => `"${tool}"`).join(", ")
-  )).replaceAll(/{{(\w+)}}/g, (_match, key) => data[key] ?? "");
+  )).replaceAll(/{{(\w+)}}/g, (_match, key) => {
+    const val = data[key];
+    return (val != null && !isHtmlComment(val)) ? val : "";
+  });
 }
 
 export function templateOutputPath(relativePath) {

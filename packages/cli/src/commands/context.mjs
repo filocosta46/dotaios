@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { pathExists, readJson, writeFileSafe } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { planTemplateTree } from "../../../core/src/render.mjs";
+import { isHtmlComment, planTemplateTree } from "../../../core/src/render.mjs";
 import { confirmWrites } from "../../../core/src/review.mjs";
 import { readBullet, readSection } from "../../../core/src/sections.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -161,12 +161,14 @@ async function readTemplateData(target) {
     readText(path.join(target, "context", "priorities.md"))
   ]);
 
+  const strip = (v) => (isHtmlComment(v) ? "" : v);
+
   return {
     created_at: config.created_at || new Date().toISOString(),
     ai_tools: config.ai_tools || [],
     vault_path: config.vault_path || null,
-    user_name: readBullet(identity, "Name") || "Your Name",
-    user_role: readBullet(identity, "Role") || "student / operator / builder",
+    user_name: strip(readBullet(identity, "Name")) || "Your Name",
+    user_role: strip(readBullet(identity, "Role")) || "student / operator / builder",
     current_work: readSection(work, "Current Work") || "Add the active work threads agents should keep in mind.",
     priorities: readSection(priorities, "Current Bets") || "Add the current bets and near-term priorities."
   };

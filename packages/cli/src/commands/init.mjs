@@ -269,7 +269,7 @@ function printSuccess(target, vaultPath, results) {
 function firstSessionTemplate() {
   return `# First Session
 
-Welcome to {{user_name}}'s local AIOS.
+Welcome to {{#if user_name}}{{user_name}}'s{{else}}your{{/if}} local AIOS.
 
 ## What To Open
 
@@ -305,7 +305,7 @@ Keep these files short and true. Detail belongs in projects, skills, memory, or 
 }
 
 function localReadmeTemplate() {
-  return `# {{user_name}}'s AIOS
+  return `{{#if user_name}}# {{user_name}}'s AIOS{{else}}# My AIOS{{/if}}
 
 Local-first memory and context for AI agents.
 

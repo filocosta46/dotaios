@@ -49,12 +49,14 @@ export async function setupCommand(args) {
   }
 
   // Step 2: activate (requires aios.json from init)
+  let activateOk = true;
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
   console.log("");
   try {
     await activateCommand(passthrough);
   } catch (err) {
+    activateOk = false;
     console.error(`Step 2 failed: ${err.message}`);
     console.error("Re-run: dotaios activate to retry connecting your tools.");
     console.error("");
@@ -111,7 +113,12 @@ export async function setupCommand(args) {
   }
 
   console.log("");
-  console.log("All set. To get started:");
+  if (!activateOk) {
+    console.log("Folder created. Tool connection needs attention — run `dotaios activate` to finish.");
+    console.log("Once connected, to get started:");
+  } else {
+    console.log("All set. To get started:");
+  }
   console.log("  1. Open your AI agent — Claude Code, Codex, Gemini CLI, Cursor, or any other.");
   console.log("  2. Open the ~/aios folder or make it your working directory.");
   console.log('  3. Ask: "Read my context and tell me what I am working on."');

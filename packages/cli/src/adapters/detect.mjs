@@ -145,15 +145,11 @@ async function detectGemini() {
     return { detected: false, level: ADAPTER_LEVELS.UNSUPPORTED, enabled: false };
   }
 
-  // Check for parseable history (jsonl files)
-  const historyDir = path.join(geminiDir, "history");
-  const hasTranscripts = await hasJsonlFiles(historyDir);
-
   return {
     detected: true,
-    level: hasTranscripts ? ADAPTER_LEVELS.BACKFILL_ONLY : ADAPTER_LEVELS.MANUAL_ASSIST,
+    level: ADAPTER_LEVELS.MANUAL_ASSIST,
     enabled: false,
-    importCommand: hasTranscripts ? "dotaios capture import gemini" : null,
+    importCommand: null,
   };
 }
 

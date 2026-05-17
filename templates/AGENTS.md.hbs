@@ -1,4 +1,4 @@
-# {{user_name}}'s AIOS
+{{#if user_name}}# {{user_name}}'s AIOS{{else}}# My AIOS{{/if}}
 
 If you are an AI agent and this folder was just opened, read this file top to
 bottom first. It is the single source of truth for this folder — it works for
@@ -6,7 +6,7 @@ any agent (Claude Code, Codex, Gemini, Cursor, and ones not listed here).
 
 ## What This Is
 
-This folder is {{user_name}}'s local AIOS: durable, local-first context that
+This folder is {{#if user_name}}{{user_name}}'s{{else}}your{{/if}} local AIOS: durable, local-first context that
 helps AI agents understand who the user is, their active work, priorities, and
 communication preferences. It is plain text the user owns. No servers, no cloud.
 
