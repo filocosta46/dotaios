@@ -1022,7 +1022,7 @@ test("activate symlinks AIOS skills into ~/.claude/skills/ for slash-command dis
   const claudeSkills = path.join(homePath, ".claude", "skills");
   assert.equal(fs.existsSync(claudeSkills), true, "~/.claude/skills/ should be created");
 
-  for (const name of ["audit", "ingest", "plan-today", "today", "closeday", "import-context"]) {
+  for (const name of ["audit", "ingest", "plan-today", "today", "closeday", "import-context", "save-session"]) {
     const link = path.join(claudeSkills, name);
     assert.equal(fs.existsSync(link), true, `expected symlink at ${link}`);
     const stat = fs.lstatSync(link);
@@ -1035,6 +1035,16 @@ test("activate symlinks AIOS skills into ~/.claude/skills/ for slash-command dis
     const content = fs.readFileSync(skillFile, "utf8");
     assert.match(content, /^---\nname: /, `${name} SKILL.md should start with YAML frontmatter for Claude Code skill discovery`);
   }
+});
+
+test("init registry lists bundled save-session skill", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-v141-registry-"));
+  const aiosPath = path.join(tempRoot, "aios");
+
+  runCli(["init", "--path", aiosPath, "--yes"]);
+
+  const result = runCli(["skill", "list", "--path", aiosPath]);
+  assert.match(result.stdout, /save-session/);
 });
 
 test("every shipped skill has YAML frontmatter so Claude Code surfaces /skill commands", () => {
