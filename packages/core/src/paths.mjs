@@ -34,3 +34,12 @@ export async function ensureAiosFolder(target) {
     throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
   }
 }
+
+export function dotaiosBinDir() {
+  return path.join(os.homedir(), ".dotaios", "bin");
+}
+
+export function lightpandaBinPath() {
+  const ext = process.platform === "win32" ? ".exe" : "";
+  return path.join(dotaiosBinDir(), `lightpanda${ext}`);
+}
