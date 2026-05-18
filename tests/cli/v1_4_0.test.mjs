@@ -233,6 +233,8 @@ test("disambiguateSlug appends stable 8-char hash", () => {
 
 // --- Path A web scraper ---
 
+const NO_LIGHTPANDA = { resolveLightpandaImpl: async () => null };
+
 function makeFakeFetch({ body = "", status = 200, statusText = "OK", contentType = "text/html; charset=utf-8" } = {}) {
   return async () =>
     new Response(body, {
@@ -322,7 +324,7 @@ test("ingestUrl writes markdown with frontmatter from HTML fixture", async () =>
     rawDir: ws.rawDir,
     eventsPath: ws.eventsPath,
     fetchImpl,
-    resolveLightpandaImpl: async () => null,
+    ...NO_LIGHTPANDA,
     now: () => new Date("2026-05-10T12:00:00Z")
   });
 
@@ -355,7 +357,7 @@ test("ingestUrl skips when destination already exists without overwrite", async 
   const ws = makeWorkspace();
   const html = await fsp.readFile(path.join(fixturesDir, "sample-article.html"), "utf8");
   const fetchImpl = makeFakeFetch({ body: html });
-  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, resolveLightpandaImpl: async () => null };
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, ...NO_LIGHTPANDA };
 
   await ingestUrl("https://example.com/post", opts);
   const second = await ingestUrl("https://example.com/post", opts);
@@ -369,7 +371,7 @@ test("ingestUrl overwrites when overwrite=true", async () => {
   const ws = makeWorkspace();
   const html = await fsp.readFile(path.join(fixturesDir, "sample-article.html"), "utf8");
   const fetchImpl = makeFakeFetch({ body: html });
-  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, resolveLightpandaImpl: async () => null };
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, ...NO_LIGHTPANDA };
 
   await ingestUrl("https://example.com/post", opts);
   const second = await ingestUrl("https://example.com/post", { ...opts, overwrite: true });
@@ -382,7 +384,7 @@ test("ingestUrl overwrites when overwrite=true", async () => {
 test("ingestUrl disambiguates duplicate titles from different URLs", async () => {
   const ws = makeWorkspace();
   const fetchImpl = makeFakeFetch({ body: sameTitleHtml("Shared Title") });
-  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, resolveLightpandaImpl: async () => null };
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, ...NO_LIGHTPANDA };
 
   const first = await ingestUrl("https://example.com/a", opts);
   const second = await ingestUrl("https://example.org/b", opts);
@@ -408,7 +410,7 @@ test("ingestUrl --dry-run does not fetch or write", async () => {
     rawDir: ws.rawDir,
     eventsPath: ws.eventsPath,
     fetchImpl,
-    resolveLightpandaImpl: async () => null,
+    ...NO_LIGHTPANDA,
     dryRun: true
   });
 
@@ -427,7 +429,7 @@ test("ingestUrl raises FETCH_FAILED on non-2xx responses", async () => {
         rawDir: ws.rawDir,
         eventsPath: ws.eventsPath,
         fetchImpl,
-        resolveLightpandaImpl: async () => null
+        ...NO_LIGHTPANDA
       }),
     (err) => err instanceof IngestError && err.code === "FETCH_FAILED"
   );
@@ -443,7 +445,7 @@ test("ingestUrl routes URL PDFs through Path B with URL source preserved", async
     assetsDir: ws.assetsDir,
     eventsPath: ws.eventsPath,
     fetchImpl,
-    resolveLightpandaImpl: async () => null,
+    ...NO_LIGHTPANDA,
     documentOptions: {
       whichImpl: async () => null,
       extractPdfImpl: async (sourcePath) => {
@@ -478,7 +480,7 @@ test("ingestUrl raises READABILITY_NULL on empty SPA shell (no silent body-dump)
         rawDir: ws.rawDir,
         eventsPath: ws.eventsPath,
         fetchImpl,
-        resolveLightpandaImpl: async () => null
+        ...NO_LIGHTPANDA
       }),
     (err) => err instanceof IngestError && err.code === "READABILITY_NULL"
   );
@@ -1230,7 +1232,7 @@ test("ingestUrl raises TIMEOUT when fetch is aborted", async () => {
         rawDir: ws.rawDir,
         eventsPath: ws.eventsPath,
         fetchImpl,
-        resolveLightpandaImpl: async () => null,
+        ...NO_LIGHTPANDA,
         timeoutMs: 30
       }),
     (err) => err instanceof IngestError && err.code === "TIMEOUT"

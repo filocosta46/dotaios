@@ -99,16 +99,17 @@ export async function setupCommand(args) {
     }
   }
 
-  // Step 3.5: install Lightpanda (best-effort, never blocks)
-  if (lightpandaPlatformBinary() !== null) {
+  // Install Lightpanda for JS-rendered web ingest (best-effort, never blocks setup)
+  const platformBinary = lightpandaPlatformBinary();
+  if (platformBinary !== null) {
+    console.log("");
     if (process.env.DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD === "1") {
-      console.log("");
-      console.log("⬇  Installing Lightpanda for web browsing... (skipped via DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD)");
+      console.log("   Lightpanda install skipped (DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD)");
     } else {
-      console.log("");
-      const result = await downloadLightpanda({ silent: true });
+      const result = await downloadLightpanda({ silent: true, platformBinary });
       if (result.ok) {
-        console.log("✓  Lightpanda installed for web browsing");
+        const verb = result.alreadyInstalled ? "already installed" : "installed";
+        console.log(`✓  Lightpanda ${verb} for web browsing`);
       } else {
         console.log(`(Lightpanda install skipped: ${result.reason}. Web ingest will use plain fetch.)`);
       }

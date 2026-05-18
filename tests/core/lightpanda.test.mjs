@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { lightpandaPlatformBinary, downloadLightpanda } from "../../packages/core/src/lightpanda.mjs";
+import { lightpandaPlatformBinary, downloadLightpanda, resolveLightpanda } from "../../packages/core/src/lightpanda.mjs";
 
 function makeFakeFetch({ status = 200, body = "FAKE_BINARY_BYTES" } = {}) {
   return async () => ({
@@ -109,8 +109,6 @@ test("downloadLightpanda returns { ok:false, reason:'unsupported-platform' } whe
   assert.equal(result.ok, false);
   assert.equal(result.reason, "unsupported-platform");
 });
-
-import { resolveLightpanda } from "../../packages/core/src/lightpanda.mjs";
 
 test("resolveLightpanda returns local bin path when it exists and is executable", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-lp-res-"));

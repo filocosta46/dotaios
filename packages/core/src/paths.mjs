@@ -35,11 +35,19 @@ export async function ensureAiosFolder(target) {
   }
 }
 
+export function dotaiosDir() {
+  return path.join(os.homedir(), ".dotaios");
+}
+
 export function dotaiosBinDir() {
-  return path.join(os.homedir(), ".dotaios", "bin");
+  return path.join(dotaiosDir(), "bin");
 }
 
 export function lightpandaBinPath() {
   const ext = process.platform === "win32" ? ".exe" : "";
   return path.join(dotaiosBinDir(), `lightpanda${ext}`);
+}
+
+export function lightpandaHintFlagPath() {
+  return path.join(dotaiosDir(), ".lightpanda_hint_shown");
 }

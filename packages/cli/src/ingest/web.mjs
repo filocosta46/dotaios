@@ -6,8 +6,12 @@ import { canonicalizeUrl } from "./canonical-url.mjs";
 import { buildFrontmatter, slugify } from "./frontmatter.mjs";
 import { describeShelfTarget, placeMarkdown } from "./placement.mjs";
 import { resolveLightpanda, lightpandaPlatformBinary } from "../../../core/src/lightpanda.mjs";
+import { lightpandaHintFlagPath } from "../../../core/src/paths.mjs";
+import { pathExists } from "../../../core/src/files.mjs";
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
+export const PARSER_LIGHTPANDA = "lightpanda+readability+turndown";
+export const PARSER_PLAIN = "readability+turndown";
 const STRIP_SELECTORS = ["script", "style", "noscript", "iframe", "nav", "footer", "aside", "header"];
 
 export class IngestError extends Error {
@@ -74,7 +78,7 @@ export async function ingestUrl(rawInput, options) {
     now = () => new Date(),
     resolveLightpandaImpl = resolveLightpanda,
     spawnImpl = nodeSpawnSync,
-    hintFlagPath = path.join(os.homedir(), ".dotaios", ".lightpanda_hint_shown"),
+    hintFlagPath = lightpandaHintFlagPath(),
     lightpandaPlatformSupported = lightpandaPlatformBinary() !== null
   } = options;
 
@@ -82,7 +86,7 @@ export async function ingestUrl(rawInput, options) {
 
   if (dryRun) {
     const lp = await resolveLightpandaImpl();
-    const parser = lp ? "lightpanda+readability+turndown" : "readability+turndown";
+    const parser = lp ? PARSER_LIGHTPANDA : PARSER_PLAIN;
     return {
       action: "dry-run",
       kind: "web",
@@ -107,7 +111,6 @@ export async function ingestUrl(rawInput, options) {
     lightpandaPlatformSupported
   });
 
-  // PDF branch still goes through plain fetch (fetched.response is set when lightpanda was skipped)
   if (fetched.via === "plain") {
     const response = fetched.response;
     if (!response.ok) {
@@ -179,11 +182,9 @@ async function fetchHtml(url, {
   lightpandaPlatformSupported
 }) {
   const looksLikePdfUrl = /\.pdf($|[?#])/i.test(url);
-  const lp = await resolveLightpandaImpl();
+  const lp = looksLikePdfUrl ? null : await resolveLightpandaImpl();
 
-  if (looksLikePdfUrl) {
-    // Skip lightpanda — it returns binary bytes that fail Readability. PDFs go through plain fetch.
-  } else if (lp) {
+  if (lp) {
     try {
       const result = spawnImpl(lp, ["fetch", "--dump", url], {
         timeout: timeoutMs,
@@ -191,35 +192,30 @@ async function fetchHtml(url, {
         maxBuffer: 64 * 1024 * 1024
       });
       if (result && result.status === 0 && typeof result.stdout === "string" && result.stdout.trim()) {
-        return { via: "lightpanda", html: result.stdout, parser: "lightpanda+readability+turndown" };
+        return { via: "lightpanda", html: result.stdout, parser: PARSER_LIGHTPANDA };
       }
       console.warn(`[lightpanda] fetch failed for ${url} (exit ${result?.status ?? "?"}), falling back to plain fetch`);
     } catch (err) {
       console.warn(`[lightpanda] spawn error for ${url}: ${err.message}, falling back to plain fetch`);
     }
-  } else if (lightpandaPlatformSupported) {
+  } else if (!looksLikePdfUrl && lightpandaPlatformSupported) {
     await maybeShowLightpandaHint(hintFlagPath);
   }
 
   const response = await fetchWithTimeout(url, { timeoutMs, fetchImpl });
   if (!response.ok) {
-    return { via: "plain", response, html: "", parser: "readability+turndown" };
+    return { via: "plain", response, html: "", parser: PARSER_PLAIN };
   }
   const contentType = (response.headers.get("content-type") || "").toLowerCase();
   if (contentType.includes("application/pdf")) {
-    return { via: "plain", response, html: "", parser: "readability+turndown" };
+    return { via: "plain", response, html: "", parser: PARSER_PLAIN };
   }
   const html = await response.text();
-  return { via: "plain", response, html, parser: "readability+turndown" };
+  return { via: "plain", response, html, parser: PARSER_PLAIN };
 }
 
 async function maybeShowLightpandaHint(hintFlagPath) {
-  try {
-    await fs.access(hintFlagPath);
-    return; // already shown
-  } catch {
-    // fall through
-  }
+  if (await pathExists(hintFlagPath)) return;
   try {
     await fs.mkdir(path.dirname(hintFlagPath), { recursive: true });
     await fs.writeFile(hintFlagPath, new Date().toISOString());

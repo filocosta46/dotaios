@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isHtmlComment, renderTemplate, templateOutputPath } from "../../packages/core/src/render.mjs";
@@ -57,9 +59,6 @@ test("isHtmlComment identifies HTML comment strings", () => {
   assert.equal(isHtmlComment(""), false);
   assert.equal(isHtmlComment(null), false);
 });
-
-import fs from "node:fs/promises";
-import path from "node:path";
 
 test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", async () => {
   const tpl = await fs.readFile(
