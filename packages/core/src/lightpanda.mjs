@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 import { lightpandaBinPath } from "./paths.mjs";
 
 const PLATFORM_BINARIES = {
@@ -44,4 +45,26 @@ export async function downloadLightpanda({
   } catch (err) {
     return { ok: false, reason: err.message || String(err) };
   }
+}
+
+function defaultWhich() {
+  const cmd = process.platform === "win32" ? "where" : "which";
+  const result = spawnSync(cmd, ["lightpanda"], { encoding: "utf8" });
+  if (result.status !== 0) return null;
+  const first = (result.stdout || "").split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+  return first || null;
+}
+
+export async function resolveLightpanda({
+  localBinPath = lightpandaBinPath(),
+  whichImpl = defaultWhich
+} = {}) {
+  try {
+    await fs.access(localBinPath);
+    return localBinPath;
+  } catch {
+    // not present, try PATH
+  }
+  const fromPath = whichImpl();
+  return fromPath || null;
 }

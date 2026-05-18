@@ -109,3 +109,37 @@ test("downloadLightpanda returns { ok:false, reason:'unsupported-platform' } whe
   assert.equal(result.ok, false);
   assert.equal(result.reason, "unsupported-platform");
 });
+
+import { resolveLightpanda } from "../../packages/core/src/lightpanda.mjs";
+
+test("resolveLightpanda returns local bin path when it exists and is executable", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-lp-res-"));
+  const localBin = path.join(tmp, "lightpanda");
+  await fs.writeFile(localBin, "#!/bin/sh\necho fake");
+  await fs.chmod(localBin, 0o755);
+  try {
+    const result = await resolveLightpanda({
+      localBinPath: localBin,
+      whichImpl: () => null
+    });
+    assert.equal(result, localBin);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("resolveLightpanda falls back to PATH when local missing", async () => {
+  const result = await resolveLightpanda({
+    localBinPath: "/nonexistent/lightpanda",
+    whichImpl: () => "/usr/local/bin/lightpanda"
+  });
+  assert.equal(result, "/usr/local/bin/lightpanda");
+});
+
+test("resolveLightpanda returns null when neither local nor PATH has it", async () => {
+  const result = await resolveLightpanda({
+    localBinPath: "/nonexistent/lightpanda",
+    whichImpl: () => null
+  });
+  assert.equal(result, null);
+});
