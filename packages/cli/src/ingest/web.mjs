@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { canonicalizeUrl } from "./canonical-url.mjs";
 import { buildFrontmatter, slugify } from "./frontmatter.mjs";
 import { describeShelfTarget, placeMarkdown } from "./placement.mjs";
+import { resolveLightpanda, lightpandaPlatformBinary } from "../../../core/src/lightpanda.mjs";
 
 export const DEFAULT_FETCH_TIMEOUT_MS = 10_000;
 const STRIP_SELECTORS = ["script", "style", "noscript", "iframe", "nav", "footer", "aside", "header"];
@@ -69,20 +71,26 @@ export async function ingestUrl(rawInput, options) {
     signalsDir = null,
     apply = false,
     interactive = false,
-    now = () => new Date()
+    now = () => new Date(),
+    resolveLightpandaImpl = resolveLightpanda,
+    spawnImpl = nodeSpawnSync,
+    hintFlagPath = path.join(os.homedir(), ".dotaios", ".lightpanda_hint_shown"),
+    lightpandaPlatformSupported = lightpandaPlatformBinary() !== null
   } = options;
 
   const canonical = canonicalizeUrl(rawInput);
 
   if (dryRun) {
+    const lp = await resolveLightpandaImpl();
+    const parser = lp ? "lightpanda+readability+turndown" : "readability+turndown";
     return {
       action: "dry-run",
       kind: "web",
-      parser: "readability+turndown",
+      parser,
       canonical,
       plan: {
         kind: "web",
-        parser: "readability+turndown",
+        parser,
         canonical,
         shelf,
         rawDir
@@ -90,43 +98,54 @@ export async function ingestUrl(rawInput, options) {
     };
   }
 
-  const response = await fetchWithTimeout(canonical, { timeoutMs, fetchImpl });
+  const fetched = await fetchHtml(canonical, {
+    timeoutMs,
+    fetchImpl,
+    resolveLightpandaImpl,
+    spawnImpl,
+    hintFlagPath,
+    lightpandaPlatformSupported
+  });
 
-  if (!response.ok) {
-    throw new IngestError(
-      `Fetch failed: ${canonical} returned ${response.status} ${response.statusText || ""}`.trim(),
-      "FETCH_FAILED"
-    );
+  // PDF branch still goes through plain fetch (fetched.response is set when lightpanda was skipped)
+  if (fetched.via === "plain") {
+    const response = fetched.response;
+    if (!response.ok) {
+      throw new IngestError(
+        `Fetch failed: ${canonical} returned ${response.status} ${response.statusText || ""}`.trim(),
+        "FETCH_FAILED"
+      );
+    }
+    const contentType = (response.headers.get("content-type") || "").toLowerCase();
+    if (contentType.includes("application/pdf")) {
+      return await ingestPdfResponse({
+        response,
+        canonical,
+        rawDir,
+        assetsDir: options.assetsDir,
+        eventsPath,
+        overwrite,
+        documentOptions,
+        shelf,
+        name,
+        vaultRoot,
+        signalsDir,
+        apply,
+        interactive,
+        now
+      });
+    }
   }
 
-  const contentType = (response.headers.get("content-type") || "").toLowerCase();
-  if (contentType.includes("application/pdf")) {
-    return await ingestPdfResponse({
-      response,
-      canonical,
-      rawDir,
-      assetsDir: options.assetsDir,
-      eventsPath,
-      overwrite,
-      documentOptions,
-      shelf,
-      name,
-      vaultRoot,
-      signalsDir,
-      apply,
-      interactive,
-      now
-    });
-  }
-
-  const html = await response.text();
+  const html = fetched.html;
+  const parser = fetched.parser;
   const { title, markdown } = await extractArticle(html, canonical);
 
   const baseSlug = slugify(title);
   const frontmatter = buildFrontmatter({
     source: canonical,
     kind: "web",
-    parser: "readability+turndown",
+    parser,
     title,
     ingestedAt: now().toISOString()
   });
@@ -143,12 +162,68 @@ export async function ingestUrl(rawInput, options) {
     title,
     body: `${frontmatter}\n${markdown.trimEnd()}`,
     kind: "web",
-    parser: "readability+turndown",
+    parser,
     overwrite,
     apply,
     interactive,
     now
   });
+}
+
+async function fetchHtml(url, {
+  timeoutMs,
+  fetchImpl,
+  resolveLightpandaImpl,
+  spawnImpl,
+  hintFlagPath,
+  lightpandaPlatformSupported
+}) {
+  const lp = await resolveLightpandaImpl();
+
+  if (lp) {
+    try {
+      const result = spawnImpl(lp, ["fetch", "--dump", url], {
+        timeout: timeoutMs,
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024
+      });
+      if (result && result.status === 0 && typeof result.stdout === "string" && result.stdout.trim()) {
+        return { via: "lightpanda", html: result.stdout, parser: "lightpanda+readability+turndown" };
+      }
+      console.warn(`[lightpanda] fetch failed for ${url} (exit ${result?.status ?? "?"}), falling back to plain fetch`);
+    } catch (err) {
+      console.warn(`[lightpanda] spawn error for ${url}: ${err.message}, falling back to plain fetch`);
+    }
+  } else if (lightpandaPlatformSupported) {
+    await maybeShowLightpandaHint(hintFlagPath);
+  }
+
+  const response = await fetchWithTimeout(url, { timeoutMs, fetchImpl });
+  if (!response.ok) {
+    return { via: "plain", response, html: "", parser: "readability+turndown" };
+  }
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("application/pdf")) {
+    return { via: "plain", response, html: "", parser: "readability+turndown" };
+  }
+  const html = await response.text();
+  return { via: "plain", response, html, parser: "readability+turndown" };
+}
+
+async function maybeShowLightpandaHint(hintFlagPath) {
+  try {
+    await fs.access(hintFlagPath);
+    return; // already shown
+  } catch {
+    // fall through
+  }
+  try {
+    await fs.mkdir(path.dirname(hintFlagPath), { recursive: true });
+    await fs.writeFile(hintFlagPath, new Date().toISOString());
+    console.log("Tip: run `dotaios setup` to install Lightpanda for better web scraping.");
+  } catch {
+    // non-fatal — never block ingest because of the hint
+  }
 }
 
 async function fetchWithTimeout(url, { timeoutMs, fetchImpl }) {

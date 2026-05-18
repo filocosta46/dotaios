@@ -11,6 +11,7 @@ import {
   shelfNeedsName,
   shelfMarkdownPath
 } from "../../packages/cli/src/ingest/placement.mjs";
+import { ingestUrl } from "../../packages/cli/src/ingest/web.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -163,3 +164,93 @@ function runFail(args) {
 function read(filePath) {
   return fs.readFileSync(filePath, "utf8");
 }
+
+function htmlFixture(title = "Lightpanda Rendered") {
+  return `<!doctype html><html><head><title>${title}</title></head><body><article><h1>${title}</h1><p>${"Body paragraph. ".repeat(60)}</p></article></body></html>`;
+}
+
+function makeFakeFetch({ body = htmlFixture(), status = 200 } = {}) {
+  return async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: "OK",
+    text: async () => body,
+    arrayBuffer: async () => new TextEncoder().encode(body).buffer,
+    headers: { get: () => "text/html; charset=utf-8" }
+  });
+}
+
+function makeWebWorkspace() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-lp-web-"));
+  return {
+    root,
+    rawDir: path.join(root, "vault", "raw"),
+    assetsDir: path.join(root, "vault", "assets"),
+    eventsPath: path.join(root, "memory", "events.jsonl"),
+    hintFlagPath: path.join(root, "lightpanda_hint_shown")
+  };
+}
+
+test("ingestUrl uses lightpanda when resolver returns a path and spawn succeeds", async () => {
+  const ws = makeWebWorkspace();
+  const html = htmlFixture("Lightpanda Win");
+  const result = await ingestUrl("https://example.com/lp-win", {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makeFakeFetch({ body: "<html><body>SHOULD NOT BE USED</body></html>" }),
+    resolveLightpandaImpl: async () => "/fake/lightpanda",
+    spawnImpl: () => ({ status: 0, stdout: html, stderr: "" }),
+    hintFlagPath: ws.hintFlagPath,
+    now: () => new Date("2026-05-18T12:00:00Z")
+  });
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "lightpanda+readability+turndown");
+  const written = fs.readFileSync(result.destination, "utf8");
+  assert.match(written, /parser: lightpanda\+readability\+turndown/);
+  assert.match(written, /Lightpanda Win/);
+});
+
+test("ingestUrl falls back to plain fetch when lightpanda spawn fails", async () => {
+  const ws = makeWebWorkspace();
+  const html = htmlFixture("Plain Fetch Fallback");
+  const result = await ingestUrl("https://example.com/fallback", {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makeFakeFetch({ body: html }),
+    resolveLightpandaImpl: async () => "/fake/lightpanda",
+    spawnImpl: () => ({ status: 1, stdout: "", stderr: "boom" }),
+    hintFlagPath: ws.hintFlagPath,
+    now: () => new Date("2026-05-18T12:00:00Z")
+  });
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "readability+turndown");
+  const written = fs.readFileSync(result.destination, "utf8");
+  assert.match(written, /parser: readability\+turndown/);
+  assert.match(written, /Plain Fetch Fallback/);
+});
+
+test("ingestUrl uses plain fetch when lightpanda not found and writes hint flag once", async () => {
+  const ws = makeWebWorkspace();
+  const html = htmlFixture("Plain No Lightpanda");
+  const opts = {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makeFakeFetch({ body: html }),
+    resolveLightpandaImpl: async () => null,
+    spawnImpl: () => { throw new Error("must not spawn"); },
+    hintFlagPath: ws.hintFlagPath,
+    lightpandaPlatformSupported: true,
+    now: () => new Date("2026-05-18T12:00:00Z")
+  };
+  const result = await ingestUrl("https://example.com/nope", opts);
+  assert.equal(result.parser, "readability+turndown");
+  assert.equal(fs.existsSync(ws.hintFlagPath), true);
+
+  // Second call must not re-create / re-print (flag already exists)
+  const html2 = htmlFixture("Second Call");
+  const second = await ingestUrl("https://example.com/nope2", {
+    ...opts,
+    fetchImpl: makeFakeFetch({ body: html2 })
+  });
+  assert.equal(second.parser, "readability+turndown");
+});
