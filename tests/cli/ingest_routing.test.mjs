@@ -254,3 +254,66 @@ test("ingestUrl uses plain fetch when lightpanda not found and writes hint flag 
   });
   assert.equal(second.parser, "readability+turndown");
 });
+
+test("ingestUrl skips lightpanda for PDF URLs and routes through Path B (regression)", async () => {
+  const ws = makeWebWorkspace();
+  const pdfBytes = buildMinimalPdf("Regression PDF");
+
+  const result = await ingestUrl("https://example.com/paper.pdf", {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makePdfFetch(pdfBytes),
+    resolveLightpandaImpl: async () => "/fake/lightpanda",
+    spawnImpl: () => { throw new Error("must not spawn for PDF URLs"); },
+    hintFlagPath: ws.hintFlagPath,
+    lightpandaPlatformSupported: true,
+    documentOptions: {
+      whichImpl: async () => null,
+      extractPdfImpl: async () => "Extracted PDF text."
+    },
+    now: () => new Date("2026-05-18T12:00:00Z")
+  });
+
+  assert.equal(result.kind, "pdf");
+  assert.equal(result.parser, "unpdf");
+  // Hint flag must NOT be written — PDFs bypass the lightpanda hint logic entirely
+  assert.equal(fs.existsSync(ws.hintFlagPath), false);
+});
+
+// --- helpers ---
+
+function buildMinimalPdf(message = "Hello DotAIOS Test") {
+  const stream = `BT /F1 24 Tf 100 700 Td (${message}) Tj ET\n`;
+  const objects = [
+    "<</Type/Catalog/Pages 2 0 R>>",
+    "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+    "<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>/Contents 4 0 R>>",
+    `<</Length ${stream.length}>>stream\n${stream}endstream`
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = [];
+  for (let i = 0; i < objects.length; i += 1) {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefStart = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) {
+    body += `${off.toString().padStart(10, "0")} 00000 n \n`;
+  }
+  body += `trailer\n<</Size ${objects.length + 1}/Root 1 0 R>>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return Buffer.from(body, "binary");
+}
+
+function makePdfFetch(pdfBytes) {
+  const buf = pdfBytes instanceof Buffer ? pdfBytes : Buffer.from(pdfBytes);
+  return async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => buf.toString("binary"),
+    arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+    headers: { get: (name) => name.toLowerCase() === "content-type" ? "application/pdf" : null }
+  });
+}

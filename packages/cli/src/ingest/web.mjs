@@ -178,9 +178,12 @@ async function fetchHtml(url, {
   hintFlagPath,
   lightpandaPlatformSupported
 }) {
+  const looksLikePdfUrl = /\.pdf($|[?#])/i.test(url);
   const lp = await resolveLightpandaImpl();
 
-  if (lp) {
+  if (looksLikePdfUrl) {
+    // Skip lightpanda — it returns binary bytes that fail Readability. PDFs go through plain fetch.
+  } else if (lp) {
     try {
       const result = spawnImpl(lp, ["fetch", "--dump", url], {
         timeout: timeoutMs,
