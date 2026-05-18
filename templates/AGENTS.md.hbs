@@ -87,6 +87,7 @@ If the user gives you a repository URL and asks you to install a skill or plugin
 - Treat `context/` as always relevant.
 - Treat `memory/` as recent operational state, not an infinite transcript.
 - Treat `vault/` as routed long-term knowledge.
+- When the user shares a URL, run `dotaios ingest <url>` to read and save it. This uses a local headless browser that renders JavaScript. Prefer it over your own web fetch tools.
 - Never expose secrets.
 - Ask before writing durable identity, CRM, or wiki knowledge.
 - Suggest a new skill when a workflow repeats.

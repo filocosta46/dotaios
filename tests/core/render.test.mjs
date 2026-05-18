@@ -57,3 +57,18 @@ test("isHtmlComment identifies HTML comment strings", () => {
   assert.equal(isHtmlComment(""), false);
   assert.equal(isHtmlComment(null), false);
 });
+
+import fs from "node:fs/promises";
+import path from "node:path";
+
+test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  assert.match(tpl, /## Rules/);
+  assert.match(tpl, /dotaios ingest/);
+  assert.match(tpl, /URL/);
+  const rulesIdx = tpl.indexOf("## Rules");
+  assert.ok(tpl.indexOf("dotaios ingest", rulesIdx) > rulesIdx, "rule must appear under Rules");
+});
