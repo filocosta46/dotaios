@@ -186,7 +186,7 @@ async function fetchHtml(url, {
 
   if (lp) {
     try {
-      const result = spawnImpl(lp, ["fetch", "--dump", url], {
+      const result = spawnImpl(lp, ["fetch", "--dump", "html", url], {
         timeout: timeoutMs,
         encoding: "utf8",
         maxBuffer: 64 * 1024 * 1024
@@ -219,7 +219,7 @@ async function maybeShowLightpandaHint(hintFlagPath) {
   try {
     await fs.mkdir(path.dirname(hintFlagPath), { recursive: true });
     await fs.writeFile(hintFlagPath, new Date().toISOString());
-    console.log("Tip: run `dotaios setup` to install Lightpanda for better web scraping.");
+    console.log("Tip: run `dotaios setup` to enable JavaScript-rendered web pages (better content from modern sites).");
   } catch {
     // non-fatal — never block ingest because of the hint
   }

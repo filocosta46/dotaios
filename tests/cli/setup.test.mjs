@@ -114,7 +114,7 @@ describe("enableSchedule — fallback when entry missing", () => {
   });
 });
 
-test("setupCommand prints lightpanda step (download skipped via env)", () => {
+test("setupCommand prints web browsing engine step (download skipped via env)", () => {
   const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-lp-"));
   const aiosPath = path.join(tmp, "aios");
   const result = spawnSync(process.execPath, [
@@ -128,5 +128,5 @@ test("setupCommand prints lightpanda step (download skipped via env)", () => {
     env: { ...process.env, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Lightpanda/);
+  assert.match(result.stdout, /Web browsing engine.*skipped/);
 });

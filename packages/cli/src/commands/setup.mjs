@@ -104,14 +104,14 @@ export async function setupCommand(args) {
   if (platformBinary !== null) {
     console.log("");
     if (process.env.DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD === "1") {
-      console.log("   Lightpanda install skipped (DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD)");
+      console.log("   Web browsing engine: install skipped (DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD)");
     } else {
       const result = await downloadLightpanda({ silent: true, platformBinary });
       if (result.ok) {
-        const verb = result.alreadyInstalled ? "already installed" : "installed";
-        console.log(`✓  Lightpanda ${verb} for web browsing`);
+        const verb = result.alreadyInstalled ? "already ready" : "ready";
+        console.log(`✓  Web browsing engine ${verb} (renders JavaScript pages)`);
       } else {
-        console.log(`(Lightpanda install skipped: ${result.reason}. Web ingest will use plain fetch.)`);
+        console.log(`(Web browsing engine setup skipped. Pages will still load, but JavaScript-heavy sites may not render.)`);
       }
     }
   }

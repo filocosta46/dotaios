@@ -17,7 +17,11 @@ export function lightpandaPlatformBinary({ platform = process.platform, arch = p
   return PLATFORM_BINARIES[`${platform}:${arch}`] ?? null;
 }
 
-const RELEASE_BASE = "https://github.com/lightpanda-io/browser/releases/latest/download";
+// Pinned to a stable tag. `releases/latest/download/` redirects to the
+// `nightly` tag for this repo, which has historically shipped broken builds
+// (silent startup hangs on macOS arm64). Bump intentionally after smoke test.
+const LIGHTPANDA_VERSION = "0.3.0";
+const RELEASE_BASE = `https://github.com/lightpanda-io/browser/releases/download/${LIGHTPANDA_VERSION}`;
 
 export async function downloadLightpanda({
   silent = false,
