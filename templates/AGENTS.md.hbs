@@ -44,6 +44,7 @@ Long-term knowledge is configured at `vault/`.
 - `memory/signals/`: load today and yesterday only.
 - `memory/errors.jsonl`: load only when debugging failed operations.
 - `vault/`: load on demand when the task references knowledge, companies, people, writing style, or raw sources.
+- `memory/sessions/`: at the start of a work session, load the single most recent file from `memory/sessions/` if one exists. This gives you continuity from the last session without loading the full history.
 
 ## Project Convention
 
@@ -89,3 +90,4 @@ If the user gives you a repository URL and asks you to install a skill or plugin
 - Never expose secrets.
 - Ask before writing durable identity, CRM, or wiki knowledge.
 - Suggest a new skill when a workflow repeats.
+- When a work session is wrapping up, offer to save it: "Want me to save this session to your AIOS memory?" Use the `save-session` skill.
