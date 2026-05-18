@@ -322,6 +322,7 @@ test("ingestUrl writes markdown with frontmatter from HTML fixture", async () =>
     rawDir: ws.rawDir,
     eventsPath: ws.eventsPath,
     fetchImpl,
+    resolveLightpandaImpl: async () => null,
     now: () => new Date("2026-05-10T12:00:00Z")
   });
 
@@ -354,7 +355,7 @@ test("ingestUrl skips when destination already exists without overwrite", async 
   const ws = makeWorkspace();
   const html = await fsp.readFile(path.join(fixturesDir, "sample-article.html"), "utf8");
   const fetchImpl = makeFakeFetch({ body: html });
-  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl };
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, resolveLightpandaImpl: async () => null };
 
   await ingestUrl("https://example.com/post", opts);
   const second = await ingestUrl("https://example.com/post", opts);
@@ -368,7 +369,7 @@ test("ingestUrl overwrites when overwrite=true", async () => {
   const ws = makeWorkspace();
   const html = await fsp.readFile(path.join(fixturesDir, "sample-article.html"), "utf8");
   const fetchImpl = makeFakeFetch({ body: html });
-  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl };
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, resolveLightpandaImpl: async () => null };
 
   await ingestUrl("https://example.com/post", opts);
   const second = await ingestUrl("https://example.com/post", { ...opts, overwrite: true });
@@ -381,7 +382,7 @@ test("ingestUrl overwrites when overwrite=true", async () => {
 test("ingestUrl disambiguates duplicate titles from different URLs", async () => {
   const ws = makeWorkspace();
   const fetchImpl = makeFakeFetch({ body: sameTitleHtml("Shared Title") });
-  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl };
+  const opts = { rawDir: ws.rawDir, eventsPath: ws.eventsPath, fetchImpl, resolveLightpandaImpl: async () => null };
 
   const first = await ingestUrl("https://example.com/a", opts);
   const second = await ingestUrl("https://example.org/b", opts);
@@ -407,6 +408,7 @@ test("ingestUrl --dry-run does not fetch or write", async () => {
     rawDir: ws.rawDir,
     eventsPath: ws.eventsPath,
     fetchImpl,
+    resolveLightpandaImpl: async () => null,
     dryRun: true
   });
 
@@ -424,7 +426,8 @@ test("ingestUrl raises FETCH_FAILED on non-2xx responses", async () => {
       ingestUrl("https://example.com/missing", {
         rawDir: ws.rawDir,
         eventsPath: ws.eventsPath,
-        fetchImpl
+        fetchImpl,
+        resolveLightpandaImpl: async () => null
       }),
     (err) => err instanceof IngestError && err.code === "FETCH_FAILED"
   );
@@ -440,6 +443,7 @@ test("ingestUrl routes URL PDFs through Path B with URL source preserved", async
     assetsDir: ws.assetsDir,
     eventsPath: ws.eventsPath,
     fetchImpl,
+    resolveLightpandaImpl: async () => null,
     documentOptions: {
       whichImpl: async () => null,
       extractPdfImpl: async (sourcePath) => {
@@ -473,7 +477,8 @@ test("ingestUrl raises READABILITY_NULL on empty SPA shell (no silent body-dump)
       ingestUrl("https://example.com/spa", {
         rawDir: ws.rawDir,
         eventsPath: ws.eventsPath,
-        fetchImpl
+        fetchImpl,
+        resolveLightpandaImpl: async () => null
       }),
     (err) => err instanceof IngestError && err.code === "READABILITY_NULL"
   );
@@ -1225,6 +1230,7 @@ test("ingestUrl raises TIMEOUT when fetch is aborted", async () => {
         rawDir: ws.rawDir,
         eventsPath: ws.eventsPath,
         fetchImpl,
+        resolveLightpandaImpl: async () => null,
         timeoutMs: 30
       }),
     (err) => err instanceof IngestError && err.code === "TIMEOUT"
