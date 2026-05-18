@@ -6,6 +6,7 @@ import { hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
+import { downloadLightpanda, lightpandaPlatformBinary } from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
 import { activateCommand } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
@@ -95,6 +96,22 @@ export async function setupCommand(args) {
       await promptSessionMemory(rl, aiosPath, nonInteractive);
     } finally {
       rl.close();
+    }
+  }
+
+  // Step 3.5: install Lightpanda (best-effort, never blocks)
+  if (lightpandaPlatformBinary() !== null) {
+    if (process.env.DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD === "1") {
+      console.log("");
+      console.log("⬇  Installing Lightpanda for web browsing... (skipped via DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD)");
+    } else {
+      console.log("");
+      const result = await downloadLightpanda({ silent: true });
+      if (result.ok) {
+        console.log("✓  Lightpanda installed for web browsing");
+      } else {
+        console.log(`(Lightpanda install skipped: ${result.reason}. Web ingest will use plain fetch.)`);
+      }
     }
   }
 

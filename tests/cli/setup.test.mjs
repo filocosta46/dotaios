@@ -1,8 +1,10 @@
-import { describe, it } from "node:test";
+import { describe, it, test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
+import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 const repoRoot = new URL("../..", import.meta.url).pathname;
 
@@ -110,4 +112,21 @@ describe("enableSchedule — fallback when entry missing", () => {
     assert.ok(updated.includes("enabled: true"), "should have updated enabled to true");
     assert.ok(!updated.includes("enabled: false"), "should not still have enabled: false");
   });
+});
+
+test("setupCommand prints lightpanda step (download skipped via env)", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-lp-"));
+  const aiosPath = path.join(tmp, "aios");
+  const result = spawnSync(process.execPath, [
+    path.resolve(repoRoot, "packages/cli/src/index.mjs"),
+    "setup",
+    "--path", aiosPath,
+    "--yes",
+    "--skip-reveal"
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Lightpanda/);
 });
