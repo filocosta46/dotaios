@@ -3,8 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { readJson } from "../../../core/src/files.mjs";
-import { writeSession, readSessionIndex, filterSessions, deleteSession, searchSessions, SESSIONS_SUBDIR } from "../../../core/src/sessions.mjs";
+import { writeSession, filterSessions, deleteSession } from "../../../core/src/sessions.mjs";
 import { parseRawText } from "../adapters/manual.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 

@@ -33,7 +33,7 @@ export async function searchAios({
   return groups;
 }
 
-export async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_LIMIT, sessionFilters = {} }) {
+async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_LIMIT, sessionFilters = {} }) {
   if (scope === "sessions") {
     return searchSessionsScope(aiosPath, query, { limit, ...sessionFilters });
   }

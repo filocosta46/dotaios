@@ -1,6 +1,5 @@
 import path from "node:path";
-import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { pathExists, readJson } from "../../../core/src/files.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { compactEvents, trimSignals, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 

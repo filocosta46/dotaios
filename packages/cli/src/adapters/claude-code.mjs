@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
-import { writeSession, readSessionIndex, SESSIONS_SUBDIR } from "../../../core/src/sessions.mjs";
+import { writeSession, readSessionIndex } from "../../../core/src/sessions.mjs";
 
 export const name = "claude-code";
 export const level = ADAPTER_LEVELS.FULL_AUTO;

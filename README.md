@@ -73,7 +73,7 @@ If you opened this page inside Claude Code, Codex, or another AI agent — or pa
 
 **Say this to your agent:**
 
-> Read the DotAIOS README at this URL and help me install it step by step. First check if I have Node.js 20 or higher installed. If I don't, tell me exactly how to get it for my operating system. Then run the setup commands for me and tell me what to do next.
+> Read the DotAIOS README at this URL and help me install it. First run `node --version` to check if I have Node.js 20 or higher. If I don't, install it for me: on Mac run `brew install node` if Homebrew is available, otherwise open https://nodejs.org and download the LTS installer; on Windows run `winget install OpenJS.NodeJS.LTS`; on Linux run `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash` then `nvm install --lts`. Once Node is ready, run `npx dotaios setup` and walk me through the setup questions.
 
 The agent will check your machine, install anything missing, run `npx dotaios setup`, and walk you through the 5 setup questions. You don't need to understand the Terminal commands — just follow what it says.
 

@@ -6,7 +6,7 @@ const DEFAULT_DIR_NAME = ".dotaios";
 const FILE_NAME = "licenses.json";
 const GUMROAD_VERIFY_URL = "https://api.gumroad.com/v2/licenses/verify";
 
-export function licenseDir() {
+function licenseDir() {
   return process.env.DOTAIOS_LICENSE_DIR
     ? path.resolve(process.env.DOTAIOS_LICENSE_DIR)
     : path.join(os.homedir(), DEFAULT_DIR_NAME);
@@ -16,7 +16,7 @@ export function licenseFile() {
   return path.join(licenseDir(), FILE_NAME);
 }
 
-export async function readLicenses() {
+async function readLicenses() {
   try {
     const content = await fs.readFile(licenseFile(), "utf8");
     const parsed = JSON.parse(content);
@@ -27,7 +27,7 @@ export async function readLicenses() {
   }
 }
 
-export async function writeLicenses(store) {
+async function writeLicenses(store) {
   const dir = licenseDir();
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
   const file = licenseFile();

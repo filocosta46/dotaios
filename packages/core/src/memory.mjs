@@ -55,7 +55,7 @@ export async function readRecentEvents(filePath, limit = RECENT_EVENT_LIMIT) {
  * @param {string} fromDate - ISO date string "YYYY-MM-DD"
  * @param {string} toDate - ISO date string "YYYY-MM-DD"
  */
-export async function readSignals(signalsDir, fromDate, toDate) {
+async function readSignals(signalsDir, fromDate, toDate) {
   let entries;
   try {
     entries = await fs.readdir(signalsDir);
@@ -217,13 +217,6 @@ export async function searchMemory(memoryDir, query, { limit = 20 } = {}) {
  */
 export async function searchVault(vaultDir, query, { limit = 20 } = {}) {
   return searchMarkdownDir(vaultDir, query, { limit, sourcePrefix: "vault" });
-}
-
-/**
- * Search across context files for a keyword.
- */
-export async function searchContext(contextDir, query, { limit = 10 } = {}) {
-  return searchMarkdownDir(contextDir, query, { limit, sourcePrefix: "context" });
 }
 
 // --- Helpers ---

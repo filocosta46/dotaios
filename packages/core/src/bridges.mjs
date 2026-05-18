@@ -53,7 +53,7 @@ export function bridgePath(homePath, agent) {
   return path.join(homePath, agent.bridge);
 }
 
-export function detectPath(homePath, agent) {
+function detectPath(homePath, agent) {
   return path.join(homePath, agent.detect);
 }
 

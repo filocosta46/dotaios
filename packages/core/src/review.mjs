@@ -4,7 +4,7 @@ import { pathExists } from "./files.mjs";
 
 const MAX_PREVIEW_LINES = 40;
 
-export const Action = Object.freeze({
+const Action = Object.freeze({
   Create: "create",
   Update: "update",
   NoChange: "no change"
