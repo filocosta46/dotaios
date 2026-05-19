@@ -51,3 +51,19 @@ export function lightpandaBinPath() {
 export function lightpandaHintFlagPath() {
   return path.join(dotaiosDir(), ".lightpanda_hint_shown");
 }
+
+export function syncConfigPath() {
+  return path.join(dotaiosDir(), "sync.json");
+}
+
+export function inboxDir(aiosPath = defaultAiosPath()) {
+  return path.join(aiosPath, "memory", "inbox");
+}
+
+export function heartbeatPlistPath() {
+  return path.join(os.homedir(), "Library", "LaunchAgents", "io.dotaios.sync.plist");
+}
+
+export function heartbeatUnitDir() {
+  return path.join(os.homedir(), ".config", "systemd", "user");
+}
