@@ -51,3 +51,30 @@ test("isSyncEnabled is false when no access_token", async () => {
     assert.equal(await isSyncEnabled(cfg), true);
   });
 });
+
+test("writeSyncConfig tightens mode on pre-existing looser file", { skip: process.platform === "win32" }, async () => {
+  await withTmpHome(async (cfg) => {
+    await fs.writeFile(cfg, "{}", { mode: 0o644 });
+    await fs.chmod(cfg, 0o644);
+    await writeSyncConfig(cfg, { access_token: "T" });
+    const stat = await fs.stat(cfg);
+    assert.equal(stat.mode & 0o777, 0o600);
+  });
+});
+
+test("readSyncConfig throws typed error on malformed JSON", async () => {
+  await withTmpHome(async (cfg) => {
+    await fs.writeFile(cfg, "{not json", { mode: 0o600 });
+    await assert.rejects(readSyncConfig(cfg), /malformed/);
+  });
+});
+
+test("writeSyncConfig ensures parent dir is 0700", { skip: process.platform === "win32" }, async () => {
+  await withTmpHome(async (cfgPath, tmpRoot) => {
+    // Place sync.json inside a nested subdir that mkdir must create
+    const nested = path.join(tmpRoot, "sub", "sync.json");
+    await writeSyncConfig(nested, { access_token: "T" });
+    const dirStat = await fs.stat(path.dirname(nested));
+    assert.equal(dirStat.mode & 0o777, 0o700);
+  });
+});

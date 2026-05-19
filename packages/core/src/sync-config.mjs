@@ -3,12 +3,17 @@ import path from "node:path";
 import { syncConfigPath } from "./paths.mjs";
 
 export async function readSyncConfig(filePath = syncConfigPath()) {
+  let raw;
   try {
-    const raw = await fs.readFile(filePath, "utf8");
-    return JSON.parse(raw);
+    raw = await fs.readFile(filePath, "utf8");
   } catch (err) {
     if (err.code === "ENOENT") return null;
     throw err;
+  }
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    throw new Error(`sync.json is malformed at ${filePath}: ${err.message}`);
   }
 }
 
@@ -23,15 +28,28 @@ export async function writeSyncConfig(filePathOrPatch, maybePatch) {
     patch = filePathOrPatch;
   }
 
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const dir = path.dirname(filePath);
+  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
+  // Re-chmod the dir in case it pre-existed at looser mode (mkdir won't tighten existing dirs)
+  if (process.platform !== "win32") {
+    try { await fs.chmod(dir, 0o700); } catch {}
+  }
+
+  // TODO(Task 7): wrap with file lock to prevent concurrent CLI hook + heartbeat
+  // from clobbering each other's read-modify-write basis. Atomic rename below
+  // covers half-written file visibility, but not the read-merge-write race.
   const existing = (await readSyncConfig(filePath)) ?? {};
   const merged = { ...existing, ...patch };
-  await fs.writeFile(filePath, JSON.stringify(merged, null, 2), { mode: 0o600 });
 
-  // re-chmod in case file existed before with looser mode
+  // Write to .tmp first (mode honored on creation), then atomic rename.
+  // This guarantees the new content lands at 0600 from the moment it exists,
+  // and concurrent readers never see a half-written file.
+  const tmp = `${filePath}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
   if (process.platform !== "win32") {
-    await fs.chmod(filePath, 0o600);
+    await fs.chmod(tmp, 0o600); // belt-and-suspenders
   }
+  await fs.rename(tmp, filePath);
   return merged;
 }
 
