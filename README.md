@@ -191,6 +191,8 @@ npx dotaios ingest call-notes.txt --to signal                          # working
 
 Every Markdown file gets full provenance frontmatter (`source`, `ingested_at`, `kind`, `parser`, `title`). Documents are parsed locally, nothing is uploaded. PDFs use the bundled `unpdf` extractor by default. Install [marker-pdf](https://github.com/datalab-to/marker) for high-fidelity PDF / DOCX / PPTX / EPUB parsing.
 
+Web pages are fetched using [Lightpanda](https://github.com/lightpanda-io/browser), a lightweight headless browser that renders JavaScript. It installs automatically during `dotaios setup`.
+
 ## Daily Brief
 
 ```bash

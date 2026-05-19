@@ -11,6 +11,7 @@ import {
   shelfNeedsName,
   shelfMarkdownPath
 } from "../../packages/cli/src/ingest/placement.mjs";
+import { ingestUrl } from "../../packages/cli/src/ingest/web.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -162,4 +163,157 @@ function runFail(args) {
 
 function read(filePath) {
   return fs.readFileSync(filePath, "utf8");
+}
+
+function htmlFixture(title = "Lightpanda Rendered") {
+  return `<!doctype html><html><head><title>${title}</title></head><body><article><h1>${title}</h1><p>${"Body paragraph. ".repeat(60)}</p></article></body></html>`;
+}
+
+function makeFakeFetch({ body = htmlFixture(), status = 200 } = {}) {
+  return async () => ({
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: "OK",
+    text: async () => body,
+    arrayBuffer: async () => new TextEncoder().encode(body).buffer,
+    headers: { get: () => "text/html; charset=utf-8" }
+  });
+}
+
+function makeWebWorkspace() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-lp-web-"));
+  return {
+    root,
+    rawDir: path.join(root, "vault", "raw"),
+    assetsDir: path.join(root, "vault", "assets"),
+    eventsPath: path.join(root, "memory", "events.jsonl"),
+    hintFlagPath: path.join(root, "lightpanda_hint_shown")
+  };
+}
+
+test("ingestUrl uses lightpanda when resolver returns a path and spawn succeeds", async () => {
+  const ws = makeWebWorkspace();
+  const html = htmlFixture("Lightpanda Win");
+  const result = await ingestUrl("https://example.com/lp-win", {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makeFakeFetch({ body: "<html><body>SHOULD NOT BE USED</body></html>" }),
+    resolveLightpandaImpl: async () => "/fake/lightpanda",
+    spawnImpl: () => ({ status: 0, stdout: html, stderr: "" }),
+    hintFlagPath: ws.hintFlagPath,
+    now: () => new Date("2026-05-18T12:00:00Z")
+  });
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "lightpanda+readability+turndown");
+  const written = fs.readFileSync(result.destination, "utf8");
+  assert.match(written, /parser: lightpanda\+readability\+turndown/);
+  assert.match(written, /Lightpanda Win/);
+});
+
+test("ingestUrl falls back to plain fetch when lightpanda spawn fails", async () => {
+  const ws = makeWebWorkspace();
+  const html = htmlFixture("Plain Fetch Fallback");
+  const result = await ingestUrl("https://example.com/fallback", {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makeFakeFetch({ body: html }),
+    resolveLightpandaImpl: async () => "/fake/lightpanda",
+    spawnImpl: () => ({ status: 1, stdout: "", stderr: "boom" }),
+    hintFlagPath: ws.hintFlagPath,
+    now: () => new Date("2026-05-18T12:00:00Z")
+  });
+  assert.equal(result.action, "written");
+  assert.equal(result.parser, "readability+turndown");
+  const written = fs.readFileSync(result.destination, "utf8");
+  assert.match(written, /parser: readability\+turndown/);
+  assert.match(written, /Plain Fetch Fallback/);
+});
+
+test("ingestUrl uses plain fetch when lightpanda not found and writes hint flag once", async () => {
+  const ws = makeWebWorkspace();
+  const html = htmlFixture("Plain No Lightpanda");
+  const opts = {
+    rawDir: ws.rawDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makeFakeFetch({ body: html }),
+    resolveLightpandaImpl: async () => null,
+    spawnImpl: () => { throw new Error("must not spawn"); },
+    hintFlagPath: ws.hintFlagPath,
+    lightpandaPlatformSupported: true,
+    now: () => new Date("2026-05-18T12:00:00Z")
+  };
+  const result = await ingestUrl("https://example.com/nope", opts);
+  assert.equal(result.parser, "readability+turndown");
+  assert.equal(fs.existsSync(ws.hintFlagPath), true);
+
+  // Second call must not re-create / re-print (flag already exists)
+  const html2 = htmlFixture("Second Call");
+  const second = await ingestUrl("https://example.com/nope2", {
+    ...opts,
+    fetchImpl: makeFakeFetch({ body: html2 })
+  });
+  assert.equal(second.parser, "readability+turndown");
+});
+
+test("ingestUrl skips lightpanda for PDF URLs and routes through Path B (regression)", async () => {
+  const ws = makeWebWorkspace();
+  const pdfBytes = buildMinimalPdf("Regression PDF");
+
+  const result = await ingestUrl("https://example.com/paper.pdf", {
+    rawDir: ws.rawDir,
+    assetsDir: ws.assetsDir,
+    eventsPath: ws.eventsPath,
+    fetchImpl: makePdfFetch(pdfBytes),
+    resolveLightpandaImpl: async () => "/fake/lightpanda",
+    spawnImpl: () => { throw new Error("must not spawn for PDF URLs"); },
+    hintFlagPath: ws.hintFlagPath,
+    lightpandaPlatformSupported: true,
+    documentOptions: {
+      whichImpl: async () => null,
+      extractPdfImpl: async () => "Extracted PDF text."
+    },
+    now: () => new Date("2026-05-18T12:00:00Z")
+  });
+
+  assert.equal(result.kind, "pdf");
+  assert.equal(result.parser, "unpdf");
+  // Hint flag must NOT be written — PDFs bypass the lightpanda hint logic entirely
+  assert.equal(fs.existsSync(ws.hintFlagPath), false);
+});
+
+// --- helpers ---
+
+function buildMinimalPdf(message = "Hello DotAIOS Test") {
+  const stream = `BT /F1 24 Tf 100 700 Td (${message}) Tj ET\n`;
+  const objects = [
+    "<</Type/Catalog/Pages 2 0 R>>",
+    "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+    "<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>>>>>/Contents 4 0 R>>",
+    `<</Length ${stream.length}>>stream\n${stream}endstream`
+  ];
+  let body = "%PDF-1.4\n";
+  const offsets = [];
+  for (let i = 0; i < objects.length; i += 1) {
+    offsets.push(body.length);
+    body += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+  const xrefStart = body.length;
+  body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const off of offsets) {
+    body += `${off.toString().padStart(10, "0")} 00000 n \n`;
+  }
+  body += `trailer\n<</Size ${objects.length + 1}/Root 1 0 R>>\nstartxref\n${xrefStart}\n%%EOF\n`;
+  return Buffer.from(body, "binary");
+}
+
+function makePdfFetch(pdfBytes) {
+  const buf = pdfBytes instanceof Buffer ? pdfBytes : Buffer.from(pdfBytes);
+  return async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    text: async () => buf.toString("binary"),
+    arrayBuffer: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength),
+    headers: { get: (name) => name.toLowerCase() === "content-type" ? "application/pdf" : null }
+  });
 }

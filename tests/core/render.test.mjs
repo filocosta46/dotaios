@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isHtmlComment, renderTemplate, templateOutputPath } from "../../packages/core/src/render.mjs";
@@ -56,4 +58,16 @@ test("isHtmlComment identifies HTML comment strings", () => {
   assert.equal(isHtmlComment("Filippo"), false);
   assert.equal(isHtmlComment(""), false);
   assert.equal(isHtmlComment(null), false);
+});
+
+test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  assert.match(tpl, /## Rules/);
+  assert.match(tpl, /dotaios ingest/);
+  assert.match(tpl, /URL/);
+  const rulesIdx = tpl.indexOf("## Rules");
+  assert.ok(tpl.indexOf("dotaios ingest", rulesIdx) > rulesIdx, "rule must appear under Rules");
 });
