@@ -1,7 +1,24 @@
 # GitHub Sync — Cross-Device Memory via Private Repo
 
-> Status: design approved, ready for implementation plan
+> Status: **v2 design approved + implementation plan written** (see `docs/superpowers/plans/2026-05-19-github-sync.md`)
 > Date: 2026-05-19
+
+## v2 update (2026-05-19, after web research)
+
+Three decisions changed from v1 spec below. Plan implements v2:
+
+| # | v1 (below) | v2 (final) | Why |
+|---|---|---|---|
+| Repo create | Auto-create via API | Deep-link to `github.com/new?name=<u>-aios&visibility=private` — user clicks "Create" on GitHub's UI | GitHub App `Contents: read/write` cannot create repos; needs `Administration: write` which scares non-tech users at install |
+| Sync mechanism | Long-running daemon polling 2s push / 30s pull | CLI hook (fires on every `dotaios` invocation) + 5-min platform-native heartbeat (launchd / systemd user / schtasks) | No PID/lifecycle, no "is sync on?", no fs watcher, no npm deps. 5-min worst-case lag acceptable for personal memory |
+| Phone-read primary recommendation | Claude Projects (paid Claude Pro) | Claude Projects (free tier as of Feb 2026, manual "Sync now" tap). Codex Mobile + GitHub Mobile listed as alternates | Free-tier ICP can use Claude Projects + GitHub link without paying. Codex Mobile (May 14, 2026) is also free but requires desktop awake |
+
+Also added: 10-second minimum gap between ticks (GitHub secondary rate limit 80 writes/min, 500/hr). First tick fires immediately on `sync setup` completion. Token stored as `0600` file at `~/.dotaios/sync.json` (zero npm deps).
+
+Original v1 spec below preserved for context.
+
+---
+
 
 ## Summary
 
