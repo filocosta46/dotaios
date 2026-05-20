@@ -95,3 +95,29 @@ test("fetchUsername returns login from /user", async () => {
   });
   assert.equal(name, "filocosta46");
 });
+
+test("requestDeviceCode throws when GitHub returns an error payload", async () => {
+  await assert.rejects(
+    requestDeviceCode({
+      clientId: "ID",
+      fetchImpl: jsonFetch([{
+        match: "login/device/code",
+        body: { error: "invalid_client", error_description: "bad client id" }
+      }])
+    }),
+    /device code request failed/
+  );
+});
+
+test("postJson surfaces a clear error on non-JSON response", async () => {
+  // fetchImpl whose .json() rejects, simulating an HTML error page
+  const htmlFetch = async () => ({
+    ok: false,
+    status: 502,
+    json: async () => { throw new SyntaxError("Unexpected token <"); }
+  });
+  await assert.rejects(
+    requestDeviceCode({ clientId: "ID", fetchImpl: htmlFetch }),
+    /non-JSON response/
+  );
+});

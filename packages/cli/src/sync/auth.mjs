@@ -13,10 +13,20 @@ const TERMINAL_ERRORS = new Set([
 async function postJson(url, body, { fetchImpl }) {
   const res = await fetchImpl(url, {
     method: "POST",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "User-Agent": "dotaios-sync"
+    },
     body: JSON.stringify(body)
   });
-  return res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`GitHub returned a non-JSON response (HTTP ${res.status ?? "?"}) from ${url}`);
+  }
+  return data;
 }
 
 export async function requestDeviceCode({ clientId, fetchImpl = fetch }) {
@@ -44,7 +54,12 @@ export async function pollForToken({
 }) {
   let interval = intervalSec;
   const startedAt = now();
+  let iterations = 0;
+  const MAX_ITERATIONS = 10_000;
   while (true) {
+    if (++iterations > MAX_ITERATIONS) {
+      throw new Error("device flow polling exceeded maximum iterations");
+    }
     if (now() - startedAt > timeoutMs) {
       throw new Error("device code expired before user approved");
     }
