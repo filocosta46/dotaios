@@ -4,8 +4,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { renderLaunchAgentPlist, installMacHeartbeat } from "../../packages/cli/src/sync/heartbeat.mjs";
-import { renderSystemdUnits } from "../../packages/cli/src/sync/heartbeat.mjs";
-import { buildSchtasksArgs } from "../../packages/cli/src/sync/heartbeat.mjs";
+import { renderSystemdUnits, installLinuxHeartbeat } from "../../packages/cli/src/sync/heartbeat.mjs";
+import { buildSchtasksArgs, installWindowsHeartbeat } from "../../packages/cli/src/sync/heartbeat.mjs";
 
 test("renderLaunchAgentPlist embeds binary, 300s interval, log paths", () => {
   const plist = renderLaunchAgentPlist({
@@ -98,4 +98,58 @@ test("buildSchtasksArgs creates the right /Create command", () => {
   assert.ok(args.includes("/TR"));
   assert.ok(args.some((a) => a.includes("C:/dotaios.exe")));
   assert.ok(args.some((a) => a.includes("sync tick")));
+});
+
+test("installLinuxHeartbeat writes both unit files and reloads/enables", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-hb-linux-"));
+  try {
+    const calls = [];
+    await installLinuxHeartbeat({
+      binary: "/usr/bin/dotaios",
+      unitDir: dir,
+      exec: async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return { code: 0, stderr: "" }; }
+    });
+    const service = await fs.readFile(path.join(dir, "dotaios-sync.service"), "utf8");
+    const timer = await fs.readFile(path.join(dir, "dotaios-sync.timer"), "utf8");
+    assert.ok(service.includes("ExecStart=/usr/bin/dotaios sync tick"));
+    assert.ok(timer.includes("OnUnitActiveSec="));
+    assert.ok(calls.some((c) => c.includes("daemon-reload")));
+    assert.ok(calls.some((c) => c.includes("enable --now dotaios-sync.timer")));
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("installLinuxHeartbeat throws on a hard systemctl failure", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-hb-linux-"));
+  try {
+    await assert.rejects(
+      installLinuxHeartbeat({
+        binary: "/usr/bin/dotaios",
+        unitDir: dir,
+        exec: async () => ({ code: 1, stderr: "Failed to connect to bus" })
+      }),
+      /systemctl/
+    );
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("installWindowsHeartbeat invokes schtasks /Create", async () => {
+  const calls = [];
+  await installWindowsHeartbeat({
+    binary: "C:/dotaios.exe",
+    taskName: "DotAIOS Sync",
+    exec: async (cmd, args) => { calls.push([cmd, ...args].join(" ")); return { code: 0, stderr: "" }; }
+  });
+  assert.ok(calls.some((c) => c.startsWith("schtasks /Create")));
+  assert.ok(calls.some((c) => c.includes("sync tick")));
+});
+
+test("installWindowsHeartbeat throws on a hard schtasks failure", async () => {
+  await assert.rejects(
+    installWindowsHeartbeat({
+      binary: "C:/dotaios.exe",
+      taskName: "DotAIOS Sync",
+      exec: async () => ({ code: 1, stderr: "Access is denied" })
+    }),
+    /schtasks install failed/
+  );
 });
