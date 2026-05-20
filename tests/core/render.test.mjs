@@ -71,3 +71,11 @@ test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", asy
   const rulesIdx = tpl.indexOf("## Rules");
   assert.ok(tpl.indexOf("dotaios ingest", rulesIdx) > rulesIdx, "rule must appear under Rules");
 });
+
+test("sync-gitignore.template ships in templates/", async () => {
+  const file = path.join(new URL("../..", import.meta.url).pathname, "templates", "sync-gitignore.template");
+  const content = await fs.readFile(file, "utf8");
+  assert.ok(content.includes(".env"));
+  assert.ok(content.includes("*.token"));
+  assert.ok(content.includes("node_modules/"));
+});
