@@ -157,11 +157,37 @@ export async function removeLinuxHeartbeat({
   await exec("systemctl", ["--user", "daemon-reload"]);
 }
 
-export async function installWindowsHeartbeat() {
-  throw new Error("not implemented yet");
+const TASK_NAME = "DotAIOS Sync";
+
+export function buildSchtasksArgs({ taskName, binary }) {
+  return [
+    "/Create",
+    "/F",
+    "/TN", taskName,
+    "/SC", "MINUTE",
+    "/MO", "5",
+    "/TR", `"${binary}" sync tick`
+  ];
 }
-export async function removeWindowsHeartbeat() {
-  throw new Error("not implemented yet");
+
+export async function installWindowsHeartbeat({
+  binary,
+  taskName = TASK_NAME,
+  exec = runCmd
+} = {}) {
+  const args = buildSchtasksArgs({ taskName, binary });
+  const result = await exec("schtasks", args);
+  if (result.code !== 0) {
+    throw new Error(`schtasks install failed (code ${result.code}): ${(result.stderr || "").trim()}`);
+  }
+}
+
+export async function removeWindowsHeartbeat({
+  taskName = TASK_NAME,
+  exec = runCmd
+} = {}) {
+  // Removal is best-effort: deleting an absent task is benign, so do not throw.
+  await exec("schtasks", ["/Delete", "/F", "/TN", taskName]);
 }
 
 export async function installHeartbeat({ binary }) {

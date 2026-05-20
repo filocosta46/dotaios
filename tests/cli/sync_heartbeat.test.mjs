@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { renderLaunchAgentPlist, installMacHeartbeat } from "../../packages/cli/src/sync/heartbeat.mjs";
 import { renderSystemdUnits } from "../../packages/cli/src/sync/heartbeat.mjs";
+import { buildSchtasksArgs } from "../../packages/cli/src/sync/heartbeat.mjs";
 
 test("renderLaunchAgentPlist embeds binary, 300s interval, log paths", () => {
   const plist = renderLaunchAgentPlist({
@@ -83,4 +84,18 @@ test("renderSystemdUnits returns service + timer matching binary + 300s interval
   assert.ok(timer.includes("OnBootSec=30s"));
   assert.ok(timer.includes("[Install]"));
   assert.ok(timer.includes("WantedBy=default.target"));
+});
+
+test("buildSchtasksArgs creates the right /Create command", () => {
+  const args = buildSchtasksArgs({ taskName: "DotAIOS Sync", binary: "C:/dotaios.exe" });
+  assert.ok(args.includes("/Create"));
+  assert.ok(args.includes("/TN"));
+  assert.ok(args.includes("DotAIOS Sync"));
+  assert.ok(args.includes("/SC"));
+  assert.ok(args.includes("MINUTE"));
+  assert.ok(args.includes("/MO"));
+  assert.ok(args.includes("5"));
+  assert.ok(args.includes("/TR"));
+  assert.ok(args.some((a) => a.includes("C:/dotaios.exe")));
+  assert.ok(args.some((a) => a.includes("sync tick")));
 });
