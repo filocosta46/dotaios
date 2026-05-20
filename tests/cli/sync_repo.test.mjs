@@ -1,0 +1,73 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  buildCreateRepoUrl,
+  remoteUrlWithToken,
+  pollForRepoExists,
+  initialMirrorPush
+} from "../../packages/cli/src/sync/repo.mjs";
+
+test("buildCreateRepoUrl returns a pre-filled github.com/new URL", () => {
+  const url = buildCreateRepoUrl("filocosta46");
+  assert.ok(url.startsWith("https://github.com/new?"));
+  assert.ok(url.includes("name=filocosta46-aios"));
+  assert.ok(url.includes("visibility=private"));
+  assert.ok(url.includes("description="));
+});
+
+test("remoteUrlWithToken embeds x-access-token", () => {
+  const url = remoteUrlWithToken("ghu_T", "filocosta46/filocosta46-aios");
+  assert.equal(url, "https://x-access-token:ghu_T@github.com/filocosta46/filocosta46-aios.git");
+});
+
+test("pollForRepoExists resolves once API returns 200", async () => {
+  let calls = 0;
+  const ok = await pollForRepoExists({
+    accessToken: "T",
+    fullName: "u/u-aios",
+    fetchImpl: async () => {
+      calls += 1;
+      return { ok: calls >= 2, status: calls >= 2 ? 200 : 404, json: async () => ({}) };
+    },
+    sleep: () => Promise.resolve(),
+    timeoutMs: 60_000,
+    now: () => 0
+  });
+  assert.equal(ok, true);
+});
+
+test("initialMirrorPush invokes git init, add, commit, push in order", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-mirror-"));
+  try {
+    await fs.writeFile(path.join(tmp, "hello.md"), "hi");
+    const calls = [];
+    const fakeGit = {
+      init: async () => calls.push("init"),
+      addRemote: async (url) => calls.push(`remote:${url}`),
+      raw: async (args) => { calls.push(`raw:${args.join(" ")}`); return { stdout: "", stderr: "", code: 0 }; },
+      dirty: async () => true,
+      commitAll: async (m) => { calls.push(`commit:${m}`); return "deadbeef"; },
+      push: async (b) => calls.push(`push:${b}`)
+    };
+    await initialMirrorPush({
+      aiosPath: tmp,
+      accessToken: "T",
+      fullName: "u/u-aios",
+      gitignoreContent: ".env\n",
+      git: fakeGit
+    });
+    assert.deepEqual(
+      calls.slice(0, 2),
+      ["init", "remote:https://x-access-token:T@github.com/u/u-aios.git"]
+    );
+    assert.ok(calls.includes("commit:Initial DotAIOS mirror"));
+    assert.ok(calls.includes("push:main"));
+    const writtenGitignore = await fs.readFile(path.join(tmp, ".gitignore"), "utf8");
+    assert.equal(writtenGitignore, ".env\n");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
