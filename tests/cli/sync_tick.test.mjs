@@ -1,0 +1,172 @@
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import { runTick, acquireLock, releaseLock } from "../../packages/cli/src/sync/tick.mjs";
+
+async function tmpLock() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-tick-"));
+  return { lockPath: path.join(dir, "sync.lock"), dir };
+}
+
+function makeGit({ dirty = false, ffResult = "up-to-date", commitSha = null, calls = [] } = {}) {
+  return {
+    async dirty() { calls.push("dirty"); return dirty; },
+    async commitAll(msg) { calls.push(`commit:${msg.slice(0, 15)}`); return commitSha; },
+    async push(b) { calls.push(`push:${b}`); },
+    async fetch() { calls.push("fetch"); },
+    async ffPull(b) { calls.push(`ffPull:${b}`); return ffResult; },
+    async currentSha() { return "sha-current"; },
+    async branchFromSha(n, s) { calls.push(`branch:${n}:${s}`); },
+    async hardResetToOrigin(b) { calls.push(`reset:${b}`); }
+  };
+}
+
+test("tick skips when no config", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => null,
+      writeConfig: async () => {},
+      makeGit: () => makeGit(),
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+    assert.equal(result.skipped, "no-token");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick skips when within 10s of last tick", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: new Date(1000).toISOString() }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit(),
+      appendEvent: async () => {},
+      now: () => 5000 // 4 seconds later
+    });
+    assert.equal(result.skipped, "rate-limit-gap");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick skips with 'locked' when lock already held", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    // pre-create a fresh (non-stale) lock
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 99999, at: Date.now() }));
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: true }),
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+    assert.equal(result.skipped, "locked");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick pulls + pushes when dirty and remote up-to-date", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: true, ffResult: "up-to-date", commitSha: "deadbeef", calls }),
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+    assert.ok(calls.includes("ffPull:main"));
+    assert.ok(calls.includes("push:main"));
+    assert.ok(calls.some((c) => c.startsWith("commit:sync:")));
+    assert.equal(result.pushed, true);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick releases lock after a successful run", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: false }),
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+    // lock file must be gone after the run
+    await assert.rejects(fs.stat(lockPath), { code: "ENOENT" });
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick branches and resets on divergence, then pushes local work", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: true, ffResult: "diverged", commitSha: "newsha", calls }),
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+    assert.ok(calls.some((c) => c.startsWith("branch:local-")));
+    assert.ok(calls.includes("reset:main"));
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick writes last_error on git failure and does not throw", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const written = [];
+    const failingGit = {
+      dirty: async () => true,
+      commitAll: async () => "sha",
+      push: async () => { throw new Error("network down"); },
+      fetch: async () => {},
+      ffPull: async () => "up-to-date",
+      currentSha: async () => "sha",
+      branchFromSha: async () => {},
+      hardResetToOrigin: async () => {}
+    };
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async (patch) => written.push(patch),
+      makeGit: () => failingGit,
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+    assert.equal(result.error, "network down");
+    assert.ok(written.some((p) => p.last_error?.includes("network down")));
+    // lock released even on failure
+    await assert.rejects(fs.stat(lockPath), { code: "ENOENT" });
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("acquireLock steals a stale lock older than staleMs", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    // write a lock timestamped 10 minutes ago
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 1, at: Date.now() - 10 * 60 * 1000 }));
+    const got = await acquireLock(lockPath, { now: () => Date.now(), staleMs: 5 * 60 * 1000 });
+    assert.equal(got, true);
+    await releaseLock(lockPath);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("acquireLock returns false when a fresh lock is held", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 1, at: Date.now() }));
+    const got = await acquireLock(lockPath, { now: () => Date.now(), staleMs: 5 * 60 * 1000 });
+    assert.equal(got, false);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
