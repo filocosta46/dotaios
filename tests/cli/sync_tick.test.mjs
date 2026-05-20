@@ -170,3 +170,47 @@ test("acquireLock returns false when a fresh lock is held", async () => {
     assert.equal(got, false);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+test("tick does not throw when writeConfig/appendEvent reject in error path", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const failingGit = {
+      dirty: async () => true,
+      commitAll: async () => "sha",
+      push: async () => { throw new Error("network down"); },
+      fetch: async () => {},
+      ffPull: async () => "up-to-date",
+      currentSha: async () => "sha",
+      branchFromSha: async () => {},
+      hardResetToOrigin: async () => {}
+    };
+    // both side-effect writers reject — runTick must still resolve, not throw
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async () => { throw new Error("disk full"); },
+      makeGit: () => failingGit,
+      appendEvent: async () => { throw new Error("events.jsonl unwritable"); },
+      now: () => Date.now()
+    });
+    assert.equal(result.error, "network down");
+    // lock still released despite all the failures
+    await assert.rejects(fs.stat(lockPath), { code: "ENOENT" });
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("acquireLock: two racers on a stale lock — exactly one wins", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    // pre-write a stale lock (10 min old)
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 1, at: Date.now() - 10 * 60 * 1000 }));
+    const opts = { now: () => Date.now(), staleMs: 5 * 60 * 1000 };
+    const [a, b] = await Promise.all([
+      acquireLock(lockPath, opts),
+      acquireLock(lockPath, opts)
+    ]);
+    // exactly one true, one false
+    assert.equal([a, b].filter(Boolean).length, 1);
+    await releaseLock(lockPath);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});

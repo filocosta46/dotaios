@@ -95,10 +95,17 @@ export async function runTick({
       sha: pushedSha
     };
   } catch (err) {
-    await writeConfig({ last_error: err.message, last_tick_at: startedIso });
-    await appendEvent({ type: "sync-error", reason: err.message, at: startedIso });
+    // Best-effort: persisting the error must never itself cause runTick to throw.
+    try {
+      await writeConfig({ last_error: err.message, last_tick_at: startedIso });
+    } catch { /* swallow — error reporting is best-effort */ }
+    try {
+      await appendEvent({ type: "sync-error", reason: err.message, at: startedIso });
+    } catch { /* swallow */ }
     return { error: err.message };
   } finally {
-    await releaseLock(lockPath);
+    try {
+      await releaseLock(lockPath);
+    } catch { /* swallow — lock removal is best-effort; stale-steal recovers it */ }
   }
 }
