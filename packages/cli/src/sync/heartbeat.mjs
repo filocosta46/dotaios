@@ -76,14 +76,27 @@ export async function installMacHeartbeat({
     stderrPath: path.join(logsDir, "sync.err.log")
   });
   await fs.writeFile(plistPath, plist);
-  // bootstrap (load); ignore "already loaded" errors
-  await exec("launchctl", ["bootstrap", `gui/${process.getuid()}`, plistPath]);
+  // bootstrap (load); a non-zero exit when the agent is ALREADY loaded
+  // (re-running setup) is benign — launchctl signals this with exit code 5
+  // and/or an "already" message that varies by macOS version. Any other
+  // non-zero code means the heartbeat never loaded and must fail loudly.
+  const result = await exec("launchctl", ["bootstrap", `gui/${process.getuid()}`, plistPath]);
+  if (result.code !== 0) {
+    const alreadyLoaded = result.code === 5 || /already/i.test(result.stderr || "");
+    if (!alreadyLoaded) {
+      throw new Error(`launchctl bootstrap failed (code ${result.code}): ${(result.stderr || "").trim()}`);
+    }
+  }
 }
 
 export async function removeMacHeartbeat({
   plistPath = heartbeatPlistPath(),
   exec = runCmd
 } = {}) {
+  // bootout failure is intentionally ignored: removal is best-effort
+  // (an agent that was never loaded returns non-zero, and the user is
+  // tearing sync down regardless). The plist file removal below is
+  // unconditional so the unit never lingers on disk.
   await exec("launchctl", ["bootout", `gui/${process.getuid()}`, plistPath]);
   await fs.rm(plistPath, { force: true });
 }
