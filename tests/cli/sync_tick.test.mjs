@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runTick, acquireLock, releaseLock } from "../../packages/cli/src/sync/tick.mjs";
+import { runTickCommand } from "../../packages/cli/src/sync/tick-cmd.mjs";
 
 async function tmpLock() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-tick-"));
@@ -213,4 +214,16 @@ test("acquireLock: two racers on a stale lock — exactly one wins", async () =>
     assert.equal([a, b].filter(Boolean).length, 1);
     await releaseLock(lockPath);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("runTickCommand resolves without throwing when sync not enabled", async () => {
+  // With no sync.json configured, runTick returns { skipped: "no-token" }.
+  // runTickCommand must simply resolve — no throw, no crash.
+  const origLog = console.log;
+  console.log = () => {};
+  try {
+    await runTickCommand([]);
+  } finally { console.log = origLog; }
+  // reaching here = did not throw
+  assert.ok(true);
 });
