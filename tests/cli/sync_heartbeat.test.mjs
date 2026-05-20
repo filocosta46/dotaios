@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { renderLaunchAgentPlist, installMacHeartbeat } from "../../packages/cli/src/sync/heartbeat.mjs";
+import { renderSystemdUnits } from "../../packages/cli/src/sync/heartbeat.mjs";
 
 test("renderLaunchAgentPlist embeds binary, 300s interval, log paths", () => {
   const plist = renderLaunchAgentPlist({
@@ -68,4 +69,18 @@ test("installMacHeartbeat throws on a hard launchctl failure", { skip: process.p
       /launchctl bootstrap failed/
     );
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("renderSystemdUnits returns service + timer matching binary + 300s interval", () => {
+  const { service, timer } = renderSystemdUnits({
+    binary: "/usr/bin/dotaios",
+    intervalSec: 300
+  });
+  assert.ok(service.includes("[Service]"));
+  assert.ok(service.includes("ExecStart=/usr/bin/dotaios sync tick"));
+  assert.ok(timer.includes("[Timer]"));
+  assert.ok(timer.includes("OnUnitActiveSec=300s"));
+  assert.ok(timer.includes("OnBootSec=30s"));
+  assert.ok(timer.includes("[Install]"));
+  assert.ok(timer.includes("WantedBy=default.target"));
 });

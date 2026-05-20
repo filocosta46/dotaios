@@ -101,13 +101,62 @@ export async function removeMacHeartbeat({
   await fs.rm(plistPath, { force: true });
 }
 
-// Stubs filled in by Tasks 9 and 10
-export async function installLinuxHeartbeat() {
-  throw new Error("not implemented yet");
+export function renderSystemdUnits({ binary, intervalSec }) {
+  const service = `[Unit]
+Description=DotAIOS sync tick
+
+[Service]
+Type=oneshot
+ExecStart=${binary} sync tick
+`;
+
+  const timer = `[Unit]
+Description=DotAIOS sync timer
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=${intervalSec}s
+Unit=dotaios-sync.service
+
+[Install]
+WantedBy=default.target
+`;
+
+  return { service, timer };
 }
-export async function removeLinuxHeartbeat() {
-  throw new Error("not implemented yet");
+
+export async function installLinuxHeartbeat({
+  binary,
+  unitDir = heartbeatUnitDir(),
+  exec = runCmd
+} = {}) {
+  await ensureDir(unitDir);
+  const { service, timer } = renderSystemdUnits({ binary, intervalSec: INTERVAL_SEC });
+  await fs.writeFile(path.join(unitDir, "dotaios-sync.service"), service);
+  await fs.writeFile(path.join(unitDir, "dotaios-sync.timer"), timer);
+
+  const reload = await exec("systemctl", ["--user", "daemon-reload"]);
+  if (reload.code !== 0) {
+    throw new Error(`systemctl daemon-reload failed (code ${reload.code}): ${(reload.stderr || "").trim()}`);
+  }
+  const enable = await exec("systemctl", ["--user", "enable", "--now", "dotaios-sync.timer"]);
+  if (enable.code !== 0) {
+    throw new Error(`systemctl enable failed (code ${enable.code}): ${(enable.stderr || "").trim()}`);
+  }
 }
+
+export async function removeLinuxHeartbeat({
+  unitDir = heartbeatUnitDir(),
+  exec = runCmd
+} = {}) {
+  // Removal is best-effort: disabling an already-absent timer is benign,
+  // so we do not throw on a non-zero exit here.
+  await exec("systemctl", ["--user", "disable", "--now", "dotaios-sync.timer"]);
+  await fs.rm(path.join(unitDir, "dotaios-sync.timer"), { force: true });
+  await fs.rm(path.join(unitDir, "dotaios-sync.service"), { force: true });
+  await exec("systemctl", ["--user", "daemon-reload"]);
+}
+
 export async function installWindowsHeartbeat() {
   throw new Error("not implemented yet");
 }
