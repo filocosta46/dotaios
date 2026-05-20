@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
+import { fireSyncHook } from "./lib/sync-hook.mjs";
 
 const pkg = JSON.parse(
   readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
@@ -106,6 +107,9 @@ async function main(argv) {
   const module = await import(commandPath);
   const command = module[`${commandName}Command`];
   await command(args);
+
+  // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
+  await fireSyncHook({ command: commandName });
 }
 
 main(process.argv).catch((error) => {
