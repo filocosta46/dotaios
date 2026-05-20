@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
 
+// Strip an embedded credential (https://x-access-token:TOKEN@host) from any
+// string before it reaches an error message or log. git echoes the full
+// remote URL on auth/network failures.
+function redactToken(text) {
+  return String(text).replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
+}
+
 function defaultSpawn(cmd, args, opts) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { ...opts, stdio: ["ignore", "pipe", "pipe"] });
@@ -29,7 +36,7 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
       if (staged.code === 0) return null;
       const commit = await run(["commit", "-m", message]);
       if (commit.code !== 0) {
-        throw new Error(`git commit failed: ${commit.stderr.trim()}`);
+        throw new Error(`git commit failed: ${redactToken(commit.stderr.trim())}`);
       }
       const sha = await run(["rev-parse", "HEAD"]);
       return sha.stdout.trim();
@@ -37,12 +44,12 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
 
     async push(branch = "main") {
       const { code, stderr } = await run(["push", "origin", branch]);
-      if (code !== 0) throw new Error(`git push failed: ${stderr.trim()}`);
+      if (code !== 0) throw new Error(`git push failed: ${redactToken(stderr.trim())}`);
     },
 
     async fetch() {
       const { code, stderr } = await run(["fetch", "origin"]);
-      if (code !== 0) throw new Error(`git fetch failed: ${stderr.trim()}`);
+      if (code !== 0) throw new Error(`git fetch failed: ${redactToken(stderr.trim())}`);
     },
 
     async ffPull(branch = "main") {
@@ -52,7 +59,7 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
       const behind = parseInt((await run(["rev-list", "--count", `origin/${branch}..HEAD`])).stdout.trim(), 10);
       if (behind > 0) return "diverged";
       const { code, stderr } = await run(["merge", "--ff-only", `origin/${branch}`]);
-      if (code !== 0) throw new Error(`ff merge failed: ${stderr.trim()}`);
+      if (code !== 0) throw new Error(`ff merge failed: ${redactToken(stderr.trim())}`);
       return "fast-forwarded";
     },
 
@@ -62,24 +69,24 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
 
     async branchFromSha(branchName, sha) {
       const { code, stderr } = await run(["branch", branchName, sha]);
-      if (code !== 0) throw new Error(`git branch failed: ${stderr.trim()}`);
+      if (code !== 0) throw new Error(`git branch failed: ${redactToken(stderr.trim())}`);
     },
 
     async hardResetToOrigin(branch = "main") {
       const { code, stderr } = await run(["reset", "--hard", `origin/${branch}`]);
-      if (code !== 0) throw new Error(`git reset failed: ${stderr.trim()}`);
+      if (code !== 0) throw new Error(`git reset failed: ${redactToken(stderr.trim())}`);
     },
 
     async init() {
       const { code, stderr } = await run(["init", "-b", "main"]);
-      if (code !== 0) throw new Error(`git init failed: ${stderr.trim()}`);
+      if (code !== 0) throw new Error(`git init failed: ${redactToken(stderr.trim())}`);
     },
 
     async addRemote(url) {
       // idempotent: remove first if exists
       await run(["remote", "remove", "origin"]); // ignore exit code
       const { code, stderr } = await run(["remote", "add", "origin", url]);
-      if (code !== 0) throw new Error(`git remote add failed: ${stderr.trim()}`);
+      if (code !== 0) throw new Error(`git remote add failed: ${redactToken(stderr.trim())}`);
     },
 
     raw: run

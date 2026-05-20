@@ -59,12 +59,12 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
       gitignoreContent: ".env\n",
       git: fakeGit
     });
-    assert.deepEqual(
-      calls.slice(0, 2),
-      ["init", "remote:https://x-access-token:T@github.com/u/u-aios.git"]
-    );
-    assert.ok(calls.includes("commit:Initial DotAIOS mirror"));
-    assert.ok(calls.includes("push:main"));
+    assert.deepEqual(calls, [
+      "init",
+      "remote:https://x-access-token:T@github.com/u/u-aios.git",
+      "commit:Initial DotAIOS mirror",
+      "push:main"
+    ]);
     const writtenGitignore = await fs.readFile(path.join(tmp, ".gitignore"), "utf8");
     assert.equal(writtenGitignore, ".env\n");
   } finally {

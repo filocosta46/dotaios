@@ -106,3 +106,34 @@ test("branchFromSha() creates named branch pointing at given sha", async () => {
   await git.branchFromSha("local-2026", "abc123");
   assert.ok(calls.some((c) => c.includes("branch local-2026 abc123")));
 });
+
+test("push() redacts embedded token from error message", async () => {
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: fakeSpawn([{
+      match: "push origin main",
+      code: 1,
+      stderr: "fatal: Authentication failed for 'https://x-access-token:ghu_SECRET123@github.com/u/u-aios.git'"
+    }])
+  });
+  await assert.rejects(git.push("main"), (err) => {
+    assert.ok(!err.message.includes("ghu_SECRET123"), "token must not appear in error");
+    assert.ok(err.message.includes("x-access-token:***@"), "token should be redacted");
+    return true;
+  });
+});
+
+test("fetch() redacts embedded token from error message", async () => {
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: fakeSpawn([{
+      match: "fetch origin",
+      code: 1,
+      stderr: "fatal: could not read from 'https://x-access-token:ghu_LEAK@github.com/u/u-aios.git'"
+    }])
+  });
+  await assert.rejects(git.fetch(), (err) => {
+    assert.ok(!err.message.includes("ghu_LEAK"), "token must not appear in error");
+    return true;
+  });
+});
