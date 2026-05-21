@@ -34,7 +34,7 @@ test("dirty() false when porcelain empty", async () => {
   assert.equal(await git.dirty(), false);
 });
 
-test("ffPull() returns 'up-to-date' when origin matches HEAD", async () => {
+test("pullRebase() returns 'up-to-date' when origin matches HEAD", async () => {
   const git = createGit({
     cwd: "/x",
     spawnImpl: fakeSpawn([
@@ -42,32 +42,36 @@ test("ffPull() returns 'up-to-date' when origin matches HEAD", async () => {
       { match: "rev-list --count HEAD..origin/main", stdout: "0\n" }
     ])
   });
-  assert.equal(await git.ffPull("main"), "up-to-date");
+  assert.equal(await git.pullRebase("main"), "up-to-date");
 });
 
-test("ffPull() returns 'fast-forwarded' when remote ahead and merge succeeds", async () => {
-  const git = createGit({
-    cwd: "/x",
-    spawnImpl: fakeSpawn([
-      { match: "fetch", stdout: "" },
-      { match: "rev-list --count HEAD..origin/main", stdout: "3\n" },
-      { match: "rev-list --count origin/main..HEAD", stdout: "0\n" },
-      { match: "merge --ff-only origin/main", stdout: "" }
-    ])
-  });
-  assert.equal(await git.ffPull("main"), "fast-forwarded");
-});
-
-test("ffPull() returns 'diverged' when both ahead", async () => {
+test("pullRebase() returns 'rebased' when remote ahead and rebase succeeds", async () => {
   const git = createGit({
     cwd: "/x",
     spawnImpl: fakeSpawn([
       { match: "fetch", stdout: "" },
       { match: "rev-list --count HEAD..origin/main", stdout: "2\n" },
-      { match: "rev-list --count origin/main..HEAD", stdout: "5\n" }
+      { match: "rebase origin/main", stdout: "", code: 0 }
     ])
   });
-  assert.equal(await git.ffPull("main"), "diverged");
+  assert.equal(await git.pullRebase("main"), "rebased");
+});
+
+test("pullRebase() aborts and returns 'conflict' when rebase fails", async () => {
+  const calls = [];
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: (cmd, args) => {
+      const full = [cmd, ...args].join(" ");
+      calls.push(full);
+      if (full.includes("rebase --abort")) return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      if (full.includes("rebase origin/main")) return Promise.resolve({ stdout: "", stderr: "CONFLICT (content)", code: 1 });
+      if (full.includes("rev-list --count HEAD..origin/main")) return Promise.resolve({ stdout: "2\n", stderr: "", code: 0 });
+      return Promise.resolve({ stdout: "", stderr: "", code: 0 }); // fetch
+    }
+  });
+  assert.equal(await git.pullRebase("main"), "conflict");
+  assert.ok(calls.some((c) => c.includes("rebase --abort")), "must abort the failed rebase");
 });
 
 test("commitAll() returns null when nothing staged", async () => {

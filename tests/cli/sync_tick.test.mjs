@@ -11,13 +11,13 @@ async function tmpLock() {
   return { lockPath: path.join(dir, "sync.lock"), dir };
 }
 
-function makeGit({ dirty = false, ffResult = "up-to-date", commitSha = null, calls = [] } = {}) {
+function makeGit({ dirty = false, pullResult = "up-to-date", commitSha = null, calls = [] } = {}) {
   return {
     async dirty() { calls.push("dirty"); return dirty; },
     async commitAll(msg) { calls.push(`commit:${msg.slice(0, 15)}`); return commitSha; },
     async push(b) { calls.push(`push:${b}`); },
     async fetch() { calls.push("fetch"); },
-    async ffPull(b) { calls.push(`ffPull:${b}`); return ffResult; },
+    async pullRebase(b) { calls.push(`pullRebase:${b}`); return pullResult; },
     async currentSha() { return "sha-current"; },
     async branchFromSha(n, s) { calls.push(`branch:${n}:${s}`); },
     async hardResetToOrigin(b) { calls.push(`reset:${b}`); }
@@ -71,7 +71,7 @@ test("tick skips with 'locked' when lock already held", async () => {
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
-test("tick pulls + pushes when dirty and remote up-to-date", async () => {
+test("tick commits before pulling, then pushes when dirty and remote up-to-date", async () => {
   const { lockPath, dir } = await tmpLock();
   try {
     const calls = [];
@@ -79,13 +79,16 @@ test("tick pulls + pushes when dirty and remote up-to-date", async () => {
       lockPath,
       readConfig: async () => ({ access_token: "T", last_tick_at: null }),
       writeConfig: async () => {},
-      makeGit: () => makeGit({ dirty: true, ffResult: "up-to-date", commitSha: "deadbeef", calls }),
+      makeGit: () => makeGit({ dirty: true, pullResult: "up-to-date", commitSha: "deadbeef", calls }),
       appendEvent: async () => {},
       now: () => Date.now()
     });
-    assert.ok(calls.includes("ffPull:main"));
+    assert.ok(calls.includes("pullRebase:main"));
     assert.ok(calls.includes("push:main"));
-    assert.ok(calls.some((c) => c.startsWith("commit:sync:")));
+    const commitIdx = calls.findIndex((c) => c.startsWith("commit:sync:"));
+    const pullIdx = calls.indexOf("pullRebase:main");
+    assert.ok(commitIdx !== -1, "must commit local work");
+    assert.ok(commitIdx < pullIdx, "commit must happen before the rebase pull");
     assert.equal(result.pushed, true);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
@@ -106,7 +109,27 @@ test("tick releases lock after a successful run", async () => {
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
-test("tick branches and resets on divergence, then pushes local work", async () => {
+test("tick branches and resets only on a real rebase conflict", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const events = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: true, pullResult: "conflict", commitSha: "newsha", calls }),
+      appendEvent: async (e) => events.push(e),
+      now: () => Date.now()
+    });
+    assert.ok(calls.some((c) => c.startsWith("branch:local-")), "conflicting local work parked on a branch");
+    assert.ok(calls.includes("reset:main"), "main hard-reset to origin");
+    assert.ok(events.some((e) => e.type === "sync-conflict"), "sync-conflict logged");
+    assert.equal(result.pushed, false, "no push after a conflict reset");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick does NOT branch on a clean rebase even when remote was ahead", async () => {
   const { lockPath, dir } = await tmpLock();
   try {
     const calls = [];
@@ -114,12 +137,13 @@ test("tick branches and resets on divergence, then pushes local work", async () 
       lockPath,
       readConfig: async () => ({ access_token: "T", last_tick_at: null }),
       writeConfig: async () => {},
-      makeGit: () => makeGit({ dirty: true, ffResult: "diverged", commitSha: "newsha", calls }),
+      makeGit: () => makeGit({ dirty: true, pullResult: "rebased", commitSha: "newsha", calls }),
       appendEvent: async () => {},
       now: () => Date.now()
     });
-    assert.ok(calls.some((c) => c.startsWith("branch:local-")));
-    assert.ok(calls.includes("reset:main"));
+    assert.ok(!calls.some((c) => c.startsWith("branch:")), "no orphan branch on a clean rebase");
+    assert.ok(!calls.includes("reset:main"), "no hard reset on a clean rebase");
+    assert.ok(calls.includes("push:main"), "rebased local commit still pushed");
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
@@ -132,7 +156,7 @@ test("tick writes last_error on git failure and does not throw", async () => {
       commitAll: async () => "sha",
       push: async () => { throw new Error("network down"); },
       fetch: async () => {},
-      ffPull: async () => "up-to-date",
+      pullRebase: async () => "up-to-date",
       currentSha: async () => "sha",
       branchFromSha: async () => {},
       hardResetToOrigin: async () => {}
@@ -180,7 +204,7 @@ test("tick does not throw when writeConfig/appendEvent reject in error path", as
       commitAll: async () => "sha",
       push: async () => { throw new Error("network down"); },
       fetch: async () => {},
-      ffPull: async () => "up-to-date",
+      pullRebase: async () => "up-to-date",
       currentSha: async () => "sha",
       branchFromSha: async () => {},
       hardResetToOrigin: async () => {}

@@ -52,15 +52,27 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
       if (code !== 0) throw new Error(`git fetch failed: ${redactToken(stderr.trim())}`);
     },
 
-    async ffPull(branch = "main") {
+    // Pull by rebasing local commits on top of origin. Local changes must be
+    // committed before calling this — rebase refuses to run on a dirty tree.
+    // Returns "up-to-date" (origin had nothing new), "rebased" (local commits
+    // replayed cleanly on top of origin), or "conflict" (a real same-file
+    // clash — the failed rebase is aborted so the tree is left untouched and
+    // the caller falls back to the branch-and-reset escape hatch).
+    async pullRebase(branch = "main") {
       await this.fetch();
-      const ahead = parseInt((await run(["rev-list", "--count", `HEAD..origin/${branch}`])).stdout.trim(), 10);
-      if (ahead === 0) return "up-to-date";
-      const behind = parseInt((await run(["rev-list", "--count", `origin/${branch}..HEAD`])).stdout.trim(), 10);
-      if (behind > 0) return "diverged";
-      const { code, stderr } = await run(["merge", "--ff-only", `origin/${branch}`]);
-      if (code !== 0) throw new Error(`ff merge failed: ${redactToken(stderr.trim())}`);
-      return "fast-forwarded";
+      const behind = parseInt(
+        (await run(["rev-list", "--count", `HEAD..origin/${branch}`])).stdout.trim(),
+        10
+      );
+      if (behind === 0) return "up-to-date";
+      const rebase = await run(["rebase", `origin/${branch}`]);
+      if (rebase.code !== 0) {
+        // Abort so the working tree is restored to the pre-rebase state.
+        // Best-effort: ignore the abort's own exit code.
+        await run(["rebase", "--abort"]);
+        return "conflict";
+      }
+      return "rebased";
     },
 
     async currentSha() {

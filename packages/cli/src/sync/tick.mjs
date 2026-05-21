@@ -64,35 +64,43 @@ export async function runTick({
   const startedIso = new Date(now()).toISOString();
 
   try {
-    const pullResult = await git.ffPull("main");
+    // 1. Commit local changes FIRST — rebase refuses to run on a dirty tree.
+    let pushedSha = null;
+    if (await git.dirty()) {
+      pushedSha = await git.commitAll(`sync: ${startedIso}`);
+    }
 
-    if (pullResult === "diverged") {
+    // 2. Pull by rebasing the local commit(s) on top of origin.
+    const pullResult = await git.pullRebase("main");
+
+    // 3. A real same-file conflict is the only case that needs the escape
+    //    hatch: park the (already-aborted, restored) local commit on a branch
+    //    so it is recoverable, then align main with origin. Any other
+    //    divergence rebased cleanly above and needs nothing special.
+    let pushed = false;
+    if (pullResult === "conflict") {
       const localSha = await git.currentSha();
       const branchName = `local-${startedIso.replace(/[:.]/g, "-")}`;
       await git.branchFromSha(branchName, localSha);
       await git.hardResetToOrigin("main");
-      await appendEvent({ type: "sync-diverged", branch: branchName, at: startedIso });
-    }
-
-    let pushedSha = null;
-    if (await git.dirty()) {
-      pushedSha = await git.commitAll(`sync: ${startedIso}`);
-      if (pushedSha) {
-        await git.push("main");
-      }
+      await appendEvent({ type: "sync-conflict", branch: branchName, at: startedIso });
+    } else if (pushedSha) {
+      // 4. Local commit (now replayed on top of origin) goes up.
+      await git.push("main");
+      pushed = true;
     }
 
     await writeConfig({
       last_tick_at: startedIso,
-      last_push_sha: pushedSha ?? cfg.last_push_sha ?? null,
+      last_push_sha: pushed ? pushedSha : (cfg.last_push_sha ?? null),
       last_pull_at: startedIso,
       last_error: null
     });
 
     return {
       pulled: pullResult,
-      pushed: Boolean(pushedSha),
-      sha: pushedSha
+      pushed,
+      sha: pushed ? pushedSha : null
     };
   } catch (err) {
     // Best-effort: persisting the error must never itself cause runTick to throw.
