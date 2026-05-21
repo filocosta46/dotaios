@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { orchestrateSetup } from "../../packages/cli/src/sync/setup-flow.mjs";
+import path from "node:path";
+import { orchestrateSetup, runSetup } from "../../packages/cli/src/sync/setup-flow.mjs";
 
 test("orchestrateSetup runs all steps in order on the happy path", async () => {
   const calls = [];
@@ -92,4 +93,27 @@ test("orchestrateSetup opens the browser to the token page and the create-repo p
   });
   assert.ok(opened.some((u) => u.includes("settings/tokens/new")));
   assert.ok(opened.some((u) => u.includes("github.com/new")));
+});
+
+test("runSetup throws on failure and does not leak process.exitCode", async () => {
+  // Regression: a failing optional sync step inside `dotaios setup` must not
+  // set process.exitCode — that leaked and made the whole wizard exit 1.
+  const before = process.exitCode;
+  try {
+    await assert.rejects(
+      runSetup([], { orchestrate: async () => { throw new Error("token rejected"); } }),
+      /token rejected/
+    );
+    assert.equal(process.exitCode, before, "runSetup must not set process.exitCode");
+  } finally {
+    process.exitCode = before;
+  }
+});
+
+test("runSetup honors --path for the AIOS folder", async () => {
+  let seen;
+  await runSetup(["--path", "/tmp/aios-synctest"], {
+    orchestrate: async ({ aiosPath }) => { seen = aiosPath; }
+  });
+  assert.equal(seen, path.resolve("/tmp/aios-synctest"));
 });

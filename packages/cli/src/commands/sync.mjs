@@ -26,7 +26,15 @@ export async function syncCommand(args = []) {
 
   if (sub === "setup") {
     const { runSetup } = await import("../sync/setup-flow.mjs");
-    return runSetup();
+    // `dotaios sync setup` IS the command — a failure here exits non-zero.
+    try {
+      await runSetup(rest);
+    } catch (err) {
+      console.error(`Sync setup failed: ${err.message}`);
+      console.error("You can retry with: dotaios sync setup");
+      process.exitCode = 1;
+    }
+    return;
   }
   if (sub === "tick") {
     const { runTickCommand } = await import("../sync/tick-cmd.mjs");

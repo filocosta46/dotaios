@@ -10,6 +10,14 @@ import { buildTokenCreateUrl, validateToken } from "./auth.mjs";
 import { buildCreateRepoUrl, pollForRepoExists, initialMirrorPush } from "./repo.mjs";
 import { createGit } from "./git.mjs";
 import { runTick } from "./tick.mjs";
+import { readOptionValue } from "../lib/args.mjs";
+
+// Parse `--path <dir>` from args; undefined when absent.
+function readPathOption(args) {
+  const index = args.indexOf("--path");
+  if (index === -1) return undefined;
+  return readOptionValue(args, index, "--path");
+}
 
 function defaultOpenInBrowser(url) {
   const cmd =
@@ -98,39 +106,37 @@ export async function orchestrateSetup({
   log("  No-AI fallback: install GitHub Mobile to browse and edit the repo by hand.");
 }
 
-export async function runSetup() {
-  const aiosPath = path.resolve(expandHome(defaultAiosPath()));
+// Runs the setup flow. THROWS on failure — the caller owns the exit code.
+// `dotaios sync setup` treats a failure as a non-zero exit; the optional sync
+// step inside `dotaios setup` catches it and lets the wizard finish cleanly,
+// so an optional sub-step can never fail the whole setup.
+export async function runSetup(args = [], { orchestrate = orchestrateSetup } = {}) {
+  const aiosPath = path.resolve(expandHome(readPathOption(args) || defaultAiosPath()));
   const gitignoreContent = await loadGitignoreTemplate();
 
-  try {
-    await orchestrateSetup({
-      aiosPath,
-      gitignoreContent,
-      readToken: defaultReadToken,
-      validateToken: ({ accessToken }) => validateToken({ accessToken }),
-      writeConfig: (patch) => writeSyncConfig(patch),
-      openInBrowser: async (url) => defaultOpenInBrowser(url),
-      pollForRepoExists,
-      initialMirrorPush: async ({ aiosPath: p, accessToken, fullName, gitignoreContent: g }) => {
-        const git = createGit({ cwd: p });
-        await initialMirrorPush({ aiosPath: p, accessToken, fullName, gitignoreContent: g, git });
-      },
-      runFirstTick: async () => {
-        const git = createGit({ cwd: aiosPath });
-        const lockPath = path.join(path.dirname(syncConfigPath()), "sync.lock");
-        await runTick({
-          lockPath,
-          readConfig: () => readSyncConfig(),
-          writeConfig: (patch) => writeSyncConfig(patch),
-          makeGit: () => git,
-          appendEvent: async () => {},
-          now: () => Date.now()
-        });
-      }
-    });
-  } catch (err) {
-    console.error(`Sync setup failed: ${err.message}`);
-    console.error("You can retry with: dotaios sync setup");
-    process.exitCode = 1;
-  }
+  await orchestrate({
+    aiosPath,
+    gitignoreContent,
+    readToken: defaultReadToken,
+    validateToken: ({ accessToken }) => validateToken({ accessToken }),
+    writeConfig: (patch) => writeSyncConfig(patch),
+    openInBrowser: async (url) => defaultOpenInBrowser(url),
+    pollForRepoExists,
+    initialMirrorPush: async ({ aiosPath: p, accessToken, fullName, gitignoreContent: g }) => {
+      const git = createGit({ cwd: p });
+      await initialMirrorPush({ aiosPath: p, accessToken, fullName, gitignoreContent: g, git });
+    },
+    runFirstTick: async () => {
+      const git = createGit({ cwd: aiosPath });
+      const lockPath = path.join(path.dirname(syncConfigPath()), "sync.lock");
+      await runTick({
+        lockPath,
+        readConfig: () => readSyncConfig(),
+        writeConfig: (patch) => writeSyncConfig(patch),
+        makeGit: () => git,
+        appendEvent: async () => {},
+        now: () => Date.now()
+      });
+    }
+  });
 }
