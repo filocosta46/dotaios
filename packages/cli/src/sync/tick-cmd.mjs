@@ -46,7 +46,7 @@ export async function runTickCommand(args = []) {
     now: () => Date.now()
   });
 
-  // Quiet by default (this runs from the heartbeat + CLI hook constantly).
+  // Quiet by default (this runs from the CLI hook + agent sessions constantly).
   // Verbose only with --verbose, for manual `dotaios sync tick --verbose`.
   if (args.includes("--verbose")) {
     console.log(JSON.stringify(result));

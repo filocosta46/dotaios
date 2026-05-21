@@ -6,9 +6,7 @@ import {
   dotaiosBinDir,
   lightpandaBinPath,
   syncConfigPath,
-  inboxDir,
-  heartbeatPlistPath,
-  heartbeatUnitDir
+  inboxDir
 } from "../../packages/core/src/paths.mjs";
 
 test("dotaiosBinDir returns ~/.dotaios/bin", () => {
@@ -31,19 +29,5 @@ test("inboxDir returns <aios>/memory/inbox", () => {
   assert.equal(
     inboxDir("/tmp/aios-test"),
     path.join("/tmp/aios-test", "memory", "inbox")
-  );
-});
-
-test("heartbeatPlistPath returns ~/Library/LaunchAgents/io.dotaios.sync.plist", () => {
-  assert.equal(
-    heartbeatPlistPath(),
-    path.join(os.homedir(), "Library", "LaunchAgents", "io.dotaios.sync.plist")
-  );
-});
-
-test("heartbeatUnitDir returns ~/.config/systemd/user", () => {
-  assert.equal(
-    heartbeatUnitDir(),
-    path.join(os.homedir(), ".config", "systemd", "user")
   );
 });

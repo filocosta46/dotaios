@@ -35,9 +35,9 @@ export async function writeSyncConfig(filePathOrPatch, maybePatch) {
     try { await fs.chmod(dir, 0o700); } catch {}
   }
 
-  // TODO(Task 7): wrap with file lock to prevent concurrent CLI hook + heartbeat
-  // from clobbering each other's read-modify-write basis. Atomic rename below
-  // covers half-written file visibility, but not the read-merge-write race.
+  // TODO: a file lock would prevent two concurrent ticks from clobbering each
+  // other's read-modify-write basis. The atomic rename below covers half-written
+  // file visibility, but not the read-merge-write race.
   const existing = (await readSyncConfig(filePath)) ?? {};
   const merged = { ...existing, ...patch };
 

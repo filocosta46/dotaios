@@ -6,10 +6,10 @@ const HELP_TEXT = `Usage:
 Cross-device sync of your ~/aios/ folder to a private GitHub repo.
 
 Subcommands:
-  setup       One-time: sign in to GitHub, create your repo, push first mirror, install background heartbeat
-  tick        Run one push+pull cycle (used by the heartbeat; safe to run manually)
-  status      Show last tick time, repo URL, divergent branches, errors
-  logout      Sign out of GitHub, remove heartbeat (keeps your repo on GitHub)
+  setup       One-time: connect GitHub, create your repo, push the first mirror
+  tick        Run one commit+pull+push cycle (runs automatically; safe to run manually)
+  status      Show last tick time, repo URL, errors
+  logout      Sign out of GitHub (keeps your repo on GitHub)
   repo        Print the URL of your DotAIOS repo
 
 Options:

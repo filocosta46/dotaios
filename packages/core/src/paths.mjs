@@ -59,11 +59,3 @@ export function syncConfigPath() {
 export function inboxDir(aiosPath = defaultAiosPath()) {
   return path.join(aiosPath, "memory", "inbox");
 }
-
-export function heartbeatPlistPath() {
-  return path.join(os.homedir(), "Library", "LaunchAgents", "io.dotaios.sync.plist");
-}
-
-export function heartbeatUnitDir() {
-  return path.join(os.homedir(), ".config", "systemd", "user");
-}
