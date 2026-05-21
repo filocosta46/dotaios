@@ -75,6 +75,27 @@ export async function setupCommand(args) {
     }
   }
 
+  // GitHub cross-device sync prompt — skip in non-interactive or non-TTY mode
+  if (!nonInteractive && process.stdin.isTTY) {
+    const rl = readline.createInterface({ input, output });
+    try {
+      const answer = (await rl.question("\nConnect to GitHub for cross-device access? (Y/n): "))
+        .trim()
+        .toLowerCase();
+      if (answer === "" || answer === "y" || answer === "yes") {
+        const { runSetup } = await import("../sync/setup-flow.mjs");
+        try {
+          await runSetup([]);
+        } catch (err) {
+          console.error(`Sync setup could not finish: ${err.message}`);
+          console.error("You can retry later with: dotaios sync setup");
+        }
+      }
+    } finally {
+      rl.close();
+    }
+  }
+
   // Brief schedule prompt — skip in non-interactive or non-TTY mode
   if (!nonInteractive && process.stdin.isTTY) {
     const rl = readline.createInterface({ input, output });
