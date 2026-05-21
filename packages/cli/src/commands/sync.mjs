@@ -26,7 +26,7 @@ export async function syncCommand(args = []) {
 
   if (sub === "setup") {
     const { runSetup } = await import("../sync/setup-flow.mjs");
-    return runSetup(rest);
+    return runSetup();
   }
   if (sub === "tick") {
     const { runTickCommand } = await import("../sync/tick-cmd.mjs");
