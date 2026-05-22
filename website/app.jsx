@@ -229,7 +229,7 @@ function HowItWorks() {
         <div className="step">
           <span className="step-num">Step 01 — Tell an AI to set it up</span>
           <h3>Paste one line into the AI you already use.</h3>
-          <p>Claude Code, Cursor, Gemini, Codex pick any of them. It creates the folder, asks you who you are and what you're working on, and saves your answers.</p>
+          <p>Claude Code, Cursor, Gemini, Codex, Antigravity — pick any agent you already use. It creates the folder, asks you who you are and what you're working on, and saves your answers.</p>
           <div className="step-visual">
             <div className="tree-row"><span className="ico">›</span><span>creating <em>~/aios/</em>…</span></div>
             <div className="tree-row"><span className="ico plus">+</span><span><b>context/identity.md</b></span></div>
