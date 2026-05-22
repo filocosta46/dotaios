@@ -71,3 +71,31 @@ test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", asy
   const rulesIdx = tpl.indexOf("## Rules");
   assert.ok(tpl.indexOf("dotaios ingest", rulesIdx) > rulesIdx, "rule must appear under Rules");
 });
+
+test("AGENTS.md.hbs Rules section includes the sync-tick and inbox-routing rules", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  const rulesIdx = tpl.indexOf("## Rules");
+  assert.ok(rulesIdx !== -1, "Rules section exists");
+  assert.ok(tpl.indexOf("dotaios sync tick", rulesIdx) > rulesIdx, "sync-tick rule under Rules");
+  assert.ok(tpl.indexOf("process-inbox", rulesIdx) > rulesIdx, "inbox-routing rule under Rules");
+});
+
+test("process-inbox skill ships in skills/", async () => {
+  const content = await fs.readFile(
+    path.resolve("skills/process-inbox/SKILL.md"),
+    "utf8"
+  );
+  assert.match(content, /name: process-inbox/);
+  assert.match(content, /memory\/inbox/);
+});
+
+test("sync-gitignore.template ships in templates/", async () => {
+  const file = path.join(new URL("../..", import.meta.url).pathname, "templates", "sync-gitignore.template");
+  const content = await fs.readFile(file, "utf8");
+  assert.ok(content.includes(".env"));
+  assert.ok(content.includes("*.token"));
+  assert.ok(content.includes("node_modules/"));
+});

@@ -75,6 +75,32 @@ export async function setupCommand(args) {
     }
   }
 
+  // GitHub cross-device sync prompt — skip in non-interactive or non-TTY mode
+  if (!nonInteractive && process.stdin.isTTY) {
+    let wantsSync = false;
+    const rl = readline.createInterface({ input, output });
+    try {
+      const answer = (await rl.question("\nConnect to GitHub for cross-device access? (Y/n): "))
+        .trim()
+        .toLowerCase();
+      wantsSync = answer === "" || answer === "y" || answer === "yes";
+    } finally {
+      rl.close();
+    }
+    // Close this prompt's readline BEFORE runSetup — its token-paste step
+    // opens its own readline, and two interfaces on one stdin clash.
+    if (wantsSync) {
+      const { runSetup } = await import("../sync/setup-flow.mjs");
+      try {
+        // Mirror the same folder the wizard set up — honor --path.
+        await runSetup(["--path", aiosPath]);
+      } catch (err) {
+        console.error(`Sync setup could not finish: ${err.message}`);
+        console.error("You can retry later with: dotaios sync setup");
+      }
+    }
+  }
+
   // Brief schedule prompt — skip in non-interactive or non-TTY mode
   if (!nonInteractive && process.stdin.isTTY) {
     const rl = readline.createInterface({ input, output });

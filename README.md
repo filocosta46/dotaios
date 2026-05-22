@@ -105,6 +105,33 @@ All conversations save to `~/aios/memory/sessions/` as plain Markdown files you 
 
 → [How it works and which tools are supported](docs/sessions.md)
 
+## Cross-device sync (read your memory on your phone)
+
+Your `~/aios/` folder lives on one computer. `dotaios sync` mirrors it to a **private GitHub repository** so an AI app on your phone can read the same memory — who you are, what you're working on, your notes.
+
+```bash
+dotaios sync setup     # one-time: connect GitHub, create the repo, first upload
+dotaios sync status    # is sync on? when did it last run?
+```
+
+**One-time setup.** `dotaios sync setup` walks you through three steps:
+
+1. It opens a GitHub page where you click **Generate token** and paste the token back into the terminal. (You need a free GitHub account — making one is the only prerequisite.)
+2. It opens `github.com/new` with the form pre-filled — you click **Create repository**.
+3. It uploads your folder.
+
+After that, sync runs on its own — after every `dotaios` command, and at the start and end of every AI session. There is no background service to manage and nothing for DotAIOS to host.
+
+**Reading from your phone.** Point a mobile AI at the repo:
+
+- **Claude (free):** claude.ai → Projects → New → link your repo. Tap "Sync now" before you ask.
+- **ChatGPT / Codex:** link the repo from Codex; works while your computer is awake.
+- **No AI:** the GitHub Mobile app browses and edits the repo by hand.
+
+**Writing from your phone.** When a phone AI saves something, it drops a note into `memory/inbox/`. The next time you work on your computer, your agent files those notes into the right place with the `process-inbox` skill — so two devices never fight over the same file.
+
+**About the token.** Setup uses a classic GitHub token with the `repo` scope. That token can reach *all* of your GitHub repositories, not only the DotAIOS one. It is stored only on your computer, in a private file, and never leaves it. If you'd rather scope it tighter, create a fine-grained token limited to your `<username>-aios` repo and paste that instead.
+
 ## Where the folder lives
 
 `~/aios/` is a normal, visible folder in your home directory. **You can open it.** Drag notes in. Edit Markdown in any text editor. Move files around. It's yours.
@@ -215,6 +242,7 @@ Logs a note to memory instantly — no need to know which file to edit. Run with
 |---|---|
 | `dotaios setup` | One-shot: init + activate + reveal (best for first-time users) |
 | `dotaios capture <cmd>` | Save, browse, search, and manage saved AI conversations |
+| `dotaios sync <cmd>` | Mirror `~/aios/` to a private GitHub repo so your phone can read it |
 | `dotaios brief` | Writes today's local brief into `memory/daily/YYYY-MM-DD.md` |
 | `dotaios doctor` | One-stop health check |
 | `dotaios init` | Interactive setup, creates `~/aios/` |

@@ -188,7 +188,11 @@ async function renderTemplates(target, data, writeMode) {
   const templateRoot = path.join(repoRoot, "templates");
   return renderTemplateTree(templateRoot, target, data, {
     writeMode,
-    include: (outputRelative) => outputRelative !== "aios.json"
+    // sync-gitignore.template is a build-time resource for `dotaios sync
+    // setup`, not a file the user's AIOS folder should carry.
+    include: (outputRelative) =>
+      outputRelative !== "aios.json" &&
+      outputRelative !== "sync-gitignore.template"
   });
 }
 
@@ -231,7 +235,7 @@ async function createStarterFiles(target, data, writeMode) {
       "    command: \"dotaios brief\"",
       "    enabled: false"
     ].join("\n") + "\n",
-    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"privacy-brief\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"
+    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"privacy-brief\", \"process-inbox\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"
   };
   const results = [];
 

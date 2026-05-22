@@ -1,0 +1,13 @@
+.env
+.env.*
+*.key
+*.pem
+*.token
+*.credentials
+connections/*/credentials.json
+connections/*/token.json
+license/*.json
+.DS_Store
+cache/
+tmp/
+node_modules/

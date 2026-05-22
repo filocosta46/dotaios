@@ -51,3 +51,7 @@ export function lightpandaBinPath() {
 export function lightpandaHintFlagPath() {
   return path.join(dotaiosDir(), ".lightpanda_hint_shown");
 }
+
+export function syncConfigPath() {
+  return path.join(dotaiosDir(), "sync.json");
+}

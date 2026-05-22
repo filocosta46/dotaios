@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
+import { fireSyncHook } from "./lib/sync-hook.mjs";
 
 const pkg = JSON.parse(
   readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
@@ -33,6 +34,7 @@ const commands = {
   skill: "./commands/skill.mjs",
   skills: "./commands/skills.mjs",
   status: "./commands/status.mjs",
+  sync: "./commands/sync.mjs",
   update: "./commands/update.mjs"
 };
 
@@ -68,6 +70,7 @@ Commands:
   skill <cmd>       Add, list, or remove skills (friendly alias for install)
   skills [name]     List installed skills or show full instructions for one skill
   status            Check the health of a local AIOS folder
+  sync <cmd>        Cross-device sync to a private GitHub repo
   update [text]     Log a quick update — decision, meeting, note — to memory
 
 Options:
@@ -106,6 +109,9 @@ async function main(argv) {
   const module = await import(commandPath);
   const command = module[`${commandName}Command`];
   await command(args);
+
+  // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
+  await fireSyncHook({ command: commandName });
 }
 
 main(process.argv).catch((error) => {

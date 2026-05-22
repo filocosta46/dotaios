@@ -91,4 +91,6 @@ If the user gives you a repository URL and asks you to install a skill or plugin
 - Never expose secrets.
 - Ask before writing durable identity, CRM, or wiki knowledge.
 - Suggest a new skill when a workflow repeats.
+- At the start of a work session, if `memory/inbox/` contains files, read them before anything else and use the `process-inbox` skill to file each one into the right place, then delete the inbox file. These are notes captured on another device.
+- At the start of a work session and again before finishing, run `dotaios sync tick` to keep this folder mirrored to its GitHub repo across devices. It does nothing if cross-device sync is not set up.
 - When a work session is wrapping up, offer to save it: "Want me to save this session to your AIOS memory?" Use the `save-session` skill.
