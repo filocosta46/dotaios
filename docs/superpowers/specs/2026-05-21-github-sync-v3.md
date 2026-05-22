@@ -115,6 +115,21 @@ start/end (`AGENTS.md` rule). No background daemon.
 Encryption at rest, web reader app, native mobile app, conflict-resolution UI,
 fine-grained per-repo token (future hardening).
 
+## Known limitations
+
+**Same-file conflict recovery is not surfaced in `sync status`.** When two
+devices edit the *same* file, `tick` parks the local commit on a `local-<ts>`
+branch and hard-resets `main` to origin (see Decision 2). The local edit is
+preserved on that branch and the event is logged to `memory/events.jsonl` as
+`sync-conflict` — which agents load every session — but `sync status` does not
+report pending conflict branches, and the branches are not auto-pruned.
+
+Accepted for v3: the conflict path is near-unreachable for the stated ICP — one
+desktop plus a phone, where the phone only ever *adds* new files under
+`memory/inbox/`, so the two sides touch disjoint files and rebase cleanly. If
+DotAIOS later targets users with two or more desktops, add conflict-branch
+reporting to `sync status`.
+
 ## Acceptance criteria
 
 - `dotaios sync setup` opens the token link, accepts a pasted PAT, validates it,
