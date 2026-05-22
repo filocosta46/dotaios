@@ -1,29 +1,51 @@
 # DotAIOS — Agent Setup Guide
 
-> This document is written for AI agents (Claude Code, Codex, Gemini, Cursor).
+> This document is written for AI agents (Claude Code, Codex, Cursor, Gemini, and others).
 > A human has asked you to set up DotAIOS for them.
-> Follow each step in order. Do not skip steps. Do not ask the user about steps they don't need to see.
+> Follow each step in order. Do not skip steps. The human should never need to type
+> a terminal command — you run them.
 
 ---
 
 ## Before you start
 
-DotAIOS creates a folder at `~/aios/` that you and every other AI tool on this machine will read automatically. It holds context about who the user is, what they're working on, and skills you can run on their behalf.
+DotAIOS creates a folder at `~/aios/` that you and every other AI tool on this
+machine will read automatically. It holds context about who the user is, what
+they're working on, and skills you can run on their behalf.
 
-Your job is to install it, connect it, learn a few things about the user through friendly conversation, and then explain what they now have access to.
+Your job: install it, connect it, learn a few things about the user through
+friendly conversation, then explain what they now have.
+
+Run every command yourself. Do not ask the user to open a terminal or paste
+commands.
 
 ---
 
-## Step 1 — Check Node.js
+## Step 1 — Make sure Node.js 20+ is available
 
-Run this command and read the output:
+Run:
 ```
 node --version
 ```
 
-- If it returns `v20.x.x` or higher → continue to Step 2.
-- If it returns a version below 20 → tell the user: *"You need to update Node.js first. Go to nodejs.org, click the LTS button, and run the installer. Come back when it's done."* Wait for them to confirm before continuing.
-- If the command fails entirely → tell the user: *"Node.js is not installed. Go to nodejs.org, click the LTS button, and run the installer. Come back when it's done."* Wait for them to confirm before continuing.
+- Returns `v20.x.x` or higher → continue to Step 2.
+- Returns a lower version, or the command fails → **install Node.js yourself**,
+  then re-check. Do not send the user to a download page unless automated install
+  is impossible.
+  - **macOS** with Homebrew (`brew --version` succeeds): `brew install node`
+  - **macOS** without Homebrew: install nvm, then Node —
+    `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash`
+    then open a new shell and run `nvm install --lts`
+  - **Windows**: `winget install OpenJS.NodeJS.LTS`
+  - **Linux**:
+    `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash`
+    then `nvm install --lts`
+- Only if every automated path fails: tell the user *"I need Node.js to continue.
+  Please install the LTS version from nodejs.org, then tell me when it's done."*
+  and wait for them to confirm.
+
+After installing, run `node --version` again and confirm it reports `v20.x.x` or
+higher before continuing.
 
 ---
 
@@ -34,100 +56,135 @@ Run:
 npx dotaios init --yes
 ```
 
-This creates `~/aios/` with empty context files. It takes about 30 seconds. Do not tell the user anything while it runs — just wait for it to finish. Say nothing if it succeeds.
+This scaffolds `~/aios/` with placeholder context files. It takes about 30
+seconds. Wait for it to finish. Say nothing to the user while it runs.
+
+Do **not** run `npx dotaios setup`. That command is the interactive path for a
+human sitting at a terminal. You are on the agent path: `init` then `activate`,
+with the interview done by you in Step 4.
 
 ---
 
-## Step 3 — Connect to agent tools
+## Step 3 — Connect the user's AI tools
 
 Run:
 ```
 npx dotaios activate
 ```
 
-This writes small files that tell Claude Code, Codex, and Gemini where to find the user's context. Say nothing if it succeeds.
+This writes small bridge files so Claude Code, Codex, Gemini, and other tools
+find the user's context. It also auto-detects which tools are installed — you do
+not need to ask the user which tools they use.
 
 ---
 
 ## Step 4 — Learn about the user (conversational — do not rush this)
 
-Ask the user these questions **one at a time**. Wait for each answer before asking the next. Be warm and natural — you are having a conversation, not filling out a form.
+Ask these three questions **one at a time**. Wait for each answer before asking
+the next. Be warm and natural — you are having a conversation, not filling out a
+form.
 
-After each answer, write it directly into the correct file using your file editing tools. Do not ask permission to write — just do it.
+After each answer, write it directly into the correct file using your
+file-editing tools. Do not ask permission to write — just do it.
 
 **Question 1:**
-> "What's your name and what do you do for work?"
+> "What's your name, and what do you do for work?"
 
-→ Write the answer to `~/aios/context/identity.md`. Replace the placeholder line under `## Basics` with their actual name and role. Leave the other sections as they are.
+→ Write to `~/aios/context/identity.md`. Replace the placeholder line under
+`## Basics` with their name and role. Leave the other sections as they are.
 
 **Question 2:**
-> "What are you currently working on? Can be one thing or a few — whatever's taking up your mental energy right now."
+> "What are you working on right now? One thing or a few — whatever's taking up
+> your mental energy."
 
-→ Write the answer to `~/aios/context/work.md`. Replace the content under `## Current Work` with what they said. Keep it in their words.
+→ Write to `~/aios/context/work.md`. Replace the content under `## Current Work`
+with what they said. Keep it in their words.
 
 **Question 3:**
-> "What matters most to you this week? What would make it a good week if it got done?"
+> "What matters most this week? What would make it a good week if it got done?"
 
-→ Write the answer to `~/aios/context/priorities.md`. Replace the content under `## Current Bets` with what they said.
+→ Write to `~/aios/context/priorities.md`. Replace the content under
+`## Current Bets` with what they said.
 
 After all three answers, say:
-> "Perfect. You can always update any of this later — just tell me, or run `dotaios interview` when things change."
+> "Perfect. You can change any of this later — just tell me, or run
+> `npx dotaios interview --review` when things shift."
 
 **Optional — do not push this:**
-> "One last thing: do you have a CV, bio, a document about your project, or anything else you'd like me to remember? If yes, drag it here or give me a link."
+> "Anything else you'd like me to remember — a CV, a bio, a doc about your
+> project? Drag it here or give me a link."
 
 If they give you something:
-- If it's a file or local path: run `npx dotaios ingest <path>`
-- If it's a URL: run `npx dotaios ingest <url>`
-- If they say no or skip: move on immediately, do not mention it again.
+- A file or local path → run `npx dotaios ingest <path>`
+- A URL → run `npx dotaios ingest <url>`
+- They say no or skip → move on immediately, do not mention it again.
 
 ---
 
 ## Step 5 — Show them what they now have
 
-Do NOT say "try asking me to plan your day" — the memory may not have enough information yet to do that well.
+Do NOT say "try asking me to plan your day" — the memory may not have enough in
+it yet to do that well.
 
-Instead, say something like this (adapt to what they told you):
+Instead, say something like this (adapt it to what they told you):
 
 > "You're set up. Here's what DotAIOS gives you now:
 >
-> **Your AI always knows who you are.** Every time you open Claude Code, Cursor, Codex, or Gemini, they'll read your context automatically — no re-introduction needed.
+> **Every AI tool on this machine knows who you are.** Claude Code, Cursor,
+> Codex, Gemini — they read your context automatically, with no re-introduction.
 >
-> **Skills you can use right now** (just ask me, or type `/` in Claude Code):
+> **Skills you can use right now** — just ask me, or type `/` in Claude Code:
 >
 > - `/plan-today` — a structured plan for the day (works best after a few sessions)
 > - `/today` — save today's plan to a daily note
 > - `/closeday` — close the day and carry unfinished work forward
-> - `/ingest` — save any article, PDF, or document into your memory vault
+> - `/ingest` — save any article, PDF, or document into your vault
 > - `/weekly-review` — review the week and update your context
 > - `/audit` — check that your setup is healthy
 >
-> **A brief you can run any time:** `npx dotaios brief` writes today's local brief into your daily note.
+> **A brief any time:** `npx dotaios brief` writes today's local brief into your
+> daily note.
 >
-> **How the system grows with you:**
-> The more you use it, the more useful it gets. When a project changes, tell me and I'll update `work.md`. When your priorities shift, just say so. You can also drag any document in at any time and I'll save it to your vault.
->
-> **One good first thing to try:** Ask me to run `npx dotaios brief`. It'll show you what DotAIOS can already give back from your local context."
+> **It grows with you.** When your work or priorities change, tell me and I'll
+> update the files. You can drag any document in at any time."
+
+**Optional extras — mention them, but do not set them up now.** Tell the user
+these exist and that they can turn them on whenever they want:
+
+- **Cross-device sync** — read your memory on your phone: `npx dotaios sync setup`
+- **Save conversations** — keep AI sessions as local memory:
+  `npx dotaios capture enable claude-code`
+- **Daily brief on a schedule** — `~/aios/` ships a pre-wired daily brief
+  schedule; run `npx dotaios schedule install --dry-run` to see how to enable it
+  with the computer's own scheduler.
+
+Do not run these during first-time setup. Keep the first run minimal.
 
 ---
 
 ## If something goes wrong
 
-- `npx: command not found` → Node.js is not installed. Go back to Step 1.
-- `EACCES` permission error → The user needs to fix npm permissions. See: https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally
-- `Target already exists` → `~/aios/` already exists from a previous install. Run `npx dotaios init --force` instead.
-- Anything else → Run `npx dotaios status` and show the output.
+- `npx: command not found` → Node.js is not installed. Go back to Step 1 and
+  install it yourself.
+- `EACCES` permission error → npm permissions need fixing. See:
+  https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally
+- `Target already exists` → `~/aios/` already exists from a previous install. Run
+  `npx dotaios init --force --yes` instead.
+- Anything else → run `npx dotaios status` and read the output.
 
 ---
 
 ## For agents reading the GitHub repo
 
-If a user pointed you at `https://github.com/filocosta46/dotaios` and asked you to set up DotAIOS, this is the file to follow. Start at Step 1 above.
+If a user pointed you at `https://github.com/filocosta46/dotaios` and asked you to
+set up DotAIOS, this is the file to follow. Start at Step 1 above.
 
 ### Installing third-party plugins
-If the user already has DotAIOS set up and gives you a link to a different repository to install a skill/plugin:
+If the user already has DotAIOS set up and gives you a link to a different
+repository to install a skill or plugin:
 1. `git clone <url> /tmp/dotaios-plugin`
 2. `npx dotaios install /tmp/dotaios-plugin`
 3. `rm -rf /tmp/dotaios-plugin`
 
-The full documentation is in the `docs/` folder. The skills are in `skills/`. Everything is plain Markdown — you can read it all.
+The full documentation is in the `docs/` folder. The skills are in `skills/`.
+Everything is plain Markdown — you can read it all.
