@@ -126,25 +126,49 @@ function Hero({ headlineText, showGraph }) {
 
         <div id="install" className="install">
           <div className="install-head">
-            <span className="lbl">paste this into any AI chat</span>
-            <span>60 seconds</span>
+            <span className="lbl">get started</span>
+            <span>2 steps · ~60 seconds</span>
           </div>
-          <code>
-            <span className="prompt">›</span>
-            <span>Ask </span>
-            <span className="arg">Claude Code</span>
-            <span>: </span>
-            <span className="quote">"Read this and set up DotAIOS for me: https://github.com/filocosta46/dotaios"</span>
-          </code>
-          <button className={`copy-btn ${copied ? "copied" : ""}`} onClick={() => copy(INSTALL_SNIPPET, setCopied)}>
-            {copied ? "✓ copied" : "Copy"}
-          </button>
 
-          <div className="install-or">or, if you prefer the command line</div>
+          <div className="install-step">
+            <span className="install-step-num">1</span>
+            <div className="install-step-body">
+              <b>Open an AI agent app.</b>
+              <p>
+                DotAIOS works with any agent that reads <code>AGENTS.md</code> —
+                Claude Code, Codex, Cursor, Gemini, Antigravity. Don't have one
+                yet? Claude Code is a free and friendly place to start.
+              </p>
+            </div>
+          </div>
+
+          <div className="install-step">
+            <span className="install-step-num">2</span>
+            <div className="install-step-body">
+              <b>Paste this line into it.</b>
+              <div className="install-line">
+                <code>
+                  <span className="prompt">›</span>
+                  <span className="quote">{INSTALL_SNIPPET}</span>
+                </code>
+                <button
+                  className={`copy-btn ${copied ? "copied" : ""}`}
+                  onClick={() => copy(INSTALL_SNIPPET, setCopied)}
+                  style={{ position: "static" }}>
+                  {copied ? "✓" : "Copy"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="install-or">already comfortable in a terminal?</div>
 
           <div className="install-alt">
             <code><span className="lead">$</span>{NPX_SNIPPET}</code>
-            <button className={`copy-btn ${copiedNpx ? "copied" : ""}`} onClick={() => copy(NPX_SNIPPET, setCopiedNpx)} style={{ position: 'static' }}>
+            <button
+              className={`copy-btn ${copiedNpx ? "copied" : ""}`}
+              onClick={() => copy(NPX_SNIPPET, setCopiedNpx)}
+              style={{ position: "static" }}>
               {copiedNpx ? "✓" : "Copy"}
             </button>
           </div>

@@ -328,6 +328,63 @@ body::before {
 .install-alt code { color: var(--ink); }
 .install-alt .lead { color: var(--cobalt); user-select: none; margin-right: 6px; }
 
+/* Two-step get-started block */
+.install-step {
+  display: flex; gap: 12px;
+  margin-bottom: 14px;
+}
+.install-step-num {
+  flex: 0 0 22px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--cobalt);
+  color: var(--paper);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  display: grid; place-items: center;
+}
+.install-step-body { flex: 1; min-width: 0; }
+.install-step-body b {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink);
+  display: block;
+  margin-bottom: 4px;
+}
+.install-step-body p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  line-height: 1.55;
+}
+.install-step-body p code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--cobalt-tint);
+  color: var(--cobalt-deep);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.install-line {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 8px;
+  background: var(--paper);
+  border: 1px solid var(--hairline-2);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.install-line code {
+  display: block; flex: 1; min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .hero-meta {
   display: flex; gap: 36px; margin-top: 32px;
   flex-wrap: wrap;
