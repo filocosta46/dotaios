@@ -55,7 +55,3 @@ export function lightpandaHintFlagPath() {
 export function syncConfigPath() {
   return path.join(dotaiosDir(), "sync.json");
 }
-
-export function inboxDir(aiosPath = defaultAiosPath()) {
-  return path.join(aiosPath, "memory", "inbox");
-}

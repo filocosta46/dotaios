@@ -5,8 +5,7 @@ import assert from "node:assert/strict";
 import {
   dotaiosBinDir,
   lightpandaBinPath,
-  syncConfigPath,
-  inboxDir
+  syncConfigPath
 } from "../../packages/core/src/paths.mjs";
 
 test("dotaiosBinDir returns ~/.dotaios/bin", () => {
@@ -25,9 +24,3 @@ test("syncConfigPath returns ~/.dotaios/sync.json", () => {
   assert.equal(syncConfigPath(), path.join(os.homedir(), ".dotaios", "sync.json"));
 });
 
-test("inboxDir returns <aios>/memory/inbox", () => {
-  assert.equal(
-    inboxDir("/tmp/aios-test"),
-    path.join("/tmp/aios-test", "memory", "inbox")
-  );
-});

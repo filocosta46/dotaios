@@ -8,7 +8,6 @@ connections/*/credentials.json
 connections/*/token.json
 license/*.json
 .DS_Store
-memory/.daemon.*
 cache/
 tmp/
 node_modules/
