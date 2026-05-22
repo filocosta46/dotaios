@@ -1,3 +1,11 @@
+> **Status: not a shipped path (kept for reference).** DotAIOS onboards through
+> an AI agent — the agent installs Node.js and runs setup with no terminal typing
+> (see the repo's `INSTALL.md`). This MSI launcher is unbuilt, unsigned, and
+> unmaintained. A native installer was evaluated and rejected on KISS grounds:
+> code-signing, notarization, and per-OS CI are release infrastructure DotAIOS
+> would have to own, and the installer would still need an agent app plus Node to
+> be useful. Do not present this as an install option.
+
 # Windows Installer
 
 This directory holds the source files for the DotAIOS `.msi` installer for Windows.
