@@ -19,7 +19,7 @@ DotAIOS creates **one folder** at `~/aios/` that holds your context, your memory
 DotAIOS needs one AI app installed on your computer so it has somewhere to send your context. Once that's set up, every AI you use — on your computer or in a browser — can read from the same folder.
 
 **Pick one app to install (if you haven't already):**
-- [Claude Code](https://claude.ai/download) — recommended
+- [Claude Code](https://claude.com/download) — recommended
 - [Codex CLI](https://github.com/openai/codex) by OpenAI
 - [Cursor](https://www.cursor.com) — code editor with AI
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
@@ -69,13 +69,13 @@ npx dotaios reveal     # open the folder in Finder / Explorer
 
 ## Installing with AI help
 
-If you opened this page inside Claude Code, Codex, or another AI agent — or pasted this URL into a chat — the agent can guide you through the whole installation.
+Have an AI agent app open — Claude Code, Codex, Cursor, Gemini, or another? It can do the whole install for you. You will not type a single terminal command.
 
-**Say this to your agent:**
+**Paste this to your agent:**
 
-> Read the DotAIOS README at this URL and help me install it. First run `node --version` to check if I have Node.js 20 or higher. If I don't, install it for me: on Mac run `brew install node` if Homebrew is available, otherwise open https://nodejs.org and download the LTS installer; on Windows run `winget install OpenJS.NodeJS.LTS`; on Linux run `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash` then `nvm install --lts`. Once Node is ready, run `npx dotaios setup` and walk me through the setup questions.
+> Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.
 
-The agent will check your machine, install anything missing, run `npx dotaios setup`, and walk you through the 5 setup questions. You don't need to understand the Terminal commands — just follow what it says.
+The agent reads [`INSTALL.md`](INSTALL.md) — a setup guide written for agents — installs Node.js if it is missing, creates your folder, connects your tools, and asks you a few questions about yourself. Just follow along.
 
 ---
 
@@ -282,7 +282,7 @@ Your existing notes become agent readable knowledge.
 
 ## Principles
 
-* **Local first**, no accounts, no server, no cloud sync
+* **Local first**, no accounts, no server we run — optional cross-device sync uses your own private GitHub repo
 * **File based**, Markdown and JSONL, not databases
 * **Agent native**, your AI tools read directly; DotAIOS is invisible infrastructure
 

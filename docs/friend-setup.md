@@ -2,6 +2,12 @@
 
 A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Claude Code, Cursor, Codex, Gemini) know who you are, what you're working on, and how to help without asking you to re-explain everything.
 
+> **Prefer not to use the terminal?** If you have an AI agent app open (Claude
+> Code, Codex, Cursor, Gemini), it can do this whole install for you — see
+> [`../INSTALL.md`](../INSTALL.md). Paste it one line and the agent handles every
+> step. The guide below is the manual terminal path, for when you'd rather run
+> the commands yourself.
+
 ## What you need before starting
 
 - A Mac (Linux works the same way; Windows is not officially tested yet).
