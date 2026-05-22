@@ -18,6 +18,22 @@ function fakeSpawn(plan) {
   };
 }
 
+test("createGit stamps a DotAIOS git identity into the spawn env", async () => {
+  let capturedEnv;
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: (cmd, args, opts) => {
+      capturedEnv = opts.env;
+      return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+    }
+  });
+  await git.dirty();
+  assert.equal(capturedEnv.GIT_AUTHOR_NAME, "DotAIOS Sync");
+  assert.equal(capturedEnv.GIT_AUTHOR_EMAIL, "sync@dotaios.local");
+  assert.equal(capturedEnv.GIT_COMMITTER_NAME, "DotAIOS Sync");
+  assert.equal(capturedEnv.GIT_COMMITTER_EMAIL, "sync@dotaios.local");
+});
+
 test("dirty() true when porcelain has lines", async () => {
   const git = createGit({
     cwd: "/x",

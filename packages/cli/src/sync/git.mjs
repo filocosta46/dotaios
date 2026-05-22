@@ -19,9 +19,21 @@ function defaultSpawn(cmd, args, opts) {
   });
 }
 
+// A non-technical user's machine often has no global git identity. Without one
+// `git commit` (and `git rebase`) fail with "Author identity unknown". Stamp a
+// DotAIOS identity into every git invocation so sync never depends on the
+// user's global git config. These env vars override user.name/user.email.
+const SYNC_GIT_IDENTITY = {
+  GIT_AUTHOR_NAME: "DotAIOS Sync",
+  GIT_AUTHOR_EMAIL: "sync@dotaios.local",
+  GIT_COMMITTER_NAME: "DotAIOS Sync",
+  GIT_COMMITTER_EMAIL: "sync@dotaios.local"
+};
+
 export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } = {}) {
+  const gitEnv = { ...env, ...SYNC_GIT_IDENTITY };
   function run(args) {
-    return spawnImpl("git", args, { cwd, env });
+    return spawnImpl("git", args, { cwd, env: gitEnv });
   }
 
   return {
