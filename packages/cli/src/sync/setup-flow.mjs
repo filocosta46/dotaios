@@ -78,7 +78,7 @@ export async function orchestrateSetup({
   log("Step 2/4 - Create your memory repo");
   const fullName = `${username}/${username}-aios`;
   const createUrl = buildCreateRepoUrl(username);
-  log(`  -> Opening github.com/new (pre-filled) in your browser...`);
+  log(`  -> Opening ${createUrl} in your browser...`);
   log(`  -> Click "Create repository" on GitHub's page (we don't create it for you).`);
   await openInBrowser(createUrl);
   await pollForRepoExistsImpl({ accessToken, fullName });
