@@ -23,20 +23,41 @@ test("remoteUrlWithToken embeds x-access-token", () => {
   assert.equal(url, "https://x-access-token:ghu_T@github.com/filocosta46/filocosta46-aios.git");
 });
 
-test("pollForRepoExists resolves once API returns 200", async () => {
-  let calls = 0;
+test("pollForRepoExists resolves once the repo exists and is empty", async () => {
+  let repoCalls = 0;
   const ok = await pollForRepoExists({
     accessToken: "T",
     fullName: "u/u-aios",
-    fetchImpl: async () => {
-      calls += 1;
-      return { ok: calls >= 2, status: calls >= 2 ? 200 : 404, json: async () => ({}) };
+    fetchImpl: async (url) => {
+      // empty repo -> GitHub returns 409 for the commits list
+      if (url.endsWith("/commits")) return { ok: false, status: 409, json: async () => ({}) };
+      repoCalls += 1;
+      return { ok: repoCalls >= 2, status: repoCalls >= 2 ? 200 : 404, json: async () => ({}) };
     },
     sleep: () => Promise.resolve(),
     timeoutMs: 60_000,
     now: () => 0
   });
   assert.equal(ok, true);
+});
+
+test("pollForRepoExists rejects a repo that was created with files in it", async () => {
+  await assert.rejects(
+    pollForRepoExists({
+      accessToken: "T",
+      fullName: "u/u-aios",
+      fetchImpl: async (url) => {
+        if (url.endsWith("/commits")) {
+          return { ok: true, status: 200, json: async () => [{ sha: "abc" }] };
+        }
+        return { ok: true, status: 200, json: async () => ({}) };
+      },
+      sleep: () => Promise.resolve(),
+      timeoutMs: 60_000,
+      now: () => 0
+    }),
+    /created with files already in it/
+  );
 });
 
 test("initialMirrorPush invokes git init, add, commit, push in order", async () => {

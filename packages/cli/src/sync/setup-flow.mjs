@@ -80,6 +80,7 @@ export async function orchestrateSetup({
   const createUrl = buildCreateRepoUrl(username);
   log(`  -> Opening ${createUrl} in your browser...`);
   log(`  -> Click "Create repository" on GitHub's page (we don't create it for you).`);
+  log(`  -> Leave every "Initialize this repository" option OFF — no README, no .gitignore, no license.`);
   await openInBrowser(createUrl);
   await pollForRepoExistsImpl({ accessToken, fullName });
   await writeConfig({

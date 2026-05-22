@@ -25,16 +25,33 @@ export async function pollForRepoExists({
   intervalSec = 3,
   timeoutMs = 5 * 60 * 1000
 }) {
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: "application/vnd.github+json",
+    "User-Agent": "dotaios-sync"
+  };
   const startedAt = now();
   while (now() - startedAt < timeoutMs) {
-    const res = await fetchImpl(`https://api.github.com/repos/${fullName}`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/vnd.github+json",
-        "User-Agent": "dotaios-sync"
+    const res = await fetchImpl(`https://api.github.com/repos/${fullName}`, { headers });
+    if (res.ok) {
+      // Repo exists. Confirm it is EMPTY — pushing the initial mirror to a repo
+      // that already has commits (the user ticked "Add a README" etc. on the
+      // create page) is rejected non-fast-forward, and setup would die with a
+      // cryptic git error. GitHub returns 409 for the commits of an empty repo.
+      const commits = await fetchImpl(
+        `https://api.github.com/repos/${fullName}/commits`,
+        { headers }
+      );
+      if (commits.status === 409) return true; // empty — as expected
+      if (commits.ok) {
+        throw new Error(
+          `the repo ${fullName} was created with files already in it. On github.com, ` +
+          `delete that repo, then re-run "dotaios sync setup" — and this time leave ` +
+          `every "Initialize this repository" option (README, .gitignore, license) unchecked.`
+        );
       }
-    });
-    if (res.ok) return true;
+      return true; // any other status — proceed; the push will surface real errors
+    }
     await sleep(intervalSec);
   }
   throw new Error(`timed out waiting for repo ${fullName} to be created on GitHub`);
