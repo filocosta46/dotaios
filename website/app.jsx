@@ -114,14 +114,14 @@ function Hero({ headlineText, showGraph }) {
     <section className="hero" data-screen-label="Hero">
       <div className="hero-left">
         <span className="hero-tag">
-          <span className="pill">v0.3</span>
+          <span className="pill">open source</span>
           local · file-based · no sign-up
         </span>
         <h1>
           {renderHeadline()}
         </h1>
         <p className="hero-lede">
-          DotAIOS is one folder on your computer. <code>~/aios/</code> — that holds your context, your memory, and the things you'd like your AI to do for you. Claude, Cursor, Gemini, Codex: they all read from the same place. Write it once, every tool knows.
+          DotAIOS is one folder on your computer. <code>~/aios/</code> — that holds your context, your memory, and the things you'd like your AI to do for you. Claude Code, Cursor, Gemini, Codex, and any agent that reads <code>AGENTS.md</code> all read from the same place. Write it once, every tool knows.
         </p>
 
         <div id="install" className="install">
@@ -180,12 +180,12 @@ function Hero({ headlineText, showGraph }) {
             <span>plain Markdown, on your machine</span>
           </div>
           <div className="hero-meta-item">
-            <b>Four tools</b>
-            <span>Claude · Cursor · Codex · Gemini</span>
+            <b>Every agent</b>
+            <span>anything that reads AGENTS.md</span>
           </div>
           <div className="hero-meta-item">
-            <b>No cloud</b>
-            <span>no sign-up, no sync, no server</span>
+            <b>No account</b>
+            <span>no server we run; sync is your own GitHub</span>
           </div>
         </div>
       </div>
