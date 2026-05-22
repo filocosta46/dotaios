@@ -270,6 +270,47 @@ function HowItWorks() {
 
 }
 
+function WhatItDoes() {
+  return (
+    <section className="section" data-screen-label="What it does">
+      <span className="section-eyebrow">What it does</span>
+      <h2 className="section-title">More than a profile. A working memory.</h2>
+      <p className="section-lede">
+        Your context is the start. DotAIOS also pulls in what you read, remembers
+        what you discussed, and follows you across devices.
+      </p>
+      <div className="steps">
+        <div className="feature">
+          <h3>Cross-device sync</h3>
+          <p>
+            Mirror your folder to a private GitHub repo, so an AI on your phone
+            reads the same memory. Opt-in, and it runs on your own GitHub — no
+            server we host.
+          </p>
+          <span className="feature-cmd">npx dotaios sync setup</span>
+        </div>
+        <div className="feature">
+          <h3>Reads the web</h3>
+          <p>
+            Hand it a URL, a PDF, or a document. DotAIOS extracts clean Markdown
+            into your vault — JavaScript-heavy pages included, via a built-in
+            headless browser.
+          </p>
+          <span className="feature-cmd">npx dotaios ingest &lt;url&gt;</span>
+        </div>
+        <div className="feature">
+          <h3>Remembers your sessions</h3>
+          <p>
+            Save AI conversations locally so your context compounds — across
+            tools and across time. Search every past session from one place.
+          </p>
+          <span className="feature-cmd">npx dotaios capture enable claude-code</span>
+        </div>
+      </div>
+    </section>);
+
+}
+
 function Footer() {
   return (
     <footer className="footer">
@@ -311,6 +352,7 @@ function App() {
       <Hero headlineText={t.headlineText} showGraph={t.showGraph} />
       <Metaphor />
       <HowItWorks />
+      <WhatItDoes />
       <Marketplace />
       <Footer />
       <TweaksPanel title="Tweaks">
