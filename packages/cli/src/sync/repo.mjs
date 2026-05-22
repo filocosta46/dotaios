@@ -57,8 +57,10 @@ export async function initialMirrorPush({
   await git.addRemote(remoteUrlWithToken(accessToken, fullName));
 
   // 4. Add + commit everything.
-  await git.commitAll("Initial DotAIOS mirror");
+  const sha = await git.commitAll("Initial DotAIOS mirror");
 
   // 5. Push.
   await git.push("main");
+
+  return sha;
 }

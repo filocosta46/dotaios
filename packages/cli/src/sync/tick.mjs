@@ -78,6 +78,7 @@ export async function runTick({
     //    so it is recoverable, then align main with origin. Any other
     //    divergence rebased cleanly above and needs nothing special.
     let pushed = false;
+    let pushedHead = null;
     if (pullResult === "conflict") {
       const localSha = await git.currentSha();
       const branchName = `local-${startedIso.replace(/[:.]/g, "-")}`;
@@ -87,12 +88,15 @@ export async function runTick({
     } else if (pushedSha) {
       // 4. Local commit (now replayed on top of origin) goes up.
       await git.push("main");
+      // Record the actual HEAD after push: a rebase above may have rewritten
+      // the commit, so commitAll's pre-rebase sha can no longer exist.
+      pushedHead = await git.currentSha();
       pushed = true;
     }
 
     await writeConfig({
       last_tick_at: startedIso,
-      last_push_sha: pushed ? pushedSha : (cfg.last_push_sha ?? null),
+      last_push_sha: pushed ? pushedHead : (cfg.last_push_sha ?? null),
       last_pull_at: startedIso,
       last_error: null
     });
@@ -100,7 +104,7 @@ export async function runTick({
     return {
       pulled: pullResult,
       pushed,
-      sha: pushed ? pushedSha : null
+      sha: pushed ? pushedHead : null
     };
   } catch (err) {
     // Best-effort: persisting the error must never itself cause runTick to throw.

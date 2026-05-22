@@ -90,6 +90,7 @@ test("tick commits before pulling, then pushes when dirty and remote up-to-date"
     assert.ok(commitIdx !== -1, "must commit local work");
     assert.ok(commitIdx < pullIdx, "commit must happen before the rebase pull");
     assert.equal(result.pushed, true);
+    assert.equal(result.sha, "sha-current", "reported sha is HEAD after push, not the pre-rebase commit");
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 

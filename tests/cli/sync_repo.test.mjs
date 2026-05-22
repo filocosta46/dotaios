@@ -52,7 +52,7 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
       commitAll: async (m) => { calls.push(`commit:${m}`); return "deadbeef"; },
       push: async (b) => calls.push(`push:${b}`)
     };
-    await initialMirrorPush({
+    const sha = await initialMirrorPush({
       aiosPath: tmp,
       accessToken: "T",
       fullName: "u/u-aios",
@@ -65,6 +65,7 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
       "commit:Initial DotAIOS mirror",
       "push:main"
     ]);
+    assert.equal(sha, "deadbeef", "returns the initial commit sha for last_push_sha");
     const writtenGitignore = await fs.readFile(path.join(tmp, ".gitignore"), "utf8");
     assert.equal(writtenGitignore, ".env\n");
   } finally {

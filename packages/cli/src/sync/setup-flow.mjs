@@ -124,7 +124,9 @@ export async function runSetup(args = [], { orchestrate = orchestrateSetup } = {
     pollForRepoExists,
     initialMirrorPush: async ({ aiosPath: p, accessToken, fullName, gitignoreContent: g }) => {
       const git = createGit({ cwd: p });
-      await initialMirrorPush({ aiosPath: p, accessToken, fullName, gitignoreContent: g, git });
+      const sha = await initialMirrorPush({ aiosPath: p, accessToken, fullName, gitignoreContent: g, git });
+      // Record the first push so `sync status` is accurate before any tick.
+      if (sha) await writeSyncConfig({ last_push_sha: sha });
     },
     runFirstTick: async () => {
       const git = createGit({ cwd: aiosPath });
