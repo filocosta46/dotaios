@@ -188,7 +188,11 @@ async function renderTemplates(target, data, writeMode) {
   const templateRoot = path.join(repoRoot, "templates");
   return renderTemplateTree(templateRoot, target, data, {
     writeMode,
-    include: (outputRelative) => outputRelative !== "aios.json"
+    // sync-gitignore.template is a build-time resource for `dotaios sync
+    // setup`, not a file the user's AIOS folder should carry.
+    include: (outputRelative) =>
+      outputRelative !== "aios.json" &&
+      outputRelative !== "sync-gitignore.template"
   });
 }
 
