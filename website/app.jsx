@@ -4,8 +4,8 @@
 
 const { useState, useEffect } = React;
 
-const INSTALL_SNIPPET = `Ask Claude Code: "Read this and set up DotAIOS for me: https://github.com/filocosta46/dotaios"`;
-const NPX_SNIPPET = `npx dotaios init`;
+const INSTALL_SNIPPET = `Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.`;
+const NPX_SNIPPET = `npx dotaios setup`;
 
 // ---- Tweakable defaults (host can rewrite this JSON on disk) ----
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
