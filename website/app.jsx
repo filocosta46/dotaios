@@ -4,8 +4,8 @@
 
 const { useState, useEffect } = React;
 
-const INSTALL_SNIPPET = `Ask Claude Code: "Read this and set up DotAIOS for me: https://github.com/filocosta46/dotaios"`;
-const NPX_SNIPPET = `npx dotaios init`;
+const INSTALL_SNIPPET = `Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.`;
+const NPX_SNIPPET = `npx dotaios setup`;
 
 // ---- Tweakable defaults (host can rewrite this JSON on disk) ----
 const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
@@ -114,37 +114,61 @@ function Hero({ headlineText, showGraph }) {
     <section className="hero" data-screen-label="Hero">
       <div className="hero-left">
         <span className="hero-tag">
-          <span className="pill">v0.3</span>
+          <span className="pill">open source</span>
           local · file-based · no sign-up
         </span>
         <h1>
           {renderHeadline()}
         </h1>
         <p className="hero-lede">
-          DotAIOS is one folder on your computer. <code>~/aios/</code> — that holds your context, your memory, and the things you'd like your AI to do for you. Claude, Cursor, Gemini, Codex: they all read from the same place. Write it once, every tool knows.
+          DotAIOS is one folder on your computer. <code>~/aios/</code> — that holds your context, your memory, and the things you'd like your AI to do for you. Claude Code, Cursor, Gemini, Codex, and any agent that reads <code>AGENTS.md</code> all read from the same place. Write it once, every tool knows.
         </p>
 
         <div id="install" className="install">
           <div className="install-head">
-            <span className="lbl">paste this into any AI chat</span>
-            <span>60 seconds</span>
+            <span className="lbl">get started</span>
+            <span>2 steps · ~60 seconds</span>
           </div>
-          <code>
-            <span className="prompt">›</span>
-            <span>Ask </span>
-            <span className="arg">Claude Code</span>
-            <span>: </span>
-            <span className="quote">"Read this and set up DotAIOS for me: https://github.com/filocosta46/dotaios"</span>
-          </code>
-          <button className={`copy-btn ${copied ? "copied" : ""}`} onClick={() => copy(INSTALL_SNIPPET, setCopied)}>
-            {copied ? "✓ copied" : "Copy"}
-          </button>
 
-          <div className="install-or">or, if you prefer the command line</div>
+          <div className="install-step">
+            <span className="install-step-num">1</span>
+            <div className="install-step-body">
+              <b>Open an AI agent app.</b>
+              <p>
+                DotAIOS works with any agent that reads <code>AGENTS.md</code> —
+                Claude Code, Codex, Cursor, Gemini, Antigravity. Don't have one
+                yet? Claude Code is a free and friendly place to start.
+              </p>
+            </div>
+          </div>
+
+          <div className="install-step">
+            <span className="install-step-num">2</span>
+            <div className="install-step-body">
+              <b>Paste this line into it.</b>
+              <div className="install-line">
+                <code>
+                  <span className="prompt">›</span>
+                  <span className="quote">{INSTALL_SNIPPET}</span>
+                </code>
+                <button
+                  className={`copy-btn ${copied ? "copied" : ""}`}
+                  onClick={() => copy(INSTALL_SNIPPET, setCopied)}
+                  style={{ position: "static" }}>
+                  {copied ? "✓" : "Copy"}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="install-or">already comfortable in a terminal?</div>
 
           <div className="install-alt">
             <code><span className="lead">$</span>{NPX_SNIPPET}</code>
-            <button className={`copy-btn ${copiedNpx ? "copied" : ""}`} onClick={() => copy(NPX_SNIPPET, setCopiedNpx)} style={{ position: 'static' }}>
+            <button
+              className={`copy-btn ${copiedNpx ? "copied" : ""}`}
+              onClick={() => copy(NPX_SNIPPET, setCopiedNpx)}
+              style={{ position: "static" }}>
               {copiedNpx ? "✓" : "Copy"}
             </button>
           </div>
@@ -156,12 +180,12 @@ function Hero({ headlineText, showGraph }) {
             <span>plain Markdown, on your machine</span>
           </div>
           <div className="hero-meta-item">
-            <b>Four tools</b>
-            <span>Claude · Cursor · Codex · Gemini</span>
+            <b>Every agent</b>
+            <span>anything that reads AGENTS.md</span>
           </div>
           <div className="hero-meta-item">
-            <b>No cloud</b>
-            <span>no sign-up, no sync, no server</span>
+            <b>No account</b>
+            <span>no server we run; sync is your own GitHub</span>
           </div>
         </div>
       </div>
@@ -205,7 +229,7 @@ function HowItWorks() {
         <div className="step">
           <span className="step-num">Step 01 — Tell an AI to set it up</span>
           <h3>Paste one line into the AI you already use.</h3>
-          <p>Claude Code, Cursor, Gemini, Codex pick any of them. It creates the folder, asks you who you are and what you're working on, and saves your answers.</p>
+          <p>Claude Code, Cursor, Gemini, Codex, Antigravity — pick any agent you already use. It creates the folder, asks you who you are and what you're working on, and saves your answers.</p>
           <div className="step-visual">
             <div className="tree-row"><span className="ico">›</span><span>creating <em>~/aios/</em>…</span></div>
             <div className="tree-row"><span className="ico plus">+</span><span><b>context/identity.md</b></span></div>
@@ -240,6 +264,47 @@ function HowItWorks() {
             <span><b>/ingest</b> <em>save an article into your vault</em></span>
             <span><b>/audit</b> <em>health check on your folder</em></span>
           </div>
+        </div>
+      </div>
+    </section>);
+
+}
+
+function WhatItDoes() {
+  return (
+    <section className="section" data-screen-label="What it does">
+      <span className="section-eyebrow">What it does</span>
+      <h2 className="section-title">More than a profile. A working memory.</h2>
+      <p className="section-lede">
+        Your context is the start. DotAIOS also pulls in what you read, remembers
+        what you discussed, and follows you across devices.
+      </p>
+      <div className="steps">
+        <div className="feature">
+          <h3>Cross-device sync</h3>
+          <p>
+            Mirror your folder to a private GitHub repo, so an AI on your phone
+            reads the same memory. Opt-in, and it runs on your own GitHub — no
+            server we host.
+          </p>
+          <span className="feature-cmd">npx dotaios sync setup</span>
+        </div>
+        <div className="feature">
+          <h3>Reads the web</h3>
+          <p>
+            Hand it a URL, a PDF, or a document. DotAIOS extracts clean Markdown
+            into your vault — JavaScript-heavy pages included, via a built-in
+            headless browser.
+          </p>
+          <span className="feature-cmd">npx dotaios ingest &lt;url&gt;</span>
+        </div>
+        <div className="feature">
+          <h3>Remembers your sessions</h3>
+          <p>
+            Save AI conversations locally so your context compounds — across
+            tools and across time. Search every past session from one place.
+          </p>
+          <span className="feature-cmd">npx dotaios capture enable claude-code</span>
         </div>
       </div>
     </section>);
@@ -287,6 +352,7 @@ function App() {
       <Hero headlineText={t.headlineText} showGraph={t.showGraph} />
       <Metaphor />
       <HowItWorks />
+      <WhatItDoes />
       <Marketplace />
       <Footer />
       <TweaksPanel title="Tweaks">
