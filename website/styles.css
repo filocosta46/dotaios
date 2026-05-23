@@ -360,6 +360,8 @@ body::before {
   line-height: 1.55;
 }
 .install-step-body p code {
+  display: inline;
+  white-space: normal;
   font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--cobalt-tint);

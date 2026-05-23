@@ -39,7 +39,7 @@ node --version
   - **Windows**: `winget install OpenJS.NodeJS.LTS`
   - **Linux**:
     `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash`
-    then `nvm install --lts`
+    then `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install --lts`
 - Only if every automated path fails: tell the user *"I need Node.js to continue.
   Please install the LTS version from nodejs.org, then tell me when it's done."*
   and wait for them to confirm.
@@ -90,8 +90,9 @@ file-editing tools. Do not ask permission to write — just do it.
 **Question 1:**
 > "What's your name, and what do you do for work?"
 
-→ Write to `~/aios/context/identity.md`. Replace the placeholder line under
-`## Basics` with their name and role. Leave the other sections as they are.
+→ Write to `~/aios/context/identity.md`. Replace the two placeholder lines under
+`## Basics` (`- Name:` and `- Role:`) with their name and role. Leave the other
+sections as they are.
 
 **Question 2:**
 > "What are you working on right now? One thing or a few — whatever's taking up
