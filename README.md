@@ -28,34 +28,46 @@ DotAIOS needs one AI app installed on your computer so it has somewhere to send 
 
 ## Install in 60 seconds
 
-> **Using an AI agent to set this up?** Skip to [Installing with AI help](#installing-with-ai-help) below.
+You will not type a single terminal command. Your AI agent does the whole install for you.
 
-**Step 1. Open your Terminal app.** This is where the commands below run. It is NOT a chat window like ChatGPT or Gemini.
+**Step 1. Open an AI agent app.** Any one of these works:
 
-- **Mac:** press `⌘ + space`, type `Terminal`, press Enter.
-- **Windows:** press the Windows key, type `cmd`, press Enter.
-- **Linux:** open whichever shell you normally use.
+- [Claude Code](https://claude.com/download) — recommended, free
+- [Codex CLI](https://github.com/openai/codex) by OpenAI
+- [Cursor](https://www.cursor.com) — code editor with AI built in
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
+- [Antigravity](https://antigravity.google/) by Google
 
-A small black-and-white window opens. That is your Terminal.
+Don't have one yet? Install **Claude Code** — it's free and the friendliest place to start.
 
-**Step 2. Check that Node.js is installed.** Paste this into your Terminal and press Enter:
+**Step 2. Paste this sentence into the agent's chat box and press Enter:**
 
-```bash
-node --version
-```
+> Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.
 
-- **You see `v20.x.x` or higher** → you're ready. Go to Step 3.
-- **You see a lower version (like `v18`) or get an error** → go to [nodejs.org](https://nodejs.org), click the big green **LTS** button, run the installer, then come back here and run `node --version` again.
+That's it. The agent:
 
-**Step 3. Run setup.** Paste this into your Terminal:
+1. Installs Node.js if you don't have it
+2. Creates your `~/aios/` folder
+3. Connects every AI tool on your machine to it
+4. Asks you three friendly questions — your name, what you're working on, what matters this week — and writes your answers into the folder
+
+Sit back, answer the questions when it asks, and you're set up in about a minute.
+
+**Step 3. Try it.** Open Claude Code (or whichever AI you use). Ask: **"What am I working on?"** It answers from the folder.
+
+---
+
+### Prefer the terminal?
+
+If you already use a terminal and have Node 20+ installed, you can run setup yourself:
 
 ```bash
 npx dotaios setup
 ```
 
-This does everything in one go: creates your folder, answers 5 short questions about you, and connects your AI tools. Takes about 60 seconds.
+If you don't have Node yet, install the LTS version from [nodejs.org](https://nodejs.org) first, then run the command above.
 
-Prefer to run it manually? Three separate steps:
+Three separate steps if you want to control each:
 
 ```bash
 npx dotaios init       # answer 5 questions, your folder appears
@@ -63,29 +75,17 @@ npx dotaios activate   # connect Claude Code, Codex, and Gemini
 npx dotaios reveal     # open the folder in Finder / Explorer
 ```
 
-**Step 4.** Open Claude Code (or whichever AI tool you use). Ask: **"What am I working on?"** It answers from your `work.md`.
-
 ---
 
-## Installing with AI help
+## Changing your context later
 
-Have an AI agent app open — Claude Code, Codex, Cursor, Gemini, or another? It can do the whole install for you. You will not type a single terminal command.
-
-**Paste this to your agent:**
-
-> Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.
-
-The agent reads [`INSTALL.md`](INSTALL.md) — a setup guide written for agents — installs Node.js if it is missing, creates your folder, connects your tools, and asks you a few questions about yourself. Just follow along.
-
----
-
-When your role, priorities, or planning style changes, run:
+Your name, your work, your priorities will change. When they do, you don't need to dig through files. Tell any AI agent on your machine and it will update the right file — or run:
 
 ```bash
 npx dotaios interview --review
 ```
 
-It asks a few plain English questions, shows what will change, then updates the files your agents read.
+A few plain English questions, it shows what will change, then updates the files your agents read.
 
 ## Save your AI conversations
 
