@@ -12,8 +12,8 @@ All notable changes to DotAIOS will be documented in this file.
 - Frequency-weighted relevance ranking for search (phrase matches rank above multi-term matches; repeated hits rank higher). Note: this is term-frequency scoring, not full BM25.
 
 ### Changed
-- `connect gemini`/`connect opencode` merge into existing agent config and refuse to overwrite a config file that exists but is not valid JSON.
-- Session index writes are now atomic (temp file + rename) to survive concurrent digest reads.
+- `connect gemini`/`connect opencode` merge into existing agent config, refuse to overwrite a config file that exists but is not valid JSON, and run the merge before writing any other files (no partial install on failure).
+- Session index mutations are serialized with a cross-process lock and written atomically (temp file + rename), so concurrent appends and digest-driven rewrites can't drop entries.
 
 ### Removed
 - Unused adapter-first memory backend scaffolding (`memory-backend.mjs`, `MEMORY_BACKEND_KIND`) — it was never wired into any command. It will return when adapters are actually integrated.

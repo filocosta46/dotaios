@@ -110,8 +110,11 @@ export async function writeSession(aiosPath, session) {
         path: updatedRelative,
         content_hash: bodyHash,
       };
-      const rest = existing.filter((e) => e.source_path !== session.source_path);
-      await writeSessionIndex(aiosPath, [...rest, updatedEntry]);
+      await withIndexLock(aiosPath, async () => {
+        const current = await readSessionIndex(aiosPath);
+        const rest = current.filter((e) => e.source_path !== session.source_path);
+        await writeSessionIndex(aiosPath, [...rest, updatedEntry]);
+      });
       return { filePath: updatedFilePath, relativePath: updatedRelative, hash: bodyHash, skipped: false, updated: true };
     }
   }
@@ -170,24 +173,30 @@ export async function touchSessions(aiosPath, sessionIds) {
   if (!sessionIds.length) return;
   const ids = new Set(sessionIds);
   const now = new Date().toISOString();
-  const entries = await readSessionIndex(aiosPath);
-  let changed = false;
-  for (let i = 0; i < entries.length; i++) {
-    if (!ids.has(entries[i].session_id)) continue;
-    entries[i] = {
-      ...entries[i],
-      last_accessed: now,
-      access_count: (entries[i].access_count || 0) + 1,
-    };
-    changed = true;
-  }
-  if (changed) await writeSessionIndex(aiosPath, entries);
+  await withIndexLock(aiosPath, async () => {
+    const entries = await readSessionIndex(aiosPath);
+    let changed = false;
+    for (let i = 0; i < entries.length; i++) {
+      if (!ids.has(entries[i].session_id)) continue;
+      entries[i] = {
+        ...entries[i],
+        last_accessed: now,
+        access_count: (entries[i].access_count || 0) + 1,
+      };
+      changed = true;
+    }
+    if (changed) await writeSessionIndex(aiosPath, entries);
+  });
 }
 
 export async function deleteSession(aiosPath, sessionId) {
-  const entries = await readSessionIndex(aiosPath);
-  const entry = entries.find((e) => e.session_id === sessionId);
-  if (!entry) throw new Error(`Session not found: ${sessionId}`);
+  const entry = await withIndexLock(aiosPath, async () => {
+    const entries = await readSessionIndex(aiosPath);
+    const found = entries.find((e) => e.session_id === sessionId);
+    if (!found) throw new Error(`Session not found: ${sessionId}`);
+    await writeSessionIndex(aiosPath, entries.filter((e) => e.session_id !== sessionId));
+    return found;
+  });
 
   const filePath = path.join(aiosPath, entry.path);
   try {
@@ -195,9 +204,6 @@ export async function deleteSession(aiosPath, sessionId) {
   } catch (err) {
     if (err.code !== "ENOENT") throw err;
   }
-
-  const remaining = entries.filter((e) => e.session_id !== sessionId);
-  await writeSessionIndex(aiosPath, remaining);
   return entry;
 }
 
@@ -237,17 +243,55 @@ export async function searchSessions(aiosPath, query, { agent, project, since, l
   return results;
 }
 
-async function appendIndexEntry(aiosPath, entry) {
-  const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
-  await fs.mkdir(path.dirname(indexPath), { recursive: true });
-  await fs.appendFile(indexPath, `${JSON.stringify(entry)}\n`, "utf8");
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Serialize index mutations across processes so a concurrent append and a full
+// rewrite (touchSessions) can't drop each other's changes. Best-effort: never
+// hangs the CLI, and takes over a lock left by a dead process.
+async function withIndexLock(aiosPath, fn) {
+  const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
+  await fs.mkdir(path.dirname(indexPath), { recursive: true });
+  const lockPath = `${indexPath}.lock`;
+  const deadline = Date.now() + 5000;
+  let handle = null;
+  while (!handle) {
+    try {
+      handle = await fs.open(lockPath, "wx");
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      try {
+        const st = await fs.stat(lockPath);
+        if (Date.now() - st.mtimeMs > 10000) {
+          await fs.rm(lockPath, { force: true }); // stale lock from a dead process
+          continue;
+        }
+      } catch {}
+      if (Date.now() > deadline) return fn(); // give up waiting; proceed best-effort
+      await delay(50);
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    await handle.close();
+    await fs.rm(lockPath, { force: true });
+  }
+}
+
+async function appendIndexEntry(aiosPath, entry) {
+  await withIndexLock(aiosPath, async () => {
+    const entries = await readSessionIndex(aiosPath);
+    entries.push(entry);
+    await writeSessionIndex(aiosPath, entries);
+  });
+}
+
+// Atomic replace. Callers must hold withIndexLock for the read-modify-write.
 async function writeSessionIndex(aiosPath, entries) {
   const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
   const content = entries.map((e) => JSON.stringify(e)).join("\n");
-  // Write to a temp file then rename so a crash or concurrent writer can never
-  // leave a half-written index (touchSessions is now called on every digest read).
   const tmpPath = `${indexPath}.${process.pid}.tmp`;
   await fs.writeFile(tmpPath, content.length > 0 ? content + "\n" : "", "utf8");
   await fs.rename(tmpPath, indexPath);

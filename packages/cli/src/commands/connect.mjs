@@ -359,21 +359,21 @@ async function connectGemini(aiosPath, options) {
 
   await fs.mkdir(geminiDir, { recursive: true });
 
-  // Write GEMINI.md bridge
   const geminiMdPath = path.join(geminiDir, "GEMINI.md");
+  const hookScriptPath = path.join(geminiDir, "dotaios-context-hook.sh");
+  const settingsPath = path.join(geminiDir, "settings.json");
+
+  // Merge settings first: it validates an existing settings.json and aborts on a
+  // malformed file before we write any other artifacts (no partial install).
+  await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath);
+  console.log("[ok] ~/.gemini/settings.json (SessionStart hook + MCP server)");
+
   await writeGeminiBridge(geminiMdPath, aiosPath);
   console.log("[ok] ~/.gemini/GEMINI.md");
 
-  // Write hook script
-  const hookScriptPath = path.join(geminiDir, "dotaios-context-hook.sh");
   await writeGeminiHookScript(hookScriptPath, aiosPath);
   await fs.chmod(hookScriptPath, 0o755);
   console.log("[ok] ~/.gemini/dotaios-context-hook.sh");
-
-  // Merge settings.json
-  const settingsPath = path.join(geminiDir, "settings.json");
-  await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath);
-  console.log("[ok] ~/.gemini/settings.json (SessionStart hook + MCP server)");
 
   await appendEvent(path.join(aiosPath, "memory", "events.jsonl"), {
     type: "connection",
