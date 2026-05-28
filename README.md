@@ -138,7 +138,11 @@ After that, sync runs on its own — after every `dotaios` command, and at the s
 
 **Writing from your phone.** When a phone AI saves something, it drops a note into `memory/inbox/`. The next time you work on your computer, your agent files those notes into the right place with the `process-inbox` skill — so two devices never fight over the same file.
 
-**About the token.** Setup uses a classic GitHub token with the `repo` scope. That token can reach *all* of your GitHub repositories, not only the DotAIOS one. It is stored locally in a private file and sent to GitHub only when DotAIOS performs sync operations (setup, push, pull, status checks). If you'd rather scope it tighter, create a fine-grained token limited to your `<username>-aios` repo and paste that instead.
+**About the token.**
+
+- **What access it has:** a classic token with `repo` scope can reach all your GitHub repositories, not only DotAIOS.
+- **When DotAIOS uses it:** only during sync operations (`sync setup`, push, pull, status checks).
+- **How to reduce risk:** use a fine-grained token limited to your `<username>-aios` repo.
 
 ## Where the folder lives
 
@@ -315,7 +319,7 @@ See [marketplace.md](docs/marketplace.md) for the full flow and how to publish y
 
 ## More docs
 
-[getting-started](docs/getting-started.md) · [friend-setup](docs/friend-setup.md) · [architecture](docs/architecture.md) · [google-workspace](docs/google-workspace.md) · [mcp](docs/mcp.md) · [plugin-development](docs/plugin-development.md) · [security](docs/security.md)
+[getting-started](docs/getting-started.md) · [friend-setup](docs/friend-setup.md) · [architecture](docs/architecture.md) · [google-workspace](docs/google-workspace.md) · [mcp](docs/mcp.md) · [plugin-development](docs/plugin-development.md) · [security](docs/security.md) · [superpowers index](docs/superpowers/INDEX.md)
 
 ## License
 

@@ -44,10 +44,10 @@ Try saying:
 Or run it directly:
 
 ```bash
-dotaios ingest <url-or-path>
-dotaios ingest <input> --to wiki --name <ref>   # route by purpose
-dotaios ingest <input> --dry-run                # preview the plan
-dotaios ingest <input> --overwrite              # replace existing
+npx dotaios ingest <url-or-path>
+npx dotaios ingest <input> --to wiki --name <ref>   # route by purpose
+npx dotaios ingest <input> --dry-run                # preview the plan
+npx dotaios ingest <input> --overwrite              # replace existing
 ```
 
 ## Advanced details
@@ -77,15 +77,15 @@ the interactive Terminal question counts as approval and writes immediately.
 Examples:
 
 ```bash
-dotaios ingest report.pdf --to raw
-dotaios ingest https://example.com/post --to wiki --name ai-sales-research
-dotaios ingest company-brief.pdf --to company --name acme --apply
-dotaios ingest call-note.md --to signal
+npx dotaios ingest report.pdf --to raw
+npx dotaios ingest https://example.com/post --to wiki --name ai-sales-research
+npx dotaios ingest company-brief.pdf --to company --name acme --apply
+npx dotaios ingest call-note.md --to signal
 ```
 
 ## Routing internals (what goes where)
 
-The CLI command `dotaios ingest <input>` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins — flag the conflict and update this file.
+The CLI command `npx dotaios ingest <input>` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins — flag the conflict and update this file.
 
 | Input | Path | Parser | Output |
 |---|---|---|---|
@@ -140,7 +140,7 @@ There is no `--batch` flag. For multiple files or URLs, loop the single-file com
 
 ```bash
 for f in ~/Downloads/*.pdf; do
-  dotaios ingest "$f"
+  npx dotaios ingest "$f"
 done
 ```
 
@@ -160,7 +160,7 @@ If the user accepts, install with:
 pip install marker-pdf
 ```
 
-Then verify with `dotaios status` — the **Ingest engines** section should show `Marker (local) : installed (<path>)`.
+Then verify with `npx dotaios status` — the **Ingest engines** section should show `Marker (local) : installed (<path>)`.
 
 If declined or installation fails, PDFs continue to use the bundled `unpdf` text fallback. `.docx` / `.pptx` / `.epub` will still reject with `MARKER_REQUIRED` until marker is available.
 
@@ -172,7 +172,7 @@ When the user asks to ingest:
   pass `--to` and `--name` directly instead of dumping everything in `vault/raw`.
 - For a durable shelf (`wiki`/`company`/`person`), the command will preview and not
   write. Show the user the previewed destination, confirm, then re-run with `--apply`.
-- If intent is unclear, run plain `dotaios ingest <input>` (saves to `vault/raw`) and
+- If intent is unclear, run plain `npx dotaios ingest <input>` (saves to `vault/raw`) and
   ask the user where it should ultimately live.
 - If the result is `Already ingested:`, ask whether the user wants `--overwrite` rather than re-running unprompted.
 - If the result is a `MARKER_REQUIRED` error, offer the install prompt above before suggesting alternatives.

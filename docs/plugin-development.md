@@ -56,6 +56,15 @@ npx dotaios install https://github.com/owner/repo.git
 npx dotaios install https://github.com/owner/repo.git --subdir packages/my-plugin
 ```
 
+Before installing from git, confirm:
+
+- `git` is installed and available in your terminal.
+- You have network access to the repository host.
+- Private repositories are authenticated (GitHub token or SSH key configured locally).
+- You run `npx dotaios install <plugin> --dry-run` first to preview permissions.
+
+For trust and safety expectations, see `docs/security.md#plugins`.
+
 The installer stages the copy before replacing an existing plugin, and rejects symlinks inside plugin folders. This reduces accidental install damage, but it is not a sandbox.
 
 ## Manifest Rules
