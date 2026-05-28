@@ -2,8 +2,9 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEvent, readRecentEvents, readRecentSignals } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { readSection, replaceSection } from "../../../core/src/sections.mjs";
+import { readSection, readSubsection, replaceSection } from "../../../core/src/sections.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { buildSessionDigest } from "../../../core/src/digest.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios brief [daily] [options]
@@ -15,6 +16,8 @@ external services required.
 Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Print the brief without writing the daily note
+  --compact     Print a compact working-memory digest to stdout (no file write)
+  --json        With --compact: wrap output as Gemini CLI hook JSON
 `;
 
 const OPEN_LOOP_RE = /\b(open|loop|blocker|blocked|waiting|follow[- ]?up|todo|to do|next action|deadline|due|carry[- ]?over)\b/i;
@@ -28,6 +31,16 @@ export async function briefCommand(args) {
   const options = parseOptions(args);
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
+
+  if (options.compact) {
+    const { digest } = await buildSessionDigest(target);
+    if (options.json) {
+      process.stdout.write(JSON.stringify({ hookSpecificOutput: { additionalContext: digest } }) + "\n");
+    } else {
+      process.stdout.write(digest + "\n");
+    }
+    return;
+  }
 
   const now = new Date();
   const date = localDate(now);
@@ -55,7 +68,7 @@ export async function briefCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { dryRun: false, path: null };
+  const options = { dryRun: false, compact: false, json: false, path: null };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -63,6 +76,10 @@ function parseOptions(args = []) {
       continue;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--compact") {
+      options.compact = true;
+    } else if (arg === "--json") {
+      options.json = true;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
       index += 1;
@@ -131,18 +148,6 @@ function extractCarriedOverPlan(content) {
   return index === -1 ? "" : plan.slice(index);
 }
 
-function readSubsection(content, heading) {
-  const lines = content.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `### ${heading}`);
-  if (start === -1) return "";
-
-  const body = [];
-  for (const line of lines.slice(start + 1)) {
-    if (line.startsWith("### ") || line.startsWith("## ")) break;
-    body.push(line);
-  }
-  return body.join("\n").trim();
-}
 
 function renderBrief({ date, priorities, openLoops, carryOver }) {
   return [

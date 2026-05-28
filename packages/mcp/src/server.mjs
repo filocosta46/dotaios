@@ -4,6 +4,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 import { appendEvent, searchMemory, searchVault } from "../../core/src/memory.mjs";
+import { buildSessionDigest } from "../../core/src/digest.mjs";
+import { touchSessions } from "../../core/src/sessions.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
 import { assessGwsAuth, hasGoogleConnection, resolveGwsBinary, runGws } from "../../cli/src/lib/gws.mjs";
@@ -102,6 +104,8 @@ class DotaiosMcpServer {
     await this.assertAios();
 
     if (name === "read_context") return await this.readContext(args);
+    if (name === "read_session_digest") return await this.readSessionDigest(args);
+    if (name === "list_skills") return await this.listSkills();
     if (name === "search_memory") return await this.searchMemory(args);
     if (name === "search_vault") return await this.searchVault(args);
     if (name === "search_aios") return await this.searchAios(args);
@@ -150,6 +154,25 @@ class DotaiosMcpServer {
       });
     }
     return JSON.stringify({ context: entries }, null, 2);
+  }
+
+  async readSessionDigest(args) {
+    const project = optionalString(args.project);
+    const limit = args.limit !== undefined ? positiveInteger(args.limit, "limit") : 3;
+    const { digest, sessionIds } = await buildSessionDigest(this.aiosPath, { project, limit });
+    await touchSessions(this.aiosPath, sessionIds);
+    return JSON.stringify({ digest }, null, 2);
+  }
+
+  async listSkills() {
+    const indexPath = path.join(this.aiosPath, "skills", "INDEX.md");
+    let content;
+    try {
+      content = await fs.readFile(indexPath, "utf8");
+    } catch {
+      return JSON.stringify({ skills: [], message: "No skills installed. Run: dotaios activate" }, null, 2);
+    }
+    return JSON.stringify({ skills: content }, null, 2);
   }
 
   async searchMemory(args) {
@@ -331,6 +354,24 @@ function tools() {
           file: { type: "string", description: "Context file under context/, such as work.md or priorities.md." }
         }
       }
+    },
+    {
+      name: "read_session_digest",
+      title: "Read Session Digest",
+      description: "Get a compact digest of today's focus, carry-overs, recent signals, and recent sessions. Call this at session start to get up to speed without loading everything.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string", description: "Filter sessions and signals to a specific project." },
+          limit: { type: "integer", minimum: 1, maximum: 10, default: 3, description: "Number of recent sessions to include." }
+        }
+      }
+    },
+    {
+      name: "list_skills",
+      title: "List Skills",
+      description: "List all installed DotAIOS skills the user can run. Returns the skills/INDEX.md content which describes each skill and how to invoke it.",
+      inputSchema: { type: "object", properties: {} }
     },
     {
       name: "search_memory",

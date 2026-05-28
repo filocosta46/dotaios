@@ -26,6 +26,19 @@ export function readSection(content, heading) {
   return body.join("\n").trim();
 }
 
+export function readSubsection(content, heading) {
+  const lines = content.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `### ${heading}`);
+  if (start === -1) return "";
+
+  const body = [];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{2,3} /.test(line)) break;
+    body.push(line);
+  }
+  return body.join("\n").trim();
+}
+
 export function replaceSection(content, heading, newBody) {
   const lines = content.split("\n");
   const start = lines.findIndex((line) => line.trim() === `## ${heading}`);
