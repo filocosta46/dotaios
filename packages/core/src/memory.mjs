@@ -55,7 +55,7 @@ export async function readRecentEvents(filePath, limit = RECENT_EVENT_LIMIT) {
  * @param {string} fromDate - ISO date string "YYYY-MM-DD"
  * @param {string} toDate - ISO date string "YYYY-MM-DD"
  */
-async function readSignals(signalsDir, fromDate, toDate) {
+export async function readSignals(signalsDir, fromDate, toDate) {
   let entries;
   try {
     entries = await fs.readdir(signalsDir);
