@@ -5,12 +5,6 @@ export const ADAPTER_LEVELS = {
   UNSUPPORTED: "unsupported",
 };
 
-export const MEMORY_BACKEND_KIND = {
-  ADAPTER: "adapter",
-  FALLBACK: "fallback",
-  NONE: "none",
-};
-
 const LEVEL_LABELS = {
   "full-auto": "auto-save",
   "backfill-only": "import only",

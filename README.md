@@ -305,7 +305,7 @@ See [marketplace.md](docs/marketplace.md) for the full flow and how to publish y
 
 ## More docs
 
-[getting-started](docs/getting-started.md) · [friend-setup](docs/friend-setup.md) · [architecture](docs/architecture.md) · [google-workspace](docs/google-workspace.md) · [mcp](docs/mcp.md) · [plugin-development](docs/plugin-development.md) · [security](docs/security.md) · [superpowers index](docs/superpowers/INDEX.md)
+[getting-started](docs/getting-started.md) · [friend-setup](docs/friend-setup.md) · [architecture](docs/architecture.md) · [google-workspace](docs/google-workspace.md) · [mcp](docs/mcp.md) · [plugin-development](docs/plugin-development.md) · [security](docs/security.md)
 
 ## License
 

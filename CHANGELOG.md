@@ -2,9 +2,17 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.16.1] - 2026-05-28
+### Removed
+- Unused adapter-first memory backend scaffolding (`memory-backend.mjs`, `MEMORY_BACKEND_KIND`) — it was never wired into any command. It will return when adapters are actually integrated.
+- Internal design-history docs under `docs/superpowers/` (still preserved in git history).
+
+### Changed
+- Honest framing of 1.16.0 below: the real shipped value was the pilot measurement tooling, the `pilot-report` packaging fix, and simpler onboarding — not a functional memory upgrade.
+
 ## [1.16.0] - 2026-05-28
 ### Added
-- **Adapter-first memory backend** — `resolveMemoryBackend` resolves memory to an adapter when healthy and falls back to the local store when not (`packages/core/src/memory-backend.mjs`). Local-first, no managed cloud DB.
+- Internal scaffolding for a future adapter-first memory backend (resolver + contract). Note: not wired into any command in this release; the running product still uses the existing local file-based memory.
 - **Pilot instrumentation** — `dotaios setup`, `search`, and `capture` emit best-effort, non-blocking metrics to `memory/metrics/pilot.jsonl` (`install_start/end`, `setup_phase_start/end`, `search_run`, `capture_saved/deleted`).
 - `dotaios pilot-score` — record one scored pilot sample with required provenance (`--scorer-id`, `--method-version`, `--first-recall-min`, `--p-at-5`).
 - `dotaios pilot-report [--json]` — run the rollup and print ship decisions (pilot + public) with explicit block reasons.
