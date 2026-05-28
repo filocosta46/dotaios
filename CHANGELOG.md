@@ -2,6 +2,20 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.16.0] - 2026-05-28
+### Added
+- **Adapter-first memory backend** — `resolveMemoryBackend` resolves memory to an adapter when healthy and falls back to the local store when not (`packages/core/src/memory-backend.mjs`). Local-first, no managed cloud DB.
+- **Pilot instrumentation** — `dotaios setup`, `search`, and `capture` emit best-effort, non-blocking metrics to `memory/metrics/pilot.jsonl` (`install_start/end`, `setup_phase_start/end`, `search_run`, `capture_saved/deleted`).
+- `dotaios pilot-score` — record one scored pilot sample with required provenance (`--scorer-id`, `--method-version`, `--first-recall-min`, `--p-at-5`).
+- `dotaios pilot-report [--json]` — run the rollup and print ship decisions (pilot + public) with explicit block reasons.
+- Go/kill rollup with anti-gaming gates: requires ≥2 distinct scorers (pilot) / ≥3 (public), rejects future-dated and incomplete score rows, and a stricter public bar. See `docs/pilot/scoring-rubric.md`.
+
+### Changed
+- Rollup logic now lives in a shared library (`packages/cli/src/lib/pilot-rollup.mjs`) used by both `pilot-report` and `scripts/pilot-rollup.mjs`, so `pilot-report` works from an installed npm package (no subprocess, no unshipped script).
+
+### Removed
+- Stale `HANDOVER.md` internal handoff doc.
+
 ## [1.14.0] - 2026-05-16
 ### Added
 - **Session memory** — DotAIOS can now save your AI conversations locally so every agent on your machine can remember them. All sessions saved to `~/aios/memory/sessions/` as plain Markdown files.

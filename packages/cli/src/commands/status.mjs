@@ -6,6 +6,7 @@ import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "
 import { detectMarker } from "../ingest/pdf.mjs";
 import { parsePathHomeOptions } from "../lib/args.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
+import { pilotMetricsSummary } from "../lib/pilot-metrics.mjs";
 
 export async function statusCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -67,6 +68,23 @@ Options:
   console.log("\nMemory");
   console.log(`[info] events: ${await countLines(path.join(target, "memory", "events.jsonl"))}`);
   console.log(`[info] errors: ${await countLines(path.join(target, "memory", "errors.jsonl"))}`);
+  const pilotSummary = await pilotMetricsSummary(target);
+  console.log(`[info] pilot metrics: ${pilotSummary.total}`);
+
+  console.log("\nPilot health");
+  const { probeAdapterLiveness } = await import("../adapters/detect.mjs");
+  const probe = await probeAdapterLiveness();
+  const backendState = probe.anyLive
+    ? `adapter-live (${probe.liveAdapters.join(", ")})`
+    : probe.anyDetected
+      ? "adapter-detected-not-live (fallback-active)"
+      : "fallback-only";
+  console.log(`[info] backend state: ${backendState}`);
+  if (pilotSummary.installSuccessRate === null) {
+    console.log("[info] install success rate: n/a");
+  } else {
+    console.log(`[info] install success rate: ${(pilotSummary.installSuccessRate * 100).toFixed(1)}%`);
+  }
 
   console.log("\nSkills");
   const skillsPath = path.join(target, "skills");

@@ -27,6 +27,8 @@ const commands = {
   license: "./commands/license.mjs",
   market: "./commands/market.mjs",
   mcp: "./commands/mcp.mjs",
+  "pilot-report": "./commands/pilot-report.mjs",
+  "pilot-score": "./commands/pilot-score.mjs",
   reveal: "./commands/reveal.mjs",
   schedule: "./commands/schedule.mjs",
   search: "./commands/search.mjs",
@@ -66,6 +68,8 @@ Commands:
   mcp <cmd>         Print local MCP server status and client config
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
+  pilot-score       Record one pilot scoring sample
+  pilot-report      Print pilot rollup + ship decision
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins
   skill <cmd>       Add, list, or remove skills (friendly alias for install)
   skills [name]     List installed skills or show full instructions for one skill
@@ -107,11 +111,19 @@ async function main(argv) {
   }
 
   const module = await import(commandPath);
-  const command = module[`${commandName}Command`];
+  const command = resolveCommand(module, commandName);
+  if (typeof command !== "function") {
+    throw new Error(`Command module missing handler for: ${commandName}`);
+  }
   await command(args);
 
   // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
   await fireSyncHook({ command: commandName });
+}
+
+function resolveCommand(module, commandName) {
+  const camelName = commandName.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase());
+  return module[`${commandName}Command`] || module[`${camelName}Command`];
 }
 
 main(process.argv).catch((error) => {

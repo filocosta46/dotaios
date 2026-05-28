@@ -269,3 +269,11 @@ test("capture status --all prints adapter summary including unsupported", () => 
   assert.match(result.stdout, /capture status/i);
   assert.match(result.stdout, /claude-code/);
 });
+
+test("capture enable with --path and no adapter does not parse path as adapter", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const result = run(["capture", "enable", "--path", aiosPath], {
+    env: { ...process.env, HOME: tempRoot },
+  });
+  assert.match(result.stdout, /Found on this machine|No supported AI tools detected/i);
+});

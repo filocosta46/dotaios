@@ -26,27 +26,11 @@ DotAIOS needs one AI app installed on your computer so it has somewhere to send 
 
 **Already using Claude.ai, ChatGPT, or Gemini in your browser?** Great — keep using them. After setup, open your `~/aios/AGENTS.md` file and paste it at the start of any web chat. Your AI reads your context immediately, no extra steps.
 
-## Choose your setup path
-
-Start with the one that matches how you like to work:
-
-- **Agent-led path (recommended):** tell your AI app to install DotAIOS for you. Best for non-technical users (`INSTALL.md`).
-- **Terminal path:** run `npx dotaios ...` commands yourself (`docs/getting-started.md` or `docs/friend-setup.md`).
-- **Advanced/manual path:** use plugin, marketplace, MCP, and architecture docs when you want full control (`docs/plugin-development.md`, `docs/marketplace.md`, `docs/mcp.md`, `docs/architecture.md`).
-
 ## Install in 60 seconds
 
 You will not type a single terminal command. Your AI agent does the whole install for you.
 
-**Step 1. Open an AI agent app.** Any one of these works:
-
-- [Claude Code](https://claude.com/download) — recommended, free
-- [Codex CLI](https://github.com/openai/codex) by OpenAI
-- [Cursor](https://www.cursor.com) — code editor with AI built in
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
-- [Antigravity](https://antigravity.google/) by Google
-
-Don't have one yet? Install **Claude Code** — it's free and the friendliest place to start.
+**Step 1. Open the AI app you installed above** (Claude Code is the friendliest place to start).
 
 **Step 2. Paste this sentence into the agent's chat box and press Enter:**
 

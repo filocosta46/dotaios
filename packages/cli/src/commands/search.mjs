@@ -3,6 +3,7 @@ import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from 
 import { readJson } from "../../../core/src/files.mjs";
 import { markMatches, SEARCH_SCOPES, searchAios } from "../../../core/src/search.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { emitPilotMetric, hashMetricValue } from "../lib/pilot-metrics.mjs";
 
 const validScopes = new Set(SEARCH_SCOPES);
 
@@ -20,6 +21,7 @@ export async function searchCommand(args) {
   }
 
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+  const startedAt = Date.now();
   await ensureAiosFolder(target);
 
   const config = await readJson(path.join(target, "aios.json"), {});
@@ -49,6 +51,19 @@ export async function searchCommand(args) {
   } else {
     console.log(`${totalResults} result(s) found.`);
   }
+
+  const elapsedMs = Date.now() - startedAt;
+  await emitPilotMetric(target, {
+    type: "search_run",
+    query_hash: hashMetricValue(query),
+    scope,
+    total_results: totalResults,
+    limit,
+    search_latency_ms: elapsedMs,
+    // Kept nullable by design; this must come from scored pilot workflow.
+    first_recall_min: null,
+    p_at_5: null
+  });
 }
 
 function parseOptions(args = []) {

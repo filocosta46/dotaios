@@ -17,6 +17,31 @@ export async function detectAdapters() {
   return { "claude-code": claudeCode, gemini, cursor, codex };
 }
 
+export async function probeAdapterLiveness() {
+  const adapters = await detectAdapters();
+  const entries = Object.entries(adapters).map(([name, info]) => {
+    const isLive = Boolean(
+      info?.detected
+      && info?.level === ADAPTER_LEVELS.FULL_AUTO
+      && info?.enabled === true
+    );
+    return {
+      name,
+      detected: Boolean(info?.detected),
+      level: info?.level || ADAPTER_LEVELS.UNSUPPORTED,
+      enabled: Boolean(info?.enabled),
+      live: isLive
+    };
+  });
+
+  return {
+    anyDetected: entries.some((entry) => entry.detected),
+    anyLive: entries.some((entry) => entry.live),
+    liveAdapters: entries.filter((entry) => entry.live).map((entry) => entry.name),
+    entries
+  };
+}
+
 export async function enableAdapter(adapterName, aiosPath) {
   if (!adapterName) {
     return enableInteractive(aiosPath);

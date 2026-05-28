@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { hasHelpFlag } from "../lib/args.mjs";
@@ -10,6 +11,7 @@ import { downloadLightpanda, lightpandaPlatformBinary } from "../../../core/src/
 import { initCommand } from "./init.mjs";
 import { activateCommand } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
+import { emitPilotMetric } from "../lib/pilot-metrics.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios setup [options]
@@ -36,12 +38,29 @@ export async function setupCommand(args) {
   const skipReveal = args.includes("--skip-reveal");
   const nonInteractive = args.includes("--yes") || args.includes("-y");
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
+  const startedAt = Date.now();
+  const runId = randomUUID();
 
   console.log("DotAIOS setup — step 1 of 3: create your folder");
   console.log("");
   try {
+    // init creates the ~/aios folder that holds the metrics store, so the
+    // init phase markers can only be written once init has succeeded.
     await initCommand(passthrough);
+    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
+    await emitPilotMetric(aiosPath, { type: "install_start", command: "setup", run_id: runId });
   } catch (err) {
+    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" });
+    await emitPilotMetric(aiosPath, {
+      type: "install_end",
+      command: "setup",
+      outcome: "fail",
+      phase: "init",
+      run_id: runId,
+      duration_ms: Date.now() - startedAt
+    });
     console.error(`Step 1 failed: ${err.message}`);
     console.error("Re-run: dotaios init to retry this step.");
     console.error("");
@@ -54,25 +73,33 @@ export async function setupCommand(args) {
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
   console.log("");
+  await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "activate", run_id: runId });
   try {
     await activateCommand(passthrough);
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "ok" });
   } catch (err) {
     activateOk = false;
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
     console.error(`Step 2 failed: ${err.message}`);
     console.error("Re-run: dotaios activate to retry connecting your tools.");
     console.error("");
   }
 
   // Step 3: reveal (best-effort, never blocks)
+  await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "reveal", run_id: runId });
   if (!skipReveal) {
     console.log("");
     console.log("DotAIOS setup — step 3 of 3: open the folder");
     console.log("");
     try {
       await revealCommand(passthrough);
+      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "ok" });
     } catch (error) {
+      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "fail" });
       console.error(`(skipped reveal: ${error.message})`);
     }
+  } else {
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "skipped" });
   }
 
   // GitHub cross-device sync prompt — skip in non-interactive or non-TTY mode
@@ -167,6 +194,13 @@ export async function setupCommand(args) {
   console.log("  2. Open the ~/aios folder or make it your working directory.");
   console.log('  3. Ask: "Read my context and tell me what I am working on."');
   console.log("  4. Update context any time: dotaios interview --review");
+  await emitPilotMetric(aiosPath, {
+    type: "install_end",
+    command: "setup",
+    outcome: activateOk ? "ok" : "warn",
+    run_id: runId,
+    duration_ms: Date.now() - startedAt
+  });
 }
 
 async function promptSessionMemory(rl, aiosPath, nonInteractive) {

@@ -5,6 +5,7 @@ import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
+import { pilotMetricsSummary } from "../lib/pilot-metrics.mjs";
 
 const MIN_NODE_MAJOR = 20;
 
@@ -36,6 +37,8 @@ export async function doctorCommand(args) {
   checks.push(checkTerminal());
   checks.push(await checkAiosFolder(target));
   checks.push(await checkAiosConfig(target));
+  checks.push(await checkPilotMetrics(target));
+  checks.push(await checkPilotBackend(target));
   checks.push(...await checkAgentBridges(target, homePath));
 
   console.log("DotAIOS doctor");
@@ -199,4 +202,67 @@ async function checkAgentBridges(target, homePath) {
   }
 
   return results;
+}
+
+async function checkPilotMetrics(target) {
+  const summary = await pilotMetricsSummary(target);
+  const pathOption = pathOptionFor(target);
+  if (summary.total === 0) {
+    return {
+      name: "Pilot metrics",
+      status: "warn",
+      detail: "No pilot metric events recorded yet.",
+      fix: `Run \`dotaios setup${pathOption} --yes --skip-reveal\` and \`dotaios search "test"${pathOption}\` to generate pilot telemetry.`
+    };
+  }
+  return {
+    name: "Pilot metrics",
+    status: "ok",
+    detail: `${summary.total} event(s), installs: ${summary.installRuns}, searches: ${summary.searches}`
+  };
+}
+
+async function checkPilotBackend(target) {
+  const { probeAdapterLiveness } = await import("../adapters/detect.mjs");
+  const probe = await probeAdapterLiveness();
+  const hasFallbackPath = await pathExists(target);
+
+  if (probe.anyLive) {
+    return {
+      name: "Pilot memory backend",
+      status: "ok",
+      detail: `adapter live: ${probe.liveAdapters.join(", ")}`
+    };
+  }
+  if (probe.anyDetected && hasFallbackPath) {
+    return {
+      name: "Pilot memory backend",
+      status: "warn",
+      detail: "adapter detected but not live; fallback (local) path available.",
+      fix: "Run `dotaios capture enable` to enable auto-save for a supported adapter."
+    };
+  }
+  if (hasFallbackPath) {
+    return {
+      name: "Pilot memory backend",
+      status: "warn",
+      detail: "fallback (local) path available; no adapter detected."
+    };
+  }
+  return {
+    name: "Pilot memory backend",
+    status: "fail",
+    detail: "No healthy backend available.",
+    fix: "Re-run `dotaios setup` and verify your AIOS folder path."
+  };
+}
+
+function pathOptionFor(target) {
+  const defaultPath = path.resolve(expandHome(defaultAiosPath()));
+  return target === defaultPath ? "" : ` --path ${shellQuote(target)}`;
+}
+
+function shellQuote(value) {
+  if (/^[A-Za-z0-9_./:-]+$/.test(value)) return value;
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
