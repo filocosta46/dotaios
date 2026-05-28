@@ -110,3 +110,22 @@ test("searchMarkdownDir skips hidden and secret-like files", async () => {
   const results = await searchMarkdownDir(dir, "needle", { sourcePrefix: "vault" });
   assert.deepEqual(results.map((result) => result.file), ["visible.md"]);
 });
+
+test("searchJsonlEntries skips corrupt lines instead of throwing", async () => {
+  const dir = tmpDir();
+  const filePath = path.join(dir, "events.jsonl");
+  // A corrupt line between two valid ones must not crash search — it powers the
+  // MCP search_memory tool, the session digest, and the agent SessionStart hook.
+  fs.writeFileSync(
+    filePath,
+    [
+      JSON.stringify({ type: "note", summary: "needle one" }),
+      "{ this is not valid json",
+      JSON.stringify({ type: "note", summary: "needle two" })
+    ].join("\n") + "\n"
+  );
+
+  const results = await searchJsonlEntries(filePath, "needle", { source: "memory/events.jsonl" });
+  assert.equal(results.length, 2);
+  assert.deepEqual(results.map((r) => r.summary), ["needle one", "needle two"]);
+});

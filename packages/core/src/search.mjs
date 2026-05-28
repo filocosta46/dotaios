@@ -393,7 +393,15 @@ async function readJsonl(filePath) {
   return content
     .split("\n")
     .filter((line) => line.trim())
-    .map((line) => JSON.parse(line));
+    .flatMap((line) => {
+      // Skip a corrupt line rather than crashing the whole search — this reader
+      // backs search_memory, the session digest, and the agent SessionStart hook.
+      try {
+        return [JSON.parse(line)];
+      } catch {
+        return [];
+      }
+    });
 }
 
 function readTitle(content) {
