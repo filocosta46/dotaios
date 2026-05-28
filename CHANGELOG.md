@@ -2,13 +2,22 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
-## [1.16.1] - 2026-05-28
+## [1.17.0] - 2026-05-28
+### Added
+- **Cross-agent context continuity.** `read_session_digest` MCP tool and `dotaios brief --compact` produce a compact working-memory digest (today's focus, carry-overs, recent signals, recent sessions) so any agent can get up to speed at session start without loading everything.
+- `dotaios connect gemini` — install a Gemini CLI SessionStart hook + MCP server entry so context is injected automatically each session.
+- `dotaios connect opencode` — install an OpenCode MCP server entry + per-skill stubs.
+- `list_skills` MCP tool.
+- Session access tracking (`access_count`, `last_accessed`) used to rank recent sessions in the digest.
+- Frequency-weighted relevance ranking for search (phrase matches rank above multi-term matches; repeated hits rank higher). Note: this is term-frequency scoring, not full BM25.
+
+### Changed
+- `connect gemini`/`connect opencode` merge into existing agent config and refuse to overwrite a config file that exists but is not valid JSON.
+- Session index writes are now atomic (temp file + rename) to survive concurrent digest reads.
+
 ### Removed
 - Unused adapter-first memory backend scaffolding (`memory-backend.mjs`, `MEMORY_BACKEND_KIND`) — it was never wired into any command. It will return when adapters are actually integrated.
 - Internal design-history docs under `docs/superpowers/` (still preserved in git history).
-
-### Changed
-- Honest framing of 1.16.0 below: the real shipped value was the pilot measurement tooling, the `pilot-report` packaging fix, and simpler onboarding — not a functional memory upgrade.
 
 ## [1.16.0] - 2026-05-28
 ### Added

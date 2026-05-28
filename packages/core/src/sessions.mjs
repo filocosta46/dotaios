@@ -246,7 +246,11 @@ async function appendIndexEntry(aiosPath, entry) {
 async function writeSessionIndex(aiosPath, entries) {
   const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
   const content = entries.map((e) => JSON.stringify(e)).join("\n");
-  await fs.writeFile(indexPath, content.length > 0 ? content + "\n" : "", "utf8");
+  // Write to a temp file then rename so a crash or concurrent writer can never
+  // leave a half-written index (touchSessions is now called on every digest read).
+  const tmpPath = `${indexPath}.${process.pid}.tmp`;
+  await fs.writeFile(tmpPath, content.length > 0 ? content + "\n" : "", "utf8");
+  await fs.rename(tmpPath, indexPath);
 }
 
 function escapeYaml(value) {

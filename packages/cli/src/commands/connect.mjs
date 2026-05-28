@@ -412,10 +412,18 @@ npx dotaios brief --compact --json --path "${aiosPath}" 2>/dev/null || echo '{}'
 
 async function mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath) {
   let settings = {};
+  let raw = null;
   try {
-    settings = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+    raw = await fs.readFile(settingsPath, "utf8");
   } catch {
-    settings = {};
+    raw = null;
+  }
+  if (raw !== null) {
+    try {
+      settings = JSON.parse(raw);
+    } catch {
+      throw new Error(`Existing ${settingsPath} is not valid JSON. Fix or remove it, then retry — refusing to overwrite it.`);
+    }
   }
 
   // Merge SessionStart hook (preserve any existing hooks)
@@ -488,10 +496,18 @@ async function connectOpenCode(aiosPath, options) {
 
 async function mergeOpenCodeSettings(settingsPath, aiosPath) {
   let settings = {};
+  let raw = null;
   try {
-    settings = JSON.parse(await fs.readFile(settingsPath, "utf8"));
+    raw = await fs.readFile(settingsPath, "utf8");
   } catch {
-    settings = {};
+    raw = null;
+  }
+  if (raw !== null) {
+    try {
+      settings = JSON.parse(raw);
+    } catch {
+      throw new Error(`Existing ${settingsPath} is not valid JSON. Fix or remove it, then retry — refusing to overwrite it.`);
+    }
   }
 
   if (!settings.mcp) settings.mcp = {};
