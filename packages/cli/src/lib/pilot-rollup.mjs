@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { readJsonLines } from "../../../core/src/metrics.mjs";
 
 // Pilot gate: minimum bar to continue a controlled pilot.
 export const PILOT_GATES = {
@@ -130,29 +131,9 @@ export function computeRollup(rows, options = {}) {
   };
 }
 
-async function readPilotRows(metricsDir) {
-  const file = path.join(metricsDir, "pilot.jsonl");
-  let content;
-  try {
-    content = await fs.readFile(file, "utf8");
-  } catch {
-    return [];
-  }
-  const rows = [];
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line));
-    } catch {
-      // Ignore malformed lines.
-    }
-  }
-  return rows;
-}
-
 export async function runRollup(aiosPath, options = {}) {
   const metricsDir = path.join(aiosPath, "memory", "metrics");
-  const rows = await readPilotRows(metricsDir);
+  const rows = await readJsonLines(path.join(metricsDir, "pilot.jsonl"));
   const summary = computeRollup(rows, options);
 
   await fs.mkdir(metricsDir, { recursive: true });

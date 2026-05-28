@@ -67,6 +67,8 @@ npx dotaios activate   # connect Claude Code, Codex, and Gemini
 npx dotaios reveal     # open the folder in Finder / Explorer
 ```
 
+> The agent-led path asks 3 quick questions; the terminal `init` asks 5. Both produce the same usable folder — pick whichever flow you prefer.
+
 ---
 
 ## Changing your context later

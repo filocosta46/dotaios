@@ -1,7 +1,6 @@
-import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { appendMetric } from "../../../core/src/metrics.mjs";
+import { appendMetric, readJsonLines } from "../../../core/src/metrics.mjs";
 
 const PILOT_FILE = "pilot.jsonl";
 
@@ -28,22 +27,7 @@ export function hashMetricValue(value) {
 }
 
 export async function readPilotMetrics(aiosPath) {
-  try {
-    const content = await fs.readFile(pilotMetricsFile(aiosPath), "utf8");
-    return content
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => {
-        try {
-          return JSON.parse(line);
-        } catch {
-          return null;
-        }
-      })
-      .filter(Boolean);
-  } catch {
-    return [];
-  }
+  return readJsonLines(pilotMetricsFile(aiosPath));
 }
 
 export async function pilotMetricsSummary(aiosPath) {

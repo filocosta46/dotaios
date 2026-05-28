@@ -23,6 +23,13 @@ All pilot gates, plus:
 
 Public-only blocks appear under `public_block_reasons`.
 
+## How install success is counted
+
+`install_success_rate` = `install_end` rows with `outcome: "ok"` divided by all
+`install_end` rows. A setup that creates the folder but fails to connect tools
+emits `outcome: "warn"`, which counts as **not** a success — the install did not
+fully deliver. This is intentionally conservative.
+
 ## Required provenance for each score
 
 Each `pilot_score` row must include:

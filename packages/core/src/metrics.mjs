@@ -10,3 +10,22 @@ export async function appendMetric(filePath, payload) {
   await fs.appendFile(filePath, `${JSON.stringify(entry)}\n`);
   return entry;
 }
+
+export async function readJsonLines(filePath) {
+  let content;
+  try {
+    content = await fs.readFile(filePath, "utf8");
+  } catch {
+    return [];
+  }
+  const rows = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      rows.push(JSON.parse(line));
+    } catch {
+      // Ignore malformed lines.
+    }
+  }
+  return rows;
+}
