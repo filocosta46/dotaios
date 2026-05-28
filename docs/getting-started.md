@@ -9,6 +9,8 @@ npx dotaios activate
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
 
+In this guide, commands use `npx dotaios ...` so they work even if DotAIOS is not globally installed yet.
+
 The init flow asks five questions, then creates starter context and memory files. `activate` creates small bridge files in the global memory locations used by Claude Code, Codex, and Gemini.
 
 For Cursor or project-scoped agents, attach a project folder:
@@ -73,12 +75,12 @@ Dynamic or paywalled pages may ingest partial content. If the saved markdown end
 Save your AI conversations locally so every agent on your machine can remember what you've discussed:
 
 ```bash
-dotaios capture enable claude-code     # auto-save every Claude Code session
-dotaios capture import paste           # paste any conversation manually
-dotaios capture import claude-code     # backfill past sessions (last 30 days)
-dotaios capture list                   # browse saved conversations
-dotaios capture list --agent claude-code --since 7d
-dotaios search "any topic"             # search includes saved sessions
+npx dotaios capture enable claude-code     # auto-save every Claude Code session
+npx dotaios capture import paste           # paste any conversation manually
+npx dotaios capture import claude-code     # backfill past sessions (last 30 days)
+npx dotaios capture list                   # browse saved conversations
+npx dotaios capture list --agent claude-code --since 7d
+npx dotaios search "any topic"             # search includes saved sessions
 ```
 
 For agents that can write local files, you can also ask: "use save-session" or "save this session". It writes a clean summary with decisions, open threads, and action items.
@@ -97,7 +99,7 @@ Search your local AIOS files:
 npx dotaios search "daily planning" --scope skills
 ```
 
-Validate and install a plugin (local folder or git URL):
+Validate and install a plugin (trusted local folder or reviewed git URL):
 
 ```bash
 npx dotaios install ./my-plugin --dry-run

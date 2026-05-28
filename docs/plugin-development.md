@@ -1,8 +1,8 @@
 # Plugin Development
 
-Plugins are optional local extensions. DotAIOS supports installing a trusted plugin from a local directory. A plugin contains a `manifest.json`, a `SKILL.md`, and optional source code.
+Plugins are optional local extensions. DotAIOS supports installing a trusted plugin from a local directory or a git URL. A plugin contains a `manifest.json`, a `SKILL.md`, and optional source code.
 
-Remote plugin installs are not supported yet. Download and review a plugin locally before installing it.
+Remote source installs are supported through git URLs (`https://...git`, `git@...`, optional `--subdir`). For safety, review source and permissions before installing.
 
 ```json
 {
@@ -34,7 +34,7 @@ Core rule: plugins may propose durable memory changes, but the user approves wri
 ## Validate A Plugin
 
 ```bash
-dotaios install ./my-plugin --dry-run
+npx dotaios install ./my-plugin --dry-run
 ```
 
 The CLI validates the manifest and prints the permission surface.
@@ -42,12 +42,19 @@ The CLI validates the manifest and prints the permission surface.
 ## Install Locally
 
 ```bash
-dotaios install ./my-plugin
+npx dotaios install ./my-plugin
 ```
 
 This copies the plugin into `~/aios/plugins/<name>/` and updates `~/aios/skills/_registry.json` with the skills the plugin provides.
 
 Use `--path <dir>` to install into a non-default AIOS folder.
+
+Install from git when needed:
+
+```bash
+npx dotaios install https://github.com/owner/repo.git
+npx dotaios install https://github.com/owner/repo.git --subdir packages/my-plugin
+```
 
 The installer stages the copy before replacing an existing plugin, and rejects symlinks inside plugin folders. This reduces accidental install damage, but it is not a sandbox.
 

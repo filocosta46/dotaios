@@ -144,26 +144,26 @@ Each morning you can run `npx dotaios brief` to get a local summary of today's p
 If you use Claude Code, you can enable automatic saving so every session is remembered across tools:
 
 ```bash
-dotaios capture enable claude-code
+npx dotaios capture enable claude-code
 ```
 
 After this, every Claude Code conversation is saved to `~/aios/memory/sessions/` as a plain Markdown file you can open and search. To bring in past sessions:
 
 ```bash
-dotaios capture import claude-code    # last 30 days
-dotaios capture import claude-code --all   # everything
+npx dotaios capture import claude-code    # last 30 days
+npx dotaios capture import claude-code --all   # everything
 ```
 
 Search across all saved conversations:
 
 ```bash
-dotaios search "topic you discussed"
+npx dotaios search "topic you discussed"
 ```
 
 For other tools (Cursor, Gemini, ChatGPT), paste any conversation manually:
 
 ```bash
-dotaios capture import paste
+npx dotaios capture import paste
 ```
 
 You can stop here. Everything below is optional.

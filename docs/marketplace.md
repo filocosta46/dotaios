@@ -6,7 +6,7 @@ This document explains how the marketplace works for users, and how vendors (you
 
 ## Where the marketplace lives
 
-The marketplace is a single static JSON file served from the DotAIOS website at `https://dotaios.com/registry.json`. The CLI reads it on `dotaios market list` and never modifies it. No DotAIOS server. No accounts. Vendors can publish their own registries by pointing users at `--registry <url>`.
+The marketplace is a single static JSON file served from the DotAIOS website at `https://dotaios.com/registry.json`. The CLI reads it on `npx dotaios market list` and never modifies it. No DotAIOS server. No accounts. Vendors can publish their own registries by pointing users at `--registry <url>`.
 
 The bundled free skills (`audit`, `plan-today`, `closeday`, `today`, `weekly-review`, `privacy-brief`, `save-session`, `summarize-source`, `ingest`, `import-context`) ship with the CLI itself and are NOT listed in the marketplace. They are installed automatically during `dotaios init`.
 
@@ -15,8 +15,8 @@ The bundled free skills (`audit`, `plan-today`, `closeday`, `today`, `weekly-rev
 ### Browse what is available
 
 ```bash
-dotaios market list
-dotaios market info <id>
+npx dotaios market list
+npx dotaios market info <id>
 ```
 
 The registry is a single JSON file. The default points at the official DotAIOS registry. Override with `--registry <url>` or by setting `DOTAIOS_REGISTRY_URL`.
@@ -24,7 +24,7 @@ The registry is a single JSON file. The default points at the official DotAIOS r
 ### Install a free skill
 
 ```bash
-dotaios market install hello-memory
+npx dotaios market install hello-memory
 ```
 
 This clones the linked git repo, validates the manifest, and copies the plugin into `~/aios/plugins/`.
@@ -34,8 +34,8 @@ This clones the linked git repo, validates the manifest, and copies the plugin i
 Buy a license from the vendor (Gumroad checkout, etc). You receive a license key by email. Then run:
 
 ```bash
-dotaios license add <product-id> <license-key>
-dotaios market install <product-id>
+npx dotaios license add <product-id> <license-key>
+npx dotaios market install <product-id>
 ```
 
 The license is verified once with Gumroad and cached at `~/.dotaios/licenses.json`. Every subsequent install is offline.
@@ -47,7 +47,7 @@ License keys are credentials. The license store at `~/.dotaios/licenses.json` is
 ### Remove a license
 
 ```bash
-dotaios license remove <product-id>
+npx dotaios license remove <product-id>
 ```
 
 ## For vendors (publishing a paid pack)
@@ -76,7 +76,7 @@ Three monetization fields:
 
 - `paid: true` — flips license enforcement on.
 - `vendor` — your stable vendor slug. Lowercase, hyphenated.
-- `product_id` — your Gumroad product permalink. This must match what `dotaios license add` is given.
+- `product_id` — your Gumroad product permalink. This must match what `npx dotaios license add` is given.
 
 ### 2. Hosting
 
@@ -92,7 +92,7 @@ DotAIOS uses Gumroad's License Verification API:
 - Body: `product_id=<permalink>&license_key=<key>&increment_uses_count=false`
 - Response: `{ "success": true, "uses": <n>, "purchase": {...} }`
 
-DotAIOS does not increment the use count during normal install; only `dotaios license verify` (future command) would.
+DotAIOS does not increment the use count during normal install; only `npx dotaios license verify` (future command) would.
 
 ### 4. Registry entry
 
@@ -114,7 +114,7 @@ Submit a PR adding your entry to `registry.json` at the root of the dotaios repo
 }
 ```
 
-Once merged, users can do `dotaios market install career-pack` and they will be told to add a license first if missing.
+Once merged, users can do `npx dotaios market install career-pack` and they will be told to add a license first if missing.
 
 ## Pricing and refunds
 

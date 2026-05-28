@@ -7,6 +7,15 @@ description: Save a URL, PDF, document, text file, or binary into the AIOS vault
 
 Drop any URL or file into your AIOS and get a clean Markdown copy you can search later.
 
+## Start here (non-technical)
+
+If you only need the basics:
+
+- Share a URL or file and say "save this to my AIOS."
+- DotAIOS stores a readable copy in your local folder.
+- If you want, say where it should go: "save this as wiki" or "save this as a company note."
+- For private or paywalled pages, export PDF in your browser first, then ingest the PDF.
+
 ## What this does
 
 - Saves articles from URLs as clean Markdown (strips ads and chrome).
@@ -41,6 +50,8 @@ dotaios ingest <input> --dry-run                # preview the plan
 dotaios ingest <input> --overwrite              # replace existing
 ```
 
+## Advanced details
+
 ## Shelf routing (`--to`)
 
 `--to` decides **where** an item lands, by purpose. It is orthogonal to the input
@@ -72,7 +83,7 @@ dotaios ingest company-brief.pdf --to company --name acme --apply
 dotaios ingest call-note.md --to signal
 ```
 
-## Routing (what goes where)
+## Routing internals (what goes where)
 
 The CLI command `dotaios ingest <input>` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins — flag the conflict and update this file.
 

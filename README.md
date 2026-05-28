@@ -26,6 +26,14 @@ DotAIOS needs one AI app installed on your computer so it has somewhere to send 
 
 **Already using Claude.ai, ChatGPT, or Gemini in your browser?** Great — keep using them. After setup, open your `~/aios/AGENTS.md` file and paste it at the start of any web chat. Your AI reads your context immediately, no extra steps.
 
+## Choose your setup path
+
+Start with the one that matches how you like to work:
+
+- **Agent-led path (recommended):** tell your AI app to install DotAIOS for you. Best for non-technical users (`INSTALL.md`).
+- **Terminal path:** run `npx dotaios ...` commands yourself (`docs/getting-started.md` or `docs/friend-setup.md`).
+- **Advanced/manual path:** use plugin, marketplace, MCP, and architecture docs when you want full control (`docs/plugin-development.md`, `docs/marketplace.md`, `docs/mcp.md`, `docs/architecture.md`).
+
 ## Install in 60 seconds
 
 You will not type a single terminal command. Your AI agent does the whole install for you.
@@ -92,14 +100,14 @@ A few plain English questions, it shows what will change, then updates the files
 DotAIOS can save your AI conversations locally so your context grows over time — across tools and sessions.
 
 ```bash
-dotaios capture enable claude-code   # auto-save every Claude Code session
-dotaios capture import paste         # paste any conversation in manually (works with any tool)
-dotaios search "launch timing"       # search across all saved conversations
+npx dotaios capture enable claude-code   # auto-save every Claude Code session
+npx dotaios capture import paste         # paste any conversation in manually (works with any tool)
+npx dotaios search "launch timing"       # search across all saved conversations
 ```
 
 **Claude Code:** auto-saves after every session once enabled.  
 **Any capable agent:** ask it to "use save-session" or "save this session" to write a clean summary into your AIOS.
-**Any other tool (ChatGPT, Gemini, Cursor, Claude.ai web):** copy-paste the conversation into `dotaios capture import paste` if it cannot write local files.
+**Any other tool (ChatGPT, Gemini, Cursor, Claude.ai web):** copy-paste the conversation into `npx dotaios capture import paste` if it cannot write local files.
 
 All conversations save to `~/aios/memory/sessions/` as plain Markdown files you can open and read. Nothing leaves your machine.
 
@@ -110,8 +118,8 @@ All conversations save to `~/aios/memory/sessions/` as plain Markdown files you 
 Your `~/aios/` folder lives on one computer. `dotaios sync` mirrors it to a **private GitHub repository** so an AI app on your phone can read the same memory — who you are, what you're working on, your notes.
 
 ```bash
-dotaios sync setup     # one-time: connect GitHub, create the repo, first upload
-dotaios sync status    # is sync on? when did it last run?
+npx dotaios sync setup     # one-time: connect GitHub, create the repo, first upload
+npx dotaios sync status    # is sync on? when did it last run?
 ```
 
 **One-time setup.** `dotaios sync setup` walks you through three steps:
@@ -130,7 +138,7 @@ After that, sync runs on its own — after every `dotaios` command, and at the s
 
 **Writing from your phone.** When a phone AI saves something, it drops a note into `memory/inbox/`. The next time you work on your computer, your agent files those notes into the right place with the `process-inbox` skill — so two devices never fight over the same file.
 
-**About the token.** Setup uses a classic GitHub token with the `repo` scope. That token can reach *all* of your GitHub repositories, not only the DotAIOS one. It is stored only on your computer, in a private file, and never leaves it. If you'd rather scope it tighter, create a fine-grained token limited to your `<username>-aios` repo and paste that instead.
+**About the token.** Setup uses a classic GitHub token with the `repo` scope. That token can reach *all* of your GitHub repositories, not only the DotAIOS one. It is stored locally in a private file and sent to GitHub only when DotAIOS performs sync operations (setup, push, pull, status checks). If you'd rather scope it tighter, create a fine-grained token limited to your `<username>-aios` repo and paste that instead.
 
 ## Where the folder lives
 
@@ -145,7 +153,7 @@ You don't have to "put" the folder anywhere special for your AI tools to find it
 | Gemini | `~/.gemini/GEMINI.md` |
 | Cursor (per project) | `<project>/.cursor/rules/dotaios.mdc` (run `dotaios attach <project>`) |
 
-Run `dotaios status` any time to confirm every bridge is healthy.
+Run `npx dotaios status` any time to confirm every bridge is healthy.
 
 ## What's inside `~/aios/`
 
@@ -187,7 +195,7 @@ Skills are plain-language instructions your agent follows. Every agent reads the
 | `summarize-source` | Turns ingested raw material into a useful local summary |
 | `weekly-review` | Reviews recent memory and proposes context/project updates |
 
-Run `dotaios skills` to see all installed skills with descriptions. Run `dotaios skills <name>` to read one in full.
+Run `npx dotaios skills` to see all installed skills with descriptions. Run `npx dotaios skills <name>` to read one in full.
 
 ## Universal Knowledge Router
 
@@ -238,6 +246,8 @@ Logs a note to memory instantly — no need to know which file to edit. Run with
 
 ## Commands
 
+For quickstart users, run commands as `npx dotaios ...`. If you installed `dotaios` globally, the shorter `dotaios ...` form is equivalent.
+
 | Command | What it does |
 |---|---|
 | `dotaios setup` | One-shot: init + activate + reveal (best for first-time users) |
@@ -264,7 +274,7 @@ Logs a note to memory instantly — no need to know which file to edit. Run with
 | `dotaios connect google` | Add read first Gmail / Calendar via local `gws` |
 | `dotaios google <cmd>` | Run Google Workspace workflows |
 | `dotaios mcp <cmd>` | Local MCP server status / config |
-| `dotaios install <plugin>` | Install a local plugin |
+| `dotaios install <plugin>` | Install a plugin from a local folder or git URL |
 | `dotaios schedule <cmd>` | List or run local schedules |
 | `dotaios cleanup` | Trim stale signals, compact event log |
 
@@ -286,7 +296,7 @@ Your existing notes become agent readable knowledge.
 * **File based**, Markdown and JSONL, not databases
 * **Agent native**, your AI tools read directly; DotAIOS is invisible infrastructure
 
-## Skill marketplace
+## Advanced: skill marketplace
 
 DotAIOS itself is and always will be free. On top of it you can install free or paid skills curated by vendors:
 

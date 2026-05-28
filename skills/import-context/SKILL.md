@@ -27,7 +27,7 @@ Try saying:
 - "import this old chat into my AIOS"
 - "merge what Gemini had on this project into DotAIOS"
 
-The agent will propose what to write and where. Review the proposed changes before confirming any write. There is no `dotaios import` shell command — the agent handles the routing directly in the conversation.
+The agent will propose what to write and where. Review the proposed changes before confirming any write. For pasted chat context, the agent handles routing directly in conversation. The `dotaios import <file>` command is for structured JSON import files.
 
 ## Agent steps
 
