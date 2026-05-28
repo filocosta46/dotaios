@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEvent, readRecentEvents, readRecentSignals } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { readSection, replaceSection } from "../../../core/src/sections.mjs";
+import { readSection, readSubsection, replaceSection } from "../../../core/src/sections.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { buildSessionDigest } from "../../../core/src/digest.mjs";
 
@@ -148,18 +148,6 @@ function extractCarriedOverPlan(content) {
   return index === -1 ? "" : plan.slice(index);
 }
 
-function readSubsection(content, heading) {
-  const lines = content.split("\n");
-  const start = lines.findIndex((line) => line.trim() === `### ${heading}`);
-  if (start === -1) return "";
-
-  const body = [];
-  for (const line of lines.slice(start + 1)) {
-    if (line.startsWith("### ") || line.startsWith("## ")) break;
-    body.push(line);
-  }
-  return body.join("\n").trim();
-}
 
 function renderBrief({ date, priorities, openLoops, carryOver }) {
   return [

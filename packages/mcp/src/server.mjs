@@ -5,7 +5,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { appendEvent, searchMemory, searchVault } from "../../core/src/memory.mjs";
 import { buildSessionDigest } from "../../core/src/digest.mjs";
-import { touchSession } from "../../core/src/sessions.mjs";
+import { touchSessions } from "../../core/src/sessions.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
 import { assessGwsAuth, hasGoogleConnection, resolveGwsBinary, runGws } from "../../cli/src/lib/gws.mjs";
@@ -160,7 +160,7 @@ class DotaiosMcpServer {
     const project = optionalString(args.project);
     const limit = args.limit !== undefined ? positiveInteger(args.limit, "limit") : 3;
     const { digest, sessionIds } = await buildSessionDigest(this.aiosPath, { project, limit });
-    await Promise.all(sessionIds.map((id) => touchSession(this.aiosPath, id)));
+    await touchSessions(this.aiosPath, sessionIds);
     return JSON.stringify({ digest }, null, 2);
   }
 

@@ -315,7 +315,7 @@ function matchJsonEntry(entry, query) {
     field: "entry",
     value: truncate(serialized, 160),
     kind: whole.kind,
-    score: whole.kind === "phrase" ? 2 : 1
+    score: whole.score
   };
 }
 
@@ -331,8 +331,8 @@ function flattenEntry(value, prefix = "") {
 }
 
 function compareMemoryResults(a, b) {
-  const scoreA = a.match?.score || (a.match?.kind === "phrase" ? 2 : 1);
-  const scoreB = b.match?.score || (b.match?.kind === "phrase" ? 2 : 1);
+  const scoreA = a.match?.score ?? 0;
+  const scoreB = b.match?.score ?? 0;
   if (scoreA !== scoreB) return scoreB - scoreA;
   return compareTimestampsDesc(a.ts, b.ts);
 }

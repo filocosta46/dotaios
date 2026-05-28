@@ -163,15 +163,25 @@ export async function filterSessions(aiosPath, { agent, project, since } = {}) {
 }
 
 export async function touchSession(aiosPath, sessionId) {
+  return touchSessions(aiosPath, [sessionId]);
+}
+
+export async function touchSessions(aiosPath, sessionIds) {
+  if (!sessionIds.length) return;
+  const ids = new Set(sessionIds);
+  const now = new Date().toISOString();
   const entries = await readSessionIndex(aiosPath);
-  const idx = entries.findIndex((e) => e.session_id === sessionId);
-  if (idx === -1) return;
-  entries[idx] = {
-    ...entries[idx],
-    last_accessed: new Date().toISOString(),
-    access_count: (entries[idx].access_count || 0) + 1,
-  };
-  await writeSessionIndex(aiosPath, entries);
+  let changed = false;
+  for (let i = 0; i < entries.length; i++) {
+    if (!ids.has(entries[i].session_id)) continue;
+    entries[i] = {
+      ...entries[i],
+      last_accessed: now,
+      access_count: (entries[i].access_count || 0) + 1,
+    };
+    changed = true;
+  }
+  if (changed) await writeSessionIndex(aiosPath, entries);
 }
 
 export async function deleteSession(aiosPath, sessionId) {
