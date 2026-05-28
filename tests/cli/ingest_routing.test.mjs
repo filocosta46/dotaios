@@ -12,6 +12,7 @@ import {
   shelfMarkdownPath
 } from "../../packages/cli/src/ingest/placement.mjs";
 import { ingestUrl } from "../../packages/cli/src/ingest/web.mjs";
+import { isoDate } from "../../packages/core/src/memory.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -118,7 +119,10 @@ test("ingest --to signal logs a working note in memory/signals", () => {
   const result = run(["ingest", file, "--path", aiosPath, "--to", "signal"]);
 
   assert.match(result.stdout, /memory\/signals/);
-  const today = new Date().toISOString().slice(0, 10);
+  // Signals are written with the local date (memory.isoDate), so the expected
+  // filename must use the same convention — toISOString() (UTC) drifts by a day
+  // near the local-midnight boundary and makes this test flaky.
+  const today = isoDate(new Date());
   const signalFile = path.join(aiosPath, "memory", "signals", `${today}.jsonl`);
   assert.equal(fs.existsSync(signalFile), true);
   const entry = JSON.parse(read(signalFile).trim().split(/\r?\n/).pop());
