@@ -339,10 +339,13 @@ async function withIndexLock(aiosPath, fn) {
 }
 
 async function appendIndexEntry(aiosPath, entry) {
+  const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
+  // Append a single JSONL line with O_APPEND under the lock. Unlike a
+  // read-modify-write rewrite, an atomic append can't drop a concurrent append's
+  // entry even if the advisory lock is briefly double-held during a steal — the
+  // realistic concurrency here is many captures appending at once.
   await withIndexLock(aiosPath, async () => {
-    const entries = await readSessionIndex(aiosPath);
-    entries.push(entry);
-    await writeSessionIndex(aiosPath, entries);
+    await fs.appendFile(indexPath, `${JSON.stringify(entry)}\n`);
   });
 }
 
