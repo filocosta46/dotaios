@@ -3,27 +3,282 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>DotAIOS — a shared memory folder for your AI tools</title>
+  <title>DotAIOS — one folder your AI agents all read</title>
+  <meta name="description" content="DotAIOS is one plain-text folder on your computer that every AI agent — Claude Code, Cursor, Codex, Gemini — reads from. Tell your AI who you are once. No account, no cloud, no terminal required." />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="DotAIOS — one folder your AI agents all read" />
+  <meta property="og:description" content="Tell your AI who you are, what you're working on, and how you like to work — once. Every tool on your machine knows. Local, plain-text, yours." />
+  <meta property="og:url" content="https://dotaios.vercel.app" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <!-- Reveal-on-scroll only hides content when JS is running; without it everything stays visible. -->
+  <script>document.documentElement.classList.add("js");</script>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232747dd'/%3E%3Crect x='6' y='9' width='20' height='15' rx='2.5' fill='%23fbfaf6'/%3E%3Crect x='6' y='9' width='9' height='4' rx='1.5' fill='%23fbfaf6'/%3E%3C/svg%3E" />
+
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body style="background-color: rgb(255, 255, 255)">
-  <div id="app"></div>
+<body>
+  <a class="skip-link" href="#install">Skip to install</a>
 
-  <!-- React + Babel (pinned) -->
-  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+  <header class="nav" id="top">
+    <a class="brand" href="#top" aria-label="DotAIOS home">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">DotAIOS</span>
+      <span class="brand-sub">a folder for your AI</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#how">How it works</a>
+      <a href="#more">What it does</a>
+      <a href="https://github.com/filocosta46/dotaios" target="_blank" rel="noopener">GitHub</a>
+      <a class="nav-cta" href="#install">Get started</a>
+    </nav>
+  </header>
 
-  <!-- Data -->
-  <script src="plugins.js"></script>
+  <main>
+    <!-- HERO -->
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <p class="eyebrow reveal"><span class="dot" aria-hidden="true"></span> open source · local · no sign-up</p>
+        <h1 id="hero-title" class="reveal">
+          Your AI knows <em>how to code.</em><br />
+          It doesn't know <span class="accent">who you are.</span>
+        </h1>
+        <p class="lede reveal">
+          DotAIOS is <strong>one folder</strong> on your computer — <code>~/aios/</code> — holding your
+          context, your memory, and the things you want your AI to do. Claude Code, Cursor, Gemini,
+          Codex, and anything that reads <code>AGENTS.md</code> all read from the same place.
+          Write it once; every tool knows.
+        </p>
 
-  <!-- Components (order matters: defs before app) -->
-  <script type="text/babel" src="tweaks-panel.jsx"></script>
-  <script type="text/babel" src="graph.jsx"></script>
-  <script type="text/babel" src="marketplace.jsx"></script>
-  <script type="text/babel" src="app.jsx"></script>
+        <!-- INSTALL CARD -->
+        <div class="install reveal" id="install">
+          <div class="install-head">
+            <span class="kbd-label">get started</span>
+            <span class="muted">2 steps · about a minute</span>
+          </div>
+
+          <ol class="install-steps">
+            <li>
+              <span class="step-n" aria-hidden="true">1</span>
+              <div>
+                <b>Open an AI agent you already use.</b>
+                <p>Claude Code, Codex, Cursor, Gemini — any of them. New to this? Claude Code is a free, friendly place to start.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-n" aria-hidden="true">2</span>
+              <div>
+                <b>Paste this one line and press enter.</b>
+                <div class="snippet" data-copy="Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.">
+                  <code><span class="prompt" aria-hidden="true">›</span><span class="snippet-text">Set up DotAIOS for me: read github.com/filocosta46/dotaios and follow INSTALL.md step by step.</span></code>
+                  <button class="copy" type="button" aria-label="Copy the setup prompt">Copy</button>
+                </div>
+                <p class="micro">Your agent installs everything, connects your tools, and asks you three quick questions. You never touch a terminal.</p>
+              </div>
+            </li>
+          </ol>
+
+          <details class="terminal-alt">
+            <summary>Comfortable in a terminal?</summary>
+            <div class="snippet snippet-sm" data-copy="npx dotaios setup">
+              <code><span class="prompt" aria-hidden="true">$</span><span class="snippet-text">npx dotaios setup</span></code>
+              <button class="copy" type="button" aria-label="Copy the npx command">Copy</button>
+            </div>
+          </details>
+        </div>
+
+        <ul class="hero-facts reveal">
+          <li><b>One folder</b><span>plain Markdown, on your machine</span></li>
+          <li><b>Every agent</b><span>anything that reads AGENTS.md</span></li>
+          <li><b>No account</b><span>sync is your own GitHub, or nothing</span></li>
+        </ul>
+      </div>
+
+      <!-- HERO VISUAL: the folder that every agent reads -->
+      <aside class="hero-visual reveal" aria-hidden="true">
+        <div class="folder-card">
+          <div class="folder-top">
+            <span class="folder-dot"></span><span class="folder-dot"></span><span class="folder-dot"></span>
+            <span class="folder-path">~/aios/</span>
+          </div>
+          <ul class="tree">
+            <li class="dir">context/</li>
+            <li class="file indent">identity.md<span class="ann">who you are</span></li>
+            <li class="file indent">work.md<span class="ann">what you're building</span></li>
+            <li class="file indent">priorities.md<span class="ann">what matters now</span></li>
+            <li class="dir">memory/<span class="ann">events · sessions</span></li>
+            <li class="dir">vault/<span class="ann">notes &amp; saved reading</span></li>
+            <li class="dir">skills/<span class="ann">things you can ask for</span></li>
+            <li class="file">AGENTS.md<span class="ann">the front door</span></li>
+          </ul>
+        </div>
+        <div class="reads-into">reads into</div>
+        <div class="agents">
+          <span class="agent">Claude Code</span>
+          <span class="agent">Cursor</span>
+          <span class="agent">Gemini</span>
+          <span class="agent">Codex</span>
+        </div>
+      </aside>
+    </section>
+
+    <!-- METAPHOR STRIP -->
+    <section class="metaphor" aria-label="The idea in one line">
+      <div class="metaphor-row">
+        <div class="meta-side">
+          <code>.gitconfig</code>
+          <span>makes Git know your name.</span>
+        </div>
+        <span class="meta-arrow" aria-hidden="true">→</span>
+        <div class="meta-side strong">
+          <code>~/aios/</code>
+          <span>makes every AI know your life.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="band" id="how" aria-labelledby="how-title">
+      <p class="section-eyebrow reveal">How it works · no command line required</p>
+      <h2 class="section-title reveal" id="how-title">It's just a folder. Your AI sets it up.</h2>
+      <p class="section-lede reveal">You don't run anything yourself. Your AI creates the files, asks who you are, and saves your answers where every tool can read them.</p>
+
+      <div class="steps">
+        <article class="step reveal">
+          <span class="step-tag">Step 1 — Tell an AI to set it up</span>
+          <h3>Paste one line into the AI you already use.</h3>
+          <p>It creates the folder, asks who you are and what you're working on, and writes your answers down.</p>
+          <div class="step-visual tree-mini">
+            <div><span class="t-ico">›</span> creating <em>~/aios/</em>…</div>
+            <div><span class="t-ico plus">+</span> context/identity.md</div>
+            <div><span class="t-ico plus">+</span> context/work.md</div>
+            <div><span class="t-ico plus">+</span> memory/ · vault/ · skills/</div>
+            <div><span class="t-ico ok">✓</span> <em>ready in ~3 minutes</em></div>
+          </div>
+        </article>
+
+        <article class="step reveal">
+          <span class="step-tag">Step 2 — Every AI reads the same folder</span>
+          <h3>Your context shows up everywhere you work.</h3>
+          <p>One short rule per tool, written for you — automatically.</p>
+          <div class="step-visual">
+            <div class="wire"><span>Claude Code</span><span class="ok-pill">connected</span></div>
+            <div class="wire"><span>Cursor</span><span class="ok-pill">connected</span></div>
+            <div class="wire"><span>Gemini CLI</span><span class="ok-pill">connected</span></div>
+            <div class="wire"><span>Codex</span><span class="ok-pill">connected</span></div>
+          </div>
+        </article>
+
+        <article class="step reveal">
+          <span class="step-tag">Step 3 — Ask in plain English</span>
+          <h3>Skills become things you just say.</h3>
+          <p>"Plan my day." "Save this article." "Close out today." Same words, every tool.</p>
+          <div class="step-visual slash">
+            <span><b>/plan-today</b> build a focused plan</span>
+            <span><b>/today</b> open today's note</span>
+            <span><b>/closeday</b> end the day in 3 questions</span>
+            <span><b>/ingest</b> save an article to your vault</span>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- WHAT IT DOES -->
+    <section class="band soft" id="more" aria-labelledby="more-title">
+      <p class="section-eyebrow reveal">What it does</p>
+      <h2 class="section-title reveal" id="more-title">More than a profile. A working memory.</h2>
+      <p class="section-lede reveal">Your context is the start. DotAIOS also pulls in what you read, remembers what you discussed, and follows you across devices.</p>
+
+      <div class="features">
+        <article class="feature reveal">
+          <h3>Cross-device sync</h3>
+          <p>Mirror your folder to a private GitHub repo you own, so an AI on your phone reads the same memory. Opt-in. No server we run.</p>
+          <code class="cmd">npx dotaios sync setup</code>
+        </article>
+        <article class="feature reveal">
+          <h3>Reads the web</h3>
+          <p>Hand it a URL, a PDF, or a document. DotAIOS pulls clean Markdown into your vault — JavaScript-heavy pages included.</p>
+          <code class="cmd">npx dotaios ingest &lt;url&gt;</code>
+        </article>
+        <article class="feature reveal">
+          <h3>Remembers your sessions</h3>
+          <p>Save AI conversations locally so your context compounds across tools and time. Search every past session from one place.</p>
+          <code class="cmd">npx dotaios capture enable claude-code</code>
+        </article>
+      </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta" aria-labelledby="cta-title">
+      <h2 id="cta-title" class="reveal">Set it up in the time it takes to read this.</h2>
+      <p class="reveal">Open your AI agent and paste:</p>
+      <div class="snippet snippet-lg reveal" data-copy="Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.">
+        <code><span class="prompt" aria-hidden="true">›</span><span class="snippet-text">Set up DotAIOS for me: read github.com/filocosta46/dotaios and follow INSTALL.md step by step.</span></code>
+        <button class="copy" type="button" aria-label="Copy the setup prompt">Copy</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer-lead">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <p>A folder for the AI that already runs in your life.</p>
+      <span class="muted">DotAIOS · MIT · your folder, your rules.</span>
+    </div>
+    <nav class="footer-col" aria-label="Product">
+      <b>Product</b>
+      <a href="#how">How it works</a>
+      <a href="#more">What it does</a>
+      <a href="https://github.com/filocosta46/dotaios#install-in-60-seconds" target="_blank" rel="noopener">Install</a>
+    </nav>
+    <nav class="footer-col" aria-label="Docs">
+      <b>Docs</b>
+      <a href="https://github.com/filocosta46/dotaios/blob/main/docs/getting-started.md" target="_blank" rel="noopener">Getting started</a>
+      <a href="https://github.com/filocosta46/dotaios/blob/main/docs/architecture.md" target="_blank" rel="noopener">Architecture</a>
+      <a href="https://github.com/filocosta46/dotaios/blob/main/docs/security.md" target="_blank" rel="noopener">Security</a>
+    </nav>
+    <nav class="footer-col" aria-label="Project">
+      <b>Project</b>
+      <a href="https://github.com/filocosta46/dotaios" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/filocosta46/dotaios/blob/main/CHANGELOG.md" target="_blank" rel="noopener">Changelog</a>
+      <a href="https://github.com/filocosta46/dotaios/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contributing</a>
+    </nav>
+  </footer>
+
+  <script>
+    // Copy buttons — copy the full prompt (data-copy) even if the visible text is abbreviated.
+    document.querySelectorAll(".snippet").forEach((box) => {
+      const btn = box.querySelector(".copy");
+      if (!btn) return;
+      btn.addEventListener("click", async () => {
+        const text = box.getAttribute("data-copy") || box.querySelector(".snippet-text")?.textContent || "";
+        try {
+          await navigator.clipboard.writeText(text);
+        } catch {
+          const ta = document.createElement("textarea");
+          ta.value = text; document.body.appendChild(ta); ta.select();
+          document.execCommand("copy"); document.body.removeChild(ta);
+        }
+        btn.classList.add("copied");
+        btn.textContent = "Copied ✓";
+        setTimeout(() => { btn.classList.remove("copied"); btn.textContent = "Copy"; }, 1800);
+      });
+    });
+
+    // Scroll-reveal — respects reduced motion.
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reduce) {
+      document.querySelectorAll(".reveal").forEach((el) => el.classList.add("in"));
+    } else {
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
+      }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
+      document.querySelectorAll(".reveal").forEach((el) => io.observe(el));
+    }
+  </script>
 </body>
 </html>
