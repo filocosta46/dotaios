@@ -38,6 +38,7 @@
     "docs/sessions.md",
     "INSTALL.md",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {
