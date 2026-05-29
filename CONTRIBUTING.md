@@ -10,6 +10,15 @@ pnpm check
 pnpm cli -- --help
 ```
 
+Before sending changes, run `npm test` and `npm run smoke` (both must pass). For
+agent-specific architecture, rules, and gotchas see [CLAUDE.md](CLAUDE.md).
+
+Optional: enable the test gate so pushes are blocked when tests fail:
+
+```bash
+git config core.hooksPath scripts/hooks
+```
+
 ## Guardrails
 
 - Do not commit personal memory, private vault files, `.env`, credentials, or tokens.

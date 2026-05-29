@@ -1,0 +1,11 @@
+#!/bin/sh
+# DotAIOS pre-push hook — runs the unit tests before any push and blocks on
+# failure. Opt-in: enable once with `git config core.hooksPath scripts/hooks`.
+# Emergency bypass (use sparingly): `git push --no-verify`.
+
+set -e
+
+echo "[pre-push] running npm test ..."
+npm test
+
+echo "[pre-push] tests passed — pushing."

@@ -46,7 +46,9 @@
     "check": "node packages/cli/src/index.mjs --help",
     "smoke": "node scripts/smoke.mjs",
     "test": "node --test tests/**/*.test.mjs",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "changelog": "git log --oneline $(git describe --tags --abbrev=0)..HEAD",
+    "release:check": "node scripts/release-checklist.mjs"
   },
   "keywords": [
     "ai",
