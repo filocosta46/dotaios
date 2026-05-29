@@ -33,6 +33,22 @@ All notable changes to DotAIOS will be documented in this file.
 ### Removed
 - Stale `HANDOVER.md` internal handoff doc.
 
+## [1.15.0] - 2026-05-23
+### Added
+- **Agent-carried onboarding.** Collapsed the install funnel to a single step: paste one sentence into any AI agent and it reads the repo, runs setup, connects your tools, and interviews you — no terminal commands required. This is now the primary install path in the README.
+- **Private GitHub sync (`dotaios sync`).** Optional, opt-in sync of your `~/aios` folder to a private GitHub repo you own, so your context follows you across devices.
+  - `dotaios sync setup` — guided setup using a pasted GitHub Personal Access Token (no OAuth app, no device flow).
+  - `dotaios sync status`, `dotaios sync repo`, `dotaios sync logout`.
+  - Rebase-model tick (commit → pull --rebase → push) fired after CLI commands via a hook; conflicts are surfaced, not silently resolved.
+  - Phone-write inbox: drop notes from any device into the synced repo; the `process-inbox` skill files them into the right place.
+- GitHub sync offered as an optional step during `dotaios setup`.
+
+### Changed
+- `dotaios sync` stamps its own DotAIOS git identity for sync commits, so it never depends on or modifies your global git config.
+
+### Security
+- `dotaios sync logout` strips the Personal Access Token from `.git/config` as well as `sync.json`, leaving no token behind.
+
 ## [1.14.0] - 2026-05-16
 ### Added
 - **Session memory** — DotAIOS can now save your AI conversations locally so every agent on your machine can remember them. All sessions saved to `~/aios/memory/sessions/` as plain Markdown files.

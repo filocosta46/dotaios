@@ -15,6 +15,39 @@ Run `dotaios capture status` to see what's active on your machine.
 
 ---
 
+## Giving tools your context (`connect`)
+
+The capability levels above are about *saving conversations out of* a tool. The
+`connect` commands do the opposite: they wire a tool so it *reads your DotAIOS
+context in* automatically.
+
+### Gemini CLI
+
+```
+dotaios connect gemini
+```
+
+Installs three things in `~/.gemini/`:
+- a `GEMINI.md` bridge pointing Gemini at your `~/aios` folder,
+- a **SessionStart hook** that injects your working-memory digest (`dotaios brief --compact`) at the start of every session, and
+- an MCP server entry exposing `read_session_digest`, `read_context`, `list_skills`, and `search_memory`.
+
+If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses to overwrite a file that is not valid JSON (no partial install).
+
+### OpenCode
+
+```
+dotaios connect opencode
+```
+
+Installs an MCP server entry in `~/.config/opencode/opencode.json` plus a skill stub per installed skill, so your skills appear as `/skill <name>` in OpenCode.
+
+### Claude Code, Cursor
+
+Use `dotaios activate` (and `dotaios mcp install`) to wire these — see the README.
+
+---
+
 ## Claude Code
 
 **Status:** auto-save (once enabled)

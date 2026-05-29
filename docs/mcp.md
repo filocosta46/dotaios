@@ -20,6 +20,8 @@ npx @dotaios/mcp --path ~/aios
 ## Tools
 
 - `read_context` — read one or all files under `context/`
+- `read_session_digest` — a compact working-memory digest (today's focus, carry-overs, recent signals, recent sessions) so an agent can get up to speed at session start without loading everything. Marks the surfaced sessions as accessed.
+- `list_skills` — list the DotAIOS skills installed in `skills/`
 - `search_memory` — search memory events, archives, and signals
 - `search_vault` — search vault markdown files
 - `search_aios` — search local DotAIOS scopes: memory, vault, context, skills, references, plugins, and projects when using `all`
@@ -48,4 +50,5 @@ DotAIOS prints the stdio config and a suggested client path. It does not edit cl
 - It does not mutate MCP client config automatically.
 - It exposes `log_event` as an explicit tool; clients should ask before durable memory writes.
 - Google Workspace MCP tools are read-only and call fixed DotAIOS wrappers, never arbitrary `gws` commands.
+- The `gws` binary is resolved only from the server's environment (`DOTAIOS_GWS_BIN`) or `PATH`, never from a tool argument — an MCP client cannot make the server execute a binary it names.
 - Write actions in Google Workspace still require explicit user approval outside MCP.
