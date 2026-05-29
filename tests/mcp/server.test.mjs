@@ -38,13 +38,15 @@ test("mcp server exposes DotAIOS tools over newline JSON-RPC", () => {
     { jsonrpc: "2.0", id: 6, method: "tools/call", params: { name: "log_event", arguments: { type: "mcp-test", summary: "MCP test event" } } },
     { jsonrpc: "2.0", id: 7, method: "tools/call", params: { name: "search_memory", arguments: { query: "mcp-test" } } },
     { jsonrpc: "2.0", id: 8, method: "tools/call", params: { name: "search_aios", arguments: { query: "gmail", scope: "vault" } } },
-    { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "google_status", arguments: { gwsBin } } },
-    { jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "google_gmail_search", arguments: { query: "from:alice", gwsBin } } },
-    { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "google_calendar_agenda", arguments: { today: true, gwsBin } } },
-    { jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "google_drive_search", arguments: { query: "budget", gwsBin } } }
+    { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "google_status", arguments: {} } },
+    { jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "google_gmail_search", arguments: { query: "from:alice" } } },
+    { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "google_calendar_agenda", arguments: { today: true } } },
+    { jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "google_drive_search", arguments: { query: "budget" } } }
   ];
 
-  const responses = runMcp(aiosPath, messages);
+  // The gws binary is supplied to the server via its environment (operator
+  // channel), never through tool arguments.
+  const responses = runMcp(aiosPath, messages, { DOTAIOS_GWS_BIN: gwsBin });
   assert.equal(responses[0].result.protocolVersion, "2025-06-18");
   assert.equal(responses[0].result.serverInfo.name, "dotaios-mcp");
 
@@ -82,7 +84,7 @@ test("mcp server validates tool inputs", () => {
   const responses = runMcp(aiosPath, [
     { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "read_context", arguments: { file: "../secrets.md" } } },
     { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "unknown", arguments: {} } },
-    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "google_gmail_search", arguments: { query: "from:alice", gwsBin } } }
+    { jsonrpc: "2.0", id: 3, method: "tools/call", params: { name: "google_gmail_search", arguments: { query: "from:alice" } } }
   ]);
 
   assert.equal(responses[0].error.code, -32602);
@@ -91,6 +93,33 @@ test("mcp server validates tool inputs", () => {
   assert.match(responses[1].error.message, /Unknown tool/);
   assert.equal(responses[2].error.code, -32602);
   assert.match(responses[2].error.message, /not connected/);
+  // gwsBin removed from args above is irrelevant — it is never honored anyway.
+  void gwsBin;
+});
+
+test("mcp server ignores a client-supplied gwsBin (no arbitrary exec)", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  // A Google connection so the call reaches gws resolution rather than the
+  // "not connected" guard.
+  fs.mkdirSync(path.join(aiosPath, "connections", "apis"), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "connections", "apis", "google-workspace.md"), "# Google Workspace\n\nStatus: Active\n");
+
+  // A malicious "binary" the client tries to make the server execute.
+  const sentinel = path.join(tempRoot, "pwned");
+  const evil = path.join(tempRoot, "evil");
+  fs.writeFileSync(evil, `#!/usr/bin/env bash\ntouch ${JSON.stringify(sentinel)}\n`);
+  fs.chmodSync(evil, 0o755);
+
+  // No DOTAIOS_GWS_BIN in env, and PATH cleared so no real gws is found — the
+  // only way the sentinel could appear is if args.gwsBin were honored.
+  const responses = runMcp(
+    aiosPath,
+    [{ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "google_gmail_search", arguments: { query: "x", gwsBin: evil } } }],
+    { PATH: path.join(tempRoot, "no-such-bin-dir") }
+  );
+
+  assert.ok(responses[0].error, "expected an error, not a successful search");
+  assert.equal(fs.existsSync(sentinel), false); // attacker binary was never executed
 });
 
 function setupAios() {
@@ -106,13 +135,14 @@ function setupAios() {
   return { aiosPath, tempRoot };
 }
 
-function runMcp(aiosPath, messages) {
+function runMcp(aiosPath, messages, env = {}) {
   const result = spawnSync(
     process.execPath,
     [server, "--path", aiosPath],
     {
       cwd: repoRoot,
       encoding: "utf8",
+      env: { ...process.env, ...env },
       input: `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`
     }
   );

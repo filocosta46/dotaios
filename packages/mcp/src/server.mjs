@@ -220,8 +220,8 @@ class DotaiosMcpServer {
     return JSON.stringify({ projects }, null, 2);
   }
 
-  async googleStatus(args) {
-    const gwsBin = await this.resolveGoogleTool(args);
+  async googleStatus() {
+    const gwsBin = await this.resolveGoogleTool();
     const connected = await hasGoogleConnection(this.aiosPath);
     const auth = runGws(gwsBin, ["auth", "status"]);
     const authState = assessGwsAuth(auth);
@@ -239,7 +239,7 @@ class DotaiosMcpServer {
   async googleGmailSearch(args) {
     const query = requireString(args.query, "query");
     const limit = positiveInteger(args.limit || 10, "limit");
-    const gwsBin = await this.assertGoogleReady(args);
+    const gwsBin = await this.assertGoogleReady();
     return this.runGoogleReadTool(gwsBin, ["gmail", "messages", "list", "--params", JSON.stringify({ q: query, maxResults: limit })], {
       service: "gmail",
       workflow: "search"
@@ -252,7 +252,7 @@ class DotaiosMcpServer {
     if (ranges.length > 1) {
       throw protocolError(-32602, "Use only one agenda range: today, tomorrow, week, or days.");
     }
-    const gwsBin = await this.assertGoogleReady(args);
+    const gwsBin = await this.assertGoogleReady();
     const gwsArgs = ["calendar", "+agenda"];
     if (args.today) gwsArgs.push("--today");
     if (args.tomorrow) gwsArgs.push("--tomorrow");
@@ -268,7 +268,7 @@ class DotaiosMcpServer {
   async googleDriveSearch(args) {
     const query = requireString(args.query, "query");
     const limit = positiveInteger(args.limit || 10, "limit");
-    const gwsBin = await this.assertGoogleReady(args);
+    const gwsBin = await this.assertGoogleReady();
     return this.runGoogleReadTool(gwsBin, ["drive", "files", "list", "--params", JSON.stringify({
       q: `name contains '${escapeGoogleQueryLiteral(query)}'`,
       pageSize: limit
@@ -278,17 +278,21 @@ class DotaiosMcpServer {
     });
   }
 
-  async resolveGoogleTool(args) {
-    const gwsBin = await resolveGwsBinary(optionalString(args.gwsBin) || process.env.DOTAIOS_GWS_BIN || null);
+  async resolveGoogleTool() {
+    // Resolve the gws binary only from the server environment / PATH — never from
+    // tool arguments. An MCP client (i.e. the model) must not be able to make the
+    // server spawn an arbitrary binary it names. Operators override via
+    // DOTAIOS_GWS_BIN when launching the server.
+    const gwsBin = await resolveGwsBinary(process.env.DOTAIOS_GWS_BIN || null);
     if (!gwsBin) throw protocolError(-32602, "Google Workspace CLI is required. Run dotaios google doctor.");
     return gwsBin;
   }
 
-  async assertGoogleReady(args) {
+  async assertGoogleReady() {
     if (!await hasGoogleConnection(this.aiosPath)) {
       throw protocolError(-32602, "Google Workspace is not connected. Run dotaios connect google first.");
     }
-    const gwsBin = await this.resolveGoogleTool(args);
+    const gwsBin = await this.resolveGoogleTool();
     const auth = runGws(gwsBin, ["auth", "status"]);
     const authState = assessGwsAuth(auth);
     if (!authState.ready) {
@@ -424,9 +428,7 @@ function tools() {
       description: "Read DotAIOS Google Workspace connection and gws auth status.",
       inputSchema: {
         type: "object",
-        properties: {
-          gwsBin: { type: "string", description: "Optional path to a gws binary." }
-        }
+        properties: {}
       }
     },
     {
@@ -437,8 +439,7 @@ function tools() {
         type: "object",
         properties: {
           query: { type: "string" },
-          limit: { type: "integer", minimum: 1, default: 10 },
-          gwsBin: { type: "string" }
+          limit: { type: "integer", minimum: 1, default: 10 }
         },
         required: ["query"]
       }
@@ -454,8 +455,7 @@ function tools() {
           tomorrow: { type: "boolean" },
           week: { type: "boolean" },
           days: { type: "integer", minimum: 1 },
-          calendar: { type: "string" },
-          gwsBin: { type: "string" }
+          calendar: { type: "string" }
         }
       }
     },
@@ -467,8 +467,7 @@ function tools() {
         type: "object",
         properties: {
           query: { type: "string" },
-          limit: { type: "integer", minimum: 1, default: 10 },
-          gwsBin: { type: "string" }
+          limit: { type: "integer", minimum: 1, default: 10 }
         },
         required: ["query"]
       }
