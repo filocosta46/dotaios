@@ -421,7 +421,7 @@ async function writeGeminiHookScript(scriptPath, aiosPath) {
   await fs.writeFile(scriptPath, buildGeminiHookScript(aiosPath), "utf8");
 }
 
-async function mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath) {
+export async function mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath) {
   let settings = {};
   let raw = null;
   try {
@@ -505,7 +505,7 @@ async function connectOpenCode(aiosPath, options) {
   console.log("Skills accessible via /skill <name> in OpenCode.");
 }
 
-async function mergeOpenCodeSettings(settingsPath, aiosPath) {
+export async function mergeOpenCodeSettings(settingsPath, aiosPath) {
   let settings = {};
   let raw = null;
   try {
