@@ -160,7 +160,11 @@ class DotaiosMcpServer {
     const project = optionalString(args.project);
     const limit = args.limit !== undefined ? positiveInteger(args.limit, "limit") : 3;
     const { digest, sessionIds } = await buildSessionDigest(this.aiosPath, { project, limit });
-    await touchSessions(this.aiosPath, sessionIds);
+    // Updating access counts is best-effort metadata — if the index lock is
+    // contended (or times out), still return the digest we already built.
+    try {
+      await touchSessions(this.aiosPath, sessionIds);
+    } catch {}
     return JSON.stringify({ digest }, null, 2);
   }
 

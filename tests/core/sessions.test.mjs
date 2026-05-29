@@ -521,6 +521,31 @@ test("withIndexLock serializes concurrent writers without losing entries", async
   assert.equal(index.length, N); // every concurrent writer's entry survived
 });
 
+test("withIndexLock: concurrent writers all stealing one dead lock keep every entry", async () => {
+  const aios = tmpAios();
+  // A dead holder's lock that every writer must steal at the same time — the
+  // steal must be atomic so two writers can't both delete it and double-acquire.
+  fs.writeFileSync(path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock"), "2147483647");
+
+  const N = 8;
+  const sessionsUrl = new URL("../../packages/core/src/sessions.mjs", import.meta.url).href;
+  const workerPath = path.join(aios, "worker.mjs");
+  fs.writeFileSync(
+    workerPath,
+    `import { writeSession } from ${JSON.stringify(sessionsUrl)};\n` +
+      `const [aios, id] = process.argv.slice(2);\n` +
+      `await writeSession(aios, { agent: "manual", session_id: id, captured_at: new Date().toISOString(), source_type: "import", project: "p", title: "t " + id, turns: [{ role: "user", content: "hi " + id }] });\n`
+  );
+
+  await Promise.all(
+    Array.from({ length: N }, (_, i) =>
+      execFileAsync(process.execPath, [workerPath, aios, "steal-" + i]))
+  );
+
+  const index = await readSessionIndex(aios);
+  assert.equal(index.length, N);
+});
+
 // ---------- no collision with existing commands ----------
 
 test("sessions dir is separate from vault and memory/signals", () => {

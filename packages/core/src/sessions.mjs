@@ -281,6 +281,20 @@ async function lockIsStealable(lockPath) {
   return Date.now() - st.mtimeMs > LOCK_STALE_MS;
 }
 
+// Atomically remove a stale lock. rename() is atomic: if two processes race to
+// steal the same lock, exactly one wins the rename and the other gets ENOENT —
+// so two stealers can't both delete a fresh lock and double-acquire. Best-effort;
+// any error means another process already moved it, so we just retry the loop.
+async function stealLock(lockPath) {
+  const moved = `${lockPath}.steal.${process.pid}.${Date.now()}`;
+  try {
+    await fs.rename(lockPath, moved);
+  } catch {
+    return; // someone else stole or replaced it first
+  }
+  await fs.rm(moved, { force: true });
+}
+
 // Serialize index mutations across processes so a concurrent append and a full
 // rewrite (touchSessions) can't drop each other's changes. The lock records the
 // holder's PID so a crashed holder is reclaimed immediately; a still-live holder
@@ -292,18 +306,19 @@ async function withIndexLock(aiosPath, fn) {
   const deadline = Date.now() + LOCK_WAIT_MS;
   let handle = null;
   while (!handle) {
+    // Checked every iteration (including after a steal) so the loop is bounded.
+    if (Date.now() > deadline) {
+      throw new Error(`Timed out acquiring the session index lock (${lockPath}); a live process is holding it.`);
+    }
     try {
       handle = await fs.open(lockPath, "wx");
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
       if (await lockIsStealable(lockPath)) {
-        await fs.rm(lockPath, { force: true });
-        continue;
+        await stealLock(lockPath);
+      } else {
+        await delay(50);
       }
-      if (Date.now() > deadline) {
-        throw new Error(`Timed out acquiring the session index lock (${lockPath}); a live process is holding it.`);
-      }
-      await delay(50);
     }
   }
   try {
@@ -311,11 +326,12 @@ async function withIndexLock(aiosPath, fn) {
     return await fn();
   } finally {
     await handle.close().catch(() => {});
-    // Only remove the lock if it's still ours — if a slow run let another process
-    // steal and recreate it, deleting it would drop that process's lock.
     try {
-      const current = await fs.readFile(lockPath, "utf8");
-      if (Number.parseInt(current.trim(), 10) === process.pid) {
+      // Remove the lock only if it is still ours, or empty: open("wx") is
+      // exclusive, so an empty lock can only be one we created but failed to
+      // stamp. Either way it is safe — and necessary — to clean up.
+      const current = (await fs.readFile(lockPath, "utf8")).trim();
+      if (current === "" || Number.parseInt(current, 10) === process.pid) {
         await fs.rm(lockPath, { force: true });
       }
     } catch {}
