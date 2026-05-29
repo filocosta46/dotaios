@@ -401,13 +401,24 @@ MCP tools: \`read_session_digest\` · \`read_context\` · \`list_skills\` · \`s
   await fs.writeFile(filePath, content, "utf8");
 }
 
-async function writeGeminiHookScript(scriptPath, aiosPath) {
-  const content = `#!/usr/bin/env bash
+// Wrap a value in single quotes for safe use as a POSIX shell word. Any embedded
+// single quote is closed, escaped, and reopened ('\''), so no metacharacter in
+// the value (spaces, ", $, ;, backticks) can break out of the quoting. Used for
+// the AIOS path that gets baked into the generated Gemini hook script.
+export function shSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+export function buildGeminiHookScript(aiosPath) {
+  return `#!/usr/bin/env bash
 # DotAIOS context injection for Gemini CLI SessionStart
 # Injects working memory digest as the first context turn.
-npx dotaios brief --compact --json --path "${aiosPath}" 2>/dev/null || echo '{}'
+npx dotaios brief --compact --json --path ${shSingleQuote(aiosPath)} 2>/dev/null || echo '{}'
 `;
-  await fs.writeFile(scriptPath, content, "utf8");
+}
+
+async function writeGeminiHookScript(scriptPath, aiosPath) {
+  await fs.writeFile(scriptPath, buildGeminiHookScript(aiosPath), "utf8");
 }
 
 async function mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath) {
