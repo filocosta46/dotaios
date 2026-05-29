@@ -34,6 +34,10 @@ Options:
     throw new Error("Usage: dotaios install <plugin-path-or-url> [--path <aios-dir>] [--dry-run]");
   }
 
+  // --subdir can come from a remote market registry entry, so it is untrusted:
+  // reject anything that could escape the cloned/resolved source directory.
+  assertSafeSubdir(options.subdir);
+
   let sourcePath;
   let cleanupClone = null;
 
@@ -166,6 +170,19 @@ async function readManifest(manifestPath) {
       throw new Error(`No manifest.json found at ${manifestPath}`);
     }
     throw new Error(`Could not read plugin manifest: ${error.message}`);
+  }
+}
+
+// Reject a --subdir that is absolute or contains ".." segments — it would let
+// an untrusted source (e.g. a market registry entry) escape the source dir and
+// copy arbitrary files into the (potentially GitHub-synced) vault.
+export function assertSafeSubdir(subdir) {
+  if (subdir == null) return;
+  if (path.isAbsolute(subdir)) {
+    throw new Error(`--subdir must be a relative path inside the source, got: ${subdir}`);
+  }
+  if (subdir.split(/[\\/]+/).includes("..")) {
+    throw new Error(`--subdir may not contain ".." path segments: ${subdir}`);
   }
 }
 
