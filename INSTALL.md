@@ -122,14 +122,28 @@ If they give you something:
 
 ---
 
-## Step 5 — Show them what they now have
+## Step 5 — Reflect it back, then show them what they have
 
-Do NOT say "try asking me to plan your day" — the memory may not have enough in
-it yet to do that well.
+First, a short honest recap so the setup *lands* — built only from their three
+answers. Adapt it to their exact words:
 
-Instead, say something like this (adapt it to what they told you):
+> "Quick recap so you know it landed: you're **{name}**, working on **{work}**,
+> and this week is really about **{priority}**. If I had to pick one thing to
+> start on today, it'd be **{one concrete thing pulled from their priority}** —
+> want me to take a first pass at it now?"
 
-> "You're set up. Here's what DotAIOS gives you now:
+Rules for the recap:
+- Use **only** what they told you in the three questions. Invent nothing.
+- Pick **exactly one** concrete thing. If you genuinely can't infer one from
+  their priority, ask *"what's the first step?"* instead of making one up.
+- Do **not** over-promise capability — the memory is still thin. This is a
+  reflection plus one grounded suggestion, not a claim. In particular, do **not**
+  say "try asking me to plan your day"; `/plan-today` works best after a few
+  sessions.
+
+Then show them what they now have (adapt it to what they told you):
+
+> "Here's what DotAIOS gives you now:
 >
 > **Every AI tool on this machine knows who you are.** Claude Code, Cursor,
 > Codex, Gemini — they read your context automatically, with no re-introduction.

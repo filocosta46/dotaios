@@ -93,9 +93,43 @@ export async function interviewCommand(args) {
     source: "dotaios interview"
   });
   console.log("\nDone. Restart your AI tool so it picks up the new context.");
+
+  const recap = renderInterviewRecap({
+    name: sources.currentName,
+    role: answers.role || sources.currentRole,
+    work: answers.work || sources.currentWork,
+    priorities: answers.priorities || sources.currentPriorities
+  });
+  if (recap) console.log(`\n${recap}`);
+
   if (!options.review) {
     console.log("Tip: run `dotaios interview --review` next time to see exactly what will change before saving.");
   }
+}
+
+// A short, honest reflective close for the end of an interview. Reflects only
+// what the user provided and hands the "pick one thing" reasoning to the agent
+// (the CLI can't reason). Returns null when there's nothing meaningful to echo.
+export function renderInterviewRecap({ name, role, work, priorities } = {}) {
+  const firstLine = (value) => String(value || "").split("\n").map((l) => l.trim()).find(Boolean) || "";
+  const cleanName = String(name || "").trim();
+  const cleanRole = firstLine(role);
+  const workLine = firstLine(work);
+  const priorityLine = firstLine(priorities);
+
+  if (!cleanRole && !workLine && !priorityLine) return null;
+
+  // "Here's what I've got: {name}, {role} — working on {work}."
+  const who = [cleanName, cleanRole].filter(Boolean).join(", ");
+  let head = "Here's what I've got:";
+  if (who) head += ` ${who}`;
+  if (workLine) head += `${who ? " — " : " "}working on ${workLine}`;
+  head += ".";
+
+  const lines = [head];
+  if (priorityLine) lines.push(`This week: ${priorityLine}.`);
+  lines.push('Open your AI agent and ask: "Based on my context, what\'s the one thing to focus on today?"');
+  return lines.join("\n");
 }
 
 function parseOptions(args = []) {

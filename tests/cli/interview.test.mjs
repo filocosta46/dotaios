@@ -1,6 +1,42 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildPlan } from "../../packages/cli/src/commands/interview.mjs";
+import { buildPlan, renderInterviewRecap } from "../../packages/cli/src/commands/interview.mjs";
+
+test("renderInterviewRecap reflects name, role, work, priorities and hands off to the agent", () => {
+  const recap = renderInterviewRecap({
+    name: "Filippo",
+    role: "founder",
+    work: "shipping DotAIOS 1.18",
+    priorities: "launch the new website"
+  });
+  assert.match(recap, /Filippo/);
+  assert.match(recap, /founder/);
+  assert.match(recap, /shipping DotAIOS 1\.18/);
+  assert.match(recap, /launch the new website/);
+  assert.match(recap, /what's the one thing to focus on today/i);
+});
+
+test("renderInterviewRecap degrades cleanly when name is missing (no leading comma)", () => {
+  const recap = renderInterviewRecap({ name: "", role: "founder", work: "the site", priorities: "ship it" });
+  assert.doesNotMatch(recap, /:\s*,/); // no "Here's what I've got: , founder"
+  assert.match(recap, /founder/);
+});
+
+test("renderInterviewRecap returns null when there is nothing to reflect", () => {
+  assert.equal(renderInterviewRecap({ name: "", role: "", work: "", priorities: "" }), null);
+});
+
+test("renderInterviewRecap uses only the first line of multi-line work and priorities", () => {
+  const recap = renderInterviewRecap({
+    name: "A",
+    role: "x",
+    work: "first work line\nsecond line should not appear",
+    priorities: "first priority line\nsecond priority should not appear"
+  });
+  assert.match(recap, /first work line/);
+  assert.doesNotMatch(recap, /second line should not appear/);
+  assert.doesNotMatch(recap, /second priority should not appear/);
+});
 
 function makeSources({ withPreferences = false, installedSkills = [] } = {}) {
   const sources = {
