@@ -111,6 +111,20 @@ test("searchMarkdownDir skips hidden and secret-like files", async () => {
   assert.deepEqual(results.map((result) => result.file), ["visible.md"]);
 });
 
+test("searchMarkdownDir returns correct results across many files (batched reads)", async () => {
+  const dir = tmpDir();
+  // More files than the internal read-concurrency batch to exercise batching.
+  for (let i = 0; i < 80; i += 1) {
+    const body = i % 2 === 0 ? "alpha beta together" : "nothing relevant here";
+    fs.writeFileSync(path.join(dir, `note-${String(i).padStart(2, "0")}.md`), `# Note ${i}\n\n${body}\n`);
+  }
+
+  const results = await searchMarkdownDir(dir, "alpha beta", { sourcePrefix: "vault", limit: 100 });
+  assert.equal(results.length, 40); // every even-indexed file matched
+  // Deterministic tie-break by filename despite concurrent reads.
+  assert.deepEqual(results.slice(0, 3).map((r) => r.file), ["note-00.md", "note-02.md", "note-04.md"]);
+});
+
 test("searchJsonlEntries skips corrupt lines instead of throwing", async () => {
   const dir = tmpDir();
   const filePath = path.join(dir, "events.jsonl");

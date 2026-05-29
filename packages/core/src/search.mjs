@@ -25,12 +25,14 @@ export async function searchAios({
     ? ["sessions", "context", "memory", "vault", "projects", "skills", "references", "plugins"]
     : [scope];
 
-  const groups = [];
-  for (const name of scopes) {
-    const results = await searchScope(name, { aiosPath, vaultPath, query, limit, sessionFilters });
-    groups.push({ scope: name, results });
-  }
-  return groups;
+  // Scopes are independent; run them concurrently. Promise.all preserves input
+  // order, so the returned groups stay in the same order as before.
+  return Promise.all(
+    scopes.map(async (name) => ({
+      scope: name,
+      results: await searchScope(name, { aiosPath, vaultPath, query, limit, sessionFilters })
+    }))
+  );
 }
 
 async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_LIMIT, sessionFilters = {} }) {
@@ -142,37 +144,50 @@ export async function searchMarkdownDir(dir, query, {
   const files = await listSearchFiles(dir, { extensions, includeFile });
   const results = [];
 
-  for (const filePath of files) {
-    let content;
-    try {
-      content = await fs.readFile(filePath, "utf8");
-    } catch (err) {
-      console.warn(`[dotaios] Warning: Could not read file ${filePath} (${err.message})`);
-      continue;
+  // Read and score files concurrently in bounded batches — I/O is the bottleneck,
+  // and a cap keeps us well under the open-file limit on large vaults. The final
+  // sort below makes the result order independent of read order.
+  const CONCURRENCY = 32;
+  for (let i = 0; i < files.length; i += CONCURRENCY) {
+    const batch = await Promise.all(
+      files.slice(i, i + CONCURRENCY).map((filePath) => scoreSearchFile(filePath, dir, query, sourcePrefix))
+    );
+    for (const result of batch) {
+      if (result) results.push(result);
     }
-
-    const snippets = buildMarkdownSnippets(content, query);
-    if (snippets.length === 0) continue;
-
-    const relative = path.relative(dir, filePath);
-    const title = readTitle(content) || relative;
-    const pathMatch = matchQuery(relative, query);
-    const titleMatch = matchQuery(title, query);
-    const score = scoreMarkdownResult({ snippets, pathMatch, titleMatch });
-
-    results.push({
-      source: `${sourcePrefix}/${relative}`,
-      file: relative,
-      title,
-      matches: snippets.slice(0, 5),
-      score
-    });
   }
 
   return results
     .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
     .slice(0, limit)
     .map(({ score, ...result }) => result);
+}
+
+async function scoreSearchFile(filePath, dir, query, sourcePrefix) {
+  let content;
+  try {
+    content = await fs.readFile(filePath, "utf8");
+  } catch (err) {
+    console.warn(`[dotaios] Warning: Could not read file ${filePath} (${err.message})`);
+    return null;
+  }
+
+  const snippets = buildMarkdownSnippets(content, query);
+  if (snippets.length === 0) return null;
+
+  const relative = path.relative(dir, filePath);
+  const title = readTitle(content) || relative;
+  const pathMatch = matchQuery(relative, query);
+  const titleMatch = matchQuery(title, query);
+  const score = scoreMarkdownResult({ snippets, pathMatch, titleMatch });
+
+  return {
+    source: `${sourcePrefix}/${relative}`,
+    file: relative,
+    title,
+    matches: snippets.slice(0, 5),
+    score
+  };
 }
 
 export function buildMarkdownSnippets(content, query, { contextLines = 1 } = {}) {
