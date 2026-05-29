@@ -46,3 +46,10 @@
 
 ## Progress log
 - 2026-05-29 — Wave 0 complete. Baseline green restored (`cb2fcb2`). Dispatching Wave 1 audits.
+- 2026-05-29 — Wave 1 complete. 7 audit reports in `docs/overnight/audit/`. Wave 2 backlog synthesized (`BACKLOG.md`).
+- 2026-05-29 — Wave 3 complete. Landed B1–B13 (each TDD, green + smoke per commit):
+  - B1 search tolerant JSONL (`d934351`), B3 Gemini hook shell-escape (`9314cc9`), B2 connect malformed-JSON guard test (`1c3ad02`), B4 install --subdir traversal guard (`37edbb6`), B5 withIndexLock PID-aware/no-unlocked (`4f5dc6f`), B7 MCP no client gws binary (`d7337db`), B6 search parallel reads (`4ca88b7`), B8–B10 docs (`04b680a`), B11–B13 packaging (`44bef73`).
+- 2026-05-29 — Wave 4 complete. CLAUDE.md (`65e1133`); CI-all-branches + pre-push hook + release checklist + slash commands (`a1cf12d`); audit reports committed (`29ff521`).
+- 2026-05-29 — Wave 5 website. Rebuilt as fast static site (`370953e`); then restyled dark Silicon-Valley aesthetic per founder request (`762567f`); wrote handoff design prompt (`dd3f169`). Preview deploy NOT done — Vercel CLI absent + founder opted to bring a Claude-design version to wire in. QA'd in-browser (Playwright).
+- 2026-05-29 — Wave 6. Ran code-review + security-review on the delta (2 parallel agents). Security fixes confirmed solid. Fixed 4 real self-review findings in the new lock + digest (`4e2524f`): atomic rename-steal (P1 double-acquire), per-iteration deadline, empty-lock release, best-effort digest touch. 5 pre-existing security items → BACKLOG. Final: 376 pass / 1 skip, smoke green. Wrote `REPORT.md`.
+- DONE (pending founder): website direction + the ship steps in REPORT.md. Branch left green for review.

@@ -39,6 +39,16 @@ Legend: ✅ = build this run · ⏭ = deferred (listed for human) · ❌ = dropp
 | D5 | P2-P3 | Remaining P2/P3 docs polish (dead links, cross-doc consistency) — see `04-docs-icp.md`. | Lower leverage; batch later. |
 | D6 | P3/S | `scripts/release-checklist.mjs` helper. | Nice-to-have; add in Wave 4 if time. |
 
+## ⏭ Pre-existing security items (found by the branch self-review; NOT introduced here)
+These were surfaced reviewing the delta but live in code this branch didn't change, so they're left for a follow-up rather than scope-creeping the hardening branch. All are low-to-moderate and assume a prompt-injected local agent.
+| ID | Sev/Eff | Item | File | Fix sketch |
+|----|---------|------|------|-----------|
+| S1 | P2/S | MCP `google_calendar_agenda` pushes raw `args.calendar` after `--calendar`; a value like `--foo` could be option-confused by `gws` (argv injection; no shell). | `mcp/src/server.mjs` (calendar push) | Reject a `calendar` value starting with `-`. |
+| S2 | P2/S | MCP `read_context` blocks `..` but follows a symlink inside `context/` out of the folder. | `mcp/src/server.mjs` `safeRelativePath`/readContext | After resolve, assert path stays under `contextDir`. |
+| S3 | P3/S | `log_event` caps `data` (10 KB) but not `type`/`summary`/`project`/`domain`/`source`. | `mcp/src/server.mjs` logEvent | Cap those fields (~2 KB). |
+| S4 | P3/S | `writeOpenCodeSkillStubs` interpolates `entry.name`/`aiosPath` into stub markdown unsanitized (local markdown prompt-injection via a malicious skill dir name). | `cli/src/commands/connect.mjs` | Strip backticks/newlines from `entry.name`. |
+| S5 | P3/S | `assertSafeSubdir` is string-based; add defense-in-depth resolved-path containment check. | `cli/src/commands/install.mjs` | After join, assert resolved path starts with the source root. |
+
 ## ❌ Dropped (guardrail / ICP / scope)
 - Any semantic/vector/embedding search — explicitly out of scope (KISS + ICP). 
 - Index daemon / background watcher for search — owned-infra-ish, over-engineered for personal scale.
