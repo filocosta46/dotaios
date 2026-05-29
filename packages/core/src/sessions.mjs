@@ -247,36 +247,78 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// How long a held lock can sit (by mtime) before we assume the holder is wedged
+// and reclaim it. Index mutations are sub-second, so this is a generous backstop
+// for a holder whose liveness we cannot otherwise determine.
+const LOCK_STALE_MS = 15000;
+// Hard ceiling on how long we wait for a live holder before giving up. Reaching
+// it means a real process held the lock continuously — we error rather than run
+// fn() unlocked, which would defeat the lock and corrupt the index.
+const LOCK_WAIT_MS = 30000;
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err.code === "EPERM"; // exists but owned by another user
+  }
+}
+
+// A lock is stealable if the PID written in it is no longer alive, or — as a
+// backstop for an unreadable/legacy lock — if it is older than LOCK_STALE_MS.
+async function lockIsStealable(lockPath) {
+  let st;
+  let raw;
+  try {
+    [st, raw] = await Promise.all([fs.stat(lockPath), fs.readFile(lockPath, "utf8")]);
+  } catch {
+    return false; // lock vanished; let the open() retry win the race
+  }
+  const pid = Number.parseInt(raw.trim(), 10);
+  if (Number.isInteger(pid) && pid > 0) return !pidAlive(pid);
+  return Date.now() - st.mtimeMs > LOCK_STALE_MS;
+}
+
 // Serialize index mutations across processes so a concurrent append and a full
-// rewrite (touchSessions) can't drop each other's changes. Best-effort: never
-// hangs the CLI, and takes over a lock left by a dead process.
+// rewrite (touchSessions) can't drop each other's changes. The lock records the
+// holder's PID so a crashed holder is reclaimed immediately; a still-live holder
+// is waited on (never overrun). Bounded by LOCK_WAIT_MS so the CLI never hangs.
 async function withIndexLock(aiosPath, fn) {
   const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
   await fs.mkdir(path.dirname(indexPath), { recursive: true });
   const lockPath = `${indexPath}.lock`;
-  const deadline = Date.now() + 5000;
+  const deadline = Date.now() + LOCK_WAIT_MS;
   let handle = null;
   while (!handle) {
     try {
       handle = await fs.open(lockPath, "wx");
     } catch (err) {
       if (err.code !== "EEXIST") throw err;
-      try {
-        const st = await fs.stat(lockPath);
-        if (Date.now() - st.mtimeMs > 10000) {
-          await fs.rm(lockPath, { force: true }); // stale lock from a dead process
-          continue;
-        }
-      } catch {}
-      if (Date.now() > deadline) return fn(); // give up waiting; proceed best-effort
+      if (await lockIsStealable(lockPath)) {
+        await fs.rm(lockPath, { force: true });
+        continue;
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`Timed out acquiring the session index lock (${lockPath}); a live process is holding it.`);
+      }
       await delay(50);
     }
   }
   try {
+    await handle.write(String(process.pid));
     return await fn();
   } finally {
-    await handle.close();
-    await fs.rm(lockPath, { force: true });
+    await handle.close().catch(() => {});
+    // Only remove the lock if it's still ours — if a slow run let another process
+    // steal and recreate it, deleting it would drop that process's lock.
+    try {
+      const current = await fs.readFile(lockPath, "utf8");
+      if (Number.parseInt(current.trim(), 10) === process.pid) {
+        await fs.rm(lockPath, { force: true });
+      }
+    } catch {}
   }
 }
 

@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 import {
   generateSessionId,
@@ -19,6 +21,8 @@ import {
   deleteSession,
   SESSIONS_SUBDIR,
 } from "../../packages/core/src/sessions.mjs";
+
+const execFileAsync = promisify(execFile);
 
 import { parseRawText } from "../../packages/cli/src/adapters/manual.mjs";
 import { parseTranscript } from "../../packages/cli/src/adapters/claude-code.mjs";
@@ -464,6 +468,57 @@ test("parseTranscript extracts session_id from source file UUID", () => {
     sourcePath: "/Users/filo/.claude/projects/-Users-filo-Brain/a1b2c3d4-0000-0000-0000-000000000000.jsonl",
   });
   assert.equal(session.session_id, "a1b2c3d4");
+});
+
+// ---------- index lock robustness ----------
+
+test("withIndexLock steals a lock held by a dead process and cleans it up", async () => {
+  const aios = tmpAios();
+  const lockPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock");
+  // A lock left by a process that no longer exists, with a *fresh* mtime, so it
+  // can only be reclaimed via a PID liveness check — not the mtime backstop.
+  fs.writeFileSync(lockPath, "2147483647");
+
+  await writeSession(aios, makeSession({ session_id: "ghost-steal" }));
+
+  const index = await readSessionIndex(aios);
+  assert.equal(index.some((e) => e.session_id === "ghost-steal"), true);
+  assert.equal(fs.existsSync(lockPath), false); // stolen and released, not left behind
+});
+
+test("withIndexLock reclaims a stale lock with an old mtime", async () => {
+  const aios = tmpAios();
+  const lockPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock");
+  fs.writeFileSync(lockPath, "not-a-pid");
+  const old = (Date.now() - 60_000) / 1000;
+  fs.utimesSync(lockPath, old, old);
+
+  await writeSession(aios, makeSession({ session_id: "stale-mtime" }));
+
+  const index = await readSessionIndex(aios);
+  assert.equal(index.some((e) => e.session_id === "stale-mtime"), true);
+  assert.equal(fs.existsSync(lockPath), false);
+});
+
+test("withIndexLock serializes concurrent writers without losing entries", async () => {
+  const aios = tmpAios();
+  const N = 10;
+  const sessionsUrl = new URL("../../packages/core/src/sessions.mjs", import.meta.url).href;
+  const workerPath = path.join(aios, "worker.mjs");
+  fs.writeFileSync(
+    workerPath,
+    `import { writeSession } from ${JSON.stringify(sessionsUrl)};\n` +
+      `const [aios, id] = process.argv.slice(2);\n` +
+      `await writeSession(aios, { agent: "manual", session_id: id, captured_at: new Date().toISOString(), source_type: "import", project: "p", title: "t " + id, turns: [{ role: "user", content: "hello " + id }] });\n`
+  );
+
+  await Promise.all(
+    Array.from({ length: N }, (_, i) =>
+      execFileAsync(process.execPath, [workerPath, aios, "sess-" + i]))
+  );
+
+  const index = await readSessionIndex(aios);
+  assert.equal(index.length, N); // every concurrent writer's entry survived
 });
 
 // ---------- no collision with existing commands ----------
