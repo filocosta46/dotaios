@@ -53,4 +53,12 @@ After the doc fixes landed (`4e9de73`), a real subagent was dropped into a fresh
 - **Final state:** `npx -y dotaios init --yes` created `aios.json` + 43 files; `npx -y dotaios activate` linked 11 skills (no tools detected in the throwaway HOME); the Step 4 edit targets (`identity.md` `## Basics`/Name/Role, `work.md` `## Current Work`, `priorities.md` `## Current Bets`) all present.
 - Only cosmetic note: nvm printed "Profile not found" because the sandbox HOME had no shell rc file — irrelevant since the guide's explicit `. nvm.sh` loads it in-session; a real Mac account has a `~/.zshrc`.
 
-**Install-success signal: PASS.** A capable agent completes the technical install (Node → init → activate) unattended and reaches the intended human gate with zero stalls or guesses. (Caveat: a strong model was used — the optimistic/realistic-ICP case; a weaker agent could still fumble interpretation.)
+**Install-success signal: PASS.** A capable agent completes the technical install (Node → init → activate) unattended and reaches the intended human gate with zero stalls or guesses.
+
+## Caveats on record (the PASS is conditional)
+1. **Strong-model / optimistic case.** The agent-in-the-loop run used a strong model — the realistic-ICP but optimistic case. A weaker agent could still misread a step (e.g. pick the wrong OS branch, or not recover from an unexpected error). The number is "a capable agent succeeds," not "any agent succeeds."
+2. **Ran against the published package.** The run used `npx -y dotaios` (published 1.17.0), not the local branch build. `init`/`activate` are unchanged on the branch, so the behavior is equivalent — but this was not a test of the exact branch artifacts end to end.
+
+## Before public launch (not done yet — harden the number)
+- A **true bare-OS run** (Docker / fresh VM with no Node and no host bleed-through), to remove the "clean `$HOME` + host tooling" asterisk.
+- A **weaker-agent sample** (run the same loop with a smaller model) to bound the pessimistic case, so the install-success claim isn't only the strong-model number.
