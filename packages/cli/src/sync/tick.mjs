@@ -2,6 +2,25 @@ import fs from "node:fs/promises";
 
 const MIN_TICK_GAP_MS = 10_000;
 const STALE_LOCK_MS = 5 * 60 * 1000;
+const LOCK_RETRY_MS = 50;
+const LOCK_WAIT_MS = 5_000;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Atomically remove a stale lock. rename() is exclusive: if two stealers race,
+// exactly one wins the rename and the other gets ENOENT.
+async function stealLockFile(lockPath) {
+  const moved = `${lockPath}.steal.${process.pid}.${Date.now()}`;
+  try {
+    await fs.rename(lockPath, moved);
+  } catch {
+    return false;
+  }
+  await fs.rm(moved, { force: true });
+  return true;
+}
 
 /**
  * Acquire an exclusive lock file. Returns true if acquired, false if a fresh
@@ -9,7 +28,8 @@ const STALE_LOCK_MS = 5 * 60 * 1000;
  * as abandoned (crashed process) and stolen.
  */
 export async function acquireLock(lockPath, { now = () => Date.now(), staleMs = STALE_LOCK_MS } = {}) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const deadline = Date.now() + LOCK_WAIT_MS;
+  while (Date.now() <= deadline) {
     try {
       const fh = await fs.open(lockPath, "wx"); // exclusive create — fails if exists
       await fh.writeFile(JSON.stringify({ pid: process.pid, at: now() }));
@@ -28,8 +48,8 @@ export async function acquireLock(lockPath, { now = () => Date.now(), staleMs = 
         stale = true;
       }
       if (!stale) return false;
-      // steal: remove and retry the exclusive create once more
-      await fs.rm(lockPath, { force: true });
+      const stole = await stealLockFile(lockPath);
+      if (!stole) await delay(LOCK_RETRY_MS);
     }
   }
   return false;
