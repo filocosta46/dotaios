@@ -68,8 +68,6 @@ Commands:
   mcp <cmd>         Print local MCP server status and client config
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
-  pilot-score       Record one pilot scoring sample
-  pilot-report      Print pilot rollup + ship decision
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins
   skill <cmd>       Add, list, or remove skills (friendly alias for install)
   skills [name]     List installed skills or show full instructions for one skill

@@ -30,8 +30,8 @@ tests/
   fixtures/            # Static test fixtures
 templates/  # Templates rendered during `dotaios init` / `dotaios activate`
 skills/     # Bundled skill markdown (shipped inside the npm package)
-docs/       # Architecture, user docs, docs/overnight/ audit reports
-website/    # Static marketing site (index.html + React UMD + Babel, no bundler)
+docs/       # Architecture and user docs
+website/    # Static marketing site (index.html + styles.css, no bundler)
 ```
 
 ## Hard rules (never violate)
@@ -81,8 +81,7 @@ Notable CLI commands: `connect.mjs` (Gemini SessionStart hook + OpenCode MCP + G
 `cleanup.isoDate()` still use **UTC** (`toISOString().slice(0,10)`). Near local
 midnight they disagree by a day. For anything that must match where signals/notes
 are actually written, use `memory.isoDate(new Date())` — never
-`new Date().toISOString().slice(0,10)`. (Unifying these is a tracked backlog item
-in `docs/overnight/BACKLOG.md`.)
+`new Date().toISOString().slice(0,10)`. (Unifying these is a known cleanup item.)
 
 ### Sessions index lock
 `withIndexLock()` (`sessions.mjs`) records the holder PID in the lock file. A
