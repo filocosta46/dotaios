@@ -19,6 +19,9 @@ friendly conversation, then explain what they now have.
 Run every command yourself. Do not ask the user to open a terminal or paste
 commands.
 
+**Prerequisite:** you need file-editing tools (Claude Code, Cursor, Codex, and
+Gemini CLI all qualify) — Step 4 edits the user's context files for them.
+
 ---
 
 ## Step 1 — Make sure Node.js 20+ is available
@@ -33,16 +36,24 @@ node --version
   then re-check. Do not send the user to a download page unless automated install
   is impossible.
   - **macOS** with Homebrew (`brew --version` succeeds): `brew install node`
-  - **macOS** without Homebrew: install nvm, then Node —
+  - **macOS** without Homebrew: install nvm, then load it **in this same shell**
+    (do not "open a new shell" — that doesn't work when you are driving one session):
     `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash`
-    then open a new shell and run `nvm install --lts`
+    then `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install --lts`
   - **Windows**: `winget install OpenJS.NodeJS.LTS`
   - **Linux**:
     `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash`
     then `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install --lts`
-- Only if every automated path fails: tell the user *"I need Node.js to continue.
-  Please install the LTS version from nodejs.org, then tell me when it's done."*
-  and wait for them to confirm.
+- Only if every automated path fails: hand off to the user with exact,
+  click-by-click steps (do not just say "install Node"):
+  > "I need Node.js to continue — it's a free, safe install, about 2 minutes:
+  > 1. Open **https://nodejs.org** in your browser.
+  > 2. Click the big green **LTS** button to download the installer.
+  > 3. Open the downloaded file and click **Continue / Next / Agree** through the
+  >    default options until it says it's finished.
+  > 4. Tell me **done** and I'll take it from here."
+
+  Wait for them to confirm, then re-run `node --version`.
 
 After installing, run `node --version` again and confirm it reports `v20.x.x` or
 higher before continuing.
@@ -53,10 +64,11 @@ higher before continuing.
 
 Run:
 ```
-npx dotaios init --yes
+npx -y dotaios init --yes
 ```
 
-This scaffolds `~/aios/` with placeholder context files. It takes about 30
+(The `-y` answers npx's first-run "Ok to proceed?" prompt for you, so it never
+stalls waiting on you.) This scaffolds `~/aios/` with placeholder context files. It takes about 30
 seconds. Wait for it to finish. Say nothing to the user while it runs.
 
 Do **not** run `npx dotaios setup`. That command is the interactive path for a
@@ -69,7 +81,7 @@ with the interview done by you in Step 4.
 
 Run:
 ```
-npx dotaios activate
+npx -y dotaios activate
 ```
 
 This writes small bridge files so Claude Code, Codex, Gemini, and other tools
