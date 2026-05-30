@@ -2,6 +2,23 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.18.0] - 2026-05-30
+### Added
+- Onboarding now ends with a short, honest reflective recap — your name, what you're working on, this week's priority, and one concrete thing to start today — instead of just listing features. Applies to the agent-led `INSTALL.md` flow and to `dotaios interview`.
+
+### Fixed
+- Search tolerates a corrupt line in a JSONL memory file instead of crashing — this also protects the session digest and the agent SessionStart hook that inject your working context.
+- `connect gemini` shell-escapes the AIOS path in the generated hook script (no command execution via an unusual path).
+- `install --subdir` rejects path traversal (`..` / absolute) from an untrusted plugin or marketplace entry.
+- The MCP server never executes a client-supplied `gws` binary — it is resolved only from `DOTAIOS_GWS_BIN` or `PATH`.
+- The session index lock is now crash-safe: it records the holder's PID, reclaims a crashed holder's lock, and never runs unlocked. Index entries are appended atomically, so concurrent captures can't drop an entry.
+
+### Changed
+- Search reads and scores files concurrently — faster on large vaults, with identical results.
+
+### Docs
+- Backfilled the missing `[1.15.0]` changelog entry; documented `read_session_digest` and the `connect` SessionStart hook; made the cold-start install steps followable on a fresh machine (single-shell Node install, the `npx` first-run prompt, a beginner-followable fallback); added a repo `CLAUDE.md`.
+
 ## [1.17.0] - 2026-05-28
 ### Added
 - **Cross-agent context continuity.** `read_session_digest` MCP tool and `dotaios brief --compact` produce a compact working-memory digest (today's focus, carry-overs, recent signals, recent sessions) so any agent can get up to speed at session start without loading everything.
