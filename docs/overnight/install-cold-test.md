@@ -41,3 +41,16 @@
 
 ## What this does NOT tell us
 A real LLM agent was not in the loop — I followed the text literally as a stand-in. The remaining unknown is whether a given agent *interprets* the prose correctly (e.g., reads `node --version` output and picks the right OS branch). The literal-follow surfaced the structural traps above; an agent-in-the-loop run would confirm interpretation quality.
+
+## Agent-in-the-loop run — against the FIXED INSTALL.md (2026-05-30)
+
+After the doc fixes landed (`4e9de73`), a real subagent was dropped into a fresh throwaway `$HOME` with a **node-less, brew-less PATH** (so it was forced to do Step 1 and routed to the macOS-without-Homebrew branch — the one that was just fixed) and told to follow `INSTALL.md` literally, stopping at the Step 4 interview.
+
+**Result:**
+- **Reached the Step 4 interview unattended? YES.** Steps 1–3 ran end-to-end with no human input; it stopped at the 3-question gate without fabricating answers.
+- **Stalls / guesses / deviations: NONE.** Every command came straight from the literal text.
+- **The fixed macOS-without-Homebrew Node path worked verbatim in a single shell:** `brew --version` failed → no-brew branch → `curl … | bash` then `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install --lts` produced a working `node` v24.16.0 + `npx`. The literal-pass trap (#1) is resolved — no "open a new shell" deviation was needed.
+- **Final state:** `npx -y dotaios init --yes` created `aios.json` + 43 files; `npx -y dotaios activate` linked 11 skills (no tools detected in the throwaway HOME); the Step 4 edit targets (`identity.md` `## Basics`/Name/Role, `work.md` `## Current Work`, `priorities.md` `## Current Bets`) all present.
+- Only cosmetic note: nvm printed "Profile not found" because the sandbox HOME had no shell rc file — irrelevant since the guide's explicit `. nvm.sh` loads it in-session; a real Mac account has a `~/.zshrc`.
+
+**Install-success signal: PASS.** A capable agent completes the technical install (Node → init → activate) unattended and reaches the intended human gate with zero stalls or guesses. (Caveat: a strong model was used — the optimistic/realistic-ICP case; a weaker agent could still fumble interpretation.)
