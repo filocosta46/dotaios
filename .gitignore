@@ -12,6 +12,9 @@ token.*
 *.pem
 *.key
 
+# Internal strategy/handoff docs — not for the public repo
+docs/handoff/
+
 # Runtime output from local AIOS installs (visible folder or legacy dotfile)
 aios/
 .aios/
