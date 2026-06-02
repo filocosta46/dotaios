@@ -9,13 +9,24 @@ import {
   isShelf,
   isDurableShelf,
   shelfNeedsName,
-  shelfMarkdownPath
+  shelfMarkdownPath,
+  todayStamp
 } from "../../packages/cli/src/ingest/placement.mjs";
 import { ingestUrl } from "../../packages/cli/src/ingest/web.mjs";
 import { isoDate } from "../../packages/core/src/memory.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+
+test("todayStamp uses the canonical LOCAL isoDate, not UTC", () => {
+  // 00:30 local: in any timezone ahead of UTC this instant is the PREVIOUS day
+  // in UTC, so a toISOString()-based stamp returns the wrong calendar day. The
+  // stamp must match where signals are actually written (memory.isoDate, local).
+  // (On a host whose local time is UTC the two coincide; this still locks intent.)
+  const nearMidnight = new Date(2026, 0, 15, 0, 30, 0);
+  assert.equal(todayStamp(() => nearMidnight), isoDate(nearMidnight));
+  assert.equal(todayStamp(() => nearMidnight), "2026-01-15");
+});
 
 test("placement helpers describe the shelf set", () => {
   assert.deepEqual(SHELVES, ["raw", "wiki", "company", "person", "signal"]);

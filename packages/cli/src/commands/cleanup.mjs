@@ -1,6 +1,6 @@
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { compactEvents, trimSignals, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS } from "../../../core/src/memory.mjs";
+import { compactEvents, trimSignals, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 export async function cleanupCommand(args) {
@@ -98,8 +98,4 @@ Options:
 function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   return `${(bytes / 1024).toFixed(1)} KB`;
-}
-
-function isoDate(date) {
-  return date.toISOString().slice(0, 10);
 }

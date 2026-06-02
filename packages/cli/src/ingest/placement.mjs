@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { appendEvent, appendSignal } from "../../../core/src/memory.mjs";
+import { appendEvent, appendSignal, isoDate } from "../../../core/src/memory.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { resolveMarkdownDestination } from "./destinations.mjs";
 import { slugify } from "./frontmatter.mjs";
@@ -64,8 +64,8 @@ export function describeShelfTarget({ shelf, vaultRoot, rawDir, signalsDir, name
   return shelfMarkdownPath({ shelf, vaultRoot, slug: shelfSlug({ shelf, name, baseSlug }) });
 }
 
-function todayStamp(now = () => new Date()) {
-  return now().toISOString().slice(0, 10);
+export function todayStamp(now = () => new Date()) {
+  return isoDate(now());
 }
 
 function ensureTrailingNewline(body) {
