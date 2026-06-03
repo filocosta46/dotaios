@@ -2,6 +2,14 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.19.0] - 2026-06-03
+### Added
+- Skill resolver. Skills now declare `triggers:` (the phrases a user would naturally say) in their `SKILL.md` frontmatter, and DotAIOS auto-generates `skills/RESOLVER.md` — a routing table that maps intent to the skill that handles it. Connected agents match a request against the resolver instead of guessing from descriptions, so the right skill fires even when you don't know which skill you have. All bundled skills ship with triggers.
+- `skillify` skill. Turn a workflow you keep repeating into a reusable skill: it drafts the skill (with trigger phrases) and saves it only after you approve. No evals, no auto-save, plain markdown.
+
+### Fixed
+- Date helpers unified on local time. Ingest signal placement and `cleanup`'s dry-run cutoff computed the day in UTC while signals are written under local dates, so near local midnight they could name a different day-file than where data actually lives. Both now use the canonical local `isoDate`.
+
 ## [1.18.0] - 2026-05-30
 ### Added
 - Onboarding now ends with a short, honest reflective recap — your name, what you're working on, this week's priority, and one concrete thing to start today — instead of just listing features. Applies to the agent-led `INSTALL.md` flow and to `dotaios interview`.
