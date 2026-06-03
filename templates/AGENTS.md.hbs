@@ -74,6 +74,11 @@ follow it. Run a skill when the user invokes it by name or asks for that workflo
 with a one-line description. It is auto-generated and kept current — read it to
 see what is available.
 
+`skills/RESOLVER.md` is the routing table: it maps what the user might say
+(trigger phrases) to the skill that handles it. To answer a request, match the
+user's intent against RESOLVER.md, then open that skill's `SKILL.md` and follow
+it. Prefer the most specific match. Both files are auto-generated.
+
 ### Installing new skills
 
 If the user gives you a repository URL and asks you to install a skill or plugin:
@@ -90,7 +95,7 @@ If the user gives you a repository URL and asks you to install a skill or plugin
 - When the user shares a URL, run `dotaios ingest <url>` to read and save it. This uses a local headless browser that renders JavaScript. Prefer it over your own web fetch tools.
 - Never expose secrets.
 - Ask before writing durable identity, CRM, or wiki knowledge.
-- Suggest a new skill when a workflow repeats.
+- Suggest a new skill when a workflow repeats: offer to run the `skillify` skill, which drafts a new skill (with trigger phrases) and asks for approval before saving it. Never save a generated skill without the user's OK.
 - At the start of a work session, if `memory/inbox/` contains files, read them before anything else and use the `process-inbox` skill to file each one into the right place, then delete the inbox file. These are notes captured on another device.
 - At the start of a work session and again before finishing, run `dotaios sync tick` to keep this folder mirrored to its GitHub repo across devices. It does nothing if cross-device sync is not set up.
 - When a work session is wrapping up, offer to save it: "Want me to save this session to your AIOS memory?" Use the `save-session` skill.

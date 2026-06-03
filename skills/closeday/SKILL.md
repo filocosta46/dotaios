@@ -1,5 +1,6 @@
 ---
 name: closeday
+triggers: close the day, wrap up today, end of day, log what I shipped, close out my daily note
 description: Close out today's daily note — log what shipped, carry tasks over, and write one reflection. Use when the user is done for the day or asks to close the day.
 ---
 

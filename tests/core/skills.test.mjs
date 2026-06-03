@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { collectSkills, renderSkillsIndex, writeSkillsIndex } from "../../packages/core/src/skills.mjs";
+import { collectSkills, renderSkillsIndex, renderResolver, writeSkillsIndex } from "../../packages/core/src/skills.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 
@@ -58,6 +58,49 @@ test("writeSkillsIndex writes skills/INDEX.md from the skills on disk", async ()
   assert.match(written, /## audit/);
 });
 
+test("collectSkills parses comma-separated triggers, empty when absent", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-"));
+  const skillsDir = path.join(root, "skills");
+  fs.mkdirSync(path.join(skillsDir, "plan"), { recursive: true });
+  fs.writeFileSync(
+    path.join(skillsDir, "plan", "SKILL.md"),
+    "---\nname: plan-today\ndescription: Plan the day.\ntriggers: plan my day, what should I work on, structure today\n---\n"
+  );
+  makeSkill(skillsDir, "audit", "audit", "Health check.");
+
+  const skills = await collectSkills(root);
+  const plan = skills.find((s) => s.dir === "plan");
+  const audit = skills.find((s) => s.dir === "audit");
+  assert.deepEqual(plan.triggers, ["plan my day", "what should I work on", "structure today"]);
+  assert.deepEqual(audit.triggers, []);
+});
+
+test("renderResolver builds a trigger->skill table and falls back to description", () => {
+  const md = renderResolver([
+    { dir: "plan", name: "plan-today", description: "Plan the day.", triggers: ["plan my day", "what should I work on"] },
+    { dir: "audit", name: "audit", description: "Weekly health check.", triggers: [] }
+  ]);
+  assert.match(md, /# Skill Resolver/);
+  assert.match(md, /plan my day · what should I work on/);
+  assert.match(md, /skills\/plan\/SKILL\.md/);
+  assert.match(md, /Weekly health check\./); // description fallback for a no-trigger skill
+});
+
+test("renderResolver handles an empty skill set", () => {
+  assert.match(renderResolver([]), /No skills installed yet/);
+});
+
+test("writeSkillsIndex also writes skills/RESOLVER.md", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-"));
+  makeSkill(path.join(root, "skills"), "audit", "audit", "Health check.");
+
+  await writeSkillsIndex(root);
+
+  const resolver = fs.readFileSync(path.join(root, "skills", "RESOLVER.md"), "utf8");
+  assert.match(resolver, /# Skill Resolver/);
+  assert.match(resolver, /skills\/audit\/SKILL\.md/);
+});
+
 test("bundled save-session skill is shipped and has digest instructions", () => {
   const skillPath = path.join(repoRoot, "skills", "save-session", "SKILL.md");
   const content = fs.readFileSync(skillPath, "utf8");
@@ -69,4 +112,11 @@ test("bundled save-session skill is shipped and has digest instructions", () => 
   assert.match(content, /<!-- digest:start -->/);
   assert.match(content, /<!-- digest:end -->/);
   assert.match(content, /index\.jsonl/);
+});
+
+test("bundled skillify skill ships with trigger phrases and an approval gate", () => {
+  const content = fs.readFileSync(path.join(repoRoot, "skills", "skillify", "SKILL.md"), "utf8");
+  assert.match(content, /^---\nname: skillify\n/m);
+  assert.match(content, /^triggers:/m);
+  assert.match(content, /approve|approval|ask before saving/i);
 });

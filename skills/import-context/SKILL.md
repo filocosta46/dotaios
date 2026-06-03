@@ -1,5 +1,6 @@
 ---
 name: import-context
+triggers: import this chat, bring in context from chatgpt, save this conversation context, route pasted context
 description: Route context pasted from another AI chat (ChatGPT, Claude, Gemini, Cursor) into the right DotAIOS files. Use when the user pastes prior conversation knowledge or asks to bring old AI memory in.
 ---
 

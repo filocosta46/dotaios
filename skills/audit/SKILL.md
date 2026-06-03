@@ -1,5 +1,6 @@
 ---
 name: audit
+triggers: audit my aios, review my setup, health check, is my aios healthy, status of my system
 description: Weekly health check of the local AIOS — context freshness, project clarity, memory hygiene, connection health, skill coverage. Use when the user asks for a review, audit, or status of their AIOS.
 ---
 

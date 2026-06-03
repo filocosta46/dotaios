@@ -72,6 +72,7 @@ export async function isAgentInstalled(homePath, agent) {
 export function bridgeContent(agent, aiosPath) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
   const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
+  const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
   const pointerLine = agent.include === "@"
     ? `@${entrypoint}`
     : `DotAIOS entrypoint (read this file first): ${entrypoint}`;
@@ -87,6 +88,7 @@ export function bridgeContent(agent, aiosPath) {
     "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
     "",
     `Skills: read ${skillsIndex} to see all available skills and how to run them.`,
+    `Routing: to choose a skill for a request, match the user's intent against ${resolver} (trigger phrases -> skill), then open that SKILL.md before acting. If the user keeps repeating a workflow, offer to run the skillify skill to make it reusable (draft it, then ask before saving).`,
     "Working memory: call the `read_session_digest` MCP tool, or run `dotaios brief --compact` to get today's focus, carry-overs, and recent sessions.",
     MANAGED_END,
     ""

@@ -1,5 +1,6 @@
 ---
 name: ingest
+triggers: save this article, ingest this, archive this url, capture this pdf, read and save this link
 description: Save a URL, PDF, document, text file, or binary into the AIOS vault as clean Markdown via the Universal Knowledge Router. Use when the user asks to save, archive, ingest, or capture an article, paper, or document.
 ---
 

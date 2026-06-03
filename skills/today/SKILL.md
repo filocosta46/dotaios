@@ -1,5 +1,6 @@
 ---
 name: today
+triggers: start my day, open today's note, today's plan, build today
 description: Build today's plan and save it as a daily note in memory/daily/YYYY-MM-DD.md. Use when the user asks to start the day, open today's note, or save today's plan.
 ---
 

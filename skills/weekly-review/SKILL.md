@@ -1,5 +1,6 @@
 ---
 name: weekly-review
+triggers: weekly review, review my week, reflect on the week, weekly memory review
 description: Review recent DotAIOS memory, daily notes, projects, and priorities, then propose small context updates.
 ---
 

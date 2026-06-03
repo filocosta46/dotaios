@@ -1,5 +1,6 @@
 ---
 name: plan-today
+triggers: plan my day, what should I work on, structure today, what's my focus today
 description: Plan the day from priorities, active work, and recent signals. Use when the user asks what to work on, how to structure today, or what to focus on next.
 ---
 

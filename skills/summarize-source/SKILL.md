@@ -1,5 +1,6 @@
 ---
 name: summarize-source
+triggers: summarize this source, summarize this article, tldr this, summarize the ingested doc
 description: Turn an ingested URL, PDF, transcript, call note, or raw Markdown file into a useful local summary with provenance.
 ---
 
