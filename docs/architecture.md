@@ -24,9 +24,9 @@ DotAIOS is a local file convention.
 - today and yesterday from `signals/`
 - `errors.jsonl` only when debugging
 
-**Daily notes** live in `memory/daily/YYYY-MM-DD.md`. `dotaios brief` writes the deterministic `## Brief` section. The `/today` skill writes today's plan (focus, plan, frog). The `/closeday` skill fills the close-out section (done, carry-over, reflection) and stages carry-overs into the next day's note. Daily notes are operational memory, not long-term knowledge — they belong in `memory/`, not `vault/`.
+**Daily notes** live in `memory/daily/YYYY-MM-DD.md`. `dotaios brief` writes the deterministic `## Brief` section. The `/today` skill writes today's plan (focus, plan, frog). The `/closeday` skill fills the close-out section (done, carry-over, reflection) and stages carry-overs into the next day's note. Daily notes are operational memory, not long-term knowledge, they belong in `memory/`, not `vault/`.
 
-**Session memory** lives in `memory/sessions/<date>/<timestamp>_<agent>_<id>.md`. Each file is agent-neutral Markdown with YAML frontmatter (`agent`, `session_id`, `captured_at`, `project`, `title`, `turns`). `memory/sessions/index.jsonl` is a lightweight catalog enabling fast search and deduplication. Sessions are captured via `dotaios capture enable <agent>` (auto-save) or `dotaios capture import` (manual/backfill). Agents should not load sessions in bulk — use `dotaios search` to surface relevant ones on demand.
+**Session memory** lives in `memory/sessions/<date>/<timestamp>_<agent>_<id>.md`. Each file is agent-neutral Markdown with YAML frontmatter (`agent`, `session_id`, `captured_at`, `project`, `title`, `turns`). `memory/sessions/index.jsonl` is a lightweight catalog enabling fast search and deduplication. Sessions are captured via `dotaios capture enable <agent>` (auto-save) or `dotaios capture import` (manual/backfill). Agents should not load sessions in bulk, use `dotaios search` to surface relevant ones on demand.
 
 ## Vault
 

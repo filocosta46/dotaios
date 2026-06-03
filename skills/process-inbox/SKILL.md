@@ -26,8 +26,7 @@ place in this AIOS folder.
 ## When to run it
 
 Run this at the start of a work session whenever `memory/inbox/` contains files.
-The `inbox/` folder is where notes written on a phone or another device land —
-cross-device sync drops them here so a local agent can file them properly.
+The `inbox/` folder is where notes written on a phone or another device land, cross-device sync drops them here so a local agent can file them properly.
 
 ## Inbox file shape
 
@@ -64,12 +63,12 @@ For each note, decide where it belongs and write its content there:
 
 - A fact, link, document, or research note → `vault/raw/` (or summarise it with
   the `summarize-source` skill if it is a URL or long source).
-- Something about a person or company → `vault/org/` — but ask the user first,
+- Something about a person or company → `vault/org/`, but ask the user first,
   since that is durable knowledge.
 - A task, idea, or thing that happened today → today's daily note in
   `memory/daily/YYYY-MM-DD.md`.
 - An update to who the user is, their priorities, or current work →
-  the matching file under `context/` — ask the user before changing identity.
+  the matching file under `context/`, ask the user before changing identity.
 - Clearly tied to a project → that project's folder under `projects/`.
 
 When unsure, prefer `vault/raw/` and tell the user where you put it.

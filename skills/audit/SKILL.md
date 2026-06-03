@@ -1,7 +1,7 @@
 ---
 name: audit
 triggers: audit my aios, review my setup, health check, is my aios healthy, status of my system
-description: Weekly health check of the local AIOS — context freshness, project clarity, memory hygiene, connection health, skill coverage. Use when the user asks for a review, audit, or status of their AIOS.
+description: Weekly health check of the local AIOS, context freshness, project clarity, memory hygiene, connection health, skill coverage. Use when the user asks for a review, audit, or status of their AIOS.
 ---
 
 # audit
@@ -19,7 +19,7 @@ Quick health check of your DotAIOS folder. Spots stale context, abandoned projec
 
 - It doesn't change any files. Findings only.
 - It doesn't touch external services (Gmail, Calendar, etc.).
-- It's not a substitute for your own weekly review — it's a sanity check.
+- It's not a substitute for your own weekly review, it's a sanity check.
 
 ## How to use it
 

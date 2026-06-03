@@ -67,7 +67,7 @@ type (URL/PDF/text), which only decides **how** the content is extracted.
 | `signal` | `memory/signals/<date>.jsonl` | no | Working note. Long sources are preserved in `vault/raw` and linked. |
 
 If `<slug>.md` already exists on a durable shelf, the new content is **appended**
-under a dated heading — it never overwrites.
+under a dated heading, it never overwrites.
 
 **Durable shelves need approval.** `wiki`, `company`, and `person` write into
 permanent knowledge. When you (an agent) run `--to wiki|company|person`
@@ -86,18 +86,18 @@ npx dotaios ingest call-note.md --to signal
 
 ## Routing internals (what goes where)
 
-The CLI command `npx dotaios ingest <input>` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins — flag the conflict and update this file.
+The CLI command `npx dotaios ingest <input>` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins, flag the conflict and update this file.
 
 | Input | Path | Parser | Output |
 |---|---|---|---|
-| `http://` / `https://` URL | A — web scraper | linkedom + cheerio + readability + turndown (lazy-loaded); PDF responses re-route to Path B | `vault/raw/<slug>.md` with frontmatter |
-| `.pdf` | B — document parser | `marker_single` if installed, otherwise `unpdf` (basic text only) | `vault/raw/<slug>.md` + `vault/assets/<file>` |
-| `.docx` / `.pptx` / `.epub` | B — document parser | `marker_single` required; without marker rejects with `MARKER_REQUIRED` | `vault/raw/<slug>.md` + `vault/assets/<file>` |
-| `.md` / `.txt` / `.json` / `.csv` | C — text passthrough | copy with frontmatter (json/csv wrapped in fenced code blocks) | `vault/raw/<slug>.md` |
-| anything else | D — binary fallthrough | byte-exact copy, no parse | `vault/assets/<file>` (no markdown) |
+| `http://` / `https://` URL | Path A: web scraper | linkedom + cheerio + readability + turndown (lazy-loaded); PDF responses re-route to Path B | `vault/raw/<slug>.md` with frontmatter |
+| `.pdf` | Path B: document parser | `marker_single` if installed, otherwise `unpdf` (basic text only) | `vault/raw/<slug>.md` + `vault/assets/<file>` |
+| `.docx` / `.pptx` / `.epub` | Path B: document parser | `marker_single` required; without marker rejects with `MARKER_REQUIRED` | `vault/raw/<slug>.md` + `vault/assets/<file>` |
+| `.md` / `.txt` / `.json` / `.csv` | Path C: text passthrough | copy with frontmatter (json/csv wrapped in fenced code blocks) | `vault/raw/<slug>.md` |
+| anything else | Path D: binary fallthrough | byte-exact copy, no parse | `vault/assets/<file>` (no markdown) |
 
 The **Output** column shows the default (`--to raw`). `--to wiki|company|person|signal`
-changes the destination — see [Shelf routing](#shelf-routing---to) below. Binaries (Path D)
+changes the destination, see [Shelf routing](#shelf-routing---to) below. Binaries (Path D)
 always go to `vault/assets/` regardless of `--to`.
 
 ## Frontmatter schema
@@ -161,7 +161,7 @@ If the user accepts, install with:
 pip install marker-pdf
 ```
 
-Then verify with `npx dotaios status` — the **Ingest engines** section should show `Marker (local) : installed (<path>)`.
+Then verify with `npx dotaios status`, the **Ingest engines** section should show `Marker (local) : installed (<path>)`.
 
 If declined or installation fails, PDFs continue to use the bundled `unpdf` text fallback. `.docx` / `.pptx` / `.epub` will still reject with `MARKER_REQUIRED` until marker is available.
 
@@ -178,18 +178,18 @@ When the user asks to ingest:
 - If the result is `Already ingested:`, ask whether the user wants `--overwrite` rather than re-running unprompted.
 - If the result is a `MARKER_REQUIRED` error, offer the install prompt above before suggesting alternatives.
 - For Path D (binary fallthrough), make it explicit that no markdown was generated and the file lives in `vault/assets/` only. `--to` does not apply to binaries.
-- Do not duplicate the event log — the CLI handles `memory/events.jsonl`.
+- Do not duplicate the event log, the CLI handles `memory/events.jsonl`.
 
 ## Curation routing (post-ingest)
 
 `--to` routes at ingest time. For items already sitting in `vault/raw/`, downstream
-skills may still re-route them — re-ingest with the right `--to`, or move them:
+skills may still re-route them, re-ingest with the right `--to`, or move them:
 
 - Promote to `vault/wiki/<topic>/_index.md` as a durable topic summary.
 - Extract a company profile to `vault/org/companies/`.
 - Extract a person profile to `vault/org/people/`.
 - Save a writing sample to `vault/writing-style.md`.
 
-Ask before durable writes to `vault/wiki/`, `vault/org/`, or `context/` — the `--apply`
+Ask before durable writes to `vault/wiki/`, `vault/org/`, or `context/`, the `--apply`
 gate enforces this for `ingest`. Do not duplicate companies or people in `memory/`.
 Preserve the original `source` attribution from the raw file's frontmatter when promoting.

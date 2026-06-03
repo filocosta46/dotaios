@@ -1,9 +1,9 @@
-# DotAIOS — Friend Setup (5 minutes)
+# DotAIOS: Friend Setup (5 minutes)
 
 A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Claude Code, Cursor, Codex, Gemini) know who you are, what you're working on, and how to help without asking you to re-explain everything.
 
 > **Prefer not to use the terminal?** If you have an AI agent app open (Claude
-> Code, Codex, Cursor, Gemini), it can do this whole install for you — see
+> Code, Codex, Cursor, Gemini), it can do this whole install for you, see
 > [`../INSTALL.md`](../INSTALL.md). Paste it one line and the agent handles every
 > step. The guide below is the manual terminal path, for when you'd rather run
 > the commands yourself.
@@ -11,7 +11,7 @@ A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Clau
 ## What you need before starting
 
 - A Mac (Linux works the same way; Windows is not officially tested yet).
-- Node.js 20 or newer. Check with `node --version` in a terminal. If missing, install from [nodejs.org](https://nodejs.org/) — pick the "LTS" download.
+- Node.js 20 or newer. Check with `node --version` in a terminal. If missing, install from [nodejs.org](https://nodejs.org/), pick the "LTS" download.
 - One AI tool installed already, such as Claude Code or Cursor.
 
 You do **not** need a GitHub account, an npm account, or any cloud service.
@@ -36,7 +36,7 @@ This runs the three steps below in sequence and opens your new folder when finis
 
 ## The manual path (5 steps)
 
-### Step 1 — Create your DotAIOS folder
+### Step 1: Create your DotAIOS folder
 
 In the Terminal you just opened, run:
 
@@ -44,9 +44,9 @@ In the Terminal you just opened, run:
 npx dotaios init
 ```
 
-It asks five short questions: your name, what you do, what you're working on right now, what matters most this week, and which AI tools you use. To link an external Markdown vault, pass `--vault-path /path/to/vault` (or skip — DotAIOS creates one inside `~/aios/` by default).
+It asks five short questions: your name, what you do, what you're working on right now, what matters most this week, and which AI tools you use. To link an external Markdown vault, pass `--vault-path /path/to/vault` (or skip, DotAIOS creates one inside `~/aios/` by default).
 
-When it finishes, your context lives in `~/aios/`. Open it in Finder or any text editor — every file is plain Markdown you can read and edit.
+When it finishes, your context lives in `~/aios/`. Open it in Finder or any text editor, every file is plain Markdown you can read and edit.
 
 Later, when your work or priorities change, you do not need to hunt through files. Run `npx dotaios interview --review` and answer a few short questions. DotAIOS previews the updates before saving them.
 
@@ -66,7 +66,7 @@ Next steps:
 5. Run `npx dotaios context` whenever you want to inspect what agents see
 ```
 
-### Step 2 — Connect it to your AI tools
+### Step 2: Connect it to your AI tools
 
 ```bash
 npx dotaios activate
@@ -85,15 +85,15 @@ DotAIOS activated
 For Cursor project rules, run `dotaios attach <project-dir>` inside a project.
 ```
 
-If a tool's memory file already existed before, you'll see `[kept]` instead of `[created]` for that one — that's normal and safe. DotAIOS won't overwrite existing files unless you pass `--overwrite`.
+If a tool's memory file already existed before, you'll see `[kept]` instead of `[created]` for that one, that's normal and safe. DotAIOS won't overwrite existing files unless you pass `--overwrite`.
 
-### Step 3 — Build your index
+### Step 3: Build your index
 
 ```bash
 npx dotaios index
 ```
 
-This generates `~/aios/_index.md` — a table of contents your agents can use to find the right file fast. Run it whenever you add new notes.
+This generates `~/aios/_index.md`, a table of contents your agents can use to find the right file fast. Run it whenever you add new notes.
 
 **Expected output:**
 
@@ -104,7 +104,7 @@ Wrote /Users/you/aios/_index.md
 
 (File and section counts grow as you add notes to your vault.)
 
-### Step 4 — Verify it works
+### Step 4: Verify it works
 
 ```bash
 npx dotaios status
@@ -118,7 +118,7 @@ npx dotaios search "your name"
 
 You should see results from your `~/aios/context/` files.
 
-### Step 5 — Ask your agent
+### Step 5: Ask your agent
 
 Open the AI tool you use most. Ask it:
 
@@ -126,7 +126,7 @@ Open the AI tool you use most. Ask it:
 What am I working on?
 ```
 
-It should answer using the work description you typed in Step 1. If it does — DotAIOS is wired in.
+It should answer using the work description you typed in Step 1. If it does, DotAIOS is wired in.
 
 ## What does success look like
 
@@ -182,7 +182,7 @@ This is a separate, harder setup that requires installing the Google Workspace C
 
 ## When something goes wrong
 
-Run this first — it tells you what is missing in one screen:
+Run this first, it tells you what is missing in one screen:
 
 ```bash
 npx dotaios doctor
@@ -190,16 +190,16 @@ npx dotaios doctor
 
 Common issues:
 
-- **Nothing happens / the command outputs strange characters** — You probably pasted it into ChatGPT, Gemini in a browser, or another chat window. Open the Terminal app (Mac: `⌘+space` → Terminal. Windows: `cmd`). Re-paste there.
-- **`npx: command not found`** — Install Node.js first from [nodejs.org](https://nodejs.org/).
-- **`Unknown command`** — Type the command exactly as shown. They are case-sensitive.
-- **`interactive terminal required`** — Same fix as the first item. Use the real Terminal app.
-- **Agent doesn't seem to know your context** — Restart the agent app after running `npx dotaios activate`. Most tools only re-read their config on launch.
-- **You want to change something you typed in Step 1** — Run `npx dotaios interview --review`. It asks the important questions again and shows the file updates before saving. If you prefer editing by hand, open `~/aios/context/work.md` or another file in `context/`, save it, then run `npx dotaios context --refresh --review`.
+- **Nothing happens / the command outputs strange characters**, You probably pasted it into ChatGPT, Gemini in a browser, or another chat window. Open the Terminal app (Mac: `⌘+space` → Terminal. Windows: `cmd`). Re-paste there.
+- **`npx: command not found`**, Install Node.js first from [nodejs.org](https://nodejs.org/).
+- **`Unknown command`**, Type the command exactly as shown. They are case-sensitive.
+- **`interactive terminal required`**, Same fix as the first item. Use the real Terminal app.
+- **Agent doesn't seem to know your context**, Restart the agent app after running `npx dotaios activate`. Most tools only re-read their config on launch.
+- **You want to change something you typed in Step 1**, Run `npx dotaios interview --review`. It asks the important questions again and shows the file updates before saving. If you prefer editing by hand, open `~/aios/context/work.md` or another file in `context/`, save it, then run `npx dotaios context --refresh --review`.
 
 ## Optional: experimental MCP server
 
-DotAIOS ships an experimental MCP server (`dotaios-mcp`) for tools that support the Model Context Protocol. This is **not** recommended for first-time setup — wire up the basic flow above first, then come back. See [mcp.md](mcp.md) when you're ready.
+DotAIOS ships an experimental MCP server (`dotaios-mcp`) for tools that support the Model Context Protocol. This is **not** recommended for first-time setup, wire up the basic flow above first, then come back. See [mcp.md](mcp.md) when you're ready.
 
 ## Asking for help
 

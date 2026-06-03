@@ -1,12 +1,12 @@
 ---
 name: closeday
 triggers: close the day, wrap up today, end of day, log what I shipped, close out my daily note
-description: Close out today's daily note — log what shipped, carry tasks over, and write one reflection. Use when the user is done for the day or asks to close the day.
+description: Close out today's daily note, log what shipped, carry tasks over, and write one reflection. Use when the user is done for the day or asks to close the day.
 ---
 
 # closeday
 
-End the day cleanly: log what shipped, move carry-over tasks to tomorrow, and write one reflection — all inside your daily note.
+End the day cleanly: log what shipped, move carry-over tasks to tomorrow, and write one reflection, all inside your daily note.
 
 ## What this does
 
@@ -18,7 +18,7 @@ End the day cleanly: log what shipped, move carry-over tasks to tomorrow, and wr
 
 ## What this doesn't do
 
-- It does not invent what you did. You answer the questions — it writes them down.
+- It does not invent what you did. You answer the questions, it writes them down.
 - It does not read email or calendar. Only what you tell it and what is in today's note.
 - It does not overwrite a `## Close` section that already has content without asking first.
 
@@ -32,11 +32,11 @@ Try saying:
 
 ## Agent steps
 
-### Capture (optional — before questions)
+### Capture (optional, before questions)
 
 Before the end-of-day questions, ask once:
 
-**"Before we close — anything to capture from today? A decision, meeting, contact, or something you learned. (Press Enter to skip.)"**
+**"Before we close, anything to capture from today? A decision, meeting, contact, or something you learned. (Press Enter to skip.)"**
 
 If the user provides something:
 - Append it as a signal to `memory/signals/YYYY-MM-DD.jsonl` with `type: "update"` and the text as `summary`. Use today's date.
@@ -55,11 +55,11 @@ If the user skips or presses Enter: proceed directly to the Read section.
 
 ### Ask
 
-Ask these three questions — one at a time, waiting for an answer each time:
+Ask these three questions, one at a time, waiting for an answer each time:
 
-1. **Done** — "What did you actually finish or move forward today?"
-2. **Carry-over** — "What didn't get done and needs to move to tomorrow? (Press Enter to skip)"
-3. **Reflection** — "One sentence: what would you do differently tomorrow?"
+1. **Done**, "What did you actually finish or move forward today?"
+2. **Carry-over**, "What didn't get done and needs to move to tomorrow? (Press Enter to skip)"
+3. **Reflection**, "One sentence: what would you do differently tomorrow?"
 
 Keep answers as-is. Do not paraphrase or summarize.
 

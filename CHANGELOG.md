@@ -4,7 +4,7 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [1.19.0] - 2026-06-03
 ### Added
-- Skill resolver. Skills now declare `triggers:` (the phrases a user would naturally say) in their `SKILL.md` frontmatter, and DotAIOS auto-generates `skills/RESOLVER.md` — a routing table that maps intent to the skill that handles it. Connected agents match a request against the resolver instead of guessing from descriptions, so the right skill fires even when you don't know which skill you have. All bundled skills ship with triggers.
+- Skill resolver. Skills now declare `triggers:` (the phrases a user would naturally say) in their `SKILL.md` frontmatter, and DotAIOS auto-generates `skills/RESOLVER.md`, a routing table that maps intent to the skill that handles it. Connected agents match a request against the resolver instead of guessing from descriptions, so the right skill fires even when you don't know which skill you have. All bundled skills ship with triggers.
 - `skillify` skill. Turn a workflow you keep repeating into a reusable skill: it drafts the skill (with trigger phrases) and saves it only after you approve. No evals, no auto-save, plain markdown.
 
 ### Fixed
@@ -12,17 +12,17 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [1.18.0] - 2026-05-30
 ### Added
-- Onboarding now ends with a short, honest reflective recap — your name, what you're working on, this week's priority, and one concrete thing to start today — instead of just listing features. Applies to the agent-led `INSTALL.md` flow and to `dotaios interview`.
+- Onboarding now ends with a short, honest reflective recap, your name, what you're working on, this week's priority, and one concrete thing to start today, instead of just listing features. Applies to the agent-led `INSTALL.md` flow and to `dotaios interview`.
 
 ### Fixed
-- Search tolerates a corrupt line in a JSONL memory file instead of crashing — this also protects the session digest and the agent SessionStart hook that inject your working context.
+- Search tolerates a corrupt line in a JSONL memory file instead of crashing, this also protects the session digest and the agent SessionStart hook that inject your working context.
 - `connect gemini` shell-escapes the AIOS path in the generated hook script (no command execution via an unusual path).
 - `install --subdir` rejects path traversal (`..` / absolute) from an untrusted plugin or marketplace entry.
-- The MCP server never executes a client-supplied `gws` binary — it is resolved only from `DOTAIOS_GWS_BIN` or `PATH`.
+- The MCP server never executes a client-supplied `gws` binary, it is resolved only from `DOTAIOS_GWS_BIN` or `PATH`.
 - The session index lock is now crash-safe: it records the holder's PID, reclaims a crashed holder's lock, and never runs unlocked. Index entries are appended atomically, so concurrent captures can't drop an entry.
 
 ### Changed
-- Search reads and scores files concurrently — faster on large vaults, with identical results.
+- Search reads and scores files concurrently, faster on large vaults, with identical results.
 
 ### Docs
 - Backfilled the missing `[1.15.0]` changelog entry; documented `read_session_digest` and the `connect` SessionStart hook; made the cold-start install steps followable on a fresh machine (single-shell Node install, the `npx` first-run prompt, a beginner-followable fallback); added a repo `CLAUDE.md`.
@@ -30,8 +30,8 @@ All notable changes to DotAIOS will be documented in this file.
 ## [1.17.0] - 2026-05-28
 ### Added
 - **Cross-agent context continuity.** `read_session_digest` MCP tool and `dotaios brief --compact` produce a compact working-memory digest (today's focus, carry-overs, recent signals, recent sessions) so any agent can get up to speed at session start without loading everything.
-- `dotaios connect gemini` — install a Gemini CLI SessionStart hook + MCP server entry so context is injected automatically each session.
-- `dotaios connect opencode` — install an OpenCode MCP server entry + per-skill stubs.
+- `dotaios connect gemini`, install a Gemini CLI SessionStart hook + MCP server entry so context is injected automatically each session.
+- `dotaios connect opencode`, install an OpenCode MCP server entry + per-skill stubs.
 - `list_skills` MCP tool.
 - Session access tracking (`access_count`, `last_accessed`) used to rank recent sessions in the digest.
 - Frequency-weighted relevance ranking for search (phrase matches rank above multi-term matches; repeated hits rank higher). Note: this is term-frequency scoring, not full BM25.
@@ -41,15 +41,15 @@ All notable changes to DotAIOS will be documented in this file.
 - Session index mutations are serialized with a cross-process lock and written atomically (temp file + rename), so concurrent appends and digest-driven rewrites can't drop entries.
 
 ### Removed
-- Unused adapter-first memory backend scaffolding (`memory-backend.mjs`, `MEMORY_BACKEND_KIND`) — it was never wired into any command. It will return when adapters are actually integrated.
+- Unused adapter-first memory backend scaffolding (`memory-backend.mjs`, `MEMORY_BACKEND_KIND`), it was never wired into any command. It will return when adapters are actually integrated.
 - Internal design-history docs under `docs/superpowers/` (still preserved in git history).
 
 ## [1.16.0] - 2026-05-28
 ### Added
 - Internal scaffolding for a future adapter-first memory backend (resolver + contract). Note: not wired into any command in this release; the running product still uses the existing local file-based memory.
-- **Pilot instrumentation** — `dotaios setup`, `search`, and `capture` emit best-effort, non-blocking metrics to `memory/metrics/pilot.jsonl` (`install_start/end`, `setup_phase_start/end`, `search_run`, `capture_saved/deleted`).
-- `dotaios pilot-score` — record one scored pilot sample with required provenance (`--scorer-id`, `--method-version`, `--first-recall-min`, `--p-at-5`).
-- `dotaios pilot-report [--json]` — run the rollup and print ship decisions (pilot + public) with explicit block reasons.
+- **Pilot instrumentation**, `dotaios setup`, `search`, and `capture` emit best-effort, non-blocking metrics to `memory/metrics/pilot.jsonl` (`install_start/end`, `setup_phase_start/end`, `search_run`, `capture_saved/deleted`).
+- `dotaios pilot-score`, record one scored pilot sample with required provenance (`--scorer-id`, `--method-version`, `--first-recall-min`, `--p-at-5`).
+- `dotaios pilot-report [--json]`, run the rollup and print ship decisions (pilot + public) with explicit block reasons.
 - Go/kill rollup with anti-gaming gates: requires ≥2 distinct scorers (pilot) / ≥3 (public), rejects future-dated and incomplete score rows, and a stricter public bar. See `docs/pilot/scoring-rubric.md`.
 
 ### Changed
@@ -60,9 +60,9 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [1.15.0] - 2026-05-23
 ### Added
-- **Agent-carried onboarding.** Collapsed the install funnel to a single step: paste one sentence into any AI agent and it reads the repo, runs setup, connects your tools, and interviews you — no terminal commands required. This is now the primary install path in the README.
+- **Agent-carried onboarding.** Collapsed the install funnel to a single step: paste one sentence into any AI agent and it reads the repo, runs setup, connects your tools, and interviews you, no terminal commands required. This is now the primary install path in the README.
 - **Private GitHub sync (`dotaios sync`).** Optional, opt-in sync of your `~/aios` folder to a private GitHub repo you own, so your context follows you across devices.
-  - `dotaios sync setup` — guided setup using a pasted GitHub Personal Access Token (no OAuth app, no device flow).
+  - `dotaios sync setup`, guided setup using a pasted GitHub Personal Access Token (no OAuth app, no device flow).
   - `dotaios sync status`, `dotaios sync repo`, `dotaios sync logout`.
   - Rebase-model tick (commit → pull --rebase → push) fired after CLI commands via a hook; conflicts are surfaced, not silently resolved.
   - Phone-write inbox: drop notes from any device into the synced repo; the `process-inbox` skill files them into the right place.
@@ -76,22 +76,22 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [1.14.0] - 2026-05-16
 ### Added
-- **Session memory** — DotAIOS can now save your AI conversations locally so every agent on your machine can remember them. All sessions saved to `~/aios/memory/sessions/` as plain Markdown files.
-- `dotaios capture` command tree — `import`, `list`, `delete`, `status`, `enable`, `disable`, `hook`.
-- `dotaios capture import file <path>` — save any conversation file.
-- `dotaios capture import paste` — paste a conversation in your editor; any tool supported.
-- `dotaios capture import claude-code [--all]` — backfill past Claude Code sessions (last 30 days by default).
-- `dotaios capture list [--agent] [--project] [--since]` — browse saved conversations in plain English.
-- `dotaios capture delete <id>` — remove a saved conversation.
-- `dotaios capture enable claude-code` — enable automatic saving when a Claude Code session closes.
-- `dotaios capture disable claude-code` — turn off automatic saving.
-- `dotaios capture status` — per-tool capability: auto-save / import only / paste only.
+- **Session memory**, DotAIOS can now save your AI conversations locally so every agent on your machine can remember them. All sessions saved to `~/aios/memory/sessions/` as plain Markdown files.
+- `dotaios capture` command tree, `import`, `list`, `delete`, `status`, `enable`, `disable`, `hook`.
+- `dotaios capture import file <path>`, save any conversation file.
+- `dotaios capture import paste`, paste a conversation in your editor; any tool supported.
+- `dotaios capture import claude-code [--all]`, backfill past Claude Code sessions (last 30 days by default).
+- `dotaios capture list [--agent] [--project] [--since]`, browse saved conversations in plain English.
+- `dotaios capture delete <id>`, remove a saved conversation.
+- `dotaios capture enable claude-code`, enable automatic saving when a Claude Code session closes.
+- `dotaios capture disable claude-code`, turn off automatic saving.
+- `dotaios capture status`, per-tool capability: auto-save / import only / paste only.
 - `dotaios search` now searches saved sessions in addition to memory, vault, and context.
-- `dotaios search --agent`, `--project`, `--since` — filter session results.
+- `dotaios search --agent`, `--project`, `--since`, filter session results.
 - Universal session format: agent-neutral Markdown + YAML frontmatter, one file per conversation, human-readable in any editor.
-- `memory/sessions/index.jsonl` — lightweight catalog enabling fast search and deduplication across all saved sessions.
-- `docs/sessions.md` — plain-English guide: where conversations save, how to delete, how to turn off.
-- `docs/adapters.md` — per-tool capability levels in plain English.
+- `memory/sessions/index.jsonl`, lightweight catalog enabling fast search and deduplication across all saved sessions.
+- `docs/sessions.md`, plain-English guide: where conversations save, how to delete, how to turn off.
+- `docs/adapters.md`, per-tool capability levels in plain English.
 
 ### Changed
 - `dotaios init` now creates `memory/sessions/` in the base folder tree.
@@ -107,27 +107,27 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [1.13.0] - 2026-05-15
 ### Added
-- `dotaios update [text]` — log a quick update (decision, meeting, note) directly to memory. Writes to `memory/signals/<date>.jsonl` and `memory/events.jsonl`. With no argument, prompts interactively. Designed for non-technical users who should not need to know which file to edit.
-- `dotaios skills [name]` — list all installed skills with one-line descriptions. `dotaios skills <name>` prints the full skill instructions. Works with any agent, not just Claude Code.
-- `closeday` skill now opens with an optional capture step: "anything to capture before we close?" — agent appends the note directly to signals, no CLI required.
+- `dotaios update [text]`, log a quick update (decision, meeting, note) directly to memory. Writes to `memory/signals/<date>.jsonl` and `memory/events.jsonl`. With no argument, prompts interactively. Designed for non-technical users who should not need to know which file to edit.
+- `dotaios skills [name]`, list all installed skills with one-line descriptions. `dotaios skills <name>` prints the full skill instructions. Works with any agent, not just Claude Code.
+- `closeday` skill now opens with an optional capture step: "anything to capture before we close?", agent appends the note directly to signals, no CLI required.
 
 ### Changed
 - `dotaios setup` now asks once after onboarding whether to enable the daily brief schedule (Y/n), enables it in `schedules.yml`, and prints `dotaios schedule install` as the next step for full OS automation. Default: yes.
 - `dotaios setup` prints a preview of the top 3 installed skills and how to invoke them after setup completes.
-- Setup completion message is now agent-agnostic — names Claude Code, Codex, Gemini CLI, and Cursor, and uses plain English prompts that work with any of them.
+- Setup completion message is now agent-agnostic, names Claude Code, Codex, Gemini CLI, and Cursor, and uses plain English prompts that work with any of them.
 - `skills/INDEX.md` preamble updated: removed Claude Code-specific `/skillname` slash syntax; invocation examples now read "use the audit skill" or "run plan-today" so any agent understands. Added: "When the user seems stuck or asks what you can help with, suggest a relevant skill."
 
 ## [1.12.0] - 2026-05-14
 ### Added
-- `dotaios brief` — writes today's deterministic local brief into `memory/daily/YYYY-MM-DD.md` as a `## Brief` section. It reads priorities, recent open loops, and carry-over; no LLM or external service required.
+- `dotaios brief`, writes today's deterministic local brief into `memory/daily/YYYY-MM-DD.md` as a `## Brief` section. It reads priorities, recent open loops, and carry-over; no LLM or external service required.
 - New AIOS folders now include a disabled daily brief schedule in `schedules.yml` (`dotaios brief`, daily), so the output loop is visible and can be enabled once.
-- `dotaios ingest --to raw|wiki|company|person|signal` — route an ingested item to a shelf by purpose instead of always landing in `vault/raw`. `--name <name>` sets the record name (required for `company`/`person`, optional for `wiki`).
+- `dotaios ingest --to raw|wiki|company|person|signal`, route an ingested item to a shelf by purpose instead of always landing in `vault/raw`. `--name <name>` sets the record name (required for `company`/`person`, optional for `wiki`).
 - Interactive shelf routing: `dotaios ingest <input>` with no `--to` in a Terminal now asks one plain question (rough source / lasting reference / company / person / working note); Enter defaults to `vault/raw`.
 - `--apply` flag on `ingest`. Durable shelves (`wiki`, `company`, `person`) require approval: a non-interactive caller (an agent or script) gets a preview and writes nothing unless `--apply` is passed. A human picking the shelf interactively counts as approval.
-- `packages/cli/src/ingest/placement.mjs` — shared shelf router used by the web, document, and text ingest paths.
+- `packages/cli/src/ingest/placement.mjs`, shared shelf router used by the web, document, and text ingest paths.
 
 ### Changed
-- `dotaios ingest` with no `--to` and no Terminal (agent/script) keeps today's behavior — saves to `vault/raw` — and prints a note pointing at `--to`.
+- `dotaios ingest` with no `--to` and no Terminal (agent/script) keeps today's behavior, saves to `vault/raw`, and prints a note pointing at `--to`.
 - Ingesting onto a durable shelf that already has a record for that name now **appends** the new content under a dated heading instead of overwriting.
 - `--to signal` appends a working note to `memory/signals/<date>.jsonl`; long parsed documents are preserved as markdown in `vault/raw` and linked from the signal.
 - `skills/ingest/SKILL.md` documents `--to`, `--name`, `--apply`, and the durable-shelf approval gate so every agent routes by purpose.
@@ -137,23 +137,23 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [1.11.0] - 2026-05-14
 ### Added
-- `skills/INDEX.md` — an auto-generated, agent-neutral list of every installed skill with a one-line description and run instructions. Regenerated on `init`, `activate`, raw-skill install, and `skill remove`, so every connected agent (not just Claude Code) can discover and run skills.
-- `packages/core/src/agents.json` — editable registry of supported AI tools (name, detect path, bridge path, include syntax). Extendable per-user via `<aios>/agents.json`, merged by name. Adding a new AI tool no longer requires a code change.
-- `dotaios activate --all` — connect every known AI tool even when not detected on the machine.
+- `skills/INDEX.md`, an auto-generated, agent-neutral list of every installed skill with a one-line description and run instructions. Regenerated on `init`, `activate`, raw-skill install, and `skill remove`, so every connected agent (not just Claude Code) can discover and run skills.
+- `packages/core/src/agents.json`, editable registry of supported AI tools (name, detect path, bridge path, include syntax). Extendable per-user via `<aios>/agents.json`, merged by name. Adding a new AI tool no longer requires a code change.
+- `dotaios activate --all`, connect every known AI tool even when not detected on the machine.
 - `dotaios activate` and `dotaios doctor` print a copy-paste line for AI tools not in the registry: "Read <aios>/AGENTS.md first and follow it."
 
 ### Changed
 - `dotaios activate` now connects only AI tools actually installed on the machine (detected by their config folder), and reports skipped tools clearly. Use `--all` to override.
-- `AGENTS.md` inside the AIOS folder is now the single canonical, agent-neutral front door — folder map, read order, memory routing, rules, and skills. `CLAUDE.md` shrinks to a one-line pointer at it. Every agent bridge points at `AGENTS.md`.
+- `AGENTS.md` inside the AIOS folder is now the single canonical, agent-neutral front door, folder map, read order, memory routing, rules, and skills. `CLAUDE.md` shrinks to a one-line pointer at it. Every agent bridge points at `AGENTS.md`.
 - `dotaios doctor` and `dotaios status` report not-installed AI tools as informational, not warnings.
 
 ## [1.10.0] - 2026-05-14
 ### Added
-- `dotaios setup` — one-shot onboarding wizard (init + activate + reveal).
-- `dotaios doctor` — single health-check command that reports Node version, Terminal state, AIOS folder, and agent bridges with fix-lines per warning.
-- `dotaios skill add|list|remove` — friendly alias surface for plugin management.
-- `dotaios market list|info|install` — public skill marketplace, fetches `https://dotaios.com/registry.json` (override via `--registry` or `DOTAIOS_REGISTRY_URL`).
-- `dotaios license add|list|remove` — license keys for paid skills, stored at `~/.dotaios/licenses.json` (mode 0600). Verified once via Gumroad License Verification API, then offline.
+- `dotaios setup`, one-shot onboarding wizard (init + activate + reveal).
+- `dotaios doctor`, single health-check command that reports Node version, Terminal state, AIOS folder, and agent bridges with fix-lines per warning.
+- `dotaios skill add|list|remove`, friendly alias surface for plugin management.
+- `dotaios market list|info|install`, public skill marketplace, fetches `https://dotaios.com/registry.json` (override via `--registry` or `DOTAIOS_REGISTRY_URL`).
+- `dotaios license add|list|remove`, license keys for paid skills, stored at `~/.dotaios/licenses.json` (mode 0600). Verified once via Gumroad License Verification API, then offline.
 - `install` accepts git URLs (`https://...git`, `git@host:owner/repo`) and `--subdir <path>` for monorepo plugins.
 - Monetization manifest fields: `paid`, `vendor`, `product_id`. Paid plugins require a stored license before install.
 - Windows installer source under `installers/windows/` (WiX 4 `.wxs`), GitHub Actions workflow at `.github/workflows/release-installers.yml` that builds an MSI on tag push and attaches it to the release.

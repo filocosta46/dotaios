@@ -1,6 +1,6 @@
 # Beta Testing
 
-DotAIOS ships a local folder (`~/aios/`) that makes every AI tool on your machine context-aware — shared memory, skills, and saved conversations, all as plain files. This guide covers onboarding terminal-comfortable testers.
+DotAIOS ships a local folder (`~/aios/`) that makes every AI tool on your machine context-aware, shared memory, skills, and saved conversations, all as plain files. This guide covers onboarding terminal-comfortable testers.
 
 ## Who To Invite
 

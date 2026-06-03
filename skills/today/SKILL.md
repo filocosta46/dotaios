@@ -6,7 +6,7 @@ description: Build today's plan and save it as a daily note in memory/daily/YYYY
 
 # today
 
-Build today's plan and write it to your daily note so you can refer back to it — and close it out at the end of the day with `/closeday`.
+Build today's plan and write it to your daily note so you can refer back to it, and close it out at the end of the day with `/closeday`.
 
 ## What this does
 
@@ -19,7 +19,7 @@ Build today's plan and write it to your daily note so you can refer back to it �
 
 - It does not plan without your context. If `prompt.md` and your context files are both empty, tell the user to run `dotaios interview` first.
 - It does not read your calendar or email unless a plugin has written signals for them.
-- It does not close the day — that is `/closeday`.
+- It does not close the day, that is `/closeday`.
 - It does not overwrite the `## Close` section if the file already exists and has been partially filled by `/closeday`.
 
 ## How to use it
@@ -34,13 +34,13 @@ Try saying:
 
 ### Read
 
-1. `prompt.md` in the `skills/today/` directory if present — compiled by `dotaios interview`. Prefer it over reading individual context files.
+1. `prompt.md` in the `skills/today/` directory if present, compiled by `dotaios interview`. Prefer it over reading individual context files.
 2. If `prompt.md` is missing, fall back to:
    - `context/priorities.md`
    - `context/work.md`
 3. `memory/events.jsonl` last 50 entries, if present
 4. Today and yesterday from `memory/signals/`, if present
-5. `memory/daily/YYYY-MM-DD.md` where YYYY-MM-DD is today's date — check if it already exists
+5. `memory/daily/YYYY-MM-DD.md` where YYYY-MM-DD is today's date, check if it already exists
 
 ### Process
 

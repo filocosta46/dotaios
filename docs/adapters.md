@@ -44,7 +44,7 @@ Installs an MCP server entry in `~/.config/opencode/opencode.json` plus a skill 
 
 ### Claude Code, Cursor
 
-Use `dotaios activate` (and `dotaios mcp install`) to wire these — see the README.
+Use `dotaios activate` (and `dotaios mcp install`) to wire these, see the README.
 
 ---
 
@@ -59,7 +59,7 @@ Enable automatic saving:
 dotaios capture enable claude-code
 ```
 
-The Stop hook fires after each Claude Code response, so your conversation is saved incrementally. If the same transcript grows across responses, the saved file is updated in place — no duplicate entries.
+The Stop hook fires after each Claude Code response, so your conversation is saved incrementally. If the same transcript grows across responses, the saved file is updated in place, no duplicate entries.
 
 Import past sessions (last 30 days):
 ```

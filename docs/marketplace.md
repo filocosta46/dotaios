@@ -74,9 +74,9 @@ A paid pack is a normal DotAIOS plugin with three extra manifest fields.
 
 Three monetization fields:
 
-- `paid: true` — flips license enforcement on.
-- `vendor` — your stable vendor slug. Lowercase, hyphenated.
-- `product_id` — your Gumroad product permalink. This must match what `npx dotaios license add` is given.
+- `paid: true`, flips license enforcement on.
+- `vendor`, your stable vendor slug. Lowercase, hyphenated.
+- `product_id`, your Gumroad product permalink. This must match what `npx dotaios license add` is given.
 
 ### 2. Hosting
 
@@ -128,9 +128,9 @@ DotAIOS recommends: **point at it**. Sell the layer YOU produce.
 
 ### What your paid pack should ship
 
-- Your `SKILL.md` files — curated prompts and workflows tuned for DotAIOS context shape.
-- Your `manifest.json` — `paid: true`, your `product_id`, your vendor slug, your permissions.
-- Documentation files — "how to install upstream tool X from its own source", in language your ICP understands.
+- Your `SKILL.md` files, curated prompts and workflows tuned for DotAIOS context shape.
+- Your `manifest.json`, `paid: true`, your `product_id`, your vendor slug, your permissions.
+- Documentation files, "how to install upstream tool X from its own source", in language your ICP understands.
 - Optional small glue scripts you maintain.
 
 ### What your paid pack should NOT do
@@ -142,7 +142,7 @@ DotAIOS recommends: **point at it**. Sell the layer YOU produce.
 ### How updates flow
 
 - Upstream open-source tool stays installed on the user's machine via its own channel (brew, npm, etc.) and auto-updates on its own.
-- Your pack updates when you push to your own repo — DotAIOS does not currently auto-update installed packs, but `dotaios skill add <git_url>` against the same source overwrites cleanly.
+- Your pack updates when you push to your own repo, DotAIOS does not currently auto-update installed packs, but `dotaios skill add <git_url>` against the same source overwrites cleanly.
 - This mirrors how the bundled `google-workspace` skill already works: it wraps `gws` without forking it.
 
 ### When you DO need to pin upstream
@@ -160,6 +160,6 @@ This way the user sees clearly that they are getting your curated build of a kno
 - DotAIOS core remains free, local-first, and dependency-free.
 - License verification is online once, then offline forever.
 - License storage lives outside `~/aios/` so an Obsidian-synced vault does not accidentally leak credentials.
-- The registry is a static file — no DotAIOS server, no API, no operational burden.
+- The registry is a static file, no DotAIOS server, no API, no operational burden.
 - Vendors can self-host their own registries by handing users a `--registry <url>` flag.
 - Bundled free skills stay free forever. Paid packs are pure additions on top.

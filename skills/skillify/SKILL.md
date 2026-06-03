@@ -1,6 +1,6 @@
 ---
 name: skillify
-description: Turn a repeated workflow or prompt into a reusable DotAIOS skill — drafted for you, saved only after you approve.
+description: Turn a repeated workflow or prompt into a reusable DotAIOS skill, drafted for you, saved only after you approve.
 triggers: skillify this, make this a skill, turn this into a skill, save this as a skill, I keep doing this, automate this workflow, remember how to do this
 ---
 
@@ -13,7 +13,7 @@ becomes routable through `skills/RESOLVER.md`.
 ## When to use this
 - The user says "skillify this", "make this a skill", or similar.
 - You notice the user has asked for the same kind of workflow 2+ times, or keeps
-  pasting the same prompt. Offer: "You've done this a few times — want me to make
+  pasting the same prompt. Offer: "You've done this a few times, want me to make
   it a reusable skill?"
 
 ## Hard rules (do not break)
@@ -27,9 +27,9 @@ becomes routable through `skills/RESOLVER.md`.
 1. **Check it's worth it.** Skillify only if the workflow is reusable (done 2+
    times) and has a clear thing the user would say to trigger it. One-off tasks
    stay one-off.
-2. **Pick a slug** — short, lowercase-hyphenated, e.g. `weekly-report`.
+2. **Pick a slug**, short, lowercase-hyphenated, e.g. `weekly-report`.
 3. **Draft the skill.** Write the body as clear, ordered steps an agent can follow.
-   Choose 3–6 natural trigger phrases the user would actually say.
+   Choose 3 to 6 natural trigger phrases the user would actually say.
 4. **Show the draft** (frontmatter + steps) and ask: "Save this as a skill?"
 5. **On approval**, create `skills/<slug>/SKILL.md` with this frontmatter, then the steps:
    ```

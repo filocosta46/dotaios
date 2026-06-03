@@ -24,7 +24,7 @@ Take what you told another AI tool (ChatGPT, Claude, Gemini, Cursor) and save it
 
 Try saying:
 
-- "I'm switching from ChatGPT — here's what it knew about me: <paste>"
+- "I'm switching from ChatGPT, here's what it knew about me: <paste>"
 - "import this old chat into my AIOS"
 - "merge what Gemini had on this project into DotAIOS"
 

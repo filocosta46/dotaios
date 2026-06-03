@@ -13,11 +13,11 @@ Build today's plan from your priorities, active work, and your stated planning p
 - Reads your priorities, work, and recent signals.
 - Honors your planning preferences (plan style, priority count, time blocks, frog definition).
 - Proposes focused work blocks and one explicit non-priority.
-- Names one "frog" — the task you'd avoid otherwise.
+- Names one "frog", the task you'd avoid otherwise.
 
 ## What this doesn't do
 
-- It does not write a daily note — that is `/today`. Use `/today` when you want to save the plan and close it out at the end of the day.
+- It does not write a daily note, that is `/today`. Use `/today` when you want to save the plan and close it out at the end of the day.
 - It does not read your calendar or email unless a plugin has captured signals.
 - It does not second-guess your priorities. If they are wrong, run `dotaios interview` first.
 
@@ -33,7 +33,7 @@ Try saying:
 
 ### Read
 
-1. `prompt.md` in this skill directory if present — compiled by `dotaios interview`. Prefer it over reading individual context files.
+1. `prompt.md` in this skill directory if present, compiled by `dotaios interview`. Prefer it over reading individual context files.
 2. If `prompt.md` is missing, fall back to:
    - `context/priorities.md`
    - `context/work.md`

@@ -10,7 +10,7 @@ All saved conversations live in:
 ~/aios/memory/sessions/
 ```
 
-Each conversation is a plain text file — you can open it in any text editor. The files are named by date and agent, so they're easy to browse.
+Each conversation is a plain text file, you can open it in any text editor. The files are named by date and agent, so they're easy to browse.
 
 ## How to save a conversation
 
