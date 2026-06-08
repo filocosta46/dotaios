@@ -12,6 +12,9 @@ import {
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
+import { symlinkTargets, hermesConfigTargets } from "../../../core/src/skill-targets.mjs";
+import { installSymlinkSkills, cleanupStaleLinks } from "../../../core/src/skills-install.mjs";
+import { ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = MANAGED_START;
@@ -150,78 +153,32 @@ async function createGlobalBridges(aiosPath, homePath, options) {
     results.push(result);
   }
 
-  const skills = await bridgeSkillsToClaude(aiosPath, homePath, options);
+  const skills = await installAllSkills(aiosPath, homePath, options);
   return { results: [...results, ...skills], installedCount };
 }
 
-async function bridgeSkillsToClaude(aiosPath, homePath, options) {
+// Install DotAIOS skills natively into every supported tool: symlink into each
+// well-known skills dir (~/.claude/skills, ~/.agents/skills — the shared standard
+// read by Codex/Cursor/Gemini), and register the source dir in Hermes' config.
+async function installAllSkills(aiosPath, homePath, options) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
-  const claudeSkillsDir = path.join(homePath, ".claude", "skills");
-  if (!options.dryRun) {
-    await fs.mkdir(claudeSkillsDir, { recursive: true });
-  }
-
-  let entries;
-  try {
-    entries = await fs.readdir(aiosSkillsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
-
   const results = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const name = entry.name;
-    if (name.startsWith(".") || name.startsWith("_")) continue;
+  for (const target of symlinkTargets()) {
+    const targetDir = path.join(homePath, target.dir);
+    results.push(...await installSymlinkSkills({
+      aiosPath, targetDir, dryRun: options.dryRun, overwrite: options.overwrite
+    }));
+    results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: options.dryRun }));
+  }
 
-    const source = path.join(aiosSkillsDir, name);
-    const dest = path.join(claudeSkillsDir, name);
-
-    const skillFile = path.join(source, "SKILL.md");
-    if (!await pathExists(skillFile)) {
-      results.push({ action: "skipped", path: dest, note: "no SKILL.md in source" });
-      continue;
-    }
-
-    const existsResult = await readSymlinkOrPath(dest);
-    if (existsResult.kind === "symlink" && existsResult.target === source) {
-      results.push({ action: "skipped", path: dest, note: "already linked to AIOS" });
-      continue;
-    }
-    const symlinkType = process.platform === "win32" ? "junction" : "dir";
-    if (existsResult.kind === "missing") {
-      if (!options.dryRun) {
-        await fs.symlink(source, dest, symlinkType);
-      }
-      results.push({ action: options.dryRun ? "would link" : "linked", path: dest });
-      continue;
-    }
-    if (!options.overwrite) {
-      results.push({ action: "kept", path: dest, note: "existing unmanaged file or directory" });
-      continue;
-    }
-    if (!options.dryRun) {
-      await fs.rm(dest, { recursive: true, force: true });
-      await fs.symlink(source, dest, symlinkType);
-    }
-    results.push({ action: options.dryRun ? "would relink" : "relinked", path: dest });
+  for (const h of hermesConfigTargets()) {
+    const configPath = path.join(homePath, h.configFile);
+    const r = await ensureExternalSkillsDir({ configPath, skillsPath: aiosSkillsDir, dryRun: options.dryRun });
+    results.push({ action: `hermes:${r.action}`, path: configPath, note: r.reason });
   }
   return results;
-}
-
-async function readSymlinkOrPath(filePath) {
-  try {
-    const stat = await fs.lstat(filePath);
-    if (stat.isSymbolicLink()) {
-      const target = await fs.readlink(filePath);
-      return { kind: "symlink", target };
-    }
-    return { kind: "exists" };
-  } catch {
-    return { kind: "missing" };
-  }
 }
 
 async function createProjectBridges(aiosPath, projectPath, options) {

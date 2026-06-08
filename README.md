@@ -42,6 +42,7 @@ Once it is set up, you can ask any connected AI things like:
 - "Plan my day." It builds a plan from your priorities and your recent work.
 - "Save this article for me." It tucks a web page or PDF into your notes as clean, readable text.
 - "What did I decide about the launch?" It searches everything you have saved.
+- "Run my skills." The things you can ask your AI to do install into every tool that supports them, so they work the same way in Claude Code, Codex, Cursor, Gemini, and more.
 
 You can also let it remember your conversations automatically, so your AI gets to know you better over time.
 

@@ -465,7 +465,7 @@ test("parseTranscript extracts session_id from source file UUID", () => {
     },
   ];
   const session = parseTranscript(lines, {
-    sourcePath: "/Users/filo/.claude/projects/-Users-filo-Brain/a1b2c3d4-0000-0000-0000-000000000000.jsonl",
+    sourcePath: "/Users/you/.claude/projects/-Users-you-project/a1b2c3d4-0000-0000-0000-000000000000.jsonl",
   });
   assert.equal(session.session_id, "a1b2c3d4");
 });
