@@ -2,6 +2,14 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.20.0] - 2026-06-08
+### Added
+- Native skills in every tool. `dotaios activate` now installs your `skills/<name>/SKILL.md` workflows as first-class native skills, not only the resolver convention. It symlinks each skill into `~/.claude/skills` (Claude Code) and `~/.agents/skills`, the shared Agent Skills standard folder read by Codex, Cursor 2.5+, Gemini, Warp, and VS Code, and registers your `~/aios/skills` folder in Hermes via `skills.external_dirs`. Edit a skill once and every tool that supports the standard sees it. Surfaces that do not read a local skills folder, like the Claude desktop app and browser chat, keep using the AGENTS.md paste convention. DotAIOS manages only the links it created, and cleans up a link when its source skill is removed.
+
+### Fixed
+- The Hermes config writer matches an exact list line instead of a substring, so a path like `/aios/skills` is not treated as already present when only `/aios/skills-backup` is listed. Symlink comparisons now resolve both sides so they stay correct on Windows.
+- Removed a hardcoded personal path from a test fixture.
+
 ## [1.19.0] - 2026-06-03
 ### Added
 - Skill resolver. Skills now declare `triggers:` (the phrases a user would naturally say) in their `SKILL.md` frontmatter, and DotAIOS auto-generates `skills/RESOLVER.md`, a routing table that maps intent to the skill that handles it. Connected agents match a request against the resolver instead of guessing from descriptions, so the right skill fires even when you don't know which skill you have. All bundled skills ship with triggers.

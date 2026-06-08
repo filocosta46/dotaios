@@ -46,6 +46,17 @@ Installs an MCP server entry in `~/.config/opencode/opencode.json` plus a skill 
 
 Use `dotaios activate` (and `dotaios mcp install`) to wire these, see the README.
 
+### Skills: native in every tool
+
+`dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into:
+
+- `~/.claude/skills/` for Claude Code, and
+- `~/.agents/skills/`, the shared skills folder that Codex, Cursor 2.5+, Gemini, Warp, and VS Code all read.
+
+For Hermes, DotAIOS adds your `~/aios/skills` folder to `skills.external_dirs` in `~/.hermes/config.yaml`.
+
+The link is live, so editing a skill once updates it everywhere. DotAIOS manages only the links it created, and removes a link when its source skill is gone. Surfaces that do not read a local skills folder, such as the Claude desktop app and browser based chat, keep using the AGENTS.md context that `activate` and `connect` set up.
+
 ---
 
 ## Claude Code
