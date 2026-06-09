@@ -97,17 +97,16 @@
   }
 
   function fetchSanityI18n() {
-    var query = encodeURIComponent('*[_type == "landingPage"][0].i18n');
+    var query = encodeURIComponent('*[_type == "landingPage"][0]');
     var url =
       "https://" + SANITY.projectId + ".apicdn.sanity.io/v" + SANITY.apiVersion +
       "/data/query/" + SANITY.dataset + "?query=" + query;
     return fetch(url)
       .then(function (res) { return res.json(); })
       .then(function (data) {
-        var i18n = data && data.result;
-        if (typeof i18n === "string") {
-          try { i18n = JSON.parse(i18n); } catch (e) { i18n = null; }
-        }
+        var doc = data && data.result;
+        var toI18n = window.DOTAIOS_SANITY && window.DOTAIOS_SANITY.docToI18n;
+        var i18n = toI18n ? toI18n(doc) : null;
         if (i18n && i18n.en && i18n.it) {
           window.DOTAIOS_I18N = i18n;
           return true;
