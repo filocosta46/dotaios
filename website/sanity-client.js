@@ -26,4 +26,4 @@ export const client = createClient({
   },
 })
 
-export {isPreview, STUDIO_URL}
+export {STUDIO_URL}
