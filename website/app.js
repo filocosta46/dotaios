@@ -12,6 +12,14 @@ let uiStarted = false
 
 const QUERY = '*[_type == "landingPage"][0]'
 
+function sanityHasContent(doc) {
+  if (!doc) return false
+  const h1 = doc.heroH1?.en ?? doc.heroH1
+  if (typeof h1 === 'string' && h1.trim()) return true
+  const i18n = docToI18n(doc)
+  return Boolean(i18n?.en?.hero?.h1?.trim())
+}
+
 function get(obj, path) {
   return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj)
 }
@@ -287,13 +295,18 @@ async function bootVisualEditing() {
 }
 
 async function loadContent() {
+  currentLang = detectLang()
+
+  // Never flash blank: bundled i18n.js is the default until Sanity has real copy.
+  if (window.DOTAIOS_I18N) applyLang(currentLang)
+
   try {
     const doc = await client.fetch(QUERY)
-    if (doc) applyContent(doc)
+    if (sanityHasContent(doc)) applyContent(doc)
   } catch {
-    /* fall back to bundled i18n.js */
-    if (window.DOTAIOS_I18N) applyLang(detectLang())
+    /* keep bundled i18n.js */
   }
+
   startUi()
   await bootVisualEditing()
 }
