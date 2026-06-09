@@ -105,6 +105,9 @@
       .then(function (res) { return res.json(); })
       .then(function (data) {
         var i18n = data && data.result;
+        if (typeof i18n === "string") {
+          try { i18n = JSON.parse(i18n); } catch (e) { i18n = null; }
+        }
         if (i18n && i18n.en && i18n.it) {
           window.DOTAIOS_I18N = i18n;
           return true;
