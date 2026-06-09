@@ -1,238 +1,305 @@
-/* =============================================================
-   DotAIOS — app.js  (framework-free, no build step)
-   ============================================================= */
-(function () {
-  "use strict";
-  var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  var LANG_KEY = "dotaios-lang";
-  var currentLang = "en";
-  var copyLabel = "Copied";
+/* DotAIOS — app.js (ES module, Sanity + optional visual editing) */
+import {stegaClean} from 'https://esm.sh/@sanity/client/stega'
+import {client, isPreview} from './sanity-client.js'
+import {docToI18n} from './sanity-transform.js'
 
-  var SANITY = {
-    projectId: "h7araeal",
-    dataset: "production",
-    apiVersion: "2025-06-06",
-  };
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+const LANG_KEY = 'dotaios-lang'
+let currentLang = 'en'
+let copyLabel = 'Copied'
+let visualEditingReady = false
+let uiStarted = false
 
-  function get(obj, path) {
-    return path.split(".").reduce(function (o, k) {
-      return o && o[k] !== undefined ? o[k] : undefined;
-    }, obj);
+const QUERY = '*[_type == "landingPage"][0]'
+
+function get(obj, path) {
+  return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj)
+}
+
+function detectLang() {
+  const params = new URLSearchParams(window.location.search)
+  const fromUrl = params.get('lang')
+  if (fromUrl === 'en' || fromUrl === 'it') return fromUrl
+  try {
+    const stored = localStorage.getItem(LANG_KEY)
+    if (stored === 'en' || stored === 'it') return stored
+  } catch {
+    /* ignore */
+  }
+  const nav = (navigator.language || '').toLowerCase()
+  if (nav.startsWith('it')) return 'it'
+  return 'en'
+}
+
+function setUrlLang(lang) {
+  const url = new URL(window.location.href)
+  url.searchParams.set('lang', lang)
+  window.history.replaceState({}, '', url.pathname + url.search + url.hash)
+}
+
+function applyTokens(doc) {
+  if (!doc) return
+  if (doc.fontFamily) {
+    document.documentElement.style.setProperty(
+      '--sans',
+      `"${doc.fontFamily}", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif`,
+    )
+  }
+  if (doc.accentColor) {
+    document.documentElement.style.setProperty('--accent', doc.accentColor)
+  }
+}
+
+function applyLang(lang) {
+  const pack = window.DOTAIOS_I18N && window.DOTAIOS_I18N[lang]
+  if (!pack) return
+
+  currentLang = lang
+  copyLabel = pack.install.copied
+
+  document.documentElement.lang = lang
+
+  const meta = pack.meta
+  if (meta) {
+    document.title = stegaClean(meta.title)
+    const desc = document.querySelector('meta[name="description"]')
+    if (desc) desc.setAttribute('content', stegaClean(meta.description))
+    const ogTitle = document.querySelector('meta[property="og:title"]')
+    if (ogTitle) ogTitle.setAttribute('content', stegaClean(meta.ogTitle))
+    const ogDesc = document.querySelector('meta[property="og:description"]')
+    if (ogDesc) ogDesc.setAttribute('content', stegaClean(meta.ogDescription))
   }
 
-  function detectLang() {
-    var params = new URLSearchParams(window.location.search);
-    var fromUrl = params.get("lang");
-    if (fromUrl === "en" || fromUrl === "it") return fromUrl;
-    try {
-      var stored = localStorage.getItem(LANG_KEY);
-      if (stored === "en" || stored === "it") return stored;
-    } catch (e) {}
-    var nav = (navigator.language || "").toLowerCase();
-    if (nav.indexOf("it") === 0) return "it";
-    return "en";
-  }
+  document.querySelectorAll('[data-i18n]').forEach((el) => {
+    const val = get(pack, el.getAttribute('data-i18n'))
+    if (val !== undefined) el.textContent = val
+  })
 
-  function setUrlLang(lang) {
-    var url = new URL(window.location.href);
-    url.searchParams.set("lang", lang);
-    window.history.replaceState({}, "", url.pathname + url.search + url.hash);
-  }
+  document.querySelectorAll('[data-i18n-html]').forEach((el) => {
+    const val = get(pack, el.getAttribute('data-i18n-html'))
+    if (val !== undefined) el.innerHTML = val
+  })
 
-  function applyLang(lang) {
-    var pack = window.DOTAIOS_I18N && window.DOTAIOS_I18N[lang];
-    if (!pack) return;
-
-    currentLang = lang;
-    copyLabel = pack.install.copied;
-
-    document.documentElement.lang = lang;
-
-    var meta = pack.meta;
-    if (meta) {
-      document.title = meta.title;
-      var desc = document.querySelector('meta[name="description"]');
-      if (desc) desc.setAttribute("content", meta.description);
-      var ogTitle = document.querySelector('meta[property="og:title"]');
-      if (ogTitle) ogTitle.setAttribute("content", meta.ogTitle);
-      var ogDesc = document.querySelector('meta[property="og:description"]');
-      if (ogDesc) ogDesc.setAttribute("content", meta.ogDescription);
-    }
-
-    document.querySelectorAll("[data-i18n]").forEach(function (el) {
-      var val = get(pack, el.getAttribute("data-i18n"));
-      if (val !== undefined) el.textContent = val;
-    });
-
-    document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
-      var val = get(pack, el.getAttribute("data-i18n-html"));
-      if (val !== undefined) el.innerHTML = val;
-    });
-
-    document.querySelectorAll("[data-i18n-attr]").forEach(function (el) {
-      el.getAttribute("data-i18n-attr").split(";").forEach(function (pair) {
-        var parts = pair.split(":");
-        if (parts.length < 2) return;
-        var attr = parts[0].trim();
-        var key = parts.slice(1).join(":").trim();
-        var val = get(pack, key);
-        if (val !== undefined) el.setAttribute(attr, val);
-      });
-    });
-
-    document.querySelectorAll("[data-copy-key]").forEach(function (el) {
-      var key = el.getAttribute("data-copy-key");
-      var val = get(pack, key);
-      if (val !== undefined) el.setAttribute("data-copy", val);
-    });
-
-    document.querySelectorAll(".lang-btn").forEach(function (btn) {
-      var on = btn.getAttribute("data-lang") === lang;
-      btn.classList.toggle("active", on);
-      btn.setAttribute("aria-pressed", on ? "true" : "false");
-    });
-
-    try { localStorage.setItem(LANG_KEY, lang); } catch (e) {}
-    setUrlLang(lang);
-  }
-
-  function fetchSanityI18n() {
-    var query = encodeURIComponent('*[_type == "landingPage"][0]');
-    var url =
-      "https://" + SANITY.projectId + ".apicdn.sanity.io/v" + SANITY.apiVersion +
-      "/data/query/" + SANITY.dataset + "?query=" + query;
-    return fetch(url)
-      .then(function (res) { return res.json(); })
-      .then(function (data) {
-        var doc = data && data.result;
-        var toI18n = window.DOTAIOS_SANITY && window.DOTAIOS_SANITY.docToI18n;
-        var i18n = toI18n ? toI18n(doc) : null;
-        if (i18n && i18n.en && i18n.it) {
-          window.DOTAIOS_I18N = i18n;
-          return true;
-        }
-        return false;
+  document.querySelectorAll('[data-i18n-attr]').forEach((el) => {
+    el.getAttribute('data-i18n-attr')
+      .split(';')
+      .forEach((pair) => {
+        const parts = pair.split(':')
+        if (parts.length < 2) return
+        const attr = parts[0].trim()
+        const key = parts.slice(1).join(':').trim()
+        const val = get(pack, key)
+        if (val !== undefined) el.setAttribute(attr, val)
       })
-      .catch(function () { return false; });
+  })
+
+  document.querySelectorAll('[data-copy-key]').forEach((el) => {
+    const key = el.getAttribute('data-copy-key')
+    const val = get(pack, key)
+    if (val !== undefined) el.setAttribute('data-copy', stegaClean(val))
+  })
+
+  document.querySelectorAll('.lang-btn').forEach((btn) => {
+    const on = btn.getAttribute('data-lang') === lang
+    btn.classList.toggle('active', on)
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false')
+  })
+
+  try {
+    localStorage.setItem(LANG_KEY, lang)
+  } catch {
+    /* ignore */
   }
+  setUrlLang(lang)
+}
 
-  function initI18n() {
-    if (!window.DOTAIOS_I18N) return;
-    applyLang(detectLang());
-
-    document.querySelectorAll(".lang-btn").forEach(function (btn) {
-      btn.addEventListener("click", function () {
-        var lang = btn.getAttribute("data-lang");
-        if (lang === currentLang) return;
-        applyLang(lang);
-        document.querySelectorAll(".snippet .copy").forEach(function (b) {
-          delete b.dataset.bound;
-        });
-        bindCopy(document);
-      });
-    });
+function applyContent(doc) {
+  applyTokens(doc)
+  const i18n = docToI18n(doc)
+  if (i18n && i18n.en && i18n.it) {
+    window.DOTAIOS_I18N = i18n
   }
+  applyLang(currentLang || detectLang())
+}
 
-  function bindCopy(root) {
-    (root || document).querySelectorAll(".snippet .copy").forEach(function (btn) {
-      if (btn.dataset.bound) return;
-      btn.dataset.bound = "1";
-      btn.addEventListener("click", function () {
-        var snip = btn.closest(".snippet");
-        var text = snip ? snip.getAttribute("data-copy") : "";
-        var done = function () {
-          var old = btn.textContent;
-          btn.textContent = copyLabel;
-          btn.classList.add("copied");
-          setTimeout(function () { btn.textContent = old; btn.classList.remove("copied"); }, 1600);
-        };
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).then(done).catch(done);
-        } else {
-          var ta = document.createElement("textarea");
-          ta.value = text; document.body.appendChild(ta); ta.select();
-          try { document.execCommand("copy"); } catch (e) {}
-          document.body.removeChild(ta); done();
+function initLangSwitch() {
+  document.querySelectorAll('.lang-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const lang = btn.getAttribute('data-lang')
+      if (lang === currentLang) return
+      applyLang(lang)
+      document.querySelectorAll('.snippet .copy').forEach((b) => {
+        delete b.dataset.bound
+      })
+      bindCopy(document)
+    })
+  })
+}
+
+function bindCopy(root) {
+  ;(root || document).querySelectorAll('.snippet .copy').forEach((btn) => {
+    if (btn.dataset.bound) return
+    btn.dataset.bound = '1'
+    btn.addEventListener('click', () => {
+      const snip = btn.closest('.snippet')
+      const text = snip ? snip.getAttribute('data-copy') : ''
+      const done = () => {
+        const old = btn.textContent
+        btn.textContent = copyLabel
+        btn.classList.add('copied')
+        setTimeout(() => {
+          btn.textContent = old
+          btn.classList.remove('copied')
+        }, 1600)
+      }
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(done)
+      } else {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        document.body.appendChild(ta)
+        ta.select()
+        try {
+          document.execCommand('copy')
+        } catch {
+          /* ignore */
         }
-      });
-    });
+        document.body.removeChild(ta)
+        done()
+      }
+    })
+  })
+}
+
+function initReveal() {
+  const els = [...document.querySelectorAll('.reveal')]
+  const stmt = document.querySelector('.statement')
+  if (reduceMotion || !('IntersectionObserver' in window)) {
+    els.forEach((el) => el.classList.add('in'))
+    if (stmt) stmt.classList.add('in')
+    return
+  }
+  const io = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((en) => {
+        if (en.isIntersecting) {
+          en.target.classList.add('in')
+          io.unobserve(en.target)
+        }
+      })
+    },
+    {threshold: 0.12, rootMargin: '0px 0px -8% 0px'},
+  )
+  els.forEach((el) => io.observe(el))
+
+  if (stmt) {
+    const io2 = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((en) => {
+          if (en.isIntersecting) {
+            en.target.classList.add('in')
+            io2.unobserve(en.target)
+          }
+        })
+      },
+      {threshold: 0.4},
+    )
+    io2.observe(stmt)
+  }
+}
+
+function initNav() {
+  const nav = document.querySelector('.site-nav')
+  if (!nav) return
+  const onScroll = () => nav.classList.toggle('scrolled', window.scrollY > 12)
+  onScroll()
+  window.addEventListener('scroll', onScroll, {passive: true})
+}
+
+function initFinder() {
+  const tree = document.querySelector('.tree')
+  const pathLabel = document.getElementById('path-label')
+  if (!tree) return
+
+  const views = {}
+  document.querySelectorAll('.pane-view').forEach((v) => {
+    views[v.id.replace('view-', '')] = v
+  })
+
+  function showView(name, path) {
+    Object.keys(views).forEach((k) => {
+      const el = views[k]
+      const on = k === name
+      el.hidden = !on
+      el.classList.toggle('active', on)
+    })
+    tree.querySelectorAll('.tree-item').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-view') === name)
+    })
+    if (pathLabel && path) pathLabel.textContent = path
+    const pane = document.getElementById('pane')
+    if (pane) pane.scrollTop = 0
   }
 
-  function initReveal() {
-    var els = Array.prototype.slice.call(document.querySelectorAll(".reveal"));
-    var stmt = document.querySelector(".statement");
-    if (reduceMotion || !("IntersectionObserver" in window)) {
-      els.forEach(function (el) { el.classList.add("in"); });
-      if (stmt) stmt.classList.add("in");
-      return;
-    }
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (en.isIntersecting) { en.target.classList.add("in"); io.unobserve(en.target); }
-      });
-    }, { threshold: 0.12, rootMargin: "0px 0px -8% 0px" });
-    els.forEach(function (el) { io.observe(el); });
+  tree.addEventListener('click', (e) => {
+    const btn = e.target.closest('.tree-item')
+    if (!btn) return
+    showView(btn.getAttribute('data-view'), btn.getAttribute('data-path'))
+  })
+}
 
-    if (stmt) {
-      var io2 = new IntersectionObserver(function (entries) {
-        entries.forEach(function (en) { if (en.isIntersecting) { en.target.classList.add("in"); io2.unobserve(en.target); } });
-      }, { threshold: 0.4 });
-      io2.observe(stmt);
-    }
+function startUi() {
+  if (uiStarted) return
+  uiStarted = true
+  currentLang = detectLang()
+  initLangSwitch()
+  initNav()
+  initReveal()
+  initFinder()
+  bindCopy(document)
+}
+
+async function bootVisualEditing() {
+  if (!isPreview || visualEditingReady) return
+  visualEditingReady = true
+  const {enableVisualEditing} = await import('./visual-editing.js')
+  enableVisualEditing({
+    refresh: async (payload) => {
+      if (payload.source === 'mutation' || payload.source === 'manual') {
+        const fresh = await client.fetch(QUERY)
+        applyContent(fresh)
+        return
+      }
+      return false
+    },
+    history: {
+      subscribe: (navigate) => {
+        const handler = () => navigate({type: 'pop', url: location.href})
+        addEventListener('popstate', handler)
+        return () => removeEventListener('popstate', handler)
+      },
+      update: (update) => {
+        if (update.type === 'push') history.pushState(null, '', update.url)
+        if (update.type === 'replace') history.replaceState(null, '', update.url)
+      },
+    },
+  })
+}
+
+async function loadContent() {
+  try {
+    const doc = await client.fetch(QUERY)
+    if (doc) applyContent(doc)
+  } catch {
+    /* fall back to bundled i18n.js */
+    if (window.DOTAIOS_I18N) applyLang(detectLang())
   }
+  startUi()
+  await bootVisualEditing()
+}
 
-  function initNav() {
-    var nav = document.querySelector(".site-nav");
-    if (!nav) return;
-    var onScroll = function () { nav.classList.toggle("scrolled", window.scrollY > 12); };
-    onScroll();
-    window.addEventListener("scroll", onScroll, { passive: true });
-  }
-
-  function initFinder() {
-    var tree = document.querySelector(".tree");
-    var pathLabel = document.getElementById("path-label");
-    if (!tree) return;
-
-    var views = {};
-    document.querySelectorAll(".pane-view").forEach(function (v) {
-      var id = v.id.replace("view-", "");
-      views[id] = v;
-    });
-
-    function showView(name, path) {
-      Object.keys(views).forEach(function (k) {
-        var el = views[k];
-        var on = k === name;
-        el.hidden = !on;
-        el.classList.toggle("active", on);
-      });
-      tree.querySelectorAll(".tree-item").forEach(function (btn) {
-        btn.classList.toggle("active", btn.getAttribute("data-view") === name);
-      });
-      if (pathLabel && path) pathLabel.textContent = path;
-      var pane = document.getElementById("pane");
-      if (pane) pane.scrollTop = 0;
-    }
-
-    tree.addEventListener("click", function (e) {
-      var btn = e.target.closest(".tree-item");
-      if (!btn) return;
-      showView(btn.getAttribute("data-view"), btn.getAttribute("data-path"));
-    });
-  }
-
-  function start() {
-    initI18n();
-    initNav();
-    initReveal();
-    initFinder();
-    bindCopy(document);
-  }
-
-  function boot() {
-    fetchSanityI18n().finally(start);
-  }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
-  else boot();
-})();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', loadContent)
+} else {
+  loadContent()
+}

@@ -1,0 +1,14 @@
+{
+  "name": "dotaios-website",
+  "private": true,
+  "version": "1.0.0",
+  "description": "DotAIOS marketing site (static + Sanity visual editing bundle)",
+  "scripts": {
+    "build:visual": "esbuild node_modules/@sanity/visual-editing/dist/index.js --bundle --format=esm --outfile=visual-editing.js --external:react --external:react-dom"
+  },
+  "devDependencies": {
+    "@sanity/client": "^7.6.0",
+    "@sanity/visual-editing": "^3.0.8",
+    "esbuild": "^0.25.0"
+  }
+}
