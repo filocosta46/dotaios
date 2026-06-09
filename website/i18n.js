@@ -1,0 +1,181 @@
+/* DotAIOS website — EN / IT strings (keep keys in sync across locales) */
+window.DOTAIOS_I18N = {
+  en: {
+    meta: {
+      title: "DotAIOS · one folder every AI reads",
+      description: "~/aios/ on your computer. Plain text. Claude, Cursor, Codex, Antigravity, Hermes. Paste one line to set up.",
+      ogTitle: "DotAIOS · one folder every AI reads",
+      ogDescription: "Tell your AI who you are once. Every tool reads the same folder.",
+    },
+    skipLink: "Skip to install",
+    nav: {
+      aria: "Primary",
+      folder: "Folder",
+      ask: "What to ask",
+      github: "GitHub",
+      cta: "Get started",
+      langAria: "Language",
+    },
+    hero: {
+      eyebrow: "local · open source · no account",
+      h1: "One folder. Every AI reads it.",
+      sub: "<code>~/aios/</code> on your computer. Who you are, what you're working on, what you saved. Same files in Claude, Cursor, Codex, Antigravity, and Hermes.",
+      toolsAria: "Works with",
+    },
+    install: {
+      title: "Paste into your AI",
+      desc: "It reads the guide and creates the folder. About a minute.",
+      snippetDisplay: "Set up DotAIOS for me: read github.com/filocosta46/dotaios and follow INSTALL.md.",
+      snippetCopy: "Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.",
+      copy: "Copy",
+      copied: "Copied",
+      terminalSummary: "Terminal: <code>npx dotaios setup</code>",
+      terminalCopy: "npx dotaios setup",
+    },
+    explorer: {
+      title: "The folder",
+      desc: "Plain text on your machine. Open it anytime.",
+      aria: "~/aios/ folder preview",
+      treeAria: "Folder tree",
+      start: {
+        lead: "Your context lives here as Markdown files.",
+        body: "Paste the install line above. Your AI creates this folder and asks a few questions.",
+      },
+      agents: {
+        lead: "Every agent reads this file first.",
+        pre: "# AGENTS\n\nRead context/ for who I am and what I'm working on.\nRead memory/ for what happened recently.\nRead vault/ for things I saved.\nRead skills/ for things I can ask you to do.\n\nStart with context/identity.md.",
+        preAria: "Example AGENTS.md",
+      },
+      context: {
+        identity: "Who you are",
+        work: "What you're building",
+        priorities: "What matters now",
+      },
+      memory: {
+        daily: "Daily notes",
+        profile: "Stable facts",
+        sessions: "Session logs",
+      },
+      vault: {
+        raw: "Saved articles and pages",
+        assets: "PDFs, CVs, files",
+      },
+      skills: {
+        lead: "Plain-text workflows. Setup links them into every tool automatically.",
+        items: ["Plan my day", "Save this article", "Close out today", "Weekly review"],
+      },
+    },
+    ask: {
+      title: "What you can ask",
+      desc: "Plain language. Same in every connected tool after setup.",
+      items: [
+        { title: "Plan my day.", desc: "Builds a plan from your priorities and recent work." },
+        { title: "Save this article for me.", desc: "Stores a page or PDF in your vault as clean text." },
+        { title: "What did I decide about the launch?", desc: "Searches everything you saved." },
+        { title: "What am I working on?", desc: "Quick check that your folder is connected." },
+      ],
+      note: "Skills install into Claude Code, Cursor, Codex, Antigravity, and Hermes when you run setup. Edit once in <code>~/aios/skills/</code>, every tool sees the update.",
+    },
+    cta: {
+      text: "Paste the line. Answer three questions.",
+      btn: "Copy prompt",
+    },
+    footer: {
+      tagline: "MIT · open source · v1.20",
+      folder: "Folder",
+      ask: "What to ask",
+      install: "Install",
+      docs: "Docs",
+      github: "GitHub",
+    },
+  },
+  it: {
+    meta: {
+      title: "DotAIOS · una cartella che ogni AI legge",
+      description: "~/aios/ sul tuo computer. Testo semplice. Claude, Cursor, Codex, Antigravity, Hermes. Incolla una riga per configurare.",
+      ogTitle: "DotAIOS · una cartella che ogni AI legge",
+      ogDescription: "Dì alla tua AI chi sei una volta sola. Ogni strumento legge la stessa cartella.",
+    },
+    skipLink: "Vai all'installazione",
+    nav: {
+      aria: "Principale",
+      folder: "Cartella",
+      ask: "Cosa chiedere",
+      github: "GitHub",
+      cta: "Inizia",
+      langAria: "Lingua",
+    },
+    hero: {
+      eyebrow: "locale · open source · nessun account",
+      h1: "Una cartella. Ogni AI la legge.",
+      sub: "<code>~/aios/</code> sul tuo computer. Chi sei, su cosa stai lavorando, cosa hai salvato. Gli stessi file in Claude, Cursor, Codex, Antigravity e Hermes.",
+      toolsAria: "Funziona con",
+    },
+    install: {
+      title: "Incolla nella tua AI",
+      desc: "Legge la guida e crea la cartella. Circa un minuto.",
+      snippetDisplay: "Set up DotAIOS for me: read github.com/filocosta46/dotaios and follow INSTALL.md.",
+      snippetCopy: "Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.",
+      copy: "Copia",
+      copied: "Copiato",
+      terminalSummary: "Terminale: <code>npx dotaios setup</code>",
+      terminalCopy: "npx dotaios setup",
+    },
+    explorer: {
+      title: "La cartella",
+      desc: "Testo semplice sul tuo computer. Aprilo quando vuoi.",
+      aria: "Anteprima cartella ~/aios/",
+      treeAria: "Albero cartelle",
+      start: {
+        lead: "Il tuo contesto vive qui come file Markdown.",
+        body: "Incolla la riga di installazione sopra. La tua AI crea questa cartella e ti fa qualche domanda.",
+      },
+      agents: {
+        lead: "Ogni agente legge prima questo file.",
+        pre: "# AGENTS\n\nLeggi context/ per sapere chi sono e su cosa sto lavorando.\nLeggi memory/ per cosa è successo di recente.\nLeggi vault/ per ciò che ho salvato.\nLeggi skills/ per ciò che posso chiederti di fare.\n\nInizia da context/identity.md.",
+        preAria: "Esempio AGENTS.md",
+      },
+      context: {
+        identity: "Chi sei",
+        work: "Su cosa stai lavorando",
+        priorities: "Cosa conta adesso",
+      },
+      memory: {
+        daily: "Note giornaliere",
+        profile: "Fatti stabili",
+        sessions: "Log delle sessioni",
+      },
+      vault: {
+        raw: "Articoli e pagine salvate",
+        assets: "PDF, CV, file",
+      },
+      skills: {
+        lead: "Flussi di lavoro in testo semplice. La configurazione li collega a ogni strumento in automatico.",
+        items: ["Pianifica la giornata", "Salva questo articolo", "Chiudi la giornata", "Revisione settimanale"],
+      },
+    },
+    ask: {
+      title: "Cosa puoi chiedere",
+      desc: "Italiano semplice. Uguale in ogni strumento collegato dopo la configurazione.",
+      items: [
+        { title: "Pianifica la mia giornata.", desc: "Crea un piano dalle tue priorità e dal lavoro recente." },
+        { title: "Salva questo articolo per me.", desc: "Archivia una pagina o un PDF nel vault come testo pulito." },
+        { title: "Cosa ho deciso sul lancio?", desc: "Cerca in tutto ciò che hai salvato." },
+        { title: "Su cosa sto lavorando?", desc: "Controllo rapido che la cartella sia collegata." },
+      ],
+      note: "Le skill si installano in Claude Code, Cursor, Codex, Antigravity e Hermes quando esegui la configurazione. Modifichi una volta in <code>~/aios/skills/</code>, ogni strumento vede l'aggiornamento.",
+    },
+    cta: {
+      text: "Incolla la riga. Rispondi a tre domande.",
+      btn: "Copia il prompt",
+    },
+    footer: {
+      tagline: "MIT · open source · v1.20",
+      folder: "Cartella",
+      ask: "Cosa chiedere",
+      install: "Installa",
+      docs: "Documentazione",
+      github: "GitHub",
+    },
+  },
+};

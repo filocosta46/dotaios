@@ -10,7 +10,7 @@ Tell your AI who you are, what you are working on, and how you like to work. You
 
 ## What it is
 
-DotAIOS makes one folder on your computer, called `~/aios`. It holds the things your AI should always know about you: your name, your work, your priorities, and your notes. Claude, Cursor, Codex, and Gemini all read from it. There is no account, no website to log into, and nothing stored on anyone else's server. It is just files on your computer that belong to you.
+DotAIOS makes one folder on your computer, called `~/aios`. It holds the things your AI should always know about you: your name, your work, your priorities, and your notes. Claude, Cursor, Codex, and Antigravity all read from it. There is no account, no website to log into, and nothing stored on anyone else's server. It is just files on your computer that belong to you.
 
 Here is the simplest way to think about it. Your phone keeps your contacts in one place so every app can use them. DotAIOS keeps *you* in one place so every AI can use that.
 
@@ -18,12 +18,12 @@ Here is the simplest way to think about it. Your phone keeps your contacts in on
 
 You will not type a single command. Your AI does the whole setup for you.
 
-First, make sure you have one AI app on your computer. If you are not sure which to pick, start with Claude Code, the friendliest one. You can also use Cursor, Codex, or Gemini.
+First, make sure you have one AI app on your computer. If you are not sure which to pick, start with Claude Code, the friendliest one. You can also use Cursor, Codex, or Antigravity.
 
 - [Claude Code](https://claude.com/download), recommended
 - [Cursor](https://www.cursor.com), an editor with AI built in
 - [Codex CLI](https://github.com/openai/codex) by OpenAI
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
+- [Antigravity](https://antigravity.google/download) by Google, agentic development platform
 
 Then open that app, paste this one sentence into the chat, and press Enter:
 
@@ -33,7 +33,7 @@ That is the whole install. The AI sets everything up, connects your tools, and a
 
 Want to check it worked? Ask your AI: **"What am I working on?"** It will answer from your folder.
 
-**Already use ChatGPT, Claude, or Gemini in your browser?** Those work too. After setup, open the file `~/aios/AGENTS.md`, copy what is inside, and paste it at the start of any chat. Your AI instantly knows your context.
+**Already use ChatGPT or Claude in your browser?** Those work too. After setup, open the file `~/aios/AGENTS.md`, copy what is inside, and paste it at the start of any chat. Your AI instantly knows your context.
 
 ## What you can do with it
 
@@ -42,7 +42,9 @@ Once it is set up, you can ask any connected AI things like:
 - "Plan my day." It builds a plan from your priorities and your recent work.
 - "Save this article for me." It tucks a web page or PDF into your notes as clean, readable text.
 - "What did I decide about the launch?" It searches everything you have saved.
-- "Run my skills." The things you can ask your AI to do install into every tool that supports them, so they work the same way in Claude Code, Codex, Cursor, Gemini, and more.
+- "What am I working on?" It reads your context and answers from your folder.
+
+Setup also links your skills into every tool that supports them, so the same workflows work in Claude Code, Cursor, Codex, Antigravity, and Hermes. Edit a skill once in `~/aios/skills/` and every connected tool sees the update.
 
 You can also let it remember your conversations automatically, so your AI gets to know you better over time.
 

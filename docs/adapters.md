@@ -51,7 +51,7 @@ Use `dotaios activate` (and `dotaios mcp install`) to wire these, see the README
 `dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into:
 
 - `~/.claude/skills/` for Claude Code, and
-- `~/.agents/skills/`, the shared skills folder that Codex, Cursor 2.5+, Gemini, Warp, and VS Code all read.
+- `~/.agents/skills/`, the shared skills folder that Codex, Cursor 2.5+, Antigravity, Warp, and VS Code all read.
 
 For Hermes, DotAIOS adds your `~/aios/skills` folder to `skills.external_dirs` in `~/.hermes/config.yaml`.
 

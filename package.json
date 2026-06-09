@@ -1,13 +1,13 @@
 {
   "name": "dotaios",
   "version": "1.20.0",
-  "description": "Dotfiles for AI agents: local-first personal context for Claude Code, Codex, Cursor, and other assistants.",
+  "description": "One folder every AI reads. Local-first context for Claude Code, Cursor, Codex, Antigravity, and other assistants.",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/filocosta46/dotaios.git"
   },
-  "homepage": "https://github.com/filocosta46/dotaios#readme",
+  "homepage": "https://dotaios.vercel.app",
   "bugs": {
     "url": "https://github.com/filocosta46/dotaios/issues"
   },

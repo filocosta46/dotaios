@@ -1,6 +1,6 @@
 # DotAIOS: Agent Setup Guide
 
-> This document is written for AI agents (Claude Code, Codex, Cursor, Gemini, and others).
+> This document is written for AI agents (Claude Code, Codex, Cursor, Antigravity, and others).
 > A human has asked you to set up DotAIOS for them.
 > Follow each step in order. Do not skip steps. The human should never need to type
 > a terminal command, you run them.
@@ -20,7 +20,7 @@ Run every command yourself. Do not ask the user to open a terminal or paste
 commands.
 
 **Prerequisite:** you need file-editing tools (Claude Code, Cursor, Codex, and
-Gemini CLI all qualify), Step 4 edits the user's context files for them.
+Antigravity all qualify), Step 4 edits the user's context files for them.
 
 ---
 
@@ -84,7 +84,7 @@ Run:
 npx -y dotaios activate
 ```
 
-This writes small bridge files so Claude Code, Codex, Gemini, and other tools
+This writes small bridge files so Claude Code, Codex, Antigravity, and other tools
 find the user's context. It also auto-detects which tools are installed, you do
 not need to ask the user which tools they use.
 
@@ -157,7 +157,7 @@ Then show them what they now have (adapt it to what they told you):
 > "Here's what DotAIOS gives you now:
 >
 > **Every AI tool on this machine knows who you are.** Claude Code, Cursor,
-> Codex, Gemini, they read your context automatically, with no re-introduction.
+> Codex, Antigravity, they read your context automatically, with no re-introduction.
 >
 > **Skills you can use right now**, just ask me, or type `/` in Claude Code:
 >
