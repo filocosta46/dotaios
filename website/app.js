@@ -270,8 +270,9 @@ function startUi() {
 async function bootVisualEditing() {
   if (!isPreview || visualEditingReady) return
   visualEditingReady = true
-  const {enableVisualEditing} = await import('./visual-editing.js')
-  enableVisualEditing({
+  try {
+    const {enableVisualEditing} = await import('./visual-editing.js')
+    enableVisualEditing({
     refresh: async (payload) => {
       if (payload.source === 'mutation' || payload.source === 'manual') {
         const fresh = await client.fetch(QUERY)
@@ -292,6 +293,9 @@ async function bootVisualEditing() {
       },
     },
   })
+  } catch (err) {
+    console.error('[DotAIOS] Visual editing failed to start:', err)
+  }
 }
 
 async function loadContent() {
