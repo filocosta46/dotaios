@@ -23,6 +23,7 @@
     "packages/mcp/src",
     "templates",
     "skills",
+    "docs/advanced-memory.md",
     "docs/architecture.md",
     "docs/beta-testing.md",
     "docs/context-import.md",

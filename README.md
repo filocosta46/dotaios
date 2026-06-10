@@ -33,6 +33,8 @@ That is the whole install. The AI sets everything up, connects your tools, and a
 
 Want to check it worked? Ask your AI: **"What am I working on?"** It will answer from your folder.
 
+If anything ever looks off, run `npx dotaios doctor` and it will tell you what is wrong and how to fix it.
+
 **Already use ChatGPT or Claude in your browser?** Those work too. After setup, open the file `~/aios/AGENTS.md`, copy what is inside, and paste it at the start of any chat. Your AI instantly knows your context.
 
 ## What you can do with it
@@ -94,7 +96,7 @@ Run `dotaios --help` to see everything.
 
 ## Learn more
 
-[Getting started](docs/getting-started.md) · [Saving conversations](docs/sessions.md) · [Phone sync](docs/getting-started.md) · [Google Workspace](docs/google-workspace.md) · [Skill marketplace](docs/marketplace.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md)
+[Getting started](docs/getting-started.md) · [Saving conversations](docs/sessions.md) · [Phone sync and advanced memory](docs/advanced-memory.md) · [Google Workspace](docs/google-workspace.md) · [Skill marketplace](docs/marketplace.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md)
 
 ## License
 
