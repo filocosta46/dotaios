@@ -31,7 +31,7 @@ tests/
 templates/  # Templates rendered during `dotaios init` / `dotaios activate`
 skills/     # Bundled skill markdown (shipped inside the npm package)
 docs/       # Architecture and user docs
-website/    # Static marketing site (index.html + styles.css, no bundler)
+website/    # Marketing site: static index.html + styles.css with an optional Sanity CMS overlay (app.js, sanity-client.js; devDeps only, never shipped in the npm package)
 ```
 
 ## Hard rules (never violate)
