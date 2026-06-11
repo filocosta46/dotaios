@@ -90,7 +90,7 @@ The CLI command `npx dotaios ingest <input>` is the routing authority. This skil
 
 | Input | Path | Parser | Output |
 |---|---|---|---|
-| `http://` / `https://` URL | Path A: web scraper | linkedom + cheerio + readability + turndown (lazy-loaded); PDF responses re-route to Path B | `vault/raw/<slug>.md` with frontmatter |
+| `http://` / `https://` URL | Path A: web scraper | linkedom + readability + turndown (lazy-loaded); PDF responses re-route to Path B | `vault/raw/<slug>.md` with frontmatter |
 | `.pdf` | Path B: document parser | `marker_single` if installed, otherwise `unpdf` (basic text only) | `vault/raw/<slug>.md` + `vault/assets/<file>` |
 | `.docx` / `.pptx` / `.epub` | Path B: document parser | `marker_single` required; without marker rejects with `MARKER_REQUIRED` | `vault/raw/<slug>.md` + `vault/assets/<file>` |
 | `.md` / `.txt` / `.json` / `.csv` | Path C: text passthrough | copy with frontmatter (json/csv wrapped in fenced code blocks) | `vault/raw/<slug>.md` |

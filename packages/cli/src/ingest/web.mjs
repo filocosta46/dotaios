@@ -26,15 +26,13 @@ let _deps = null;
 
 async function loadDeps() {
   if (_deps) return _deps;
-  const [linkedom, cheerio, readability, turndown] = await Promise.all([
+  const [linkedom, readability, turndown] = await Promise.all([
     import("linkedom"),
-    import("cheerio"),
     import("@mozilla/readability"),
     import("turndown")
   ]);
   _deps = {
     parseHTML: linkedom.parseHTML,
-    load: cheerio.load,
     Readability: readability.Readability,
     TurndownService: turndown.default || turndown.TurndownService
   };
@@ -241,13 +239,15 @@ async function fetchWithTimeout(url, { timeoutMs, fetchImpl }) {
 }
 
 async function extractArticle(html, sourceUrl) {
-  const { load, parseHTML, Readability, TurndownService } = await loadDeps();
+  const { parseHTML, Readability, TurndownService } = await loadDeps();
 
-  const $ = load(html);
-  for (const sel of STRIP_SELECTORS) $(sel).remove();
-  const cleaned = $.html();
+  const { document } = parseHTML(html);
+  for (const sel of STRIP_SELECTORS) {
+    for (const el of document.querySelectorAll(sel)) el.remove();
+  }
 
-  const { document } = parseHTML(cleaned);
+  // Readability mutates the document, so capture the fallback title first.
+  const fallbackTitle = extractFallbackTitle(document);
   const reader = new Readability(document);
   const article = reader.parse();
 
@@ -260,13 +260,17 @@ async function extractArticle(html, sourceUrl) {
 
   const turndown = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
   const markdown = turndown.turndown(article.content);
-  const title = (article.title || extractFallbackTitle($) || sourceUrl).trim();
+  const title = (article.title || fallbackTitle || sourceUrl).trim();
 
   return { title, markdown };
 }
 
-function extractFallbackTitle($) {
-  return $("title").first().text().trim() || $("h1").first().text().trim() || "";
+function extractFallbackTitle(document) {
+  return (
+    document.querySelector("title")?.textContent.trim() ||
+    document.querySelector("h1")?.textContent.trim() ||
+    ""
+  );
 }
 
 async function ingestPdfResponse({

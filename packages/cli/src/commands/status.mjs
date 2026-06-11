@@ -56,7 +56,7 @@ Options:
   console.log(`${await pathExists(vaultPath) ? "[ok]" : "[missing]"} ${vaultPath}`);
 
   console.log("\nIngest engines");
-  console.log("[ok] Web scraper           : bundled (linkedom + cheerio + readability + turndown)");
+  console.log("[ok] Web scraper           : bundled (linkedom + readability + turndown)");
   console.log("[ok] PDF (Node fallback)   : bundled (unpdf)");
   const markerPath = await detectMarker();
   if (markerPath) {

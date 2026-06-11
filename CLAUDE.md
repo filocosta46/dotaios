@@ -39,7 +39,7 @@ website/    # Marketing site: static index.html + styles.css with an optional Sa
 1. **ESM only.** All source is `.mjs`, `"type": "module"`. No CommonJS `require()`.
 2. **Node >= 20.** Both the root and the `mcp` package declare `>=20`. Don't use APIs that need a newer floor without bumping `engines` deliberately.
 3. **No build step.** Source ships directly. Do not add Babel, esbuild, tsc, or any transpiler.
-4. **KISS.** No new heavy dependencies (linters, formatters, bundlers, ORMs, cloud SDKs, vector DBs). The 5 runtime deps all serve ingest (readability, cheerio, linkedom, turndown, unpdf).
+4. **KISS.** No new heavy dependencies (linters, formatters, bundlers, ORMs, cloud SDKs, vector DBs). The 4 runtime deps all serve ingest (readability, linkedom, turndown, unpdf).
 5. **No semantic/vector search.** Search is intentionally TF term-frequency. Do not add embeddings.
 6. **Local-first.** Core logic makes no external network calls. Network belongs in ingest/adapters/plugins, never in `packages/core`.
 7. **Conventional commits**, single concern each: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `release`.
