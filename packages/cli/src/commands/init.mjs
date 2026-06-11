@@ -29,6 +29,10 @@ export async function initCommand(args) {
     }
   }
 
+  if (options.vaultPath) {
+    await assertVaultPathUsable(options.vaultPath);
+  }
+
   const answers = options.yes ? defaultAnswers() : await promptAnswers();
   const config = createAiosConfig({
     aiTools: splitCsv(answers.ai_tools),
@@ -170,6 +174,28 @@ async function createBaseTree(target, usesExternalVault) {
 
   await fs.mkdir(target, { recursive: true });
   await Promise.all(dirs.map((dir) => fs.mkdir(path.join(target, dir), { recursive: true })));
+}
+
+// Runs before createBaseTree so a bad --vault-path cannot leave a
+// half-created AIOS folder behind.
+async function assertVaultPathUsable(vaultPath) {
+  let probe = path.resolve(vaultPath);
+  while (!(await pathExists(probe))) {
+    const parent = path.dirname(probe);
+    if (parent === probe) break;
+    probe = parent;
+  }
+
+  const stats = await fs.stat(probe).catch(() => null);
+  if (!stats || !stats.isDirectory()) {
+    throw new Error(`Invalid --vault-path: ${vaultPath}\n${probe} is not a directory, so the vault cannot be created there.\nPass --vault-path an existing folder, or a new folder inside one you can write to.`);
+  }
+
+  try {
+    await fs.access(probe, fs.constants.W_OK);
+  } catch {
+    throw new Error(`Invalid --vault-path: ${vaultPath}\nNo permission to write in ${probe}.\nPass --vault-path a folder you can write to.`);
+  }
 }
 
 async function createVaultTree(vaultPath) {
