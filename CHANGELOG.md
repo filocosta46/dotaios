@@ -2,6 +2,14 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.20.1] - 2026-06-11
+### Fixed
+- Fresh installs are warning-free again. The web scraper now uses linkedom for HTML cleanup instead of cheerio, removing the deprecated `whatwg-encoding` transitive dependency that printed an npm deprecation warning on every first `npx dotaios` run — and 12 transitive packages with it. Ingest output is unchanged.
+- `dotaios init` validates `--vault-path` before writing anything. A vault path that cannot be created (nested under a file, or in an unwritable location) now fails up front with a clear message instead of leaving a half-created AIOS folder behind.
+
+### Changed
+- The README command list now mentions `dotaios brief --compact`, the compact working-memory digest that AGENTS.md tells agents to use.
+
 ## [1.20.0] - 2026-06-08
 ### Added
 - Native skills in every tool. `dotaios activate` now installs your `skills/<name>/SKILL.md` workflows as first-class native skills, not only the resolver convention. It symlinks each skill into `~/.claude/skills` (Claude Code) and `~/.agents/skills`, the shared Agent Skills standard folder read by Codex, Cursor 2.5+, Gemini, Warp, and VS Code, and registers your `~/aios/skills` folder in Hermes via `skills.external_dirs`. Edit a skill once and every tool that supports the standard sees it. Surfaces that do not read a local skills folder, like the Claude desktop app and browser chat, keep using the AGENTS.md paste convention. DotAIOS manages only the links it created, and cleans up a link when its source skill is removed.
