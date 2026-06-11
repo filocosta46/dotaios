@@ -4,10 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#f5f5f7" />
-  <title>DotAIOS · one folder every AI reads</title>
-  <meta name="description" content="~/aios/ on your computer. Plain text. Claude, Cursor, Codex, Antigravity, Hermes. Paste one line to set up." />
+  <title>DotAIOS · stop re-explaining yourself to AI</title>
+  <meta name="description" content="Stop re-explaining yourself to every AI tool. DotAIOS creates ~/aios, a local context folder for Claude, Cursor, Codex, Antigravity, and Hermes." />
   <meta property="og:title" content="DotAIOS · one folder every AI reads" />
-  <meta property="og:description" content="Tell your AI who you are once. Every tool reads the same folder." />
+  <meta property="og:description" content="Your local context folder for every AI tool. Plain files, no account, no lock-in." />
   <meta property="og:url" content="https://dotaios.vercel.app" />
   <link rel="alternate" hreflang="en" href="https://dotaios.vercel.app/?lang=en" />
   <link rel="alternate" hreflang="it" href="https://dotaios.vercel.app/?lang=it" />
@@ -41,9 +41,9 @@
     <section class="hero">
       <div class="wrap hero-inner">
         <div class="hero-copy">
-          <p class="eyebrow" data-i18n="hero.eyebrow">local · open source · no account</p>
+          <p class="eyebrow" data-i18n="hero.eyebrow">local-first · open source · agent-agnostic</p>
           <h1 data-i18n="hero.h1">One folder. Every AI reads it.</h1>
-          <p class="hero-sub" data-i18n-html="hero.sub"><code>~/aios/</code> on your computer. Who you are, what you're working on, what you saved. Same files in Claude, Cursor, Codex, Antigravity, and Hermes.</p>
+          <p class="hero-sub" data-i18n-html="hero.sub">Stop re-explaining yourself to every AI tool. DotAIOS creates <code>~/aios/</code>: who you are, what you're working on, what you saved, and the workflows you want agents to follow. Same files in Claude, Cursor, Codex, Antigravity, and Hermes.</p>
           <div class="tool-row" data-i18n-attr="aria-label:hero.toolsAria">
             <ul>
               <li>Claude Code</li>
@@ -57,7 +57,7 @@
 
         <div class="install-box" id="install">
           <h2 class="install-title" data-i18n="install.title">Paste into your AI</h2>
-          <p class="install-desc" data-i18n="install.desc">It reads the guide and creates the folder. About a minute.</p>
+          <p class="install-desc" data-i18n="install.desc">Your AI reads the guide, creates the folder, and asks three questions.</p>
           <div class="snippet" id="install-snippet" data-copy-key="install.snippetCopy">
             <code><span class="prompt">›</span><span class="snippet-text" data-i18n="install.snippetDisplay">Set up DotAIOS for me: read github.com/filocosta46/dotaios and follow INSTALL.md.</span></code>
             <button class="copy" type="button" data-i18n="install.copy">Copy</button>
@@ -77,7 +77,7 @@
       <div class="wrap">
         <div class="section-head compact">
           <h2 data-i18n="explorer.title">The folder</h2>
-          <p data-i18n="explorer.desc">Plain text on your machine. Open it anytime.</p>
+          <p data-i18n="explorer.desc">Plain Markdown you own. Open it, edit it, move it anytime.</p>
         </div>
 
         <div class="workspace" role="application" data-i18n-attr="aria-label:explorer.aria">
@@ -113,15 +113,15 @@
               <article class="pane-view active" id="view-start">
                 <header class="doc-head"><h3>START_HERE.md</h3></header>
                 <div class="doc-body">
-                  <p class="lead" data-i18n="explorer.start.lead">Your context lives here as Markdown files.</p>
-                  <p data-i18n="explorer.start.body">Paste the install line above. Your AI creates this folder and asks a few questions.</p>
+                  <p class="lead" data-i18n="explorer.start.lead">Your context lives here as Markdown, not inside one vendor's memory.</p>
+                  <p data-i18n="explorer.start.body">Paste the install line above. Your AI creates this folder, asks three questions, and points your tools at it.</p>
                 </div>
               </article>
 
               <article class="pane-view" id="view-agents" hidden>
                 <header class="doc-head"><h3>AGENTS.md</h3></header>
                 <div class="doc-body">
-                  <p class="lead" data-i18n="explorer.agents.lead">Every agent reads this file first.</p>
+                  <p class="lead" data-i18n="explorer.agents.lead">Every connected agent starts from the same source of truth.</p>
                   <pre class="agents-pre" data-i18n="explorer.agents.pre" data-i18n-attr="aria-label:explorer.agents.preAria"># AGENTS
 
 Read context/ for who I am and what I'm working on.
@@ -168,7 +168,7 @@ Start with context/identity.md.</pre>
               <article class="pane-view" id="view-skills" hidden>
                 <header class="doc-head"><h3>skills/</h3></header>
                 <div class="doc-body">
-                  <p class="lead" data-i18n="explorer.skills.lead">Plain-text workflows. Setup links them into every tool automatically.</p>
+                  <p class="lead" data-i18n="explorer.skills.lead">Portable workflows. Setup links them into supported tools automatically.</p>
                   <ul class="ask-list compact" id="explorer-skills-list">
                     <li data-i18n="explorer.skills.items.0">Plan my day</li>
                     <li data-i18n="explorer.skills.items.1">Save this article</li>
@@ -187,7 +187,7 @@ Start with context/identity.md.</pre>
       <div class="wrap">
         <div class="section-head compact">
           <h2 data-i18n="ask.title">What you can ask</h2>
-          <p data-i18n="ask.desc">Plain language. Same in every connected tool after setup.</p>
+          <p data-i18n="ask.desc">Same context, same skills, in every connected tool after setup.</p>
         </div>
         <ul class="ask-list" id="ask-list">
           <li>
@@ -199,22 +199,22 @@ Start with context/identity.md.</pre>
             <span data-i18n="ask.items.1.desc">Stores a page or PDF in your vault as clean text.</span>
           </li>
           <li>
-            <b data-i18n="ask.items.2.title">What did I decide about the launch?</b>
-            <span data-i18n="ask.items.2.desc">Searches everything you saved.</span>
+            <b data-i18n="ask.items.2.title">What did I decide about this project?</b>
+            <span data-i18n="ask.items.2.desc">Searches your saved notes and sessions.</span>
           </li>
           <li>
             <b data-i18n="ask.items.3.title">What am I working on?</b>
             <span data-i18n="ask.items.3.desc">Quick check that your folder is connected.</span>
           </li>
         </ul>
-        <p class="section-note" data-i18n-html="ask.note">Skills install into Claude Code, Cursor, Codex, Antigravity, and Hermes when you run setup. Edit once in <code>~/aios/skills/</code>, every tool sees the update.</p>
+        <p class="section-note" data-i18n-html="ask.note">Skills install into supported tools when you run setup. Edit once in <code>~/aios/skills/</code>, every connected tool sees the update.</p>
       </div>
     </section>
 
     <section class="section cta-section">
       <div class="wrap">
         <div class="cta-box">
-          <p data-i18n="cta.text">Paste the line. Answer three questions.</p>
+          <p data-i18n="cta.text">Stop rebuilding context by hand.</p>
           <a class="btn btn-primary" href="#install" data-i18n="cta.btn">Copy prompt</a>
         </div>
       </div>
@@ -225,7 +225,7 @@ Start with context/identity.md.</pre>
     <div class="wrap footer-grid">
       <div class="footer-brand">
         <a class="logo" href="#top"><span class="logo-mark" aria-hidden="true"></span> DotAIOS</a>
-        <p data-i18n="footer.tagline">MIT · open source · v1.20</p>
+        <p data-i18n="footer.tagline">MIT · open source · v1.20.1</p>
       </div>
       <nav class="footer-col">
         <a href="#explorer" data-i18n="footer.folder">Folder</a>

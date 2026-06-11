@@ -57,9 +57,16 @@
     "memory",
     "cli",
     "context",
+    "local-first",
+    "ai-context",
+    "aios",
+    "agent-skills",
+    "personal-ai",
     "claude-code",
     "codex",
-    "cursor"
+    "cursor",
+    "gemini",
+    "antigravity"
   ],
   "engines": {
     "node": ">=20"

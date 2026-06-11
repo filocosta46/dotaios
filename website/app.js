@@ -11,9 +11,16 @@ let visualEditingReady = false
 let uiStarted = false
 
 const QUERY = '*[_type == "landingPage"][0]'
+const CURRENT_RELEASE = 'v1.20.1'
+
+function sanityMatchesCurrentRelease(doc) {
+  if (isPreview) return true
+  const footer = doc?.footerTagline?.en ?? doc?.footerTagline
+  return typeof footer === 'string' && footer.includes(CURRENT_RELEASE)
+}
 
 function sanityHasContent(doc) {
-  if (!doc) return false
+  if (!doc || !sanityMatchesCurrentRelease(doc)) return false
   const h1 = doc.heroH1?.en ?? doc.heroH1
   if (typeof h1 === 'string' && h1.trim()) return true
   const i18n = docToI18n(doc)
