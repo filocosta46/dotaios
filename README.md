@@ -89,6 +89,7 @@ dotaios update "note"       # jot something to memory in one line
 dotaios search "topic"      # search across everything you have saved
 dotaios ingest <url|file>   # save an article, PDF, or document
 dotaios brief               # write today's brief from your priorities
+dotaios brief --compact     # print a compact working-memory digest for agents
 dotaios sync setup          # mirror your folder to a private GitHub repo
 ```
 
