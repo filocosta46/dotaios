@@ -47,6 +47,6 @@ stop. Do this:
 
 ## When NOT to use
 
-A single quick fact → just search once. The user only wants what people are
-*saying* lately on Reddit/X/forums → that's a job for a "what people are
-saying" skill, not this. `research` is for synthesized, multi-source depth.
+A single quick fact → just search once. Saving or digesting ONE known article
+or source → use `ingest` then `summarize-source`. `research` is for the case
+where you need to search *across many sources* and synthesize one cited answer.
