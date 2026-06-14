@@ -2,6 +2,10 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [Unreleased]
+### Added
+- New default skill: **`research`** — deep research on any question. The agent breaks it into sub-questions, searches the web across all of them, and writes back one cited report (TL;DR · key findings · open questions · sources), saved to `vault/research/deep/`. Fully portable: any agent runs it with its own web search, no servers, accounts, or keys. Bounded by design (plan once, search once, synthesize once — no runaway sub-agent loops). Added to the default skill registry so new AIOS folders get it, and it auto-routes via RESOLVER on intents like "deep research", "compare the options", "what's the latest on".
+
 ## [1.20.1] - 2026-06-11
 ### Fixed
 - Fresh installs are warning-free again. The web scraper now uses linkedom for HTML cleanup instead of cheerio, removing the deprecated `whatwg-encoding` transitive dependency that printed an npm deprecation warning on every first `npx dotaios` run — and 12 transitive packages with it. Ingest output is unchanged.
