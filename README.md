@@ -66,12 +66,11 @@ Inside, it looks roughly like this:
 
 If you ever want to read your memory on your phone, DotAIOS can mirror the folder to a private GitHub repository that only you can see. That part is optional, and you set it up with one command.
 
-## What we believe
+## Pillars
 
 - **Local first.** No account, no server we run. Optional phone sync uses your own private GitHub repo.
 - **Just files.** Plain Markdown and text, never a database. You can read everything yourself.
 - **Out of the way.** Your AI tools read your folder directly. DotAIOS stays invisible.
-- **Free and open source.** MIT licensed, and it will always be free.
 
 ## If you like the terminal
 
