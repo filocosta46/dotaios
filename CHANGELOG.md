@@ -2,9 +2,10 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
-## [Unreleased]
+## [1.20.2] - 2026-06-15
 ### Added
 - New default skill: **`research`** — deep research on any question. The agent breaks it into sub-questions, searches the web across all of them, and writes back one cited report (TL;DR · key findings · open questions · sources), saved to `vault/research/deep/`. Fully portable: any agent runs it with its own web search, no servers, accounts, or keys. Bounded by design (plan once, search once, synthesize once — no runaway sub-agent loops). Added to the default skill registry so new AIOS folders get it, and it auto-routes via RESOLVER on intents like "deep research", "compare the options", "what's the latest on".
+- `dotaios export-okf` — export your knowledge (context, vault, projects, decisions, connections) into an [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog) (OKF v0.1) bundle: plain markdown + YAML frontmatter, git-shaped, readable by any OKF tool. It injects the OKF-required `type` field at export, generates a progressive-disclosure `index.md` per directory plus a bundle-root `index.md` declaring `okf_version`, and rewrites resolvable `[[wikilinks]]` to absolute `/path.md` links. Read-only — your source files are never modified. OKF is treated as portable plumbing: the bundle is a disposable projection, not a migration, and is produced locally only (sharing it is your decision). Ships with an `export-okf` skill and `docs/okf.md`.
 
 ## [1.20.1] - 2026-06-11
 ### Fixed

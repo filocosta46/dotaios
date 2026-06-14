@@ -17,6 +17,7 @@ const commands = {
   connect: "./commands/connect.mjs",
   context: "./commands/context.mjs",
   doctor: "./commands/doctor.mjs",
+  "export-okf": "./commands/export-okf.mjs",
   google: "./commands/google.mjs",
   import: "./commands/import.mjs",
   index: "./commands/index.mjs",
@@ -50,6 +51,7 @@ Commands:
   setup             One-shot: init + activate + reveal (recommended for new users)
   capture <cmd>     Save, browse, and search your AI conversations
   doctor            One-stop health check
+  export-okf        Export your knowledge as an Open Knowledge Format (OKF) bundle
   activate          Connect ~/aios to global agent memory files
   attach <dir>      Connect a project folder to DotAIOS
   brief             Write today's brief into memory/daily/YYYY-MM-DD.md
