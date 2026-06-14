@@ -12,3 +12,6 @@ memory/errors.jsonl
 
 .DS_Store
 node_modules/
+
+# Regenerable OKF export bundles (dotaios export-okf) — never tracked or synced
+build/

@@ -157,9 +157,19 @@ export async function exportOkfCommand(args) {
 
   const config = await readJson(path.join(target, "aios.json"), {});
   const vaultPath = resolveVaultPath(config, target);
-  const outDir = options.out
-    ? path.resolve(expandHome(options.out))
-    : path.join(target, "build", "okf-export");
+  const usingDefaultOut = !options.out;
+  const outDir = usingDefaultOut
+    ? path.join(target, "build", "okf-export")
+    : path.resolve(expandHome(options.out));
+
+  // Keep the gate honest: the default bundle lives under <aios>/build, which the
+  // sync hook would otherwise pick up. Make build/ self-ignoring so the bundle is
+  // never committed or synced, even on installs whose .gitignore predates this.
+  if (usingDefaultOut) {
+    const buildDir = path.join(target, "build");
+    await fs.mkdir(buildDir, { recursive: true });
+    await fs.writeFile(path.join(buildDir, ".gitignore"), "*\n");
+  }
 
   const stats = await exportBundle({ srcRoot: target, outDir, vaultPath });
 
