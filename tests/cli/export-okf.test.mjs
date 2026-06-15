@@ -54,3 +54,18 @@ test("resolvable [[wikilink]] becomes an absolute /path.md link", async () => {
   const identity = await fs.readFile(path.join(out, "context", "identity.md"), "utf8");
   assert.match(identity, /\[orders\]\(\/vault\/raw\/orders\.md\)/);
 });
+
+test("preserves custom frontmatter keys (OKF: keep unknown keys)", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "okf-"));
+  await fs.mkdir(path.join(dir, "vault", "research", "scout"), { recursive: true });
+  await fs.writeFile(
+    path.join(dir, "vault", "research", "scout", "x.md"),
+    "---\ntitle: X\nadopt: YES\nconfidence: high\n---\n\nbody\n"
+  );
+  const out = path.join(dir, "out");
+  await exportBundle({ srcRoot: dir, outDir: out });
+  const t = await fs.readFile(path.join(out, "vault", "research", "scout", "x.md"), "utf8");
+  assert.match(t, /type:/, "required type injected");
+  assert.match(t, /adopt: YES/, "custom key preserved");
+  assert.match(t, /confidence: high/, "custom key preserved");
+});

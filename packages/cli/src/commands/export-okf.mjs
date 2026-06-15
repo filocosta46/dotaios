@@ -12,13 +12,13 @@ const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 
 function splitFrontmatter(text) {
   const match = FM_RE.exec(text);
-  if (!match) return { meta: {}, body: text };
+  if (!match) return { meta: {}, body: text, raw: null };
   const meta = {};
   for (const line of match[1].split("\n")) {
     const kv = /^([A-Za-z0-9_]+):\s*(.*)$/.exec(line);
     if (kv) meta[kv[1].toLowerCase()] = kv[2].trim();
   }
-  return { meta, body: match[2] };
+  return { meta, body: match[2], raw: match[1] };
 }
 
 function inferType(rel, meta) {
@@ -36,12 +36,13 @@ function inferType(rel, meta) {
   return "Note";
 }
 
-function buildFrontmatter(meta, type) {
-  const out = { type };
-  for (const key of ["title", "description", "resource", "tags", "timestamp"]) {
-    if (meta[key]) out[key] = meta[key];
-  }
-  return ["---", ...Object.entries(out).map(([k, v]) => `${k}: ${v}`), "---", ""].join("\n");
+// Preserve the source frontmatter verbatim (OKF v0.1 §4.1: keep unknown keys);
+// inject the required `type` only when the source lacks it. Files with no
+// frontmatter get a minimal block.
+function renderFrontmatter(raw, hasType, type) {
+  if (raw === null) return `---\ntype: ${type}\n---\n`;
+  if (hasType) return `---\n${raw}\n---\n`;
+  return `---\ntype: ${type}\n${raw}\n---\n`;
 }
 
 /**
@@ -78,7 +79,7 @@ export async function exportBundle({ srcRoot, outDir, roots = SRC_ROOTS, vaultPa
   const concepts = [];
   for (const { file, rel } of files) {
     const text = await fs.readFile(file, "utf8");
-    const { meta, body } = splitFrontmatter(text);
+    const { meta, body, raw } = splitFrontmatter(text);
     const type = inferType(rel, meta);
     if (!meta.type) injected += 1;
     const body2 = body.replace(WIKILINK_RE, (whole, inner) => {
@@ -92,7 +93,7 @@ export async function exportBundle({ srcRoot, outDir, roots = SRC_ROOTS, vaultPa
     });
     const dst = path.join(outDir, rel);
     await fs.mkdir(path.dirname(dst), { recursive: true });
-    await fs.writeFile(dst, buildFrontmatter(meta, type) + body2);
+    await fs.writeFile(dst, renderFrontmatter(raw, Boolean(meta.type), type) + body2);
     concepts.push({ rel, type, description: meta.description || "" });
   }
 
