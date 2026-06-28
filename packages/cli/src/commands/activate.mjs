@@ -12,6 +12,7 @@ import {
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
+import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
 import { symlinkTargets, hermesConfigTargets } from "../../../core/src/skill-targets.mjs";
 import { installSymlinkSkills, cleanupStaleLinks } from "../../../core/src/skills-install.mjs";
 import { ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
@@ -31,17 +32,31 @@ export async function activateCommand(args) {
   const homePath = resolvePath(options.home || os.homedir());
   await ensureAiosFolder(aiosPath);
 
-  const global = await createGlobalBridges(aiosPath, homePath, options);
+  // `--skills-first` persists into aios.json so re-running `dotaios activate`
+  // without the flag keeps the inlined catalog. Pass `--no-skills-first` to
+  // switch back to the default pointer-mode bridge.
+  if (options.skillsFirst !== undefined) {
+    await updateAiosConfig(aiosPath, { skills_first: options.skillsFirst });
+  }
+  const config = await readAiosConfig(aiosPath);
+  const skillsFirst = Boolean(config.skills_first);
+
+  // Refresh the skill catalog BEFORE writing bridges so a `--skills-first`
+  // run inlines the current INDEX.md + RESOLVER.md, not a stale copy.
+  const skillsIndex = await writeSkillsIndex(aiosPath);
+
+  const global = await createGlobalBridges(aiosPath, homePath, options, skillsFirst);
   const results = [...global.results];
 
   if (options.project) {
     results.push(...await createProjectBridges(aiosPath, resolvePath(options.project), options));
   }
 
-  const skillsIndex = await writeSkillsIndex(aiosPath);
-
   printResults("DotAIOS activated", results);
   console.log(`[refreshed] ${skillsIndex.path} (${skillsIndex.count} skill(s) any agent can run)`);
+  if (skillsFirst) {
+    console.log("[skills-first] bridge files inline the skill catalog (set by `dotaios activate --skills-first`).");
+  }
 
   if (global.installedCount === 0) {
     console.log("\nNo known AI tools were detected on this machine.");
@@ -81,7 +96,8 @@ function parseOptions(args = []) {
     overwrite: false,
     path: null,
     positionals: [],
-    project: null
+    project: null,
+    skillsFirst: undefined
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -92,6 +108,10 @@ function parseOptions(args = []) {
       options.dryRun = true;
     } else if (arg === "--overwrite") {
       options.overwrite = true;
+    } else if (arg === "--skills-first") {
+      options.skillsFirst = true;
+    } else if (arg === "--no-skills-first") {
+      options.skillsFirst = false;
     } else if (arg === "--home") {
       options.home = readOptionValue(args, index, "--home");
       index += 1;
@@ -114,12 +134,16 @@ function printActivateHelp() {
   dotaios activate [options]
 
 Options:
-  --path <dir>     Use an AIOS folder other than ~/aios
-  --home <dir>     Write global agent bridges somewhere other than your home
-  --project <dir>  Also attach DotAIOS to a project folder
-  --all            Connect every known AI tool, even ones not detected yet
-  --dry-run        Show what would be written without changing files
-  --overwrite      Replace existing unmanaged bridge files
+  --path <dir>          Use an AIOS folder other than ~/aios
+  --home <dir>          Write global agent bridges somewhere other than your home
+  --project <dir>       Also attach DotAIOS to a project folder
+  --all                 Connect every known AI tool, even ones not detected yet
+  --dry-run             Show what would be written without changing files
+  --overwrite           Replace existing unmanaged bridge files
+  --skills-first        Inline the skill catalog (INDEX+RESOLVER) into every bridge
+                        file so agents that don't follow file refs still see it.
+                        Persists into aios.json; re-run activate without the flag
+                        to keep it. Use --no-skills-first to switch back.
 `);
 }
 
@@ -134,7 +158,7 @@ Options:
 `);
 }
 
-async function createGlobalBridges(aiosPath, homePath, options) {
+async function createGlobalBridges(aiosPath, homePath, options, skillsFirst = false) {
   const registry = await loadAgentRegistry(aiosPath);
   const results = [];
   let installedCount = 0;
@@ -149,7 +173,7 @@ async function createGlobalBridges(aiosPath, homePath, options) {
     }
     installedCount += 1;
 
-    const result = await writeManagedFile(destination, bridgeContent(agent, aiosPath), options);
+    const result = await writeManagedFile(destination, await bridgeContent(agent, aiosPath, { skillsFirst }), options);
     results.push(result);
   }
 

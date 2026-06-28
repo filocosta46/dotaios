@@ -68,8 +68,13 @@ export async function isAgentInstalled(homePath, agent) {
 }
 
 // The managed bridge-file body for one agent. Always points at the single
-// canonical AGENTS.md front door inside the AIOS folder.
-export function bridgeContent(agent, aiosPath) {
+// canonical AGENTS.md front door inside the AIOS folder. When `skillsFirst` is
+// true, the skill catalog (INDEX.md + RESOLVER.md) is INLINED into the managed
+// block instead of just pointed at, so agents that do not auto-follow file
+// references (headless fleet workers, MCP-only clients, browser-paste users)
+// still see the catalog at boot. Default stays pointer-mode to keep bridge
+// files small.
+export async function bridgeContent(agent, aiosPath, { skillsFirst = false } = {}) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
   const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
   const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
@@ -77,7 +82,7 @@ export function bridgeContent(agent, aiosPath) {
     ? `@${entrypoint}`
     : `DotAIOS entrypoint (read this file first): ${entrypoint}`;
 
-  return [
+  const lines = [
     `# DotAIOS ${agent.name} Bridge`,
     "",
     MANAGED_START,
@@ -86,11 +91,39 @@ export function bridgeContent(agent, aiosPath) {
     pointerLine,
     "",
     "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
-    "",
-    `Skills: read ${skillsIndex} to see all available skills and how to run them.`,
-    `Routing: to choose a skill for a request, match the user's intent against ${resolver} (trigger phrases -> skill), then open that SKILL.md before acting. If the user keeps repeating a workflow, offer to run the skillify skill to make it reusable (draft it, then ask before saving).`,
-    "Working memory: call the `read_session_digest` MCP tool, or run `dotaios brief --compact` to get today's focus, carry-overs, and recent sessions.",
-    MANAGED_END,
     ""
-  ].join("\n");
+  ];
+
+  if (skillsFirst) {
+    const [indexText, resolverText] = await Promise.all([
+      readCatalogFile(skillsIndex),
+      readCatalogFile(resolver)
+    ]);
+    lines.push("## Skills first (inlined by `dotaios activate --skills-first`)");
+    lines.push("");
+    lines.push("Match the user's intent to a skill below, then open that skill's SKILL.md before acting. If nothing fits, hand-roll the work and offer to skillify a repeat.");
+    lines.push("");
+    if (indexText) {
+      lines.push("### Skills index", "", indexText.trim(), "");
+    }
+    if (resolverText) {
+      lines.push("### Skill resolver", "", resolverText.trim(), "");
+    }
+  } else {
+    lines.push(`Skills: read ${skillsIndex} to see all available skills and how to run them.`);
+    lines.push(`Routing: to choose a skill for a request, match the user's intent against ${resolver} (trigger phrases -> skill), then open that SKILL.md before acting. If the user keeps repeating a workflow, offer to run the skillify skill to make it reusable (draft it, then ask before saving).`);
+  }
+
+  lines.push("Working memory: call the `read_session_digest` MCP tool, or run `dotaios brief --compact` to get today's focus, carry-overs, and recent sessions.");
+  lines.push(MANAGED_END, "");
+
+  return lines.join("\n");
+}
+
+async function readCatalogFile(filePath) {
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return "";
+  }
 }
