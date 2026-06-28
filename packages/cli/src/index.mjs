@@ -121,7 +121,7 @@ async function main(argv) {
   await command(args);
 
   // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
-  await fireSyncHook({ command: commandName });
+  await fireSyncHook({ command: commandName, dryRun: args.includes("--dry-run") });
 }
 
 function resolveCommand(module, commandName) {

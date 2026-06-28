@@ -17,22 +17,23 @@ service.
 
 ## Pick a client
 
-- **GitSync** (iOS) and **MGit** (Android) are the common choices. Both do
-  background fetch, OAuth for private GitHub repos, and a basic conflict view.
-  Any git client that supports GitHub OAuth and a commit+push flow works; the
-  steps below are the same.
-- Use the GitHub OAuth sign-in the app offers. Do not paste a personal access
-  token into a phone app if OAuth is available, OAuth scopes are narrower and
-  revocable from GitHub directly.
+- **GitSync** (iOS) supports GitHub OAuth, an in-app editor, and scheduled
+  background sync.
+- **MGit** (Android) is a manual git client. It can clone, fetch, pull, commit,
+  and push, but it does not include a text editor, automatic background sync,
+  or the same GitHub OAuth flow. Pair it with an Android editor that supports
+  Content Providers and use one of MGit's supported HTTPS or SSH
+  authentication methods.
 
 ## One-time setup
 
 1. Run `dotaios sync setup` on your laptop first. This creates the private repo
    and pushes the first mirror.
-2. On the phone, sign in to GitHub through the git client (OAuth).
+2. In GitSync, sign in to GitHub with OAuth. In MGit, configure HTTPS or SSH
+   authentication for the private repo.
 3. Clone your DotAIOS repo. It is the URL `dotaios sync repo` prints.
-4. Open files in the app's built-in editor. Markdown renders readably in both
-   GitSync and MGit.
+4. In GitSync, open Markdown in the in-app editor. With MGit, open the cloned
+   files in a separate Android editor that supports Content Providers.
 
 ## Day-to-day flow
 
@@ -45,7 +46,8 @@ service.
 - **Let the laptop reconcile:** run `dotaios sync tick` on the laptop (it runs
   automatically on a hook). The tick pulls your phone commit by rebasing the
   local state on top of it, then pushes the combined history back. Your phone
-  fetches the result on its next background sync.
+  receives the result on GitSync's next scheduled or manual sync. In MGit,
+  fetch and pull manually.
 
 ## Keeping conflicts small
 
@@ -60,16 +62,17 @@ service.
   `local-<timestamp>` branch and aligns `main` with the remote, so nothing is
   lost. Resolve the conflict on the laptop, then push.
 
-## If the app offers a conflict view
+## If the app reports a conflict
 
-Both GitSync and MGit show a conflict marker view. For an inbox note, the
-simplest resolution is to keep both versions (yours and the laptop's) and let
-the laptop tick clean it up. For any other file, prefer the laptop's version,
-it is the one running the skills and the sync discipline.
+For an inbox note, the simplest resolution is to keep both versions (yours and
+the laptop's) and let the laptop tick clean it up. For any other file, resolve
+the conflict on the laptop, then commit and push the result.
 
 ## Private repo access
 
-The repo `dotaios sync setup` creates is private. OAuth through the phone app
-scopes to that one repo (or your account), and you can revoke the app's access
-from GitHub > Settings > Applications at any time without affecting the laptop
-sync, which uses its own token stored in `~/.dotaios/sync.json`.
+The repo `dotaios sync setup` creates is private. GitSync's GitHub OAuth access
+can be reviewed or revoked from GitHub > Settings > Applications without
+affecting laptop sync. MGit does not provide equivalent OAuth sign-in, so
+review and revoke the HTTPS credential or SSH key you configured for it
+separately. Laptop sync uses its own token stored in
+`~/.dotaios/sync.json`.

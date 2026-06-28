@@ -130,9 +130,8 @@ export function resolveIntent(intent, skills, options = {}) {
   };
 }
 
-// Render a ready-to-source `## Skills first` block for fleet scripts and any
-// non-IDE consumer. Replaces the hand-maintained block in dispatch-task.sh with
-// a generated one that stays in sync with installed skills.
+// Render Markdown prompt context for fleet scripts and other non-IDE consumers.
+// Callers capture this as text and append it to an agent prompt.
 export function renderBootContext(skills, { skillsDir } = {}) {
   const lines = [
     "## Skills first",

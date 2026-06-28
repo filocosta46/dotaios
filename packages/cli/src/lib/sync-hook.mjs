@@ -12,12 +12,14 @@ function defaultSpawn(cmd, args) {
 
 export async function fireSyncHook({
   command,
+  dryRun = false,
+  testContext = process.env.NODE_TEST_CONTEXT,
   argv0 = process.argv0,
   spawnImpl = defaultSpawn,
   isSyncEnabled: isEnabledImpl = isSyncEnabled
 } = {}) {
   try {
-    if (command === "sync") return;
+    if (command === "sync" || dryRun || testContext) return;
     if (!(await isEnabledImpl())) return;
     spawnImpl(argv0, [process.argv[1], "sync", "tick"]);
   } catch {

@@ -98,7 +98,9 @@ inside the managed block when true. Default stays pointer-mode.
 
 `renderBootContext(skills, aiosPath)` in `skill-resolver.mjs` prints a
 `## Skills first` block: the resolver rule + the catalog (name + triggers + path),
-ready to `eval`/source from fleet scripts.
+as Markdown prompt context. Fleet scripts capture it as text with
+`BOOT_CONTEXT="$(dotaios skills resolve --boot-context)"` and append that variable
+to the agent prompt.
 
 ## Task 6: sync explicit-path commits
 

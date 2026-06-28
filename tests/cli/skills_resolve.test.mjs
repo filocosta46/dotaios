@@ -33,6 +33,20 @@ test("skills resolve matches a trigger phrase and returns the right skill", () =
   assert.match(result.stdout, /skills\/plan-today\/SKILL\.md/);
 });
 
+test("skills resolve routes a block-list trigger fixture to audit", () => {
+  const { aiosPath } = setupAios();
+  fs.cpSync(
+    path.join(repoRoot, "tests", "fixtures", "skills", "audit-block-list"),
+    path.join(aiosPath, "skills", "audit"),
+    { recursive: true, force: true }
+  );
+
+  const result = run(["skills", "resolve", "review my setup", "--path", aiosPath]);
+  assert.match(result.stdout, /^audit /m);
+  assert.match(result.stdout, /matched trigger "review my setup"/);
+  assert.match(result.stdout, /skills\/audit\/SKILL\.md/);
+});
+
 test("skills resolve exits 2 when nothing matches", () => {
   const { aiosPath } = setupAios();
   const result = run(["skills", "resolve", "zzzzz qzzzz", "--path", aiosPath], { allowNonZero: true });
@@ -80,6 +94,24 @@ test("skills resolve --boot-context prints a Skills first block", () => {
   assert.match(result.stdout, /## Skills first/);
   assert.match(result.stdout, /plan-today/);
   assert.match(result.stdout, /open that skill's SKILL\.md/i);
+});
+
+test("skills resolve help describes boot context as captured Markdown", () => {
+  const result = run(["skills", "resolve", "--help"]);
+  assert.match(result.stdout, /BOOT_CONTEXT="\$\(dotaios skills resolve --boot-context\)"/);
+  assert.match(result.stdout, /Markdown, not shell code/);
+  assert.doesNotMatch(result.stdout, new RegExp(["ready", "to", "source"].join("-"), "i"));
+});
+
+test("skills resolve rejects an invalid --limit cleanly", () => {
+  const { aiosPath } = setupAios();
+  const result = run(
+    ["skills", "resolve", "plan my day", "--limit", "many", "--path", aiosPath],
+    { allowNonZero: true }
+  );
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /Invalid --limit "many"\. Use a positive whole number\./);
+  assert.doesNotMatch(result.stderr, /TypeError/);
 });
 
 test("skills resolve with no intent and no --boot-context exits 2", () => {

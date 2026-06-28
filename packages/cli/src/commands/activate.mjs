@@ -11,7 +11,12 @@ import {
   isAgentInstalled,
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
-import { writeSkillsIndex } from "../../../core/src/skills.mjs";
+import {
+  collectSkills,
+  renderResolver,
+  renderSkillsIndex,
+  writeSkillsIndex
+} from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
 import { symlinkTargets, hermesConfigTargets } from "../../../core/src/skill-targets.mjs";
 import { installSymlinkSkills, cleanupStaleLinks } from "../../../core/src/skills-install.mjs";
@@ -32,20 +37,28 @@ export async function activateCommand(args) {
   const homePath = resolvePath(options.home || os.homedir());
   await ensureAiosFolder(aiosPath);
 
-  // `--skills-first` persists into aios.json so re-running `dotaios activate`
-  // without the flag keeps the inlined catalog. Pass `--no-skills-first` to
-  // switch back to the default pointer-mode bridge.
-  if (options.skillsFirst !== undefined) {
+  const config = await readAiosConfig(aiosPath);
+  const skillsFirst = options.skillsFirst ?? Boolean(config.skills_first);
+
+  // A real activation persists an explicit preference. Dry-run uses the
+  // requested value for its preview without changing aios.json.
+  if (!options.dryRun && options.skillsFirst !== undefined) {
     await updateAiosConfig(aiosPath, { skills_first: options.skillsFirst });
   }
-  const config = await readAiosConfig(aiosPath);
-  const skillsFirst = Boolean(config.skills_first);
 
-  // Refresh the skill catalog BEFORE writing bridges so a `--skills-first`
-  // run inlines the current INDEX.md + RESOLVER.md, not a stale copy.
-  const skillsIndex = await writeSkillsIndex(aiosPath);
+  // Refresh before writing bridges. Dry-run renders the same catalog in memory
+  // so its bridge preview is current without touching INDEX.md or RESOLVER.md.
+  const { skillsIndex, skillsCatalog } = options.dryRun
+    ? await previewSkillsIndex(aiosPath)
+    : { skillsIndex: await writeSkillsIndex(aiosPath), skillsCatalog: undefined };
 
-  const global = await createGlobalBridges(aiosPath, homePath, options, skillsFirst);
+  const global = await createGlobalBridges(
+    aiosPath,
+    homePath,
+    options,
+    skillsFirst,
+    skillsCatalog
+  );
   const results = [...global.results];
 
   if (options.project) {
@@ -53,9 +66,11 @@ export async function activateCommand(args) {
   }
 
   printResults("DotAIOS activated", results);
-  console.log(`[refreshed] ${skillsIndex.path} (${skillsIndex.count} skill(s) any agent can run)`);
+  const refreshAction = options.dryRun ? "would refresh" : "refreshed";
+  console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} skill(s) any agent can run)`);
   if (skillsFirst) {
-    console.log("[skills-first] bridge files inline the skill catalog (set by `dotaios activate --skills-first`).");
+    const verb = options.dryRun ? "would inline" : "inline";
+    console.log(`[skills-first] bridge files ${verb} the current skill catalog.`);
   }
 
   if (global.installedCount === 0) {
@@ -158,7 +173,13 @@ Options:
 `);
 }
 
-async function createGlobalBridges(aiosPath, homePath, options, skillsFirst = false) {
+async function createGlobalBridges(
+  aiosPath,
+  homePath,
+  options,
+  skillsFirst = false,
+  skillsCatalog
+) {
   const registry = await loadAgentRegistry(aiosPath);
   const results = [];
   let installedCount = 0;
@@ -173,12 +194,31 @@ async function createGlobalBridges(aiosPath, homePath, options, skillsFirst = fa
     }
     installedCount += 1;
 
-    const result = await writeManagedFile(destination, await bridgeContent(agent, aiosPath, { skillsFirst }), options);
+    const result = await writeManagedFile(
+      destination,
+      await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog }),
+      options
+    );
     results.push(result);
   }
 
   const skills = await installAllSkills(aiosPath, homePath, options);
   return { results: [...results, ...skills], installedCount };
+}
+
+async function previewSkillsIndex(aiosPath) {
+  const skills = await collectSkills(aiosPath);
+  return {
+    skillsIndex: {
+      path: path.join(aiosPath, "skills", "INDEX.md"),
+      resolverPath: path.join(aiosPath, "skills", "RESOLVER.md"),
+      count: skills.length
+    },
+    skillsCatalog: {
+      indexText: renderSkillsIndex(skills),
+      resolverText: renderResolver(skills)
+    }
+  };
 }
 
 // Install DotAIOS skills natively into every supported tool: symlink into each

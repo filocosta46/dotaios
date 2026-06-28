@@ -83,6 +83,16 @@ test("AGENTS.md.hbs Rules section includes the sync-tick and inbox-routing rules
   assert.ok(tpl.indexOf("process-inbox", rulesIdx) > rulesIdx, "inbox-routing rule under Rules");
 });
 
+test("AGENTS.md.hbs documents boot context as captured prompt Markdown", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  assert.match(tpl, /BOOT_CONTEXT="\$\(dotaios skills resolve --boot-context\)"/);
+  assert.match(tpl, /append that\s+variable to the agent prompt/);
+  assert.doesNotMatch(tpl, new RegExp(["ready", "to", "source"].join("-"), "i"));
+});
+
 test("process-inbox skill ships in skills/", async () => {
   const content = await fs.readFile(
     path.resolve("skills/process-inbox/SKILL.md"),

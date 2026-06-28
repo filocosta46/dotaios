@@ -15,12 +15,37 @@ function readFrontmatterField(content, field) {
   return line.slice(field.length + 1).trim().replace(/^["']|["']$/g, "");
 }
 
-// Read a comma-separated frontmatter field (e.g. `triggers:`) as a trimmed,
-// non-empty string array. Keeps the parser tiny — no YAML dependency.
+function unquoteScalar(value) {
+  return value.trim().replace(/^(['"])(.*)\1$/, "$2");
+}
+
+// Read either a comma-separated scalar or an indented YAML block list. Skill
+// frontmatter only needs these two trigger shapes, so no YAML dependency is
+// necessary.
 function readFrontmatterList(content, field) {
-  const raw = readFrontmatterField(content, field);
-  if (!raw) return [];
-  return raw.split(",").map((value) => value.trim()).filter(Boolean);
+  const frontmatter = content.match(FRONTMATTER_RE)?.[1];
+  if (!frontmatter) return [];
+
+  const lines = frontmatter.split(/\r?\n/);
+  const fieldPattern = new RegExp(`^${field}:\\s*(.*)$`);
+  const fieldIndex = lines.findIndex((line) => fieldPattern.test(line));
+  if (fieldIndex === -1) return [];
+
+  const inlineValue = lines[fieldIndex].match(fieldPattern)?.[1].trim();
+  if (inlineValue) {
+    return unquoteScalar(inlineValue).split(",").map(unquoteScalar).filter(Boolean);
+  }
+
+  const values = [];
+  for (const line of lines.slice(fieldIndex + 1)) {
+    if (!line.trim() || /^\s*#/.test(line)) continue;
+    if (!/^\s/.test(line)) break;
+
+    const item = line.match(/^\s+-\s+(.+?)\s*$/);
+    if (!item) break;
+    values.push(unquoteScalar(item[1]));
+  }
+  return values.filter(Boolean);
 }
 
 // Scan <aiosPath>/skills/ for every <name>/SKILL.md and return its metadata.

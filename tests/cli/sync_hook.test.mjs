@@ -22,10 +22,33 @@ test("fireSyncHook does not spawn when command is 'sync'", async () => {
   assert.equal(spawned, false);
 });
 
+test("fireSyncHook does not spawn after a dry-run command", async () => {
+  let spawned = false;
+  await fireSyncHook({
+    command: "activate",
+    dryRun: true,
+    isSyncEnabled: async () => true,
+    spawnImpl: () => { spawned = true; }
+  });
+  assert.equal(spawned, false);
+});
+
+test("fireSyncHook does not spawn inside the Node test runner", async () => {
+  let spawned = false;
+  await fireSyncHook({
+    command: "activate",
+    testContext: "child-v8",
+    isSyncEnabled: async () => true,
+    spawnImpl: () => { spawned = true; }
+  });
+  assert.equal(spawned, false);
+});
+
 test("fireSyncHook spawns dotaios sync tick when enabled", async () => {
   let args = null;
   await fireSyncHook({
     command: "ingest",
+    testContext: null,
     isSyncEnabled: async () => true,
     spawnImpl: (cmd, a) => { args = [cmd, ...a]; return { unref: () => {} }; }
   });
@@ -36,6 +59,7 @@ test("fireSyncHook spawns dotaios sync tick when enabled", async () => {
 test("fireSyncHook swallows any error", async () => {
   await fireSyncHook({
     command: "ingest",
+    testContext: null,
     isSyncEnabled: async () => { throw new Error("boom"); },
     spawnImpl: () => {}
   });

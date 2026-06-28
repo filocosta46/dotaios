@@ -19,14 +19,18 @@ Examples:
   dotaios skills resolve "plan my day" --full
   dotaios skills resolve "plan my day" --json
   dotaios skills resolve --boot-context
+  BOOT_CONTEXT="$(dotaios skills resolve --boot-context)"
 
 Resolve options:
   --json          Print ranked matches as JSON (for fleet/MCP callers)
   --full          Also print the top match's SKILL.md body
   --all           Print the full ranked list, not just the top match
   --limit <n>     Cap the number of matches (default 1, ignored with --all)
-  --boot-context  Print a ready-to-source "## Skills first" block
+  --boot-context  Print Markdown context to capture and append to an agent prompt
   --path <dir>    Use a non-default AIOS folder
+
+Boot context is Markdown, not shell code. Capture it in a quoted variable as
+shown above, then interpolate that text into the agent prompt.
 
 Exit codes (resolve): 0 on a match, 2 when nothing clears the bar.
 `;
@@ -153,7 +157,7 @@ function parseResolveOptions(args) {
     } else if (arg === "--boot-context") {
       options.bootContext = true;
     } else if (arg === "--limit") {
-      options.limit = Number(readOptionValue(args, index, "--limit"));
+      options.limit = parseLimit(readOptionValue(args, index, "--limit"));
       index += 1;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
@@ -165,6 +169,13 @@ function parseResolveOptions(args) {
 
   options.intent = positional.join(" ").trim() || null;
   return options;
+}
+
+function parseLimit(value) {
+  if (!/^\d+$/.test(value) || Number(value) < 1) {
+    throw new Error(`Invalid --limit "${value}". Use a positive whole number.`);
+  }
+  return Number(value);
 }
 
 function round(value) {

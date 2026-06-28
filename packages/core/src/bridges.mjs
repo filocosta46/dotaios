@@ -74,7 +74,7 @@ export async function isAgentInstalled(homePath, agent) {
 // references (headless fleet workers, MCP-only clients, browser-paste users)
 // still see the catalog at boot. Default stays pointer-mode to keep bridge
 // files small.
-export async function bridgeContent(agent, aiosPath, { skillsFirst = false } = {}) {
+export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skillsCatalog } = {}) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
   const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
   const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
@@ -96,8 +96,8 @@ export async function bridgeContent(agent, aiosPath, { skillsFirst = false } = {
 
   if (skillsFirst) {
     const [indexText, resolverText] = await Promise.all([
-      readCatalogFile(skillsIndex),
-      readCatalogFile(resolver)
+      skillsCatalog?.indexText ?? readCatalogFile(skillsIndex),
+      skillsCatalog?.resolverText ?? readCatalogFile(resolver)
     ]);
     lines.push("## Skills first (inlined by `dotaios activate --skills-first`)");
     lines.push("");

@@ -75,6 +75,42 @@ test("collectSkills parses comma-separated triggers, empty when absent", async (
   assert.deepEqual(audit.triggers, []);
 });
 
+test("collectSkills preserves quoted comma-separated trigger scalars", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-"));
+  const skillDir = path.join(root, "skills", "plan");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    '---\nname: plan\ndescription: Plan work.\ntriggers: "plan my day, structure today"\n---\n'
+  );
+
+  const [plan] = await collectSkills(root);
+  assert.deepEqual(plan.triggers, ["plan my day", "structure today"]);
+});
+
+test("collectSkills parses YAML block-list triggers", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-"));
+  const skillDir = path.join(root, "skills", "audit");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    [
+      "---",
+      "name: audit",
+      "description: Review the local setup.",
+      "triggers:",
+      "  - audit my setup",
+      '  - "review my setup"',
+      "  - health check",
+      "---",
+      ""
+    ].join("\n")
+  );
+
+  const [audit] = await collectSkills(root);
+  assert.deepEqual(audit.triggers, ["audit my setup", "review my setup", "health check"]);
+});
+
 test("renderResolver builds a trigger->skill table and falls back to description", () => {
   const md = renderResolver([
     { dir: "plan", name: "plan-today", description: "Plan the day.", triggers: ["plan my day", "what should I work on"] },
