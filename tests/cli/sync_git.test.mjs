@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createGit } from "../../packages/cli/src/sync/git.mjs";
+import { createGit, parsePorcelainZ } from "../../packages/cli/src/sync/git.mjs";
 
 function fakeSpawn(plan) {
   // plan: array of { match: RegExp|string, stdout: "", stderr: "", code: 0 }
@@ -94,24 +94,49 @@ test("commitAll() returns null when nothing staged", async () => {
   const git = createGit({
     cwd: "/x",
     spawnImpl: fakeSpawn([
-      { match: "add -A", stdout: "" },
-      { match: "diff --cached --quiet", code: 0 }
+      { match: "status --porcelain -z", stdout: "" }
     ])
   });
   assert.equal(await git.commitAll("sync"), null);
 });
 
-test("commitAll() returns sha when commit made", async () => {
+test("commitAll() stages explicit paths (never git add -A) and returns sha", async () => {
+  const calls = [];
   const git = createGit({
     cwd: "/x",
-    spawnImpl: fakeSpawn([
-      { match: "add -A", stdout: "" },
-      { match: "diff --cached --quiet", code: 1 }, // changes present
-      { match: "commit -m", stdout: "" },
-      { match: "rev-parse HEAD", stdout: "abc123\n" }
-    ])
+    spawnImpl: (cmd, args) => {
+      const full = [cmd, ...args].join(" ");
+      calls.push(full);
+      if (full.includes("status --porcelain -z")) {
+        return Promise.resolve({ stdout: " M file.md\0", stderr: "", code: 0 });
+      }
+      if (full.startsWith("git add --")) {
+        return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      }
+      if (full.includes("diff --cached --quiet")) {
+        return Promise.resolve({ stdout: "", stderr: "", code: 1 }); // changes present
+      }
+      if (full.includes("commit -m")) {
+        return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      }
+      if (full.includes("rev-parse HEAD")) {
+        return Promise.resolve({ stdout: "abc123\n", stderr: "", code: 0 });
+      }
+      throw new Error(`unstubbed git call: ${full}`);
+    }
   });
   assert.equal(await git.commitAll("sync"), "abc123");
+  const addCall = calls.find((c) => c.startsWith("git add --"));
+  assert.ok(addCall, "must stage with an explicit `git add --` call");
+  assert.ok(/git add -- file\.md/.test(addCall), "must name the changed path explicitly");
+  assert.ok(!calls.some((c) => c.includes("add -A")), "must never use `git add -A`");
+});
+
+test("parsePorcelainZ stages rename destinations and skips the source field", () => {
+  // R  new.md\0old.md\0 M other.md\0
+  const stdout = "R  new.md\0old.md\0 M other.md\0";
+  const paths = parsePorcelainZ(stdout);
+  assert.deepEqual(paths, ["new.md", "other.md"]);
 });
 
 test("branchFromSha() creates named branch pointing at given sha", async () => {

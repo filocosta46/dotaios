@@ -30,6 +30,28 @@ const SYNC_GIT_IDENTITY = {
   GIT_COMMITTER_EMAIL: "sync@dotaios.local"
 };
 
+// Parse `git status --porcelain -z` output into the list of paths to stage.
+// Each entry is "XY <path>" NUL-separated; renames/copies (X = R or C) carry a
+// second NUL-separated field with the source path, which we drop — staging the
+// destination path is enough for git to record the rename. Empty input -> [].
+export function parsePorcelainZ(stdout) {
+  if (!stdout) return [];
+  const fields = stdout.split("\0");
+  const paths = [];
+  for (let i = 0; i < fields.length; i += 1) {
+    const field = fields[i];
+    if (!field) continue;
+    const status = field.slice(0, 2);
+    const path = field.slice(3);
+    if (!path) continue;
+    paths.push(path);
+    const code = status[0];
+    // R/C entries are followed by the original path in its own NUL field.
+    if (code === "R" || code === "C") i += 1;
+  }
+  return paths;
+}
+
 export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } = {}) {
   const gitEnv = { ...env, ...SYNC_GIT_IDENTITY };
   function run(args) {
@@ -42,8 +64,20 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
       return stdout.trim().length > 0;
     },
 
+    // Stage every changed path explicitly (never `git add -A`), then commit.
+    // Enumerating the changed paths from `git status --porcelain -z` lets us add
+    // each one by name, which keeps the commit surface explicit and lets a future
+    // caller filter paths (skip large files, secrets, etc.). Deletions and
+    // renames are staged by naming the destination path. Returns null when there
+    // is nothing to commit.
     async commitAll(message) {
-      await run(["add", "-A"]);
+      const { stdout } = await run(["status", "--porcelain", "-z"]);
+      const paths = parsePorcelainZ(stdout);
+      if (paths.length === 0) return null;
+      const addResult = await run(["add", "--", ...paths]);
+      if (addResult.code !== 0) {
+        throw new Error(`git add failed: ${redactToken(addResult.stderr.trim())}`);
+      }
       const staged = await run(["diff", "--cached", "--quiet"]);
       if (staged.code === 0) return null;
       const commit = await run(["commit", "-m", message]);
