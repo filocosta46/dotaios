@@ -8,6 +8,8 @@ import { buildSessionDigest } from "../../core/src/digest.mjs";
 import { touchSessions } from "../../core/src/sessions.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
+import { collectSkills } from "../../core/src/skills.mjs";
+import { rankSkills } from "../../core/src/skill-resolver.mjs";
 import { assessGwsAuth, hasGoogleConnection, resolveGwsBinary, runGws } from "../../cli/src/lib/gws.mjs";
 
 const PROTOCOL_VERSION = "2025-06-18";
@@ -83,7 +85,7 @@ class DotaiosMcpServer {
           title: "DotAIOS MCP",
           version: SERVER_VERSION
         },
-        instructions: "Use DotAIOS tools to read local context, search local memory/vault/skills/references/plugins, list projects, and log approved events."
+        instructions: "Use DotAIOS tools to read local context, search local memory/vault/skills/references/plugins, list projects, and log approved events. For any user request, call resolve_skill with the user's intent first and run the matching skill before hand-rolling work; only fall back to hand-rolling when no skill matches."
       };
     }
 
@@ -106,6 +108,7 @@ class DotaiosMcpServer {
     if (name === "read_context") return await this.readContext(args);
     if (name === "read_session_digest") return await this.readSessionDigest(args);
     if (name === "list_skills") return await this.listSkills();
+    if (name === "resolve_skill") return await this.resolveSkill(args);
     if (name === "search_memory") return await this.searchMemory(args);
     if (name === "search_vault") return await this.searchVault(args);
     if (name === "search_aios") return await this.searchAios(args);
@@ -177,6 +180,24 @@ class DotaiosMcpServer {
       return JSON.stringify({ skills: [], message: "No skills installed. Run: dotaios activate" }, null, 2);
     }
     return JSON.stringify({ skills: content }, null, 2);
+  }
+
+  async resolveSkill(args) {
+    const intent = requireString(args.intent, "intent");
+    const limit = args.limit !== undefined ? positiveInteger(args.limit, "limit") : 1;
+    const skillsDir = path.join(this.aiosPath, "skills");
+    const skills = await collectSkills(this.aiosPath);
+    const ranked = rankSkills(intent, skills, { skillsDir });
+    const matches = ranked.slice(0, Math.max(1, limit)).map((entry) => ({
+      name: entry.name,
+      dir: entry.dir,
+      description: entry.description,
+      triggers: entry.triggers,
+      score: Math.round(entry.score * 1000) / 1000,
+      reason: entry.reason,
+      skillPath: entry.skillPath
+    }));
+    return JSON.stringify({ intent, matches }, null, 2);
   }
 
   async searchMemory(args) {
@@ -380,6 +401,19 @@ function tools() {
       title: "List Skills",
       description: "List all installed DotAIOS skills the user can run. Returns the skills/INDEX.md content which describes each skill and how to invoke it.",
       inputSchema: { type: "object", properties: {} }
+    },
+    {
+      name: "resolve_skill",
+      title: "Resolve Skill",
+      description: "Resolve a free-text user intent to the installed skill that handles it. Call this before hand-rolling work. Returns a ranked list of matches with name, triggers, confidence, and the SKILL.md path to open. Empty matches means nothing fits, hand-roll the work.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          intent: { type: "string", description: "What the user wants, in their words (e.g. 'plan my day', 'save this article')." },
+          limit: { type: "integer", minimum: 1, default: 1, description: "Maximum number of matches to return." }
+        },
+        required: ["intent"]
+      }
     },
     {
       name: "search_memory",

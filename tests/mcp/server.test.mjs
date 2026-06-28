@@ -41,7 +41,8 @@ test("mcp server exposes DotAIOS tools over newline JSON-RPC", () => {
     { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "google_status", arguments: {} } },
     { jsonrpc: "2.0", id: 10, method: "tools/call", params: { name: "google_gmail_search", arguments: { query: "from:alice" } } },
     { jsonrpc: "2.0", id: 11, method: "tools/call", params: { name: "google_calendar_agenda", arguments: { today: true } } },
-    { jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "google_drive_search", arguments: { query: "budget" } } }
+    { jsonrpc: "2.0", id: 12, method: "tools/call", params: { name: "google_drive_search", arguments: { query: "budget" } } },
+    { jsonrpc: "2.0", id: 13, method: "tools/call", params: { name: "resolve_skill", arguments: { intent: "plan my day" } } }
   ];
 
   // The gws binary is supplied to the server via its environment (operator
@@ -55,6 +56,7 @@ test("mcp server exposes DotAIOS tools over newline JSON-RPC", () => {
     "read_context",
     "read_session_digest",
     "list_skills",
+    "resolve_skill",
     "search_memory",
     "search_vault",
     "search_aios",
@@ -76,6 +78,10 @@ test("mcp server exposes DotAIOS tools over newline JSON-RPC", () => {
   assert.match(toolText(responses[9]), /Gmail search: from:alice/);
   assert.match(toolText(responses[10]), /Calendar agenda: today/);
   assert.match(toolText(responses[11]), /Drive search: name contains 'budget'/);
+  const resolved = JSON.parse(toolText(responses[12]));
+  assert.equal(resolved.intent, "plan my day");
+  assert.ok(resolved.matches.length > 0);
+  assert.equal(resolved.matches[0].name, "plan-today");
 });
 
 test("mcp server validates tool inputs", () => {
