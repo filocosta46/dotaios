@@ -88,7 +88,9 @@ dotaios update "note"       # jot something to memory in one line
 dotaios search "topic"      # search across everything you have saved
 dotaios ingest <url|file>   # save an article, PDF, or document
 dotaios brief               # write today's brief from your priorities
-dotaios brief --compact     # print a compact working-memory digest for agents
+dotaios brief --lean        # print a small high-signal surface (identity, priorities, north-star, today, active project)
+dotaios skills resolve "plan my day"   # route an intent to the skill that handles it
+dotaios plan "ship it" --steps "tests,implement"  # write a plan.md artifact agents pick up later
 dotaios sync setup          # mirror your folder to a private GitHub repo
 dotaios export-okf          # export your knowledge as a portable Open Knowledge Format bundle
 ```
@@ -97,7 +99,7 @@ Run `dotaios --help` to see everything.
 
 ## Learn more
 
-[Getting started](docs/getting-started.md) · [Saving conversations](docs/sessions.md) · [Phone sync and advanced memory](docs/advanced-memory.md) · [Google Workspace](docs/google-workspace.md) · [Skill marketplace](docs/marketplace.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [OKF export](docs/okf.md)
+[Getting started](docs/getting-started.md) · [Saving conversations](docs/sessions.md) · [Phone sync and advanced memory](docs/advanced-memory.md) · [GitSync on mobile](docs/gitsync-mobile.md) · [Google Workspace](docs/google-workspace.md) · [Skill marketplace](docs/marketplace.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [OKF export](docs/okf.md)
 
 ## License
 

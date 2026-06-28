@@ -79,6 +79,12 @@ see what is available.
 user's intent against RESOLVER.md, then open that skill's `SKILL.md` and follow
 it. Prefer the most specific match. Both files are auto-generated.
 
+For a programmatic match, run `dotaios skills resolve "<intent>"` (or call the
+MCP `resolve_skill` tool). It returns the ranked skills that fit the intent, with
+the `SKILL.md` path to open. Exit code 2 means nothing fits, hand-roll the work
+and offer to skillify a repeat. `dotaios skills resolve --boot-context` prints a
+ready-to-source `## Skills first` block for fleet scripts.
+
 ### Installing new skills
 
 If the user gives you a repository URL and asks you to install a skill or plugin:

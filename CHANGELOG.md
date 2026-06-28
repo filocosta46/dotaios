@@ -2,6 +2,19 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.21.0] - 2026-06-28
+### Added
+- **Flagship: native agent skills-routing.** `dotaios skills resolve "<intent>"` ranks the installed skill that fits a free-text intent, with no embeddings, network, or model calls. Plain-text scoring over each skill's declared `triggers:` and `description`: exact-name hit, trigger token overlap, description overlap, specificity tiebreak. Prints the top match (name, dir, confidence, triggers, `SKILL.md` path); `--full` also prints the `SKILL.md` body, `--all` prints the ranked list, `--json` returns the documented shape for fleet and MCP callers. Exit 2 when nothing clears the bar so fleet scripts can branch on "no skill fits, hand-roll." The scoring lives in a new shared `packages/core/src/skill-resolver.mjs` so the CLI and MCP server use one function.
+- **MCP `resolve_skill` tool.** IDE agents (Cursor, Claude Code) call `resolve_skill` with the user's intent at boot or before acting, and get the same ranked payload as `dotaios skills resolve --json`. The MCP `instructions` now tell agents to resolve a skill first and only hand-roll when nothing matches.
+- **`dotaios skills resolve --boot-context`** prints a ready-to-source `## Skills first` block (the resolver rule plus the live catalog) for fleet scripts and any non-IDE consumer. This replaces the hand-maintained block in a fleet `dispatch-task.sh` with a generated one that stays in sync with installed skills.
+- **`dotaios activate --skills-first`** persists a preference in `aios.json` that makes the managed bridge block INLINE `skills/INDEX.md` + `skills/RESOLVER.md` into every agent entrypoint, so agents that do not auto-follow file references (headless fleet workers, MCP-only clients, browser-paste users) still see the catalog at boot. Default stays pointer-mode to keep bridge files small; `--no-skills-first` switches back.
+- **`dotaios brief --lean`** prints a small high-signal surface to stdout: identity, priorities, north-star, today's daily note, and the first active project README. The rest of `memory/` stays opt-in, the lean default load the push-memory thesis asks for. No file write.
+- **`dotaios plan "<title>"`** writes a lightweight `memory/plans/YYYY-MM-DD-<slug>.md` artifact (goal, checkbox steps, status, open questions) an agent can pick up across sessions, and logs a `plan` event so it surfaces in the session digest. `--print` prints instead of writing; `--steps` and `--project` tag it.
+- **`docs/gitsync-mobile.md`** documents reading and capturing notes into your AIOS from a phone via GitSync (iOS) / MGit (Android) against the same private GitHub repo `dotaios sync setup` creates. No new services.
+
+### Changed
+- `dotaios sync` now stages changed paths explicitly. `commitAll` enumerates `git status --porcelain -z` and runs `git add -- <path>` per entry instead of `git add -A`, so the commit surface is explicit and a future caller can filter paths (skip large files, secrets). Deletions and renames still stage by naming the destination path. Conflict handling (rebase, branch-and-reset escape hatch) is unchanged.
+
 ## [1.20.2] - 2026-06-15
 ### Added
 - New default skill: **`research`** — deep research on any question. The agent breaks it into sub-questions, searches the web across all of them, and writes back one cited report (TL;DR · key findings · open questions · sources), saved to `vault/research/deep/`. Fully portable: any agent runs it with its own web search, no servers, accounts, or keys. Bounded by design (plan once, search once, synthesize once — no runaway sub-agent loops). Added to the default skill registry so new AIOS folders get it, and it auto-routes via RESOLVER on intents like "deep research", "compare the options", "what's the latest on".
