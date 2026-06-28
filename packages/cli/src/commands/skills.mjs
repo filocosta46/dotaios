@@ -1,25 +1,44 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { hasHelpFlag } from "../lib/args.mjs";
+import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
+import { rankSkills, resolveIntent, renderBootContext } from "../../../core/src/skill-resolver.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios skills [name]
+  dotaios skills resolve "<intent>" [options]
 
-List installed skills or show detail for one skill.
+List installed skills, show detail for one skill, or resolve a free-text intent
+to the skill that handles it.
 
 Examples:
   dotaios skills             List all installed skills
   dotaios skills plan-today  Show full instructions for the plan-today skill
+  dotaios skills resolve "plan my day"
+  dotaios skills resolve "plan my day" --full
+  dotaios skills resolve "plan my day" --json
+  dotaios skills resolve --boot-context
 
-Options:
-  --path <dir>  Use a non-default AIOS folder
+Resolve options:
+  --json          Print ranked matches as JSON (for fleet/MCP callers)
+  --full          Also print the top match's SKILL.md body
+  --all           Print the full ranked list, not just the top match
+  --limit <n>     Cap the number of matches (default 1, ignored with --all)
+  --boot-context  Print a ready-to-source "## Skills first" block
+  --path <dir>    Use a non-default AIOS folder
+
+Exit codes (resolve): 0 on a match, 2 when nothing clears the bar.
 `;
 
 export async function skillsCommand(args) {
   if (hasHelpFlag(args)) {
     console.log(HELP_TEXT);
+    return;
+  }
+
+  if (args[0] === "resolve") {
+    await resolveSkillCommand(args.slice(1));
     return;
   }
 
@@ -33,6 +52,123 @@ export async function skillsCommand(args) {
   } else {
     listSkills(skills);
   }
+}
+
+async function resolveSkillCommand(args) {
+  const options = parseResolveOptions(args);
+  const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
+  const skillsDir = path.join(aiosPath, "skills");
+  const skills = await collectSkills(aiosPath);
+
+  if (options.bootContext) {
+    process.stdout.write(`${renderBootContext(skills, { skillsDir })}\n`);
+    return;
+  }
+
+  if (!options.intent) {
+    console.error(`Pass an intent to resolve, e.g. dotaios skills resolve "plan my day".`);
+    console.error(`Or print a boot block: dotaios skills resolve --boot-context.`);
+    process.exitCode = 2;
+    return;
+  }
+
+  const ranked = rankSkills(options.intent, skills, { skillsDir });
+
+  if (ranked.length === 0) {
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify({ intent: options.intent, matches: [] }, null, 2)}\n`);
+    } else {
+      console.error(`No skill matched: ${options.intent}`);
+      console.error(`Run "dotaios skills" to list installed skills.`);
+    }
+    process.exitCode = 2;
+    return;
+  }
+
+  const limit = options.all ? ranked.length : Math.max(1, options.limit);
+  const matches = ranked.slice(0, limit);
+
+  if (options.json) {
+    const payload = {
+      intent: options.intent,
+      matches: matches.map((entry) => ({
+        name: entry.name,
+        dir: entry.dir,
+        description: entry.description,
+        triggers: entry.triggers,
+        score: round(entry.score),
+        reason: entry.reason,
+        skillPath: entry.skillPath
+      }))
+    };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    return;
+  }
+
+  if (options.all) {
+    for (const entry of matches) {
+      printMatchHeader(entry);
+    }
+    return;
+  }
+
+  const top = matches[0];
+  printMatchHeader(top);
+  if (options.full) {
+    let body;
+    try {
+      body = await fs.readFile(top.skillPath, "utf8");
+    } catch {
+      console.error(`Could not read skill file: ${top.skillPath}`);
+      process.exitCode = 1;
+      return;
+    }
+    process.stdout.write(`\n${body}`);
+  }
+}
+
+function printMatchHeader(entry) {
+  const confidence = entry.score >= 100 ? 1 : Math.min(1, entry.score);
+  console.log(`${entry.name} — ${entry.description || "(no description)"}`);
+  console.log(`  dir:       ${entry.dir}`);
+  console.log(`  confidence: ${confidence.toFixed(2)} (${entry.reason})`);
+  if (entry.triggers.length) {
+    console.log(`  triggers:  ${entry.triggers.join(" · ")}`);
+  }
+  console.log(`  run:       ${entry.skillPath}`);
+}
+
+function parseResolveOptions(args) {
+  const options = { intent: null, json: false, full: false, all: false, bootContext: false, limit: 1, path: null };
+  const positional = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      options.json = true;
+    } else if (arg === "--full") {
+      options.full = true;
+    } else if (arg === "--all") {
+      options.all = true;
+    } else if (arg === "--boot-context") {
+      options.bootContext = true;
+    } else if (arg === "--limit") {
+      options.limit = Number(readOptionValue(args, index, "--limit"));
+      index += 1;
+    } else if (arg === "--path") {
+      options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (!arg.startsWith("--")) {
+      positional.push(arg);
+    }
+  }
+
+  options.intent = positional.join(" ").trim() || null;
+  return options;
+}
+
+function round(value) {
+  return Math.round(value * 1000) / 1000;
 }
 
 function listSkills(skills) {
