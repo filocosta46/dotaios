@@ -28,6 +28,7 @@ const commands = {
   license: "./commands/license.mjs",
   market: "./commands/market.mjs",
   mcp: "./commands/mcp.mjs",
+  plan: "./commands/plan.mjs",
   "pilot-report": "./commands/pilot-report.mjs",
   "pilot-score": "./commands/pilot-score.mjs",
   reveal: "./commands/reveal.mjs",
@@ -68,11 +69,13 @@ Commands:
   license <cmd>     Add, list, or remove license keys for paid skills
   market <cmd>      Browse and install skills from the public registry
   mcp <cmd>         Print local MCP server status and client config
+  plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins
   skill <cmd>       Add, list, or remove skills (friendly alias for install)
-  skills [name]     List installed skills or show full instructions for one skill
+  skills [name]     List installed skills, show one skill, or resolve an intent
+                   (dotaios skills resolve "plan my day")
   status            Check the health of a local AIOS folder
   sync <cmd>        Cross-device sync to a private GitHub repo
   update [text]     Log a quick update — decision, meeting, note — to memory
