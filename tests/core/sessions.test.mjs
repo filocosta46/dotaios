@@ -281,18 +281,20 @@ test("filterSessions by project", async () => {
 
 test("filterSessions by since cuts off old sessions", async () => {
   const aios = tmpAios();
+  const oldCapturedAt = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+  const recentCapturedAt = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
   await writeSession(aios, makeSession({
     session_id: generateSessionId(),
-    captured_at: "2020-01-01T00:00:00.000Z",
+    captured_at: oldCapturedAt,
   }));
   await writeSession(aios, makeSession({
     session_id: generateSessionId(),
-    captured_at: "2026-05-16T14:30:00.000Z",
+    captured_at: recentCapturedAt,
   }));
 
   const recent = await filterSessions(aios, { since: "30d" });
   assert.equal(recent.length, 1);
-  assert.equal(recent[0].captured_at, "2026-05-16T14:30:00.000Z");
+  assert.equal(recent[0].captured_at, recentCapturedAt);
 });
 
 // ---------- manual adapter ----------
