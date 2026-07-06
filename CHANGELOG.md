@@ -2,6 +2,10 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## Unreleased
+### Added
+- `dotaios memory audit`, a local skills-over-memory review that checks hot agent memory against a 200-line budget, classifies routed memory entries, and can write `memory/skill-patches/queue.md` with stable IDs for skill-tied lessons. The command is read-only by default, supports `--all-memory` for forensic scans, and `--apply-skills` can append explicit lessons into existing `skills/<name>/SKILL.md` files without creating missing skills or routing uncertain items.
+
 ## [1.20.2] - 2026-06-15
 ### Added
 - New default skill: **`research`** — deep research on any question. The agent breaks it into sub-questions, searches the web across all of them, and writes back one cited report (TL;DR · key findings · open questions · sources), saved to `vault/research/deep/`. Fully portable: any agent runs it with its own web search, no servers, accounts, or keys. Bounded by design (plan once, search once, synthesize once — no runaway sub-agent loops). Added to the default skill registry so new AIOS folders get it, and it auto-routes via RESOLVER on intents like "deep research", "compare the options", "what's the latest on".
