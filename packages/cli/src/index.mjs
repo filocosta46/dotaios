@@ -27,6 +27,7 @@ const commands = {
   interview: "./commands/interview.mjs",
   license: "./commands/license.mjs",
   market: "./commands/market.mjs",
+  memory: "./commands/memory.mjs",
   mcp: "./commands/mcp.mjs",
   plan: "./commands/plan.mjs",
   "pilot-report": "./commands/pilot-report.mjs",
@@ -68,6 +69,7 @@ Commands:
   interview         Update your context by answering a few short questions
   license <cmd>     Add, list, or remove license keys for paid skills
   market <cmd>      Browse and install skills from the public registry
+  memory audit      Audit hot memory and queue skill-tied lessons for skill patches
   mcp <cmd>         Print local MCP server status and client config
   plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open

@@ -13,6 +13,34 @@ and you still have the whole product.
 `~/aios` with your context, memory, vault, and skills. Plain files. Every
 connected tool reads it. This is the product.
 
+### Keep hot memory small
+
+DotAIOS treats always-read memory as expensive. The files agents see at startup
+should hold only what changes decisions across many future sessions. Workflow
+lessons belong in skills, not in a growing journal.
+
+Run a local audit any time:
+
+
+```bash
+npx dotaios memory audit
+npx dotaios memory audit --write-queue
+npx dotaios memory audit --apply-skills
+```
+
+The audit never deletes memory. By default it follows DotAIOS memory routing:
+the last 50 `memory/events.jsonl` entries plus today/yesterday signal files. Use
+`--all-memory` only when you want a deeper forensic pass over older history.
+
+`--write-queue` writes proposed skill patches to
+`memory/skill-patches/queue.md` with stable IDs, so cleanup or compaction does
+not duplicate the same lesson. If the queue is intentionally capped, the report
+shows both the total and the number shown; pass `--max-candidates <n>` to raise
+the cap. `--apply-skills` appends explicit, skill-named lessons into existing
+`skills/<name>/SKILL.md` files under a `Field Notes` section. It does not create
+missing skills, route uncertain lessons, or invent new workflow instructions;
+those stay in the queue for review.
+
 ## Rung 2: Phone sync
 
 Mirror your folder to a private GitHub repository that only you can see, so

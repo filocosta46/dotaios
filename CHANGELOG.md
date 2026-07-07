@@ -2,7 +2,7 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
-## [1.21.0] - 2026-06-28
+## [1.21.0] - 2026-07-07
 ### Added
 - **Flagship: native agent skills-routing.** `dotaios skills resolve "<intent>"` ranks the installed skill that fits a free-text intent, with no embeddings, network, or model calls. Plain-text scoring over each skill's declared `triggers:` and `description`: exact-name hit, trigger token overlap, description overlap, specificity tiebreak. Prints the top match (name, dir, confidence, triggers, `SKILL.md` path); `--full` also prints the `SKILL.md` body, `--all` prints the ranked list, `--json` returns the documented shape for fleet and MCP callers. Exit 2 when nothing clears the bar so fleet scripts can branch on "no skill fits, hand-roll." The scoring lives in a new shared `packages/core/src/skill-resolver.mjs` so the CLI and MCP server use one function.
 - **MCP `resolve_skill` tool.** IDE agents (Cursor, Claude Code) call `resolve_skill` with the user's intent at boot or before acting, and get the same ranked payload as `dotaios skills resolve --json`. The MCP `instructions` now tell agents to resolve a skill first and only hand-roll when nothing matches.
@@ -10,6 +10,7 @@ All notable changes to DotAIOS will be documented in this file.
 - **`dotaios activate --skills-first`** persists a preference in `aios.json` that makes the managed bridge block INLINE `skills/INDEX.md` + `skills/RESOLVER.md` into every agent entrypoint, so agents that do not auto-follow file references (headless fleet workers, MCP-only clients, browser-paste users) still see the catalog at boot. Default stays pointer-mode to keep bridge files small; `--no-skills-first` switches back.
 - **`dotaios brief --lean`** prints a small high-signal surface to stdout: identity, priorities, north-star, today's daily note, and the first active project README. The rest of `memory/` stays opt-in, the lean default load the push-memory thesis asks for. No file write.
 - **`dotaios plan "<title>"`** writes a lightweight `memory/plans/YYYY-MM-DD-<slug>.md` artifact (goal, checkbox steps, status, open questions) an agent can pick up across sessions, and logs a `plan` event so it surfaces in the session digest. `--print` prints instead of writing; `--steps` and `--project` tag it.
+- **`dotaios memory audit`**, a local skills-over-memory review that checks hot agent memory against a 200-line budget, classifies routed memory entries, and can write `memory/skill-patches/queue.md` with stable IDs for skill-tied lessons. The command is read-only by default, supports `--all-memory` for forensic scans, and `--apply-skills` can append explicit lessons into existing `skills/<name>/SKILL.md` files without creating missing skills or routing uncertain items.
 - **`docs/gitsync-mobile.md`** documents reading and capturing notes into your AIOS from a phone via GitSync (iOS) / MGit (Android) against the same private GitHub repo `dotaios sync setup` creates. No new services.
 
 ### Changed

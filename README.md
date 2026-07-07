@@ -89,8 +89,11 @@ dotaios search "topic"      # search across everything you have saved
 dotaios ingest <url|file>   # save an article, PDF, or document
 dotaios brief               # write today's brief from your priorities
 dotaios brief --lean        # print a small high-signal surface (identity, priorities, north-star, today, active project)
+dotaios brief --compact     # print a compact working-memory digest for agents
 dotaios skills resolve "plan my day"   # route an intent to the skill that handles it
 dotaios plan "ship it" --steps "tests,implement"  # write a plan.md artifact agents pick up later
+dotaios memory audit        # find bloated hot memory and skill-tied lessons
+dotaios memory audit --apply-skills  # append explicit lessons to existing skills
 dotaios sync setup          # mirror your folder to a private GitHub repo
 dotaios export-okf          # export your knowledge as a portable Open Knowledge Format bundle
 ```
