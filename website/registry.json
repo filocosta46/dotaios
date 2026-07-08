@@ -1,6 +1,150 @@
 {
-  "version": "1.0",
-  "generated_at": "2026-05-13",
-  "registry_notes": "The DotAIOS marketplace. Bundled free skills (audit, plan-today, today, closeday, etc) ship with the CLI itself and are NOT listed here. This file only advertises paid packs and curated third-party skills you can install on top.",
-  "skills": []
+  "version": "1.1",
+  "generated_at": "2026-07-09",
+  "registry_notes": "The DotAIOS marketplace. Bundled free skills ship with the CLI and are NOT listed here. This file advertises the paid packs; member skills appear as toggles under their pack.",
+  "skills": [
+    {
+      "id": "skills-pack",
+      "name": "Skills Pack",
+      "type": "bundle",
+      "tier": "skills_pack",
+      "price_eur": "12.99",
+      "problem": "Notes and plans vanish between tools.",
+      "install": "paste-prompt or npx dotaios install",
+      "gumroad_url": "https://filocosta.gumroad.com/l/tgaeui",
+      "status": "draft"
+    },
+    {
+      "id": "automations-pack",
+      "name": "Automations Pack",
+      "type": "bundle",
+      "tier": "automations_pack",
+      "price_eur": "35.00",
+      "problem": "You want the engines too, not just the prompts.",
+      "install": "ZIP with install script or npx dotaios install",
+      "gumroad_url": "https://filocosta.gumroad.com/l/baglw",
+      "status": "draft"
+    },
+    {
+      "id": "import-context",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "You told ChatGPT your life story — Claude starts from zero again.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "plan-today",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "Every morning you re-explain what matters instead of getting a plan.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "today",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "Your daily plan vanishes — nothing saved in your AIOS folder.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "process-inbox",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "Notes you capture on your phone never land in the right project folder.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "summarize-source",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "You saved an article but still can't ask your AI about it usefully.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "skillify",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "You keep re-prompting the same workflow — it never becomes reusable.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "ingest",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "Links and PDFs disappear instead of becoming searchable memory.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "save-session",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "Great AI sessions end and the decisions are lost forever.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "closeday",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "You finish the day with no record of what shipped or what's left.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "weekly-review",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "Your AIOS drifts — priorities and projects get stale without a weekly pass.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "privacy-brief",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "You want cloud AI help but can't safely paste your local context.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "humanizer",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "Your drafts sound like AI wrote them — you need a natural pass before publishing.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "audit",
+      "type": "skill-toggle",
+      "tier": "skills_pack",
+      "problem": "You don't know if your AIOS setup is actually healthy or rotting.",
+      "install": "included in Skills Pack"
+    },
+    {
+      "id": "last30days",
+      "type": "skill-toggle",
+      "tier": "automations_pack",
+      "problem": "You guess what people think — instead of seeing last-30-days discourse.",
+      "install": "included in Automations Pack"
+    },
+    {
+      "id": "research",
+      "type": "skill-toggle",
+      "tier": "automations_pack",
+      "problem": "Quick web search isn't enough — you need a cited multi-source report.",
+      "install": "included in Automations Pack"
+    },
+    {
+      "id": "ingest-plus",
+      "type": "skill-toggle",
+      "tier": "automations_pack",
+      "problem": "Save any URL/PDF into clean Markdown your agents can search (plus engines for full pipeline).",
+      "install": "included in Automations Pack",
+      "note": "ingest + lightpanda engine + transcribe docs"
+    },
+    {
+      "id": "agent-reach-transcribe",
+      "type": "skill-toggle",
+      "tier": "automations_pack",
+      "problem": "YouTube videos save without transcripts — agents can't read them.",
+      "install": "included in Automations Pack",
+      "note": "engine docs only"
+    }
+  ]
 }
