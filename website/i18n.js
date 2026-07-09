@@ -87,13 +87,13 @@ window.DOTAIOS_I18N = {
       skills: {
         eyebrow: "Starter",
         problem: "Skip the setup. Start today.",
-        sentence: "The best starter skills, curated and ready.",
+        sentence: "The best skills, curated so you skip the hunt.",
         cta: "Get Starter",
       },
       autos: {
         eyebrow: "Automations",
         problem: "Add the engines. No wiring.",
-        sentence: "Research, transcripts, and memory, setup done.",
+        sentence: "Starter plus research, transcripts, and memory.",
         cta: "Get Automations",
       },
     },
@@ -194,13 +194,13 @@ window.DOTAIOS_I18N = {
       skills: {
         eyebrow: "Starter",
         problem: "Salta il setup. Inizia oggi.",
-        sentence: "Le migliori skill di partenza, pronte.",
+        sentence: "Le migliori skill, curate per non doverle cercare.",
         cta: "Prendi Starter",
       },
       autos: {
         eyebrow: "Automazioni",
         problem: "Aggiungi i motori. Setup incluso.",
-        sentence: "Ricerca, trascrizioni e memoria, già pronte.",
+        sentence: "Starter più ricerca, trascrizioni e memoria.",
         cta: "Prendi Automations",
       },
     },
