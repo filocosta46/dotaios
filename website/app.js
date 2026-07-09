@@ -327,3 +327,26 @@ if (document.readyState === 'loading') {
 } else {
   loadContent()
 }
+
+/* ── Packs: render skill toggles from registry.json (progressive) ── */
+(async () => {
+  try {
+    const res = await fetch("registry.json");
+    if (!res.ok) return;
+    const reg = await res.json();
+    for (const list of document.querySelectorAll(".pack-chips")) {
+      const tier = list.dataset.pack;
+      const items = (reg.skills || []).filter(
+        (s) => s.type === "skill-toggle" && s.tier === tier
+      );
+      list.innerHTML = items
+        .map(
+          (s) =>
+            `<li title="${(s.problem || "").replace(/"/g, "&quot;")}">${s.id}</li>`
+        )
+        .join("");
+    }
+  } catch (_) {
+    /* chips are enhancement only; cards stay complete without them */
+  }
+})();
