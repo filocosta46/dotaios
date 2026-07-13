@@ -140,3 +140,59 @@ test("inspectSkillHealth identifies a canonical frontmatter alias separately", a
   assert.match(report.issues.join("\n"), /duplicate managed alias/);
   assert.equal(target.complete, false);
 });
+
+test("inspectSkillHealth separates configured and discoverable from unverified invocation", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  await fs.writeFile(
+    path.join(aiosPath, "agents.json"),
+    JSON.stringify({
+      agents: [{
+        name: "Probe Agent",
+        detect: ".probe-agent",
+        bridge: null,
+        command: "node",
+        skills: { mode: "symlink", dir: ".agents/skills" }
+      }]
+    })
+  );
+  await fs.mkdir(path.join(homePath, ".probe-agent"), { recursive: true });
+  await installSymlinkSkills({ aiosPath, targetDir: path.join(homePath, ".agents", "skills") });
+
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
+
+  assert.deepEqual(runtime.capabilities, {
+    configured: "yes",
+    discoverable: "path-ready",
+    binary: "available",
+    invocation: "not-run"
+  });
+  assert.equal(runtime.installed, true);
+  assert.equal(report.healthy, true);
+});
+
+test("inspectSkillHealth keeps configured paths separate from runtime installation", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  await fs.writeFile(
+    path.join(aiosPath, "agents.json"),
+    JSON.stringify({
+      agents: [{
+        name: "Uninstalled Probe Agent",
+        detect: ".not-installed",
+        bridge: null,
+        skills: { mode: "symlink", dir: ".agents/skills" }
+      }]
+    })
+  );
+  await installSymlinkSkills({ aiosPath, targetDir: path.join(homePath, ".agents", "skills") });
+
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const runtime = report.runtimes.find((entry) => entry.name === "Uninstalled Probe Agent");
+
+  assert.equal(runtime.installed, false);
+  assert.equal(runtime.capabilities.configured, "yes");
+  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.capabilities.binary, "not-detected");
+  assert.equal(runtime.capabilities.invocation, "not-run");
+  assert.equal(report.healthy, true);
+});

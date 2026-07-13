@@ -105,6 +105,18 @@ test("skills doctor returns a read-only JSON coverage report", () => {
   assert.equal(report.targets.find((target) => target.dir === ".agents/skills").foreign.length, 0);
 });
 
+test("skills doctor human output labels configuration evidence separately from invocation", () => {
+  const { aiosPath, homePath } = setupAios();
+  run(["skills", "install", "--path", aiosPath, "--home", homePath, "--all"]);
+
+  const result = run(
+    ["skills", "doctor", "--path", aiosPath, "--home", homePath],
+    { allowNonZero: true }
+  );
+  assert.match(result.stdout, /Verification scope: configuration-only; invocation=not-run/);
+  assert.match(result.stdout, /configured=yes discoverable=path-ready/);
+});
+
 test("alias pruning is explicit, dry-run first, and preserves the ordinary install path", () => {
   const { aiosPath, homePath } = setupAios();
   const source = path.join(aiosPath, "skills", "plan-today");

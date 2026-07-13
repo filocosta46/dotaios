@@ -26,6 +26,7 @@ function normalizeAgent(raw) {
   return {
     name: raw.name.trim(),
     detect: typeof raw.detect === "string" && raw.detect.trim() ? raw.detect.trim() : raw.bridge,
+    ...(typeof raw.command === "string" && raw.command.trim() ? { command: raw.command.trim() } : {}),
     bridge,
     include: raw.include === "@" ? "@" : "",
     ...(skills ? { skills } : {})

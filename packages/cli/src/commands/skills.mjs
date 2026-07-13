@@ -104,6 +104,11 @@ async function doctorSkillCommand(args) {
     for (const target of report.targets) {
       console.log(`${target.dir}: linked=${target.linked.length} missing=${target.missing.length} foreign=${target.foreign.length} broken=${target.broken.length}`);
     }
+    for (const runtime of report.runtimes) {
+      const capabilities = runtime.capabilities;
+      console.log(`${runtime.name}: configured=${capabilities.configured} discoverable=${capabilities.discoverable} binary=${capabilities.binary} invocation=${capabilities.invocation}`);
+    }
+    console.log(`Verification scope: ${report.verification.scope}; invocation=${report.verification.invocation}`);
     for (const issue of report.issues) console.log(`- ${issue}`);
   }
   if (!report.healthy) process.exitCode = 1;

@@ -37,6 +37,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
 
   const bridges = await inspectBridges({ aiosPath, homePath });
   const hermes = await inspectHermes({ aiosPath, homePath, registry });
+  const runtimes = await inspectRuntimes({ homePath, registry, targets, bridges, hermes });
   const issues = [];
 
   if (!catalogs.index.current) issues.push("skills/INDEX.md is missing or stale");
@@ -59,7 +60,6 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
   for (const entry of hermes.configs) {
     if (entry.status !== "healthy") issues.push(`${entry.path} does not expose the canonical skills directory`);
   }
-
   return {
     healthy: issues.length === 0,
     source: {
@@ -70,12 +70,113 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
     targets,
     bridges,
     hermes,
+    runtimes,
+    verification: {
+      scope: "configuration-only",
+      invocation: "not-run",
+      note: "A path-ready report does not prove that a client discovered or invoked a skill; run a bounded agent-specific smoke test for invocation evidence."
+    },
     unsupported: [
       "Codex, Cursor, and Gemini use the shared .agents/skills target; Antigravity uses its documented global target.",
       "Surfaces without local Agent Skills discovery continue to use the DotAIOS bridge and resolver."
     ],
     issues
   };
+}
+
+async function inspectRuntimes({ homePath, registry, targets, bridges, hermes }) {
+  const targetByDir = new Map(targets.map((target) => [target.dir, target]));
+  const bridgeByName = new Map(bridges.map((bridge) => [bridge.name, bridge]));
+  const rows = [];
+
+  for (const agent of registry) {
+    const installed = await isAgentInstalled(homePath, agent);
+    const bridge = bridgeByName.get(agent.name);
+    const configured = configuredStatus({ agent, installed, bridge, homePath, targetByDir, hermes });
+    const discoverable = discoverableStatus({ agent, installed, bridge, homePath, targetByDir, hermes });
+    const binary = installed
+      ? await commandStatus(agent.command)
+      : "not-detected";
+
+    rows.push({
+      name: agent.name,
+      installed,
+      capabilities: {
+        configured,
+        discoverable,
+        binary,
+        invocation: "not-run"
+      },
+      evidence: {
+        bridge: bridge?.status || "not-detected",
+        skillTarget: skillTargetEvidence(agent, targetByDir),
+        hermesConfigs: hermesEvidence(agent, homePath, hermes)
+      }
+    });
+  }
+  return rows;
+}
+
+function configuredStatus({ agent, installed, bridge, homePath, targetByDir, hermes }) {
+  if (bridge?.status === "healthy") return "yes";
+  if (agent.skills?.mode === "symlink") {
+    const target = targetByDir.get(agent.skills.dir);
+    return target?.status === "active" ? "yes" : "no";
+  }
+  if (agent.skills?.mode === "config-external-dir") {
+    const expected = path.resolve(homePath, agent.skills.configFile);
+    return hermes.configs.some((entry) => entry.path === expected && entry.status === "healthy") ? "yes" : "no";
+  }
+  if (!installed) return "not-detected";
+  return bridge?.status === "not-applicable" ? "not-declared" : "no";
+}
+
+function discoverableStatus({ agent, installed, bridge, targetByDir, hermes }) {
+  if (agent.skills?.mode === "symlink") {
+    const target = targetByDir.get(agent.skills.dir);
+    if (!target || target.status !== "active") return installed ? "no" : "not-detected";
+    return target.missing.length === 0 && target.broken.length === 0 ? "path-ready" : "no";
+  }
+  if (agent.skills?.mode === "config-external-dir") {
+    return hermes.configs.length > 0 && hermes.configs.every((entry) => entry.status === "healthy")
+      ? "path-ready"
+      : (installed ? "no" : "not-detected");
+  }
+  if (bridge?.status === "healthy") return "not-proven";
+  return installed ? "no" : "not-detected";
+}
+
+function skillTargetEvidence(agent, targetByDir) {
+  if (agent.skills?.mode !== "symlink") return null;
+  const target = targetByDir.get(agent.skills.dir);
+  return target
+    ? { path: target.path, status: target.status, complete: target.complete }
+    : { path: agent.skills.dir, status: "not-detected", complete: false };
+}
+
+function hermesEvidence(agent, homePath, hermes) {
+  if (agent.skills?.mode !== "config-external-dir") return [];
+  const expected = path.resolve(homePath, agent.skills.configFile);
+  return hermes.configs.filter((entry) => entry.path === expected).map((entry) => ({
+    path: entry.path,
+    status: entry.status
+  }));
+}
+
+async function commandStatus(command) {
+  if (!command) return "not-declared";
+  const candidates = command.includes(path.sep) || path.isAbsolute(command)
+    ? [command]
+    : (process.env.PATH || "").split(path.delimiter).filter(Boolean).map((dir) => path.join(dir, command));
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate, fs.constants.X_OK);
+      return "available";
+    } catch {
+      // Try the next PATH entry.
+    }
+  }
+  return "missing";
 }
 
 async function compareFile(filePath, expected) {
