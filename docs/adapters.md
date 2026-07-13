@@ -80,6 +80,32 @@ Hermes as a native runtime without expecting a bridge file. If a temporary
 setup path tries to overwrite the real global bridges, `activate` refuses it;
 use a permanent AIOS folder instead.
 
+### Project-owned runtime adapters
+
+An AIOS folder may include an optional `agents.json` when it needs to add a
+runtime that is not in the bundled registry. Entries are merged by agent name
+and can declare a native skill target:
+
+```json
+{
+  "agents": [
+    {
+      "name": "Custom Runner",
+      "detect": ".custom-runner",
+      "bridge": null,
+      "skills": { "mode": "symlink", "dir": ".custom/skills" }
+    }
+  ]
+}
+```
+
+Run `dotaios activate --path ~/aios` after adding or changing this file. The
+same source skill tree is then propagated to the custom target, and
+`dotaios skills doctor --path ~/aios --json` reports its coverage. This is
+filesystem propagation; the custom runtime still needs its own client-level
+acceptance check to prove that it discovers and invokes the Agent Skills
+directory.
+
 ---
 
 ## Claude Code

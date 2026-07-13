@@ -6,6 +6,7 @@ import { renderResolver, renderSkillsIndex, collectSkills } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
 
 export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) {
+  const registry = await loadAgentRegistry(aiosPath);
   const sourceSkills = await collectSkills(aiosPath);
   const skillsDir = path.join(aiosPath, "skills");
   const catalogs = {
@@ -20,7 +21,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
   };
 
   const targets = [];
-  for (const target of symlinkTargets()) {
+  for (const target of symlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     const active = await isSkillTargetActive(homePath, targetDir);
     targets.push(await inspectSkillTarget({

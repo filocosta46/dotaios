@@ -218,7 +218,7 @@ async function createGlobalBridges(
     results.push(result);
   }
 
-  const skills = await installAllSkills(aiosPath, homePath, options);
+  const skills = await installAllSkills(aiosPath, homePath, options, registry);
   return { results: [...results, ...skills], installedCount };
 }
 
@@ -239,18 +239,18 @@ async function previewSkillsIndex(aiosPath) {
 
 // Install DotAIOS skills natively into each documented client directory plus
 // the shared Agent Skills root, then register the source dir in Hermes config.
-async function installAllSkills(aiosPath, homePath, options) {
+async function installAllSkills(aiosPath, homePath, options, registry) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
   const results = [];
-  for (const target of retiredSymlinkTargets()) {
+  for (const target of retiredSymlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     results.push(...await removeManagedSkillLinks({
       aiosPath, targetDir, dryRun: options.dryRun
     }));
   }
-  for (const target of symlinkTargets()) {
+  for (const target of symlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     results.push(...await installSymlinkSkills({
       aiosPath, targetDir, dryRun: options.dryRun, overwrite: options.overwrite

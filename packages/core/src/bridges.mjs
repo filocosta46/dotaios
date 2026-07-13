@@ -22,12 +22,29 @@ function normalizeAgent(raw) {
     ? null
     : (typeof raw.bridge === "string" && raw.bridge.trim() ? raw.bridge.trim() : null);
   if (raw.bridge != null && bridge == null) return null;
+  const skills = normalizeSkills(raw.skills);
   return {
     name: raw.name.trim(),
     detect: typeof raw.detect === "string" && raw.detect.trim() ? raw.detect.trim() : raw.bridge,
     bridge,
-    include: raw.include === "@" ? "@" : ""
+    include: raw.include === "@" ? "@" : "",
+    ...(skills ? { skills } : {})
   };
+}
+
+function normalizeSkills(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const mode = typeof raw.mode === "string" ? raw.mode.trim() : "";
+  if (mode !== "symlink" && mode !== "config-external-dir") return null;
+
+  const config = { mode };
+  if (typeof raw.dir === "string" && raw.dir.trim()) config.dir = raw.dir.trim();
+  if (typeof raw.configFile === "string" && raw.configFile.trim()) config.configFile = raw.configFile.trim();
+  if (typeof raw.key === "string" && raw.key.trim()) config.key = raw.key.trim();
+
+  if (mode === "symlink" && !config.dir) return null;
+  if (mode === "config-external-dir" && (!config.configFile || !config.key)) return null;
+  return config;
 }
 
 function normalizeRegistry(data) {
