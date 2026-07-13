@@ -222,6 +222,39 @@ test("attach does not follow foreign symlinked skill roots", () => {
   }
 });
 
+test("attach refuses a project skills root that resolves outside the project", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const outside = path.join(tempRoot, "outside-skills");
+  fs.rmSync(path.join(projectPath, "skills"), { recursive: true, force: true });
+  fs.mkdirSync(path.join(outside, "external-skill"), { recursive: true });
+  fs.writeFileSync(
+    path.join(outside, "external-skill", "SKILL.md"),
+    "---\nname: external-skill\ndescription: external\n---\n"
+  );
+  fs.symlinkSync(outside, path.join(projectPath, "skills"), "dir");
+
+  try {
+    const output = run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.match(output, /unsafe.*source|source.*unsafe/i);
+    assert.equal(fs.lstatSync(path.join(projectPath, "skills")).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(path.join(outside, "external-skill", "external-skill")), false);
+    for (const targetDir of [
+      ".claude/skills",
+      ".agents/skills",
+      ".gemini/config/skills"
+    ]) {
+      assert.equal(
+        fs.existsSync(path.join(projectPath, targetDir, "external-skill")),
+        false,
+        `${targetDir} must not expose an external project skill`
+      );
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("attach does not follow a foreign symlinked Hermes config", () => {
   const { tempRoot, aiosPath, projectPath } = setupProject();
   const outside = path.join(tempRoot, "external-hermes.yaml");

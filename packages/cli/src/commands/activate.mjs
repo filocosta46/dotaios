@@ -29,7 +29,8 @@ import {
   cleanupStaleLinks,
   removeManagedSkillLinks,
   removeManagedSkillAliases,
-  validateProjectPath
+  validateProjectPath,
+  validateProjectSourcePath
 } from "../../../core/src/skills-install.mjs";
 import { discoverHermesConfigPaths, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -306,6 +307,13 @@ async function propagateProjectSkills(projectPath, options, registry) {
   const symlinkTargetsForProject = projectSymlinkTargets(registry);
   const hermesTargetsForProject = projectHermesConfigTargets(registry);
   const details = [];
+  const sourceSafety = await validateProjectSourcePath({
+    projectRoot: projectPath,
+    sourcePath: skillsDir
+  });
+  if (!sourceSafety.safe) {
+    return { action: "project-skills:unsafe-source", path: skillsDir, note: sourceSafety.reason };
+  }
   const skillsDirectoryExists = await isDirectory(skillsDir);
   const skills = skillsDirectoryExists ? await collectSkills(projectPath) : [];
 

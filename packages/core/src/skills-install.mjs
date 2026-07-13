@@ -256,6 +256,26 @@ export async function validateProjectPath({ projectRoot, targetPath }) {
   return { safe: true };
 }
 
+// A project-owned source must live inside the project itself. Unlike a target
+// path, the source root is allowed to be absent, but an existing symlink would
+// let attach propagate skills from outside the checkout and mislabel them as
+// project-owned.
+export async function validateProjectSourcePath({ projectRoot, sourcePath }) {
+  const root = path.resolve(projectRoot);
+  const source = path.resolve(sourcePath);
+  if (!isWithin(root, source)) {
+    return { safe: false, reason: "source path escapes project root" };
+  }
+  try {
+    if ((await fs.lstat(source)).isSymbolicLink()) {
+      return { safe: false, reason: "project skills source is an unmanaged symlink" };
+    }
+  } catch (error) {
+    if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+  }
+  return { safe: true };
+}
+
 async function samePath(left, right) {
   if (path.resolve(left) === path.resolve(right)) return true;
   try {
