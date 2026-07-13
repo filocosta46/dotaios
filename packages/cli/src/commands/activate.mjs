@@ -295,8 +295,14 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
 async function createProjectBridges(aiosPath, projectPath, options) {
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = await Promise.all([
-    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath), options),
-    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath), options)
+    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath), {
+      ...options,
+      projectRoot: projectPath
+    }),
+    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath), {
+      ...options,
+      projectRoot: projectPath
+    })
   ]);
   const skills = await propagateProjectSkills(projectPath, options, registry);
   return [...bridges, skills];
@@ -397,7 +403,14 @@ async function propagateProjectSkills(projectPath, options, registry) {
     ...hermesTargetsForProject.map((target) => target.configFile)
   ];
   const targetLabel = targetPaths.length > 0 ? targetPaths.join(", ") : "no registered targets";
-  const note = `${verb} ${skillLabel} to ${targetLabel}; ${linked} symlink action(s), ${changed} Hermes config action(s)`;
+  const unsafe = details.filter((result) =>
+    result.action === "skipped-unsafe-target"
+    || result.action.startsWith("project-skills:unsafe-")
+  );
+  const safetyNote = unsafe.length > 0
+    ? `; ${unsafe.length} unsafe target(s) skipped`
+    : "";
+  const note = `${verb} ${skillLabel} to ${targetLabel}; ${linked} symlink action(s), ${changed} Hermes config action(s)${safetyNote}`;
   return { action: "project-skills", path: skillsDir, note };
 }
 
@@ -409,7 +422,13 @@ async function isDirectory(value) {
   }
 }
 
-async function writeManagedFile(destination, content, { dryRun = false, overwrite = false } = {}) {
+async function writeManagedFile(destination, content, { dryRun = false, overwrite = false, projectRoot = null } = {}) {
+  if (projectRoot) {
+    const safety = await validateProjectPath({ projectRoot, targetPath: destination });
+    if (!safety.safe) {
+      return { action: "unsafe-target", path: destination, note: safety.reason };
+    }
+  }
   const exists = await pathExists(destination);
 
   if (!exists) {

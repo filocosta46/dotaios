@@ -44,13 +44,22 @@ export async function installSymlinkSkills({
   dryRun = false,
   overwrite = false
 }) {
+  const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
   if (projectRoot) {
     const safety = await validateProjectPath({ projectRoot, targetPath: targetDir });
     if (!safety.safe) {
       return [{ action: "skipped-unsafe-target", path: targetDir, note: safety.reason }];
     }
+    const source = path.resolve(skillsRoot);
+    const target = path.resolve(targetDir);
+    if (isWithin(source, target) || isWithin(target, source)) {
+      return [{
+        action: "skipped-unsafe-target",
+        path: targetDir,
+        note: "target overlaps project skills source"
+      }];
+    }
   }
-  const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
   const skills = await collectSkills(path.dirname(skillsRoot)); // [{ dir, name, ... }]
   if (skills.length === 0) return [];
   if (!dryRun) await fs.mkdir(targetDir, { recursive: true });
@@ -267,8 +276,27 @@ export async function validateProjectSourcePath({ projectRoot, sourcePath }) {
     return { safe: false, reason: "source path escapes project root" };
   }
   try {
-    if ((await fs.lstat(source)).isSymbolicLink()) {
+    const sourceStat = await fs.lstat(source);
+    if (sourceStat.isSymbolicLink()) {
       return { safe: false, reason: "project skills source is an unmanaged symlink" };
+    }
+    if (!sourceStat.isDirectory()) return { safe: false, reason: "project skills source is not a directory" };
+
+    for (const entry of await fs.readdir(source, { withFileTypes: true })) {
+      if (entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
+      const skillDir = path.join(source, entry.name);
+      if (entry.isSymbolicLink()) {
+        return { safe: false, reason: `project skill directory is an unmanaged symlink: ${entry.name}` };
+      }
+      if (!entry.isDirectory()) continue;
+      const skillFile = path.join(skillDir, "SKILL.md");
+      try {
+        if ((await fs.lstat(skillFile)).isSymbolicLink()) {
+          return { safe: false, reason: `project skill file is an unmanaged symlink: ${entry.name}/SKILL.md` };
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+      }
     }
   } catch (error) {
     if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;

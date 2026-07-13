@@ -171,6 +171,32 @@ test("inspectSkillHealth separates configured and discoverable from unverified i
   assert.equal(report.healthy, true);
 });
 
+test("inspectSkillHealth does not call a conflicted target path-ready", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  const targetDir = path.join(homePath, ".agents", "skills");
+  await installSymlinkSkills({ aiosPath, targetDir });
+  await fs.symlink(path.join(aiosPath, "skills", "today"), path.join(targetDir, "vendor-today"), "dir");
+  await fs.mkdir(path.join(homePath, ".probe-agent"), { recursive: true });
+  await fs.writeFile(
+    path.join(aiosPath, "agents.json"),
+    JSON.stringify({
+      agents: [{
+        name: "Probe Agent",
+        detect: ".probe-agent",
+        bridge: null,
+        command: "node",
+        skills: { mode: "symlink", dir: ".agents/skills" }
+      }]
+    })
+  );
+
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
+
+  assert.equal(runtime.capabilities.discoverable, "no");
+  assert.equal(runtime.evidence.skillTarget.complete, false);
+});
+
 test("inspectSkillHealth keeps configured paths separate from runtime installation", async () => {
   const { aiosPath, homePath } = await makeAios();
   await fs.writeFile(

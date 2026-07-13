@@ -255,6 +255,76 @@ test("attach refuses a project skills root that resolves outside the project", (
   }
 });
 
+test("attach refuses a project skill file that resolves outside the project", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const outside = path.join(tempRoot, "external-skill.md");
+  const skillFile = path.join(projectPath, "skills", "project-skill", "SKILL.md");
+  fs.writeFileSync(outside, "---\nname: external-skill\ndescription: external\n---\n");
+  fs.rmSync(skillFile);
+  fs.symlinkSync(outside, skillFile, "file");
+
+  try {
+    const output = run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.match(output, /unsafe.*source|source.*unsafe/i);
+    assert.equal(fs.readFileSync(outside, "utf8"), "---\nname: external-skill\ndescription: external\n---\n");
+    assert.equal(fs.existsSync(path.join(projectPath, ".claude", "skills", "project-skill")), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach does not overwrite foreign symlinked bridge files", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const externalAgents = path.join(tempRoot, "external-agents.md");
+  const externalCursor = path.join(tempRoot, "external-cursor.mdc");
+  const foreignAgents = "<!-- dotaios-managed:start -->\nforeign agents\n<!-- dotaios-managed:end -->\n";
+  const foreignCursor = "<!-- dotaios-managed:start -->\nforeign cursor\n<!-- dotaios-managed:end -->\n";
+  fs.writeFileSync(externalAgents, foreignAgents);
+  fs.writeFileSync(externalCursor, foreignCursor);
+  fs.symlinkSync(externalAgents, path.join(projectPath, "AGENTS.md"), "file");
+  fs.mkdirSync(path.join(projectPath, ".cursor", "rules"), { recursive: true });
+  fs.symlinkSync(externalCursor, path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), "file");
+
+  try {
+    const output = run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.match(output, /unsafe.*target|target.*unsafe/i);
+    assert.equal(fs.readFileSync(externalAgents, "utf8"), foreignAgents);
+    assert.equal(fs.readFileSync(externalCursor, "utf8"), foreignCursor);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach refuses a custom project target that overlaps the source skills root", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  fs.writeFileSync(
+    path.join(aiosPath, "agents.json"),
+    JSON.stringify({
+      agents: [{
+        name: "Overlapping Runner",
+        detect: ".overlapping-runner",
+        bridge: null,
+        skills: {
+          mode: "symlink",
+          dir: ".overlapping-global/skills",
+          project: { mode: "symlink", dir: "skills" }
+        }
+      }]
+    })
+  );
+
+  try {
+    const output = run(["attach", projectPath, "--path", aiosPath, "--overwrite"]);
+
+    assert.match(output, /unsafe.*target|target.*unsafe/i);
+    assert.equal(fs.existsSync(path.join(projectPath, "skills", "project-skill", "SKILL.md")), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("attach does not follow a foreign symlinked Hermes config", () => {
   const { tempRoot, aiosPath, projectPath } = setupProject();
   const outside = path.join(tempRoot, "external-hermes.yaml");

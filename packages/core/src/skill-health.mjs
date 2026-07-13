@@ -135,7 +135,7 @@ function discoverableStatus({ agent, installed, bridge, targetByDir, hermes }) {
   if (agent.skills?.mode === "symlink") {
     const target = targetByDir.get(agent.skills.dir);
     if (!target || target.status !== "active") return installed ? "no" : "not-detected";
-    return target.missing.length === 0 && target.broken.length === 0 ? "path-ready" : "no";
+    return target.complete ? "path-ready" : "no";
   }
   if (agent.skills?.mode === "config-external-dir") {
     return hermes.configs.length > 0 && hermes.configs.every((entry) => entry.status === "healthy")
