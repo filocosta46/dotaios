@@ -9,9 +9,11 @@
 
 ## Before you start
 
-DotAIOS creates a folder at `~/aios/` that you and every other AI tool on this
-machine will read automatically. It holds context about who the user is, what
-they're working on, and skills you can run on their behalf.
+DotAIOS creates a folder at `~/aios/` that connected AI tools on this machine
+can read. It holds context about who the user is, what they're working on, and
+skills you can run on their behalf. DotAIOS verifies the bridge files, native
+skill links, and Hermes configuration it writes; discovery and invocation still
+depend on each client and version.
 
 Your job: install it, connect it, learn a few things about the user through
 friendly conversation, then explain what they now have.
@@ -85,8 +87,17 @@ npx -y dotaios activate
 ```
 
 This writes small bridge files so Claude Code, Codex, Antigravity, and other tools
-find the user's context. It also auto-detects which tools are installed, you do
+find the user's context. It also propagates the canonical skills to the
+documented local targets and auto-detects which tools are installed, so you do
 not need to ask the user which tools they use.
+
+After activation, verify the filesystem contract with:
+```
+npx -y dotaios skills doctor --json
+```
+
+Treat any foreign aliases or collisions as visible review items. Do not delete
+them automatically; they may belong to another tool.
 
 ---
 
@@ -156,8 +167,11 @@ Then show them what they now have (adapt it to what they told you):
 
 > "Here's what DotAIOS gives you now:
 >
-> **Every AI tool on this machine knows who you are.** Claude Code, Cursor,
-> Codex, Antigravity, they read your context automatically, with no re-introduction.
+> **Every connected AI tool has the same context entrypoint.** Claude Code,
+> Cursor, Codex, and Antigravity can read the managed bridge; browser-only tools
+> can use the `AGENTS.md` paste fallback. Native skill discovery remains
+> client-specific and is reported by `skills doctor` as filesystem/configuration
+> coverage, not as a guarantee about an app's runtime behavior.
 >
 > **Skills you can use right now**, just ask me, or type `/` in Claude Code:
 >
