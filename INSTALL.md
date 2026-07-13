@@ -99,6 +99,14 @@ npx -y dotaios skills doctor --json
 Treat any foreign aliases or collisions as visible review items. Do not delete
 them automatically; they may belong to another tool.
 
+If the repository you are opening owns a project-local `skills/` directory,
+attach that checkout too:
+```
+npx -y dotaios attach /path/to/project --path ~/aios
+```
+This keeps project skills separate from the global AIOS library and preserves
+foreign project entries. Use `--dry-run` first when attaching an existing repo.
+
 ---
 
 ## Step 4: Learn about the user (conversational, do not rush this)

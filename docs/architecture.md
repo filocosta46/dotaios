@@ -10,7 +10,7 @@ DotAIOS is a local file convention.
 - Codex: `~/.codex/AGENTS.md`
 - Gemini CLI: `~/.gemini/GEMINI.md`
 
-`dotaios attach <project>` writes project-level bridges, including `.cursor/rules/dotaios.mdc` for Cursor. Existing unmanaged files are preserved unless the user passes `--overwrite`.
+`dotaios attach <project>` writes project-level bridges, including `.cursor/rules/dotaios.mdc` for Cursor. If the checkout owns a `skills/` directory, it also links those project skills into the explicit project-native targets declared in `packages/core/src/agents.json`. The global `~/aios/skills` surface is not replaced or copied into the project. Existing unmanaged files are preserved unless the user passes `--overwrite`.
 
 ## Context
 
@@ -37,6 +37,15 @@ Company and people profiles live only in `vault/org/`. Access frequency is routi
 ## Skills And Plugins
 
 Skills are markdown instruction sets that any agent can read. Plugins may include code, but must declare permissions in `manifest.json`.
+
+There are two skill scopes. AIOS skills are authored in `~/aios/skills` and
+propagated globally. Project skills are authored in `<project>/skills` and
+propagated only inside that checkout by `dotaios attach`. Both scopes use the
+same `SKILL.md` contract; the registry declares their native targets. Symlinks,
+Hermes external directories, dry-runs, idempotency, and preservation of foreign
+entries are tested at the CLI seam. Native client discovery and invocation are
+not inferred from a successful filesystem check and require separate acceptance
+evidence.
 
 Plugins are trusted local folders. Permission declarations are visible to users but are not sandbox enforcement. Remote/plugin marketplace installs are intentionally out of scope until provenance and stronger install controls exist.
 

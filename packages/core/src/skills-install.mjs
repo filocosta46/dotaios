@@ -36,15 +36,23 @@ async function inspectEntry(entryPath) {
   }
 }
 
-export async function installSymlinkSkills({ aiosPath, targetDir, dryRun = false, overwrite = false }) {
-  const skills = await collectSkills(aiosPath); // [{ dir, name, ... }]
+export async function installSymlinkSkills({
+  aiosPath,
+  sourceDir = null,
+  targetDir,
+  dryRun = false,
+  overwrite = false
+}) {
+  const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
+  const skills = await collectSkills(path.dirname(skillsRoot)); // [{ dir, name, ... }]
+  if (skills.length === 0) return [];
   if (!dryRun) await fs.mkdir(targetDir, { recursive: true });
 
   const symlinkType = process.platform === "win32" ? "junction" : "dir";
   const results = [];
 
   for (const skill of skills) {
-    const source = path.join(aiosPath, "skills", skill.dir);
+    const source = path.join(skillsRoot, skill.dir);
     const dest = path.join(targetDir, skill.dir);
     const entry = await inspectEntry(dest);
 
@@ -82,8 +90,8 @@ export async function installSymlinkSkills({ aiosPath, targetDir, dryRun = false
   return results;
 }
 
-export async function cleanupStaleLinks({ aiosPath, targetDir, dryRun = false }) {
-  const skillsRoot = path.join(aiosPath, "skills");
+export async function cleanupStaleLinks({ aiosPath, sourceDir = null, targetDir, dryRun = false }) {
+  const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
   let entries;
   try {
     entries = await fs.readdir(targetDir, { withFileTypes: true });
@@ -114,10 +122,11 @@ export async function cleanupStaleLinks({ aiosPath, targetDir, dryRun = false })
 // migrations when a client has multiple discovery paths and the duplicate
 // target would make the client report conflicting skill names. Real entries
 // and foreign symlinks are never touched.
-export async function removeManagedSkillLinks({ aiosPath, targetDir, dryRun = false }) {
-  const skills = await collectSkills(aiosPath);
+export async function removeManagedSkillLinks({ aiosPath, sourceDir = null, targetDir, dryRun = false }) {
+  const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
+  const skills = await collectSkills(path.dirname(skillsRoot));
   const canonicalSources = new Map(
-    skills.map((skill) => [skill.dir, path.join(aiosPath, "skills", skill.dir)])
+    skills.map((skill) => [skill.dir, path.join(skillsRoot, skill.dir)])
   );
   let entries;
   try {
@@ -125,7 +134,7 @@ export async function removeManagedSkillLinks({ aiosPath, targetDir, dryRun = fa
   } catch {
     return [];
   }
-  const root = path.resolve(path.join(aiosPath, "skills"));
+  const root = path.resolve(skillsRoot);
   const removed = [];
   for (const entry of entries) {
     const dest = path.join(targetDir, entry.name);
@@ -146,8 +155,9 @@ export async function removeManagedSkillLinks({ aiosPath, targetDir, dryRun = fa
 // frontmatter name is the only durable ownership signal for this shape. Keep
 // ambiguous names out of the result so a foreign link can never be removed by
 // accident.
-export async function findManagedSkillAliases({ aiosPath, targetDir, skills = null }) {
-  const sourceSkills = skills || await collectSkills(aiosPath);
+export async function findManagedSkillAliases({ aiosPath, sourceDir = null, targetDir, skills = null }) {
+  const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
+  const sourceSkills = skills || await collectSkills(path.dirname(skillsRoot));
   const aliasesByName = new Map();
   for (const skill of sourceSkills) {
     if (!skill.name || skill.name === skill.dir) continue;
@@ -173,7 +183,7 @@ export async function findManagedSkillAliases({ aiosPath, targetDir, skills = nu
     const destination = path.join(targetDir, entry.name);
     const rawTarget = await fs.readlink(destination);
     const resolvedTarget = resolveSymlinkTarget(destination, rawTarget);
-    const source = path.join(aiosPath, "skills", skill.dir);
+    const source = path.join(skillsRoot, skill.dir);
     if (!(await samePath(resolvedTarget, source))) continue;
 
     aliases.push({
@@ -189,8 +199,8 @@ export async function findManagedSkillAliases({ aiosPath, targetDir, skills = nu
 // Remove only aliases whose ownership is proven by the canonical skill's
 // frontmatter name and exact target. This is deliberately opt-in at the CLI
 // layer because an alias may be intentional for a foreign client.
-export async function removeManagedSkillAliases({ aiosPath, targetDir, dryRun = false }) {
-  const aliases = await findManagedSkillAliases({ aiosPath, targetDir });
+export async function removeManagedSkillAliases({ aiosPath, sourceDir = null, targetDir, dryRun = false }) {
+  const aliases = await findManagedSkillAliases({ aiosPath, sourceDir, targetDir });
   const removed = [];
   for (const alias of aliases) {
     if (!dryRun) await fs.rm(alias.path, { recursive: true, force: true });
@@ -204,6 +214,10 @@ export async function removeManagedSkillAliases({ aiosPath, targetDir, dryRun = 
 
 function resolveSymlinkTarget(entryPath, rawTarget) {
   return path.resolve(path.dirname(entryPath), rawTarget);
+}
+
+function resolveSkillsRoot(aiosPath, sourceDir) {
+  return path.resolve(sourceDir || path.join(aiosPath, "skills"));
 }
 
 async function samePath(left, right) {

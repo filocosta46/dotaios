@@ -52,6 +52,19 @@ and Hermes configuration. Actual native discovery remains client and version
 specific. Edit a skill once in `~/aios/skills/` and every verified connected
 surface sees the update.
 
+Projects can carry their own skills without replacing that global library. Put
+`SKILL.md` workflows under a project's `skills/` directory and run:
+
+```bash
+npx dotaios attach /path/to/project
+```
+
+DotAIOS links project-owned skills into the checkout's Claude Code,
+Agent-Skills, Antigravity, and Hermes project surfaces. Re-running the command
+is safe and preserves foreign entries; use `--dry-run` to preview it. A native
+filesystem link is not treated as proof that a particular client version will
+invoke the skill, so runtime acceptance remains explicit.
+
 You can also let it remember your conversations automatically, so your AI gets to know you better over time.
 
 ## It is just your files

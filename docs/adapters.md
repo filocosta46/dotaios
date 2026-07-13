@@ -96,6 +96,39 @@ directories, broken foreign links, or links whose target does not match the
 canonical source. Foreign real-directory collisions still require an explicit
 ownership decision.
 
+### Project-owned skill adapters
+
+DotAIOS has two deliberately separate skill scopes:
+
+- **AIOS scope:** `~/aios/skills/` is the user's canonical cross-project skill
+  library. `dotaios activate` exposes it globally.
+- **Project scope:** `<project>/skills/` is the project's own portable skill
+  library. `dotaios attach <project>` (or `dotaios activate --project
+  <project>`) exposes it only inside that checkout.
+
+The bundled project targets are:
+
+- `<project>/.claude/skills/` for Claude Code;
+- `<project>/.agents/skills/` for Codex, Cursor, and Gemini CLI;
+- `<project>/.gemini/config/skills/` for Antigravity; and
+- `<project>/.hermes/config.yaml` with `<project>/skills` in
+  `skills.external_dirs` for Hermes.
+
+Each target is a symlink or config entry pointing to the project's own
+`skills/` folder. Editing a project skill therefore does not change the global
+AIOS skills. Existing real entries and foreign links are preserved, repeated
+attachment is idempotent, and `--dry-run` previews changes without writing.
+Projects without a readable `skills/` directory are a no-op for this layer.
+
+```bash
+npx dotaios attach /path/to/project --path ~/aios
+npx dotaios attach /path/to/project --path ~/aios --dry-run
+```
+
+This proves filesystem/configuration propagation. It does not claim that every
+client version will discover or invoke a skill; native runtime acceptance is a
+separate client-level check.
+
 ### Project-owned runtime adapters
 
 An AIOS folder may include an optional `agents.json` when it needs to add a
@@ -124,6 +157,9 @@ directory. A custom Hermes-style runtime may instead use
 `"mode": "config-external-dir"` with a home-relative `configFile` and
 `"key": "skills.external_dirs"`; activation and `skills doctor` include that
 configuration surface as well.
+
+For a project-local custom runtime, add a `project` object under `skills` with
+the same shape and run `dotaios attach <project> --path ~/aios`.
 
 ---
 

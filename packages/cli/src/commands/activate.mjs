@@ -18,7 +18,12 @@ import {
   writeSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
-import { symlinkTargets, retiredSymlinkTargets } from "../../../core/src/skill-targets.mjs";
+import {
+  symlinkTargets,
+  retiredSymlinkTargets,
+  projectSymlinkTargets,
+  projectHermesConfigTargets
+} from "../../../core/src/skill-targets.mjs";
 import {
   installSymlinkSkills,
   cleanupStaleLinks,
@@ -183,9 +188,10 @@ function printAttachHelp() {
   dotaios attach [project-dir] [options]
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/aios
-  --dry-run     Show what would be written without changing files
-  --overwrite   Replace existing unmanaged bridge files
+  --path <dir>     Use an AIOS folder other than ~/aios
+  --project <dir>  Attach this project directory explicitly
+  --dry-run        Show what would be written without changing files
+  --overwrite      Replace existing unmanaged bridge files
 `);
 }
 
@@ -285,10 +291,92 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
 }
 
 async function createProjectBridges(aiosPath, projectPath, options) {
-  return Promise.all([
+  const registry = await loadAgentRegistry(aiosPath);
+  const bridges = await Promise.all([
     writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath), options),
     writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath), options)
   ]);
+  const skills = await propagateProjectSkills(projectPath, options, registry);
+  return [...bridges, skills];
+}
+
+async function propagateProjectSkills(projectPath, options, registry) {
+  const skillsDir = path.join(projectPath, "skills");
+  if (!await isDirectory(skillsDir)) {
+    return {
+      action: "project-skills:no-op",
+      path: skillsDir,
+      note: "project has no skills/ directory"
+    };
+  }
+
+  const skills = await collectSkills(projectPath);
+  if (skills.length === 0) {
+    return {
+      action: "project-skills:no-op",
+      path: skillsDir,
+      note: "project skills/ has no readable SKILL.md entries"
+    };
+  }
+
+  const symlinkTargetsForProject = projectSymlinkTargets(registry);
+  const hermesTargetsForProject = projectHermesConfigTargets(registry);
+  const details = [];
+
+  for (const target of symlinkTargetsForProject) {
+    const targetDir = path.join(projectPath, target.dir);
+    details.push(...await installSymlinkSkills({
+      sourceDir: skillsDir,
+      targetDir,
+      dryRun: options.dryRun,
+      overwrite: options.overwrite
+    }));
+    if (options.pruneAliases) {
+      details.push(...await removeManagedSkillAliases({
+        sourceDir: skillsDir,
+        targetDir,
+        dryRun: options.dryRun
+      }));
+    }
+    details.push(...await cleanupStaleLinks({
+      sourceDir: skillsDir,
+      targetDir,
+      dryRun: options.dryRun
+    }));
+  }
+
+  for (const target of hermesTargetsForProject) {
+    const configPath = path.join(projectPath, target.configFile);
+    const result = await ensureExternalSkillsDir({
+      configPath,
+      skillsPath: skillsDir,
+      dryRun: options.dryRun,
+      createMissing: true
+    });
+    details.push({ action: `hermes:${result.action}`, path: configPath, note: result.reason });
+  }
+
+  const linked = details.filter((result) => ["linked", "already-linked", "would link"].includes(result.action)).length;
+  const changed = details.filter((result) => result.action.startsWith("hermes:") && !result.action.endsWith("manual") && !result.action.endsWith("already-present")).length;
+  const verb = options.dryRun ? "would propagate" : "propagated";
+  const skillLabel = skills.length === 1
+    ? `skill ${skills[0].name}`
+    : `${skills.length} skill(s)`;
+  const targetPaths = [
+    ...symlinkTargetsForProject.map((target) => target.dir),
+    ...hermesTargetsForProject.map((target) => target.configFile)
+  ];
+  const targetLabel = targetPaths.length > 0 ? targetPaths.join(", ") : "no registered targets";
+  const note = `${verb} ${skillLabel} to ${targetLabel}; ${linked} symlink action(s), ${changed} Hermes config action(s)`;
+  return { action: "project-skills", path: skillsDir, note };
+}
+
+async function isDirectory(value) {
+  try {
+    return (await fs.stat(value)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 async function writeManagedFile(destination, content, { dryRun = false, overwrite = false } = {}) {

@@ -34,17 +34,38 @@ function normalizeAgent(raw) {
 
 function normalizeSkills(raw) {
   if (!raw || typeof raw !== "object") return null;
+  const config = normalizeSkillTarget(raw);
+  if (!config) return null;
+
+  const project = normalizeSkillTarget(raw.project, { relativeOnly: true });
+  return project ? { ...config, project } : config;
+}
+
+function normalizeSkillTarget(raw, { relativeOnly = false } = {}) {
+  if (!raw || typeof raw !== "object") return null;
   const mode = typeof raw.mode === "string" ? raw.mode.trim() : "";
   if (mode !== "symlink" && mode !== "config-external-dir") return null;
 
   const config = { mode };
-  if (typeof raw.dir === "string" && raw.dir.trim()) config.dir = raw.dir.trim();
-  if (typeof raw.configFile === "string" && raw.configFile.trim()) config.configFile = raw.configFile.trim();
+  if (typeof raw.dir === "string" && raw.dir.trim()) {
+    const dir = raw.dir.trim();
+    if (!relativeOnly || isSafeRelativePath(dir)) config.dir = dir;
+  }
+  if (typeof raw.configFile === "string" && raw.configFile.trim()) {
+    const configFile = raw.configFile.trim();
+    if (!relativeOnly || isSafeRelativePath(configFile)) config.configFile = configFile;
+  }
   if (typeof raw.key === "string" && raw.key.trim()) config.key = raw.key.trim();
 
   if (mode === "symlink" && !config.dir) return null;
   if (mode === "config-external-dir" && (!config.configFile || !config.key)) return null;
   return config;
+}
+
+function isSafeRelativePath(value) {
+  return !path.isAbsolute(value)
+    && !/^[a-zA-Z]:[\\/]/.test(value)
+    && !value.split(/[\\/]+/).includes("..");
 }
 
 function normalizeRegistry(data) {

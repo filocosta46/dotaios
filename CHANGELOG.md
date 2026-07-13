@@ -2,6 +2,14 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## Unreleased
+### Added
+- Project-owned skill propagation. `dotaios attach <project>` and
+  `dotaios activate --project <project>` expose a checkout's own `skills/`
+  directory to explicit Claude Code, Agent Skills, Antigravity, and Hermes
+  project targets while preserving the global AIOS skill library and foreign
+  entries.
+
 ## [1.21.0] - 2026-07-07
 ### Added
 - **Flagship: native agent skills-routing.** `dotaios skills resolve "<intent>"` ranks the installed skill that fits a free-text intent, with no embeddings, network, or model calls. Plain-text scoring over each skill's declared `triggers:` and `description`: exact-name hit, trigger token overlap, description overlap, specificity tiebreak. Prints the top match (name, dir, confidence, triggers, `SKILL.md` path); `--full` also prints the `SKILL.md` body, `--all` prints the ranked list, `--json` returns the documented shape for fleet and MCP callers. Exit 2 when nothing clears the bar so fleet scripts can branch on "no skill fits, hand-roll." The scoring lives in a new shared `packages/core/src/skill-resolver.mjs` so the CLI and MCP server use one function.
