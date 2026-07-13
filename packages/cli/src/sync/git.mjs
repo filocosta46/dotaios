@@ -102,6 +102,25 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
       if (code !== 0) throw new Error(`git fetch failed: ${redactToken(stderr.trim())}`);
     },
 
+    // Read the sync branch directly from the remote. This is deliberately
+    // separate from fetch/rebase: `sync status` must be able to verify the
+    // cached push receipt without changing the checkout or refs.
+    async remoteHead(branch = "main") {
+      if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-")) {
+        throw new Error("invalid sync branch");
+      }
+      const ref = `refs/heads/${branch}`;
+      const { code, stdout, stderr } = await run(["ls-remote", "origin", ref]);
+      if (code !== 0) {
+        throw new Error(`git ls-remote failed: ${redactToken(stderr.trim())}`);
+      }
+      const [sha, returnedRef] = stdout.trim().split(/\s+/);
+      if (!/^[0-9a-f]{40}$/i.test(sha || "") || returnedRef !== ref) {
+        throw new Error("git ls-remote returned no valid sync branch ref");
+      }
+      return sha;
+    },
+
     // Pull by rebasing local commits on top of origin. Local changes must be
     // committed before calling this — rebase refuses to run on a dirty tree.
     // Returns "up-to-date" (origin had nothing new), "rebased" (local commits

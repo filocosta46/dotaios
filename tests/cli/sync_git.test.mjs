@@ -196,3 +196,21 @@ test("fetch() redacts embedded token from error message", async () => {
     return true;
   });
 });
+
+test("remoteHead() reads the configured sync branch without exposing credentials", async () => {
+  const calls = [];
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: (cmd, args) => {
+      calls.push([cmd, ...args].join(" "));
+      return Promise.resolve({
+        stdout: "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1\trefs/heads/main\n",
+        stderr: "",
+        code: 0
+      });
+    }
+  });
+
+  assert.equal(await git.remoteHead("main"), "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1");
+  assert.deepEqual(calls, ["git ls-remote origin refs/heads/main"]);
+});
