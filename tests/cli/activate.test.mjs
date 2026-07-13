@@ -95,4 +95,21 @@ describe("activateCommand — symlinks", () => {
     );
     await fs.rm(aliasRoot, { recursive: true, force: true });
   });
+
+  it("refuses a home alias that resolves to the real user home", async () => {
+    const aliasHome = path.join(dirs.base, "home-alias");
+    await fs.symlink(os.homedir(), aliasHome, "dir");
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    await assert.rejects(
+      activateCommand([
+        "--path", dirs.aiosPath,
+        "--home", aliasHome,
+        "--all"
+      ]),
+      /temporary AIOS path/
+    );
+  });
 });

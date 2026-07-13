@@ -104,3 +104,65 @@ test("skills doctor returns a read-only JSON coverage report", () => {
   assert.equal(report.targets.find((target) => target.dir === ".agents/skills").missing.length, 0);
   assert.equal(report.targets.find((target) => target.dir === ".agents/skills").foreign.length, 0);
 });
+
+test("activation covers detected native clients and every Hermes profile without clobbering foreign skills", async () => {
+  const { aiosPath, homePath } = setupAios();
+  const skillName = "plan-today";
+  const source = path.join(aiosPath, "skills", skillName);
+  const canonicalSkills = path.join(aiosPath, "skills");
+  const profilePath = path.join(homePath, ".hermes", "profiles", "bill", "config.yaml");
+
+  for (const dir of [".claude", ".codex", ".gemini", ".cursor", ".antigravity"]) {
+    fs.mkdirSync(path.join(homePath, dir), { recursive: true });
+  }
+  fs.mkdirSync(path.join(homePath, ".hermes", "profiles", "bill"), { recursive: true });
+  fs.writeFileSync(
+    path.join(homePath, ".hermes", "config.yaml"),
+    "model:\n  provider: openrouter\nskills:\n  external_dirs: []\n"
+  );
+  fs.writeFileSync(
+    profilePath,
+    "model:\n  provider: openrouter\nskills:\n    external_dirs:\n      - /Users/filo/aios/skills\n"
+  );
+
+  const foreign = path.join(homePath, ".cursor", "skills", "humanizer");
+  fs.mkdirSync(foreign, { recursive: true });
+  fs.writeFileSync(path.join(foreign, "SKILL.md"), "foreign skill\n");
+  for (const retiredDir of [path.join(homePath, ".cursor", "skills"), path.join(homePath, ".gemini", "skills")]) {
+    fs.mkdirSync(retiredDir, { recursive: true });
+    fs.symlinkSync(source, path.join(retiredDir, skillName), "dir");
+    fs.mkdirSync(path.join(retiredDir, "coding-standards"), { recursive: true });
+    fs.writeFileSync(path.join(retiredDir, "coding-standards", "SKILL.md"), "foreign skill\n");
+  }
+
+  run(["activate", "--path", aiosPath, "--home", homePath]);
+  run(["activate", "--path", aiosPath, "--home", homePath]);
+
+  for (const targetDir of [
+    ".agents/skills",
+    ".claude/skills",
+    ".gemini/config/skills"
+  ]) {
+    const link = path.join(homePath, targetDir, skillName);
+    assert.equal(fs.readlinkSync(link), source, `${targetDir} should expose the canonical skill`);
+  }
+  assert.equal(fs.readFileSync(path.join(foreign, "SKILL.md"), "utf8"), "foreign skill\n");
+  for (const retiredDir of [path.join(homePath, ".cursor", "skills"), path.join(homePath, ".gemini", "skills")]) {
+    assert.equal(fs.existsSync(path.join(retiredDir, skillName)), false);
+    assert.equal(fs.readFileSync(path.join(retiredDir, "coding-standards", "SKILL.md"), "utf8"), "foreign skill\n");
+  }
+
+  for (const configPath of [path.join(homePath, ".hermes", "config.yaml"), profilePath]) {
+    const config = fs.readFileSync(configPath, "utf8");
+    assert.equal(config.split(canonicalSkills).length - 1, 1);
+  }
+  assert.match(fs.readFileSync(profilePath, "utf8"), /- \/Users\/filo\/aios\/skills/);
+
+  const doctor = run(
+    ["skills", "doctor", "--json", "--path", aiosPath, "--home", homePath],
+    { allowNonZero: true }
+  );
+  const report = JSON.parse(doctor.stdout);
+  assert.equal(report.hermes.configs.length, 2);
+  assert.ok(report.hermes.configs.every((entry) => entry.status === "healthy"));
+});

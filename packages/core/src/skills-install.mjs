@@ -96,6 +96,7 @@ export async function cleanupStaleLinks({ aiosPath, targetDir, dryRun = false })
     const info = await inspectEntry(dest);
     if (info.kind !== "symlink") continue;                 // never touch real files/dirs
     const target = resolveSymlinkTarget(dest, info.target);
+    if (path.basename(target) !== entry.name) continue;      // alias ownership is unprovable
     const root = path.resolve(skillsRoot);
     const ownsIt = isWithin(root, target);
     if (!ownsIt) continue;                                  // foreign symlink — leave it
@@ -105,6 +106,37 @@ export async function cleanupStaleLinks({ aiosPath, targetDir, dryRun = false })
       if (!dryRun) await fs.rm(dest, { force: true });
       removed.push({ action: dryRun ? "would remove" : "removed", path: dest });
     }
+  }
+  return removed;
+}
+
+// Remove only links that point into this AIOS skill tree. This is used for
+// migrations when a client has multiple discovery paths and the duplicate
+// target would make the client report conflicting skill names. Real entries
+// and foreign symlinks are never touched.
+export async function removeManagedSkillLinks({ aiosPath, targetDir, dryRun = false }) {
+  const skills = await collectSkills(aiosPath);
+  const canonicalSources = new Map(
+    skills.map((skill) => [skill.dir, path.join(aiosPath, "skills", skill.dir)])
+  );
+  let entries;
+  try {
+    entries = await fs.readdir(targetDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const root = path.resolve(path.join(aiosPath, "skills"));
+  const removed = [];
+  for (const entry of entries) {
+    const dest = path.join(targetDir, entry.name);
+    const info = await inspectEntry(dest);
+    if (info.kind !== "symlink") continue;
+    const canonicalSource = canonicalSources.get(entry.name);
+    if (!canonicalSource) continue;
+    const target = resolveSymlinkTarget(dest, info.target);
+    if (!isWithin(root, target) || !(await samePath(target, canonicalSource))) continue;
+    if (!dryRun) await fs.rm(dest, { recursive: true, force: true });
+    removed.push({ action: dryRun ? "would-remove" : "removed", path: dest });
   }
   return removed;
 }

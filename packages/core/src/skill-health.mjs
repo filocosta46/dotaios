@@ -44,9 +44,11 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
     if (target.broken.length) issues.push(`${target.dir}: ${target.broken.length} broken link(s)`);
     if (target.foreign.length) issues.push(`${target.dir}: ${target.foreign.length} unmanaged collision(s)`);
     if (target.stale.length) issues.push(`${target.dir}: ${target.stale.length} stale extra link(s)`);
+    const unmanagedExtras = target.extra.filter((entry) => entry.kind !== "stale-owned");
+    if (unmanagedExtras.length) issues.push(`${target.dir}: ${unmanagedExtras.length} unmanaged extra link(s)`);
   }
   for (const bridge of bridges) {
-    if (bridge.status !== "healthy" && bridge.status !== "not-detected") {
+    if (bridge.status !== "healthy" && bridge.status !== "not-detected" && bridge.status !== "not-applicable") {
       issues.push(`${bridge.name} bridge is ${bridge.status}`);
     }
   }
@@ -65,7 +67,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
     bridges,
     hermes,
     unsupported: [
-      "Cursor, Gemini, Antigravity, Warp, and VS Code use the shared .agents/skills target when supported.",
+      "Codex, Cursor, and Gemini use the shared .agents/skills target; Antigravity uses its documented global target.",
       "Surfaces without local Agent Skills discovery continue to use the DotAIOS bridge and resolver."
     ],
     issues
@@ -175,6 +177,7 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
     // A missing target directory is already represented by the source entries.
   }
 
+  const hasUnmanagedExtras = extra.some((entry) => entry.kind !== "stale-owned");
   return {
     dir: path.relative(homePath, targetDir),
     path: targetDir,
@@ -186,7 +189,11 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
     foreign,
     extra,
     stale,
-    complete: missing.length === 0 && broken.length === 0 && foreign.length === 0 && stale.length === 0
+    complete: missing.length === 0
+      && broken.length === 0
+      && foreign.length === 0
+      && stale.length === 0
+      && !hasUnmanagedExtras
   };
 }
 
@@ -195,6 +202,10 @@ async function inspectBridges({ aiosPath, homePath }) {
   const bridges = [];
   for (const agent of registry) {
     const installed = await isAgentInstalled(homePath, agent);
+    if (!agent.bridge) {
+      bridges.push({ name: agent.name, path: null, status: "not-applicable", installed, bridge: false });
+      continue;
+    }
     const bridgePath = path.join(homePath, agent.bridge);
     if (!installed) {
       bridges.push({ name: agent.name, path: bridgePath, status: "not-detected", installed: false });

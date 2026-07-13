@@ -46,7 +46,11 @@ Once it is set up, you can ask any connected AI things like:
 - "What did I decide about the launch?" It searches everything you have saved.
 - "What am I working on?" It reads your context and answers from your folder.
 
-Setup also links your skills into every tool that supports them, so the same workflows work in Claude Code, Cursor, Codex, Antigravity, and Hermes. Edit a skill once in `~/aios/skills/` and every connected tool sees the update.
+Setup also links your skills into the documented local surfaces for Claude Code,
+Cursor, Codex, Antigravity, and Hermes. DotAIOS verifies filesystem propagation
+and Hermes configuration. Actual native discovery remains client and version
+specific. Edit a skill once in `~/aios/skills/` and every verified connected
+surface sees the update.
 
 You can also let it remember your conversations automatically, so your AI gets to know you better over time.
 

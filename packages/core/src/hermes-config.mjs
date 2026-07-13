@@ -75,7 +75,7 @@ export async function ensureExternalSkillsDir({ configPath, skillsPath, dryRun =
       lines.splice(index, 1);
       prunedStale = true;
     }
-    if (lines.slice(edIdx + 1).some((line) => parseListValue(line, itemIndent) === skillsPath)) {
+    if (lines.slice(edIdx + 1, listEnd()).some((line) => parseListValue(line, itemIndent) === skillsPath)) {
       if (!prunedStale) return { action: "already-present" };
       if (!dryRun) await fs.writeFile(configPath, lines.join("\n"));
       return { action: dryRun ? "would-prune-stale" : "pruned-stale" };

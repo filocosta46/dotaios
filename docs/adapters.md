@@ -48,17 +48,26 @@ Use `dotaios activate` (and `dotaios mcp install`) to wire these, see the README
 
 ### Skills: native in every tool
 
-`dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into:
+`dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into the client paths that are safe for the installed tools:
 
 - `~/.claude/skills/` for Claude Code, and
-- `~/.agents/skills/`, the shared skills folder that Codex, Cursor 2.5+, Antigravity, Warp, and VS Code all read.
+- `~/.agents/skills/` as the single shared Agent Skills path for Codex, Cursor, and Gemini CLI, and
+- `~/.gemini/config/skills/` for Antigravity's documented global skill path.
 
 For Hermes, DotAIOS adds your `~/aios/skills` folder to `skills.external_dirs` in `~/.hermes/config.yaml`.
 
-The link is live, so editing a skill once updates it everywhere. DotAIOS manages only the links it created, and removes a link when its source skill is gone. Surfaces that do not read a local skills folder, such as the Claude desktop app and browser based chat, keep using the AGENTS.md context that `activate` and `connect` set up.
+The shared path is intentionally canonical. DotAIOS does not also populate a
+second client-native path when that would make a client discover duplicate
+skill names. A migration removes only old DotAIOS-owned links from retired
+duplicate paths; real entries and foreign links are preserved. DotAIOS verifies
+that it created the filesystem targets, but client-version discovery remains an
+acceptance check for each installed tool. Surfaces that do not read a local
+skills folder, such as the Claude desktop app and browser based chat, keep
+using the AGENTS.md context that `activate` and `connect` set up.
 
-When you add a skill, propagation happens automatically. You can reconcile all
-native locations explicitly with:
+When you install or remove a skill through DotAIOS, propagation happens during
+that operation. If you create a skill folder manually, run `dotaios activate`
+to reconcile all native locations explicitly:
 
 ```
 dotaios skills install
@@ -66,7 +75,8 @@ dotaios skills doctor --json
 ```
 
 `skills doctor` is read-only. It checks the generated catalogs, native-link
-coverage, managed bridges, and Hermes root/profile configuration. If a temporary
+coverage, managed bridges, and Hermes root/profile configuration. It reports
+Hermes as a native runtime without expecting a bridge file. If a temporary
 setup path tries to overwrite the real global bridges, `activate` refuses it;
 use a permanent AIOS folder instead.
 

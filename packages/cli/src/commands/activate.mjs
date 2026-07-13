@@ -18,8 +18,8 @@ import {
   writeSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
-import { symlinkTargets } from "../../../core/src/skill-targets.mjs";
-import { installSymlinkSkills, cleanupStaleLinks } from "../../../core/src/skills-install.mjs";
+import { symlinkTargets, retiredSymlinkTargets } from "../../../core/src/skill-targets.mjs";
+import { installSymlinkSkills, cleanupStaleLinks, removeManagedSkillLinks } from "../../../core/src/skills-install.mjs";
 import { discoverHermesConfigPaths, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -35,7 +35,11 @@ export async function activateCommand(args) {
   const options = parseOptions(args);
   const aiosPath = resolvePath(options.path || defaultAiosPath());
   const homePath = resolvePath(options.home || os.homedir());
-  if (homePath === path.resolve(os.homedir()) && await isTemporaryAiosPath(aiosPath)) {
+  const [realHomePath, realUserHomePath] = await Promise.all([
+    realpathThroughExistingAncestor(homePath),
+    realpathThroughExistingAncestor(os.homedir())
+  ]);
+  if (realHomePath === realUserHomePath && await isTemporaryAiosPath(aiosPath)) {
     throw new Error("Refusing to connect a temporary AIOS path to the real home; use a permanent AIOS folder.");
   }
   await ensureAiosFolder(aiosPath);
@@ -188,7 +192,7 @@ async function createGlobalBridges(
   let installedCount = 0;
 
   for (const agent of registry) {
-    const destination = bridgePath(homePath, agent);
+    const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
     const installed = options.all || await isAgentInstalled(homePath, agent);
 
     if (!installed) {
@@ -196,6 +200,15 @@ async function createGlobalBridges(
       continue;
     }
     installedCount += 1;
+
+    if (!agent.bridge) {
+      results.push({
+        action: "detected",
+        path: destination,
+        note: `${agent.name} has no bridge file; its skills use the native runtime configuration`
+      });
+      continue;
+    }
 
     const result = await writeManagedFile(
       destination,
@@ -224,14 +237,19 @@ async function previewSkillsIndex(aiosPath) {
   };
 }
 
-// Install DotAIOS skills natively into every supported tool: symlink into each
-// well-known skills dir (~/.claude/skills, ~/.agents/skills — the shared standard
-// read by Codex/Cursor/Gemini), and register the source dir in Hermes' config.
+// Install DotAIOS skills natively into each documented client directory plus
+// the shared Agent Skills root, then register the source dir in Hermes config.
 async function installAllSkills(aiosPath, homePath, options) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
   const results = [];
+  for (const target of retiredSymlinkTargets()) {
+    const targetDir = path.join(homePath, target.dir);
+    results.push(...await removeManagedSkillLinks({
+      aiosPath, targetDir, dryRun: options.dryRun
+    }));
+  }
   for (const target of symlinkTargets()) {
     const targetDir = path.join(homePath, target.dir);
     results.push(...await installSymlinkSkills({

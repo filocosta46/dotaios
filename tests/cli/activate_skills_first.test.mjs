@@ -151,7 +151,9 @@ describe("activateCommand --skills-first", () => {
     assert.match(output.join("\n"), /\[would refresh\].*INDEX\.md.*RESOLVER\.md/);
     assert.match(output.join("\n"), /\[skills-first\] bridge files would inline the current skill catalog/);
     assert.match(output.join("\n"), /\[would link\].*test-skill/);
-    assert.match(output.join("\n"), /\[would remove\].*stale-skill/);
+    // The target basename differs from the link name, so ownership is not
+    // provable and the dry-run must preserve the foreign alias.
+    assert.doesNotMatch(output.join("\n"), /\[would remove\].*stale-skill/);
 
     await fs.rm(dryRunDirs.base, { recursive: true, force: true });
   });

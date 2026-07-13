@@ -12,6 +12,10 @@ export function symlinkTargets() {
   return out;
 }
 
+export function retiredSymlinkTargets() {
+  return (registry.retiredSkillDirs || []).map((dir) => ({ dir }));
+}
+
 export function hermesConfigTargets() {
   return registry.agents
     .filter((a) => a.skills?.mode === "config-external-dir")

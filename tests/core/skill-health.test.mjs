@@ -87,7 +87,8 @@ test("inspectSkillHealth does not fail for agents and Hermes that are not instal
   const report = await inspectSkillHealth({ aiosPath, homePath });
   assert.equal(report.healthy, true);
   assert.ok(report.targets.every((target) => target.status === "not-detected"));
-  assert.ok(report.bridges.every((bridge) => bridge.status === "not-detected"));
+  assert.ok(report.bridges.filter((bridge) => bridge.bridge !== false).every((bridge) => bridge.status === "not-detected"));
+  assert.ok(report.bridges.filter((bridge) => bridge.bridge === false).every((bridge) => bridge.status === "not-applicable"));
   assert.equal(report.hermes.available, false);
 });
 
@@ -103,5 +104,19 @@ test("inspectSkillHealth enumerates stale extra native links", async () => {
   assert.equal(target.extra.length, 1);
   assert.equal(target.stale.length, 1);
   assert.equal(target.extra[0].kind, "stale-owned");
+  assert.equal(report.healthy, false);
+});
+
+test("inspectSkillHealth flags readable foreign aliases that can confuse a client", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  const targetDir = path.join(homePath, ".agents", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  await fs.symlink(path.join(aiosPath, "skills", "today"), path.join(targetDir, "vendor-today"), "dir");
+
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const target = report.targets.find((entry) => entry.dir === ".agents/skills");
+  assert.equal(target.extra[0].kind, "foreign-symlink");
+  assert.match(report.issues.join("\n"), /\.agents\/skills: 1 unmanaged extra link/);
+  assert.equal(target.complete, false);
   assert.equal(report.healthy, false);
 });

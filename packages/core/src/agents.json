@@ -5,11 +5,16 @@
     { "name": "Codex", "detect": ".codex", "bridge": ".codex/AGENTS.md", "include": "",
       "skills": { "mode": "symlink", "dir": ".agents/skills" } },
     { "name": "Gemini", "detect": ".gemini", "bridge": ".gemini/GEMINI.md", "include": "@",
-      "skills": { "mode": "command", "dir": ".gemini/commands" } },
+      "skills": { "mode": "symlink", "dir": ".agents/skills" } },
+    { "name": "Cursor", "detect": ".cursor", "bridge": null, "include": "",
+      "skills": { "mode": "symlink", "dir": ".agents/skills" } },
+    { "name": "Antigravity", "detect": ".antigravity", "bridge": null, "include": "",
+      "skills": { "mode": "symlink", "dir": ".gemini/config/skills" } },
     { "name": "Hermes", "detect": ".hermes", "bridge": null,
       "skills": { "mode": "config-external-dir", "configFile": ".hermes/config.yaml", "key": "skills.external_dirs" } }
   ],
   "wellKnownSkillDirs": [
     { "name": "Agent Skills standard", "mode": "symlink", "dir": ".agents/skills", "serves": ["Codex", "Cursor", "Gemini"] }
-  ]
+  ],
+  "retiredSkillDirs": [".cursor/skills", ".gemini/skills"]
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { installSymlinkSkills, cleanupStaleLinks } from "../../packages/core/src/skills-install.mjs";
+import { installSymlinkSkills, cleanupStaleLinks, removeManagedSkillLinks } from "../../packages/core/src/skills-install.mjs";
 
 async function tmp() {
   return await fs.mkdtemp(path.join(os.tmpdir(), "aios-test-"));
@@ -104,4 +104,50 @@ test("cleanupStaleLinks removes owned links whose source skill is gone, keeps ot
   assert.deepEqual(removed.map((r) => path.basename(r.path)), ["today"]);
   await assert.rejects(fs.lstat(path.join(targetDir, "today")));
   assert.ok((await fs.lstat(path.join(targetDir, "vendor-skill"))).isDirectory());
+});
+
+test("cleanupStaleLinks preserves a broken foreign alias into the AIOS tree", async () => {
+  const aios = await tmp();
+  const home = await tmp();
+  const targetDir = path.join(home, ".agents", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  const missingSource = path.join(aios, "skills", "removed-skill");
+  await fs.symlink(missingSource, path.join(targetDir, "vendor-alias"), "dir");
+
+  const removed = await cleanupStaleLinks({ aiosPath: aios, targetDir });
+
+  assert.deepEqual(removed, []);
+  assert.ok((await fs.lstat(path.join(targetDir, "vendor-alias"))).isSymbolicLink());
+});
+
+test("removeManagedSkillLinks retires only DotAIOS-owned links", async () => {
+  const aios = await tmp();
+  const home = await tmp();
+  await makeSkill(aios, "today");
+  const targetDir = path.join(home, ".gemini", "skills");
+  await installSymlinkSkills({ aiosPath: aios, targetDir });
+  await fs.mkdir(path.join(targetDir, "vendor-skill"), { recursive: true });
+  await fs.writeFile(path.join(targetDir, "vendor-skill", "SKILL.md"), "vendor\n");
+  await fs.symlink("/Users/vendor/skill", path.join(targetDir, "vendor-link"), "dir");
+
+  const removed = await removeManagedSkillLinks({ aiosPath: aios, targetDir });
+
+  assert.deepEqual(removed.map((entry) => path.basename(entry.path)), ["today"]);
+  await assert.rejects(fs.lstat(path.join(targetDir, "today")));
+  assert.ok((await fs.lstat(path.join(targetDir, "vendor-skill"))).isDirectory());
+  assert.ok((await fs.lstat(path.join(targetDir, "vendor-link"))).isSymbolicLink());
+});
+
+test("removeManagedSkillLinks preserves a foreign alias into the AIOS skill tree", async () => {
+  const aios = await tmp();
+  const home = await tmp();
+  await makeSkill(aios, "today");
+  const targetDir = path.join(home, ".gemini", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  await fs.symlink(path.join(aios, "skills", "today"), path.join(targetDir, "vendor-today"), "dir");
+
+  const removed = await removeManagedSkillLinks({ aiosPath: aios, targetDir });
+
+  assert.deepEqual(removed, []);
+  assert.ok((await fs.lstat(path.join(targetDir, "vendor-today"))).isSymbolicLink());
 });

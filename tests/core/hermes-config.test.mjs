@@ -161,6 +161,25 @@ test("substring path is NOT a false already-present", async () => {
   assert.equal(res.action, "added");
 });
 
+test("does not find the canonical path in a later YAML section", async () => {
+  const canonical = "/Users/filo/aios/skills";
+  const p = await writeCfg([
+    "skills:",
+    "  external_dirs:",
+    "    - /other/skills",
+    "logging:",
+    `    - ${canonical}`,
+    ""
+  ].join("\n"));
+
+  const res = await ensureExternalSkillsDir({ configPath: p, skillsPath: canonical });
+
+  assert.equal(res.action, "added");
+  const out = await fs.readFile(p, "utf8");
+  assert.match(out, new RegExp(`external_dirs:[\\s\\S]*- ${canonical.replaceAll("/", "\\/")}`));
+  assert.match(out, new RegExp(`logging:[\\s\\S]*- ${canonical.replaceAll("/", "\\/")}`));
+});
+
 test("fail-closed: no skills section → reports manual, file unchanged", async () => {
   const body = "model:\n  provider: openrouter\n";
   const p = await writeCfg(body);
