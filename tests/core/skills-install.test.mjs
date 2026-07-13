@@ -90,6 +90,89 @@ test("installSymlinkSkills dry-run writes nothing", async () => {
   await assert.rejects(fs.lstat(path.join(targetDir, "today")));
 });
 
+test("installSymlinkSkills rejects a project source root symlink before reading it", async () => {
+  const project = await tmp();
+  const outside = await tmp();
+  await makeSkill(outside, "external");
+  await fs.symlink(path.join(outside, "skills"), path.join(project, "skills"), "dir");
+  const targetDir = path.join(project, ".agents", "skills");
+
+  const result = await installSymlinkSkills({
+    aiosPath: project,
+    sourceDir: path.join(project, "skills"),
+    targetDir,
+    projectRoot: project
+  });
+
+  assert.equal(result[0].action, "skipped-unsafe-source");
+  assert.match(result[0].note, /source.*symlink/i);
+  await assert.rejects(fs.lstat(path.join(targetDir, "external")));
+  assert.equal((await fs.lstat(path.join(outside, "skills", "external"))).isDirectory(), true);
+});
+
+test("installSymlinkSkills rejects a project SKILL.md symlink before reading it", async () => {
+  const project = await tmp();
+  const outside = path.join(project, "outside-skill.md");
+  await makeSkill(project, "project");
+  await fs.writeFile(outside, "---\nname: external\ndescription: external\n---\n");
+  await fs.rm(path.join(project, "skills", "project", "SKILL.md"));
+  await fs.symlink(outside, path.join(project, "skills", "project", "SKILL.md"), "file");
+  const targetDir = path.join(project, ".agents", "skills");
+
+  const result = await installSymlinkSkills({
+    aiosPath: project,
+    sourceDir: path.join(project, "skills"),
+    targetDir,
+    projectRoot: project
+  });
+
+  assert.equal(result[0].action, "skipped-unsafe-source");
+  assert.match(result[0].note, /skill file.*symlink/i);
+  await assert.rejects(fs.lstat(path.join(targetDir, "project")));
+  assert.equal(await fs.readFile(outside, "utf8"), "---\nname: external\ndescription: external\n---\n");
+});
+
+test("installSymlinkSkills never overwrites an overlapping project source", async () => {
+  const project = await tmp();
+  await makeSkill(project, "project");
+  const skillsRoot = path.join(project, "skills");
+  const skillFile = path.join(skillsRoot, "project", "SKILL.md");
+
+  const result = await installSymlinkSkills({
+    aiosPath: project,
+    sourceDir: skillsRoot,
+    targetDir: skillsRoot,
+    projectRoot: project,
+    overwrite: true
+  });
+
+  assert.equal(result[0].action, "skipped-unsafe-target");
+  assert.match(result[0].note, /overlaps.*source/i);
+  assert.equal((await fs.lstat(path.join(skillsRoot, "project"))).isDirectory(), true);
+  assert.match(await fs.readFile(skillFile, "utf8"), /name: project/);
+});
+
+test("installSymlinkSkills rejects a symlink alias of the source as an overwrite target", async () => {
+  const project = await tmp();
+  await makeSkill(project, "project");
+  const skillsRoot = path.join(project, "skills");
+  const targetDir = path.join(project, ".custom", "skills");
+  await fs.mkdir(path.dirname(targetDir), { recursive: true });
+  await fs.symlink(skillsRoot, targetDir, "dir");
+
+  const result = await installSymlinkSkills({
+    aiosPath: project,
+    sourceDir: skillsRoot,
+    targetDir,
+    overwrite: true
+  });
+
+  assert.equal(result[0].action, "skipped-unsafe-target");
+  assert.match(result[0].note, /overlaps.*source/i);
+  assert.equal((await fs.lstat(path.join(skillsRoot, "project"))).isDirectory(), true);
+  assert.match(await fs.readFile(path.join(skillsRoot, "project", "SKILL.md"), "utf8"), /name: project/);
+});
+
 test("cleanupStaleLinks removes owned links whose source skill is gone, keeps others", async () => {
   const aios = await tmp();
   const home = await tmp();

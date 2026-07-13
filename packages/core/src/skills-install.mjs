@@ -45,20 +45,27 @@ export async function installSymlinkSkills({
   overwrite = false
 }) {
   const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
+  const source = path.resolve(skillsRoot);
   if (projectRoot) {
+    const sourceSafety = await validateProjectSourcePath({
+      projectRoot,
+      sourcePath: skillsRoot
+    });
+    if (!sourceSafety.safe) {
+      return [{ action: "skipped-unsafe-source", path: skillsRoot, note: sourceSafety.reason }];
+    }
     const safety = await validateProjectPath({ projectRoot, targetPath: targetDir });
     if (!safety.safe) {
       return [{ action: "skipped-unsafe-target", path: targetDir, note: safety.reason }];
     }
-    const source = path.resolve(skillsRoot);
-    const target = path.resolve(targetDir);
-    if (isWithin(source, target) || isWithin(target, source)) {
-      return [{
-        action: "skipped-unsafe-target",
-        path: targetDir,
-        note: "target overlaps project skills source"
-      }];
-    }
+  }
+  const target = path.resolve(targetDir);
+  if (await pathsOverlap(source, target)) {
+    return [{
+      action: "skipped-unsafe-target",
+      path: targetDir,
+      note: projectRoot ? "target overlaps project skills source" : "target overlaps skills source"
+    }];
   }
   const skills = await collectSkills(path.dirname(skillsRoot)); // [{ dir, name, ... }]
   if (skills.length === 0) return [];
@@ -320,4 +327,33 @@ async function samePath(left, right) {
 function isWithin(root, candidate) {
   const relative = path.relative(root, candidate);
   return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+async function pathsOverlap(left, right) {
+  const leftPath = path.resolve(left);
+  const rightPath = path.resolve(right);
+  if (isWithin(leftPath, rightPath) || isWithin(rightPath, leftPath)) return true;
+
+  const [leftReal, rightReal] = await Promise.all([
+    realpathThroughExistingAncestor(leftPath),
+    realpathThroughExistingAncestor(rightPath)
+  ]);
+  return isWithin(leftReal, rightReal) || isWithin(rightReal, leftReal);
+}
+
+async function realpathThroughExistingAncestor(value) {
+  let current = path.resolve(value);
+  const missing = [];
+  while (true) {
+    try {
+      const resolved = await fs.realpath(current);
+      return path.join(resolved, ...missing.reverse());
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return path.resolve(value);
+      missing.push(path.basename(current));
+      current = parent;
+    }
+  }
 }
