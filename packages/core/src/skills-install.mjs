@@ -98,7 +98,7 @@ export async function cleanupStaleLinks({ aiosPath, targetDir, dryRun = false })
     const target = resolveSymlinkTarget(dest, info.target);
     if (path.basename(target) !== entry.name) continue;      // alias ownership is unprovable
     const root = path.resolve(skillsRoot);
-    const ownsIt = isWithin(root, target);
+    const ownsIt = isWithin(root, target) || await isStaleDotaiosTempPath(target);
     if (!ownsIt) continue;                                  // foreign symlink — leave it
     try {
       await fs.access(target);                               // source still exists?

@@ -120,6 +120,20 @@ test("cleanupStaleLinks preserves a broken foreign alias into the AIOS tree", as
   assert.ok((await fs.lstat(path.join(targetDir, "vendor-alias"))).isSymbolicLink());
 });
 
+test("cleanupStaleLinks removes an owned dead temporary activation link", async () => {
+  const aios = await tmp();
+  const home = await tmp();
+  const targetDir = path.join(home, ".agents", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  const staleSource = path.join(os.tmpdir(), "dotaios-cleanup-dead", "aios", "skills", "today");
+  await fs.symlink(staleSource, path.join(targetDir, "today"), "dir");
+
+  const removed = await cleanupStaleLinks({ aiosPath: aios, targetDir });
+
+  assert.deepEqual(removed.map((entry) => path.basename(entry.path)), ["today"]);
+  await assert.rejects(fs.lstat(path.join(targetDir, "today")));
+});
+
 test("removeManagedSkillLinks retires only DotAIOS-owned links", async () => {
   const aios = await tmp();
   const home = await tmp();
