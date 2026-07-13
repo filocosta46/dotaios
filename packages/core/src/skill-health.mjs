@@ -4,6 +4,7 @@ import path from "node:path";
 import { MANAGED_END, MANAGED_START, isAgentInstalled, loadAgentRegistry } from "./bridges.mjs";
 import { renderResolver, renderSkillsIndex, collectSkills } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
+import { discoverHermesConfigPaths } from "./hermes-config.mjs";
 
 export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) {
   const registry = await loadAgentRegistry(aiosPath);
@@ -34,7 +35,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
   }
 
   const bridges = await inspectBridges({ aiosPath, homePath });
-  const hermes = await inspectHermes({ aiosPath, homePath });
+  const hermes = await inspectHermes({ aiosPath, homePath, registry });
   const issues = [];
 
   if (!catalogs.index.current) issues.push("skills/INDEX.md is missing or stale");
@@ -226,21 +227,14 @@ async function inspectBridges({ aiosPath, homePath }) {
   return bridges;
 }
 
-async function inspectHermes({ aiosPath, homePath }) {
+async function inspectHermes({ aiosPath, homePath, registry = [] }) {
   const hermesRoot = path.join(homePath, ".hermes");
-  if (!await pathExists(hermesRoot)) {
+  const configPaths = await discoverHermesConfigPaths(homePath, registry);
+  const hasConfigSurface = await pathExists(hermesRoot)
+    || await Promise.all(configPaths.map((configPath) => pathExists(configPath)))
+      .then((values) => values.some(Boolean));
+  if (!hasConfigSurface) {
     return { available: false, canonical: path.resolve(path.join(aiosPath, "skills")), configs: [] };
-  }
-  const configPaths = [];
-  const root = path.join(hermesRoot, "config.yaml");
-  configPaths.push(root);
-  try {
-    const entries = await fs.readdir(path.join(hermesRoot, "profiles"), { withFileTypes: true });
-    for (const entry of entries.filter((entry) => entry.isDirectory()).sort((a, b) => a.name.localeCompare(b.name))) {
-      configPaths.push(path.join(hermesRoot, "profiles", entry.name, "config.yaml"));
-    }
-  } catch {
-    // No Hermes installation is a valid discovery result, not a thrown error.
   }
 
   const expected = path.resolve(path.join(aiosPath, "skills"));

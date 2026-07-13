@@ -26,17 +26,36 @@ test("activation resolves native skill targets from a project-owned registry", (
   fs.writeFileSync(
     path.join(aiosPath, "agents.json"),
     JSON.stringify({
-      agents: [{
-        name: "Custom Runner",
-        detect: ".custom-runner",
-        bridge: null,
-        skills: { mode: "symlink", dir: ".custom/skills" }
-      }]
+      agents: [
+        {
+          name: "Custom Runner",
+          detect: ".custom-runner",
+          bridge: null,
+          skills: { mode: "symlink", dir: ".custom/skills" }
+        },
+        {
+          name: "Custom Hermes",
+          detect: ".custom-hermes",
+          bridge: null,
+          skills: {
+            mode: "config-external-dir",
+            configFile: ".custom-hermes/config.yaml",
+            key: "skills.external_dirs"
+          }
+        }
+      ]
     })
+  );
+  fs.mkdirSync(path.join(homePath, ".custom-hermes"), { recursive: true });
+  fs.writeFileSync(
+    path.join(homePath, ".custom-hermes", "config.yaml"),
+    "skills:\n  external_dirs: []\n"
   );
 
   runCli(["activate", "--path", aiosPath, "--home", homePath, "--all"]);
 
   const link = path.join(homePath, ".custom", "skills", "audit");
   assert.equal(fs.readlinkSync(link), path.join(aiosPath, "skills", "audit"));
+  const config = fs.readFileSync(path.join(homePath, ".custom-hermes", "config.yaml"), "utf8");
+  assert.match(config, new RegExp(`- ${aiosPath.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}/skills`));
 });

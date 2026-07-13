@@ -258,7 +258,7 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
     results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: options.dryRun }));
   }
 
-  for (const configPath of await discoverHermesConfigPaths(homePath)) {
+  for (const configPath of await discoverHermesConfigPaths(homePath, registry)) {
     const r = await ensureExternalSkillsDir({
       configPath,
       skillsPath: aiosSkillsDir,

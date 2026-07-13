@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-export async function discoverHermesConfigPaths(homePath) {
+export async function discoverHermesConfigPaths(homePath, registry = []) {
   const root = path.join(homePath, ".hermes");
   const configPaths = [path.join(root, "config.yaml")];
   try {
@@ -12,6 +12,12 @@ export async function discoverHermesConfigPaths(homePath) {
     }
   } catch {
     // A machine without Hermes profiles still gets the root config target.
+  }
+  for (const agent of Array.isArray(registry) ? registry : []) {
+    if (agent.skills?.mode !== "config-external-dir" || typeof agent.skills.configFile !== "string") continue;
+    const customPath = path.resolve(homePath, agent.skills.configFile);
+    if (!isWithin(path.resolve(homePath), customPath) || configPaths.includes(customPath)) continue;
+    configPaths.push(customPath);
   }
   return configPaths;
 }

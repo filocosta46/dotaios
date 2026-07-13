@@ -104,7 +104,10 @@ same source skill tree is then propagated to the custom target, and
 `dotaios skills doctor --path ~/aios --json` reports its coverage. This is
 filesystem propagation; the custom runtime still needs its own client-level
 acceptance check to prove that it discovers and invokes the Agent Skills
-directory.
+directory. A custom Hermes-style runtime may instead use
+`"mode": "config-external-dir"` with a home-relative `configFile` and
+`"key": "skills.external_dirs"`; activation and `skills doctor` include that
+configuration surface as well.
 
 ---
 
