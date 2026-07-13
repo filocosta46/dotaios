@@ -18,9 +18,9 @@ import {
   writeSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
-import { symlinkTargets, hermesConfigTargets } from "../../../core/src/skill-targets.mjs";
+import { symlinkTargets } from "../../../core/src/skill-targets.mjs";
 import { installSymlinkSkills, cleanupStaleLinks } from "../../../core/src/skills-install.mjs";
-import { ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
+import { discoverHermesConfigPaths, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = MANAGED_START;
@@ -35,6 +35,9 @@ export async function activateCommand(args) {
   const options = parseOptions(args);
   const aiosPath = resolvePath(options.path || defaultAiosPath());
   const homePath = resolvePath(options.home || os.homedir());
+  if (homePath === path.resolve(os.homedir()) && await isTemporaryAiosPath(aiosPath)) {
+    throw new Error("Refusing to connect a temporary AIOS path to the real home; use a permanent AIOS folder.");
+  }
   await ensureAiosFolder(aiosPath);
 
   const config = await readAiosConfig(aiosPath);
@@ -237,9 +240,13 @@ async function installAllSkills(aiosPath, homePath, options) {
     results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: options.dryRun }));
   }
 
-  for (const h of hermesConfigTargets()) {
-    const configPath = path.join(homePath, h.configFile);
-    const r = await ensureExternalSkillsDir({ configPath, skillsPath: aiosSkillsDir, dryRun: options.dryRun });
+  for (const configPath of await discoverHermesConfigPaths(homePath)) {
+    const r = await ensureExternalSkillsDir({
+      configPath,
+      skillsPath: aiosSkillsDir,
+      dryRun: options.dryRun,
+      createMissing: true
+    });
     results.push({ action: `hermes:${r.action}`, path: configPath, note: r.reason });
   }
   return results;
@@ -316,6 +323,40 @@ function bridgeFile(title, lines) {
 
 function resolvePath(value) {
   return path.resolve(expandHome(value));
+}
+
+async function isTemporaryAiosPath(aiosPath) {
+  const lexicalPath = path.resolve(aiosPath);
+  const lexicalTempRoot = path.resolve(os.tmpdir());
+  const [realPath, realTempRoot] = await Promise.all([
+    realpathThroughExistingAncestor(lexicalPath),
+    realpathThroughExistingAncestor(lexicalTempRoot)
+  ]);
+
+  // Check both representations. The lexical check catches a direct /tmp path,
+  // while the realpath check catches a permanent-looking alias that points into
+  // a temporary activation directory. We intentionally reject any path inside
+  // the OS temp root, not only names matching one historical temp prefix.
+  return isWithin(lexicalTempRoot, lexicalPath) || isWithin(realTempRoot, realPath);
+}
+
+async function realpathThroughExistingAncestor(value) {
+  let current = path.resolve(value);
+  while (true) {
+    try {
+      return await fs.realpath(current);
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return current;
+      current = parent;
+    }
+  }
+}
+
+function isWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function printResults(title, results) {

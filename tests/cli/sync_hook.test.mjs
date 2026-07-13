@@ -44,6 +44,18 @@ test("fireSyncHook does not spawn inside the Node test runner", async () => {
   assert.equal(spawned, false);
 });
 
+test("fireSyncHook does not spawn after an explicitly read-only command", async () => {
+  let spawned = false;
+  await fireSyncHook({
+    command: "skills",
+    readOnly: true,
+    testContext: null,
+    isSyncEnabled: async () => true,
+    spawnImpl: () => { spawned = true; }
+  });
+  assert.equal(spawned, false);
+});
+
 test("fireSyncHook spawns dotaios sync tick when enabled", async () => {
   let args = null;
   await fireSyncHook({

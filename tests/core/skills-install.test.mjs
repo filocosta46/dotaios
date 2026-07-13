@@ -50,6 +50,36 @@ test("installSymlinkSkills keeps an unmanaged real dir unless overwrite", async 
   assert.equal(res.find((r) => path.basename(r.path) === "today").action, "kept");
 });
 
+test("installSymlinkSkills repairs a stale temporary DotAIOS link without overwrite", async () => {
+  const aios = await tmp();
+  const home = await tmp();
+  await makeSkill(aios, "today");
+  const targetDir = path.join(home, ".agents", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  const stale = path.join(os.tmpdir(), "dotaios-activate-dead", "aios", "skills", "today");
+  await fs.symlink(stale, path.join(targetDir, "today"), "dir");
+
+  const result = await installSymlinkSkills({ aiosPath: aios, targetDir });
+  assert.equal(result.find((entry) => path.basename(entry.path) === "today").action, "repaired");
+  assert.equal(await fs.readlink(path.join(targetDir, "today")), path.join(aios, "skills", "today"));
+});
+
+test("keeps a live temporary-looking link instead of repairing it", async () => {
+  const aios = await tmp();
+  const home = await tmp();
+  await makeSkill(aios, "today");
+  const targetDir = path.join(home, ".agents", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  const live = path.join(os.tmpdir(), "dotaios-live-link", "aios", "skills", "today");
+  await fs.mkdir(live, { recursive: true });
+  await fs.symlink(live, path.join(targetDir, "today"), "dir");
+
+  const result = await installSymlinkSkills({ aiosPath: aios, targetDir });
+  assert.equal(result.find((entry) => path.basename(entry.path) === "today").action, "kept");
+  assert.equal(await fs.readlink(path.join(targetDir, "today")), live);
+  await fs.rm(path.join(os.tmpdir(), "dotaios-live-link"), { recursive: true, force: true });
+});
+
 test("installSymlinkSkills dry-run writes nothing", async () => {
   const aios = await tmp();
   const home = await tmp();

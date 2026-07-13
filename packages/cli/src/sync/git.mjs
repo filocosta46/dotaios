@@ -89,7 +89,11 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
     },
 
     async push(branch = "main") {
-      const { code, stderr } = await run(["push", "origin", branch]);
+      // Push the checked-out commit, not a possibly unrelated local branch.
+      // Sync can run from a feature branch in a developer checkout; `git push
+      // origin main` would silently push the local main ref and leave HEAD
+      // unmirrored while the status record claims success.
+      const { code, stderr } = await run(["push", "origin", `HEAD:${branch}`]);
       if (code !== 0) throw new Error(`git push failed: ${redactToken(stderr.trim())}`);
     },
 

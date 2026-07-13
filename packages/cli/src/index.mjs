@@ -76,7 +76,7 @@ Commands:
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins
   skill <cmd>       Add, list, or remove skills (friendly alias for install)
-  skills [name]     List installed skills, show one skill, or resolve an intent
+  skills [cmd]      List, install, doctor, or resolve installed skills
                    (dotaios skills resolve "plan my day")
   status            Check the health of a local AIOS folder
   sync <cmd>        Cross-device sync to a private GitHub repo
@@ -123,7 +123,10 @@ async function main(argv) {
   await command(args);
 
   // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
-  await fireSyncHook({ command: commandName, dryRun: args.includes("--dry-run") });
+  // A health report is deliberately a read-only operation. It must not mutate
+  // the sync queue while the caller is checking whether the system is healthy.
+  const readOnly = commandName === "skills" && args[0] === "doctor";
+  await fireSyncHook({ command: commandName, dryRun: args.includes("--dry-run"), readOnly });
 }
 
 function resolveCommand(module, commandName) {

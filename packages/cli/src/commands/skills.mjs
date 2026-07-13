@@ -1,12 +1,17 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import { rankSkills, resolveIntent, renderBootContext } from "../../../core/src/skill-resolver.mjs";
+import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
+import { activateCommand } from "./activate.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios skills [name]
+  dotaios skills install [options]
+  dotaios skills doctor [options]
   dotaios skills resolve "<intent>" [options]
 
 List installed skills, show detail for one skill, or resolve a free-text intent
@@ -14,6 +19,8 @@ to the skill that handles it.
 
 Examples:
   dotaios skills             List all installed skills
+  dotaios skills install    Reconcile native agent skill directories
+  dotaios skills doctor     Report source, bridge, native-link, and Hermes health
   dotaios skills plan-today  Show full instructions for the plan-today skill
   dotaios skills resolve "plan my day"
   dotaios skills resolve "plan my day" --full
@@ -46,6 +53,16 @@ export async function skillsCommand(args) {
     return;
   }
 
+  if (args[0] === "install") {
+    await activateCommand(args.slice(1));
+    return;
+  }
+
+  if (args[0] === "doctor") {
+    await doctorSkillCommand(args.slice(1));
+    return;
+  }
+
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
   const skills = await collectSkills(aiosPath);
 
@@ -56,6 +73,40 @@ export async function skillsCommand(args) {
   } else {
     listSkills(skills);
   }
+}
+
+async function doctorSkillCommand(args) {
+  const options = { json: false, path: null, home: null };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--json") {
+      options.json = true;
+    } else if (arg === "--path") {
+      options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--home") {
+      options.home = readOptionValue(args, index, "--home");
+      index += 1;
+    } else {
+      throw new Error(`Unknown skills doctor option: ${arg}`);
+    }
+  }
+
+  const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
+  const homePath = path.resolve(expandHome(options.home || os.homedir()));
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    console.log(`Skills health: ${report.healthy ? "healthy" : "needs attention"}`);
+    console.log(`Source: ${report.source.count} skill(s) in ${report.source.path}`);
+    console.log(`Catalogs: INDEX=${report.catalogs.index.current ? "fresh" : "stale"}, RESOLVER=${report.catalogs.resolver.current ? "fresh" : "stale"}`);
+    for (const target of report.targets) {
+      console.log(`${target.dir}: linked=${target.linked.length} missing=${target.missing.length} foreign=${target.foreign.length} broken=${target.broken.length}`);
+    }
+    for (const issue of report.issues) console.log(`- ${issue}`);
+  }
+  if (!report.healthy) process.exitCode = 1;
 }
 
 async function resolveSkillCommand(args) {

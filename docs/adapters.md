@@ -57,6 +57,19 @@ For Hermes, DotAIOS adds your `~/aios/skills` folder to `skills.external_dirs` i
 
 The link is live, so editing a skill once updates it everywhere. DotAIOS manages only the links it created, and removes a link when its source skill is gone. Surfaces that do not read a local skills folder, such as the Claude desktop app and browser based chat, keep using the AGENTS.md context that `activate` and `connect` set up.
 
+When you add a skill, propagation happens automatically. You can reconcile all
+native locations explicitly with:
+
+```
+dotaios skills install
+dotaios skills doctor --json
+```
+
+`skills doctor` is read-only. It checks the generated catalogs, native-link
+coverage, managed bridges, and Hermes root/profile configuration. If a temporary
+setup path tries to overwrite the real global bridges, `activate` refuses it;
+use a permanent AIOS folder instead.
+
 ---
 
 ## Claude Code

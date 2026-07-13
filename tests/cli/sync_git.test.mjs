@@ -156,7 +156,7 @@ test("push() redacts embedded token from error message", async () => {
   const git = createGit({
     cwd: "/x",
     spawnImpl: fakeSpawn([{
-      match: "push origin main",
+      match: "push origin HEAD:main",
       code: 1,
       stderr: "fatal: Authentication failed for 'https://x-access-token:ghu_SECRET123@github.com/u/u-aios.git'"
     }])
@@ -166,6 +166,20 @@ test("push() redacts embedded token from error message", async () => {
     assert.ok(err.message.includes("x-access-token:***@"), "token should be redacted");
     return true;
   });
+});
+
+test("push() sends the checked-out HEAD to the sync branch", async () => {
+  const calls = [];
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: (cmd, args) => {
+      calls.push([cmd, ...args].join(" "));
+      return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+    }
+  });
+
+  await git.push("main");
+  assert.deepEqual(calls, ["git push origin HEAD:main"]);
 });
 
 test("fetch() redacts embedded token from error message", async () => {
