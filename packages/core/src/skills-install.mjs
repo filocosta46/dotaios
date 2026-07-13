@@ -40,9 +40,16 @@ export async function installSymlinkSkills({
   aiosPath,
   sourceDir = null,
   targetDir,
+  projectRoot = null,
   dryRun = false,
   overwrite = false
 }) {
+  if (projectRoot) {
+    const safety = await validateProjectPath({ projectRoot, targetPath: targetDir });
+    if (!safety.safe) {
+      return [{ action: "skipped-unsafe-target", path: targetDir, note: safety.reason }];
+    }
+  }
   const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
   const skills = await collectSkills(path.dirname(skillsRoot)); // [{ dir, name, ... }]
   if (skills.length === 0) return [];
@@ -90,7 +97,13 @@ export async function installSymlinkSkills({
   return results;
 }
 
-export async function cleanupStaleLinks({ aiosPath, sourceDir = null, targetDir, dryRun = false }) {
+export async function cleanupStaleLinks({ aiosPath, sourceDir = null, targetDir, projectRoot = null, dryRun = false }) {
+  if (projectRoot) {
+    const safety = await validateProjectPath({ projectRoot, targetPath: targetDir });
+    if (!safety.safe) {
+      return [{ action: "skipped-unsafe-target", path: targetDir, note: safety.reason }];
+    }
+  }
   const skillsRoot = resolveSkillsRoot(aiosPath, sourceDir);
   let entries;
   try {
@@ -218,6 +231,29 @@ function resolveSymlinkTarget(entryPath, rawTarget) {
 
 function resolveSkillsRoot(aiosPath, sourceDir) {
   return path.resolve(sourceDir || path.join(aiosPath, "skills"));
+}
+
+export async function validateProjectPath({ projectRoot, targetPath }) {
+  const root = path.resolve(projectRoot);
+  const target = path.resolve(targetPath);
+  if (!isWithin(root, target)) {
+    return { safe: false, reason: "target escapes project root" };
+  }
+
+  const relative = path.relative(root, target);
+  let current = root;
+  for (const segment of relative ? relative.split(path.sep) : []) {
+    current = path.join(current, segment);
+    try {
+      if ((await fs.lstat(current)).isSymbolicLink()) {
+        return { safe: false, reason: "target path contains an unmanaged symlink" };
+      }
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return { safe: true };
+      throw error;
+    }
+  }
+  return { safe: true };
 }
 
 async function samePath(left, right) {

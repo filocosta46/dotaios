@@ -57,6 +57,20 @@ test("appends to an existing block list", async () => {
   assert.match(out, /- \/other\/skills\n {4}- \/home\/user\/aios\/skills/);
 });
 
+test("honors a registry-provided custom external skills key", async () => {
+  const p = await writeCfg("runner:\n  skill_paths:\n    - /other/skills\n");
+  const res = await ensureExternalSkillsDir({
+    configPath: p,
+    skillsPath: "/home/user/project/skills",
+    key: "runner.skill_paths"
+  });
+  assert.equal(res.action, "added");
+  assert.match(
+    await fs.readFile(p, "utf8"),
+    /skill_paths:\n {4}- \/other\/skills\n {4}- \/home\/user\/project\/skills/
+  );
+});
+
 test("preserves Hermes profiles that indent external_dirs list items by two spaces", async () => {
   const existing = "/Users/filo/aios/skills";
   const p = await writeCfg([

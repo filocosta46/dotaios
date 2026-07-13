@@ -118,6 +118,10 @@ Each target is a symlink or config entry pointing to the project's own
 `skills/` folder. Editing a project skill therefore does not change the global
 AIOS skills. Existing real entries and foreign links are preserved, repeated
 attachment is idempotent, and `--dry-run` previews changes without writing.
+Attachment fails closed when a target root or Hermes config path is an
+unmanaged symlink, and a later attach removes only owned dangling skill links
+if the project deletes its `skills/` directory. Custom Hermes targets use the
+registry's declared `key` rather than assuming `skills.external_dirs`.
 Projects without a readable `skills/` directory are a no-op for this layer.
 
 ```bash

@@ -25,7 +25,18 @@ export async function discoverHermesConfigPaths(homePath, registry = []) {
 // Conservative editor for `skills.external_dirs` in Hermes config.yaml.
 // Handles: inline empty `external_dirs: []` and block list under `skills:`.
 // Anything else → { action: "manual" } and leaves the file untouched.
-export async function ensureExternalSkillsDir({ configPath, skillsPath, dryRun = false, createMissing = false }) {
+export async function ensureExternalSkillsDir({
+  configPath,
+  skillsPath,
+  key = "skills.external_dirs",
+  dryRun = false,
+  createMissing = false
+}) {
+  const keyParts = typeof key === "string" ? key.split(".").filter(Boolean) : [];
+  if (keyParts.length !== 2) {
+    return { action: "manual", reason: "unsupported external_dirs key" };
+  }
+  const [sectionName, externalDirsKey] = keyParts;
   let text;
   try {
     text = await fs.readFile(configPath, "utf8");
@@ -33,11 +44,13 @@ export async function ensureExternalSkillsDir({ configPath, skillsPath, dryRun =
     return { action: "manual", reason: "config not found" };
   }
   const lines = text.split("\n");
-  const skillsIdx = lines.findIndex((l) => /^skills:\s*$/.test(l));
+  const sectionPattern = new RegExp(`^${escapeRegExp(sectionName)}:\\s*$`);
+  const childPattern = new RegExp(`^\\s{2}${escapeRegExp(externalDirsKey)}:`);
+  const skillsIdx = lines.findIndex((l) => sectionPattern.test(l));
   if (skillsIdx === -1) {
     if (!createMissing) return { action: "manual", reason: "no skills: section" };
     const prefix = text.endsWith("\n") ? text : `${text}\n`;
-    const addition = `skills:\n  external_dirs:\n    - ${skillsPath}\n`;
+    const addition = `${sectionName}:\n  ${externalDirsKey}:\n    - ${skillsPath}\n`;
     if (!dryRun) await fs.writeFile(configPath, `${prefix}${addition}`);
     return { action: dryRun ? "would-add-section" : "added-section" };
   }
@@ -46,23 +59,25 @@ export async function ensureExternalSkillsDir({ configPath, skillsPath, dryRun =
   let edIdx = -1;
   for (let i = skillsIdx + 1; i < lines.length; i++) {
     if (/^\S/.test(lines[i])) break;                 // left the skills: block
-    if (/^\s{2}external_dirs:/.test(lines[i])) { edIdx = i; break; }
+    if (childPattern.test(lines[i])) { edIdx = i; break; }
   }
   if (edIdx === -1) {
     if (!createMissing) return { action: "manual", reason: "no external_dirs key" };
     let insertAt = skillsIdx + 1;
     while (insertAt < lines.length && (!lines[insertAt].trim() || /^\s{2,}/.test(lines[insertAt]))) insertAt += 1;
-    lines.splice(insertAt, 0, "  external_dirs:", `    - ${skillsPath}`);
+    lines.splice(insertAt, 0, `  ${externalDirsKey}:`, `    - ${skillsPath}`);
     if (!dryRun) await fs.writeFile(configPath, lines.join("\n"));
     return { action: dryRun ? "would-add-key" : "added-key" };
   }
 
   const item = `    - ${skillsPath}`;
   let prunedStale = false;
-  if (/external_dirs:\s*\[\s*\]\s*$/.test(lines[edIdx])) {
-    lines[edIdx] = "  external_dirs:";
+  const keyPattern = new RegExp(`${escapeRegExp(externalDirsKey)}:\\s*\\[\\s*\\]\\s*$`);
+  const listPattern = new RegExp(`${escapeRegExp(externalDirsKey)}:\\s*$`);
+  if (keyPattern.test(lines[edIdx])) {
+    lines[edIdx] = `  ${externalDirsKey}:`;
     lines.splice(edIdx + 1, 0, item);
-  } else if (/external_dirs:\s*$/.test(lines[edIdx])) {
+  } else if (listPattern.test(lines[edIdx])) {
     // Remove dead DotAIOS setup paths, then insert after the last existing
     // item. Foreign external directories are never touched.
     const itemIndent = detectListItemIndent(lines, edIdx + 1);
@@ -90,12 +105,12 @@ export async function ensureExternalSkillsDir({ configPath, skillsPath, dryRun =
     while (insertAt < lines.length && isListItem(lines[insertAt], itemIndent)) insertAt++;
     lines.splice(insertAt, 0, `${" ".repeat(itemIndent)}- ${skillsPath}`);
   } else {
-    const scalarMatch = lines[edIdx].match(/^\s{2}external_dirs:\s+(.+?)\s*$/);
+    const scalarMatch = lines[edIdx].match(new RegExp(`^\\s{2}${escapeRegExp(externalDirsKey)}:\\s+(.+?)\\s*$`));
     const scalarValue = unquoteScalar(scalarMatch?.[1]);
     if (!scalarValue || /^[\[{|>]/.test(scalarValue)) {
       return { action: "manual", reason: "unexpected external_dirs shape" };
     }
-    lines[edIdx] = "  external_dirs:";
+    lines[edIdx] = `  ${externalDirsKey}:`;
     const scalarIsStale = await isStaleDotaiosTempPath(scalarValue);
     if (!scalarIsStale) lines.splice(edIdx + 1, 0, `    - ${scalarValue}`);
     if (scalarValue !== skillsPath) lines.splice(edIdx + 1 + (scalarIsStale ? 0 : 1), 0, item);
@@ -105,6 +120,10 @@ export async function ensureExternalSkillsDir({ configPath, skillsPath, dryRun =
   if (!dryRun) await fs.writeFile(configPath, lines.join("\n"));
   if (prunedStale) return { action: dryRun ? "would-prune-stale" : "pruned-stale" };
   return { action: dryRun ? "would-add" : "added" };
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function isStaleDotaiosTempPath(value) {

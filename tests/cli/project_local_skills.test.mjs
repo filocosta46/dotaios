@@ -205,6 +205,59 @@ test("attach does not create project-local skill targets when skills/ is absent"
   }
 });
 
+test("attach does not follow foreign symlinked skill roots", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const outside = path.join(tempRoot, "outside-skills");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.mkdirSync(path.join(projectPath, ".agents"), { recursive: true });
+  fs.symlinkSync(outside, path.join(projectPath, ".agents", "skills"), "dir");
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+    assert.equal(fs.existsSync(path.join(outside, "project-skill")), false);
+    assert.equal(fs.lstatSync(path.join(projectPath, ".agents", "skills")).isSymbolicLink(), true);
+    assert.equal(fs.existsSync(path.join(projectPath, ".claude", "skills", "project-skill")), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach does not follow a foreign symlinked Hermes config", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const outside = path.join(tempRoot, "external-hermes.yaml");
+  fs.writeFileSync(outside, "skills:\n  external_dirs:\n    - /foreign/project/skills\n");
+  const hermesPath = path.join(projectPath, ".hermes", "config.yaml");
+  fs.mkdirSync(path.dirname(hermesPath), { recursive: true });
+  fs.symlinkSync(outside, hermesPath);
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+    assert.equal(fs.readFileSync(outside, "utf8"), "skills:\n  external_dirs:\n    - /foreign/project/skills\n");
+    assert.equal(fs.lstatSync(hermesPath).isSymbolicLink(), true);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach cleans owned dangling project links after skills are removed", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+    fs.rmSync(path.join(projectPath, "skills"), { recursive: true, force: true });
+    run(["attach", projectPath, "--path", aiosPath]);
+    for (const targetDir of [
+      ".claude/skills",
+      ".agents/skills",
+      ".gemini/config/skills"
+    ]) {
+      assert.equal(fs.existsSync(path.join(projectPath, targetDir, "project-skill")), false);
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("project-local custom targets are registry-driven and reject unsafe paths", () => {
   const { tempRoot, aiosPath, projectPath } = setupProject();
   fs.writeFileSync(
@@ -230,9 +283,29 @@ test("project-local custom targets are registry-driven and reject unsafe paths",
             dir: ".unsafe-global/skills",
             project: { mode: "symlink", dir: "../outside" }
           }
+        },
+        {
+          name: "Custom Hermes",
+          detect: ".custom-hermes",
+          bridge: null,
+          skills: {
+            mode: "config-external-dir",
+            configFile: ".custom-hermes/config.yaml",
+            key: "runner.skill_paths",
+            project: {
+              mode: "config-external-dir",
+              configFile: ".custom-hermes/config.yaml",
+              key: "runner.skill_paths"
+            }
+          }
         }
       ]
     })
+  );
+  fs.mkdirSync(path.join(projectPath, ".custom-hermes"), { recursive: true });
+  fs.writeFileSync(
+    path.join(projectPath, ".custom-hermes", "config.yaml"),
+    "runner:\n  skill_paths:\n    - /foreign/project/skills\n"
   );
 
   try {
@@ -241,6 +314,12 @@ test("project-local custom targets are registry-driven and reject unsafe paths",
     const source = path.join(projectPath, "skills", "project-skill");
     const customLink = path.join(projectPath, ".custom", "skills", "project-skill");
     assert.equal(fs.realpathSync(customLink), fs.realpathSync(source));
+    const customHermesConfig = fs.readFileSync(
+      path.join(projectPath, ".custom-hermes", "config.yaml"),
+      "utf8"
+    );
+    assert.match(customHermesConfig, /- \/foreign\/project\/skills/);
+    assert.match(customHermesConfig, new RegExp(`- ${path.join(projectPath, "skills").replaceAll("/", "\\/")}`));
     assert.equal(fs.existsSync(path.join(projectPath, "outside", "project-skill")), false);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

@@ -28,7 +28,8 @@ import {
   installSymlinkSkills,
   cleanupStaleLinks,
   removeManagedSkillLinks,
-  removeManagedSkillAliases
+  removeManagedSkillAliases,
+  validateProjectPath
 } from "../../../core/src/skills-install.mjs";
 import { discoverHermesConfigPaths, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -302,32 +303,32 @@ async function createProjectBridges(aiosPath, projectPath, options) {
 
 async function propagateProjectSkills(projectPath, options, registry) {
   const skillsDir = path.join(projectPath, "skills");
-  if (!await isDirectory(skillsDir)) {
-    return {
-      action: "project-skills:no-op",
-      path: skillsDir,
-      note: "project has no skills/ directory"
-    };
-  }
-
-  const skills = await collectSkills(projectPath);
-  if (skills.length === 0) {
-    return {
-      action: "project-skills:no-op",
-      path: skillsDir,
-      note: "project skills/ has no readable SKILL.md entries"
-    };
-  }
-
   const symlinkTargetsForProject = projectSymlinkTargets(registry);
   const hermesTargetsForProject = projectHermesConfigTargets(registry);
   const details = [];
+  const skillsDirectoryExists = await isDirectory(skillsDir);
+  const skills = skillsDirectoryExists ? await collectSkills(projectPath) : [];
 
   for (const target of symlinkTargetsForProject) {
     const targetDir = path.join(projectPath, target.dir);
+    const safety = await validateProjectPath({ projectRoot: projectPath, targetPath: targetDir });
+    if (!safety.safe) {
+      details.push({ action: "project-skills:unsafe-target", path: targetDir, note: safety.reason });
+      continue;
+    }
+    if (skills.length === 0) {
+      details.push(...await cleanupStaleLinks({
+        sourceDir: skillsDir,
+        targetDir,
+        projectRoot: projectPath,
+        dryRun: options.dryRun
+      }));
+      continue;
+    }
     details.push(...await installSymlinkSkills({
       sourceDir: skillsDir,
       targetDir,
+      projectRoot: projectPath,
       dryRun: options.dryRun,
       overwrite: options.overwrite
     }));
@@ -341,15 +342,32 @@ async function propagateProjectSkills(projectPath, options, registry) {
     details.push(...await cleanupStaleLinks({
       sourceDir: skillsDir,
       targetDir,
+      projectRoot: projectPath,
       dryRun: options.dryRun
     }));
   }
 
+  if (skills.length === 0) {
+    return {
+      action: "project-skills",
+      path: skillsDir,
+      note: skillsDirectoryExists
+        ? "checked project skills/ with no readable SKILL.md entries"
+        : "checked missing project skills/ and cleaned owned links"
+    };
+  }
+
   for (const target of hermesTargetsForProject) {
     const configPath = path.join(projectPath, target.configFile);
+    const safety = await validateProjectPath({ projectRoot: projectPath, targetPath: configPath });
+    if (!safety.safe) {
+      details.push({ action: "project-skills:unsafe-hermes-config", path: configPath, note: safety.reason });
+      continue;
+    }
     const result = await ensureExternalSkillsDir({
       configPath,
       skillsPath: skillsDir,
+      key: target.key,
       dryRun: options.dryRun,
       createMissing: true
     });
@@ -358,8 +376,12 @@ async function propagateProjectSkills(projectPath, options, registry) {
 
   const linked = details.filter((result) => ["linked", "already-linked", "would link"].includes(result.action)).length;
   const changed = details.filter((result) => result.action.startsWith("hermes:") && !result.action.endsWith("manual") && !result.action.endsWith("already-present")).length;
-  const verb = options.dryRun ? "would propagate" : "propagated";
-  const skillLabel = skills.length === 1
+  const verb = skills.length === 0
+    ? "checked"
+    : (options.dryRun ? "would propagate" : "propagated");
+  const skillLabel = skills.length === 0
+    ? (skillsDirectoryExists ? "no readable project skills" : "no project skills directory")
+    : skills.length === 1
     ? `skill ${skills[0].name}`
     : `${skills.length} skill(s)`;
   const targetPaths = [

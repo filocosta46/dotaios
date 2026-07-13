@@ -9,6 +9,10 @@ All notable changes to DotAIOS will be documented in this file.
   directory to explicit Claude Code, Agent Skills, Antigravity, and Hermes
   project targets while preserving the global AIOS skill library and foreign
   entries.
+### Fixed
+- Project attachment now fails closed on foreign symlinked target roots and
+  Hermes configs, cleans owned dangling links after a project removes its
+  skills, and honors registry-provided Hermes skill keys.
 
 ## [1.21.0] - 2026-07-07
 ### Added
