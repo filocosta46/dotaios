@@ -59,6 +59,13 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
   }
 
   return {
+    async currentBranch() {
+      const { code, stdout } = await run(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+      if (code !== 0) return null;
+      const branch = stdout.trim();
+      return branch || null;
+    },
+
     async dirty() {
       const { stdout } = await run(["status", "--porcelain"]);
       return stdout.trim().length > 0;
@@ -90,9 +97,8 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
 
     async push(branch = "main") {
       // Push the checked-out commit, not a possibly unrelated local branch.
-      // Sync can run from a feature branch in a developer checkout; `git push
-      // origin main` would silently push the local main ref and leave HEAD
-      // unmirrored while the status record claims success.
+      // The tick guard ensures this is the exact local main checkout, so the
+      // checked-out HEAD is the one mirrored by this push.
       const { code, stderr } = await run(["push", "origin", `HEAD:${branch}`]);
       if (code !== 0) throw new Error(`git push failed: ${redactToken(stderr.trim())}`);
     },
