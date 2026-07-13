@@ -56,11 +56,23 @@ test("fireSyncHook does not spawn after an explicitly read-only command", async 
   assert.equal(spawned, false);
 });
 
+test("fireSyncHook refuses automatic sync without explicit worktree opt-in", async () => {
+  let spawned = false;
+  await fireSyncHook({
+    command: "ingest",
+    testContext: null,
+    isSyncEnabled: async () => true,
+    spawnImpl: () => { spawned = true; }
+  });
+  assert.equal(spawned, false);
+});
+
 test("fireSyncHook spawns dotaios sync tick when enabled", async () => {
   let args = null;
   await fireSyncHook({
     command: "ingest",
     testContext: null,
+    allowAutoSync: true,
     isSyncEnabled: async () => true,
     spawnImpl: (cmd, a) => { args = [cmd, ...a]; return { unref: () => {} }; }
   });

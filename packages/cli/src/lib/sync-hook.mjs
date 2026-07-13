@@ -17,10 +17,14 @@ export async function fireSyncHook({
   testContext = process.env.NODE_TEST_CONTEXT,
   argv0 = process.argv0,
   spawnImpl = defaultSpawn,
-  isSyncEnabled: isEnabledImpl = isSyncEnabled
+  isSyncEnabled: isEnabledImpl = isSyncEnabled,
+  allowAutoSync = process.env.DOTAIOS_ALLOW_AUTO_SYNC_HOOK === "1"
 } = {}) {
   try {
-    if (command === "sync" || dryRun || readOnly || testContext) return;
+    // The detached hook is unsafe on feature checkouts: it can commit, rebase,
+    // push, or reset the caller's worktree. The dedicated scoped-sync writer
+    // remains the default. Opt in only from a deliberately controlled worktree.
+    if (!allowAutoSync || command === "sync" || dryRun || readOnly || testContext) return;
     if (!(await isEnabledImpl())) return;
     spawnImpl(argv0, [process.argv[1], "sync", "tick"]);
   } catch {
