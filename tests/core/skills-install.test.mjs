@@ -3,15 +3,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { installSymlinkSkills, cleanupStaleLinks, removeManagedSkillLinks } from "../../packages/core/src/skills-install.mjs";
+import { installSymlinkSkills, cleanupStaleLinks, removeManagedSkillLinks, removeManagedSkillAliases } from "../../packages/core/src/skills-install.mjs";
 
 async function tmp() {
   return await fs.mkdtemp(path.join(os.tmpdir(), "aios-test-"));
 }
-async function makeSkill(aios, name) {
+async function makeSkill(aios, name, frontmatterName = name) {
   const dir = path.join(aios, "skills", name);
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, "SKILL.md"), `---\nname: ${name}\ndescription: test ${name}\n---\nbody\n`);
+  await fs.writeFile(path.join(dir, "SKILL.md"), `---\nname: ${frontmatterName}\ndescription: test ${name}\n---\nbody\n`);
 }
 
 test("installSymlinkSkills links each source skill into the target dir", async () => {
@@ -164,4 +164,26 @@ test("removeManagedSkillLinks preserves a foreign alias into the AIOS skill tree
 
   assert.deepEqual(removed, []);
   assert.ok((await fs.lstat(path.join(targetDir, "vendor-today"))).isSymbolicLink());
+});
+
+test("removeManagedSkillAliases removes only frontmatter aliases and preserves foreign entries", async () => {
+  const aios = await tmp();
+  const home = await tmp();
+  await makeSkill(aios, "taste-skill", "design-taste-frontend");
+  const targetDir = path.join(home, ".agents", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  const canonical = path.join(aios, "skills", "taste-skill");
+  await fs.symlink(canonical, path.join(targetDir, "design-taste-frontend"), "dir");
+  await fs.symlink(canonical, path.join(targetDir, "vendor-taste"), "dir");
+  await fs.mkdir(path.join(targetDir, "design-taste-frontend-real"), { recursive: true });
+
+  const preview = await removeManagedSkillAliases({ aiosPath: aios, targetDir, dryRun: true });
+  assert.deepEqual(preview.map((entry) => path.basename(entry.path)), ["design-taste-frontend"]);
+  assert.ok((await fs.lstat(path.join(targetDir, "design-taste-frontend"))).isSymbolicLink());
+
+  const removed = await removeManagedSkillAliases({ aiosPath: aios, targetDir });
+  assert.deepEqual(removed.map((entry) => path.basename(entry.path)), ["design-taste-frontend"]);
+  await assert.rejects(fs.lstat(path.join(targetDir, "design-taste-frontend")));
+  assert.ok((await fs.lstat(path.join(targetDir, "vendor-taste"))).isSymbolicLink());
+  assert.ok((await fs.lstat(path.join(targetDir, "design-taste-frontend-real"))).isDirectory());
 });

@@ -141,6 +141,67 @@ export async function removeManagedSkillLinks({ aiosPath, targetDir, dryRun = fa
   return removed;
 }
 
+// A managed alias is different from a canonical link: its basename is the
+// skill's frontmatter name, while its target is the skill directory. The
+// frontmatter name is the only durable ownership signal for this shape. Keep
+// ambiguous names out of the result so a foreign link can never be removed by
+// accident.
+export async function findManagedSkillAliases({ aiosPath, targetDir, skills = null }) {
+  const sourceSkills = skills || await collectSkills(aiosPath);
+  const aliasesByName = new Map();
+  for (const skill of sourceSkills) {
+    if (!skill.name || skill.name === skill.dir) continue;
+    if (aliasesByName.has(skill.name)) {
+      aliasesByName.set(skill.name, null);
+      continue;
+    }
+    aliasesByName.set(skill.name, skill);
+  }
+
+  let entries;
+  try {
+    entries = await fs.readdir(targetDir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const aliases = [];
+  for (const entry of entries) {
+    const skill = aliasesByName.get(entry.name);
+    if (!skill || !entry.isSymbolicLink()) continue;
+
+    const destination = path.join(targetDir, entry.name);
+    const rawTarget = await fs.readlink(destination);
+    const resolvedTarget = resolveSymlinkTarget(destination, rawTarget);
+    const source = path.join(aiosPath, "skills", skill.dir);
+    if (!(await samePath(resolvedTarget, source))) continue;
+
+    aliases.push({
+      alias: entry.name,
+      canonical: skill.dir,
+      path: destination,
+      target: rawTarget
+    });
+  }
+  return aliases.sort((left, right) => left.alias.localeCompare(right.alias));
+}
+
+// Remove only aliases whose ownership is proven by the canonical skill's
+// frontmatter name and exact target. This is deliberately opt-in at the CLI
+// layer because an alias may be intentional for a foreign client.
+export async function removeManagedSkillAliases({ aiosPath, targetDir, dryRun = false }) {
+  const aliases = await findManagedSkillAliases({ aiosPath, targetDir });
+  const removed = [];
+  for (const alias of aliases) {
+    if (!dryRun) await fs.rm(alias.path, { recursive: true, force: true });
+    removed.push({
+      action: dryRun ? "would-remove" : "removed",
+      ...alias
+    });
+  }
+  return removed;
+}
+
 function resolveSymlinkTarget(entryPath, rawTarget) {
   return path.resolve(path.dirname(entryPath), rawTarget);
 }

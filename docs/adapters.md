@@ -80,6 +80,22 @@ Hermes as a native runtime without expecting a bridge file. If a temporary
 setup path tries to overwrite the real global bridges, `activate` refuses it;
 use a permanent AIOS folder instead.
 
+The doctor also reports managed aliases separately from foreign collisions. A
+managed alias is a symlink whose basename matches a skill's `name` in
+frontmatter while its target is that skill's canonical directory. Ordinary
+activation preserves these links. If a client reports duplicate skill names,
+preview an explicit cleanup first, then apply it only after review:
+
+```
+dotaios skills install --dry-run --prune-aliases
+dotaios skills install --prune-aliases
+```
+
+The prune flag removes only exact managed alias symlinks. It never removes real
+directories, broken foreign links, or links whose target does not match the
+canonical source. Foreign real-directory collisions still require an explicit
+ownership decision.
+
 ### Project-owned runtime adapters
 
 An AIOS folder may include an optional `agents.json` when it needs to add a

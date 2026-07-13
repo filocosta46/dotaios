@@ -105,6 +105,37 @@ test("skills doctor returns a read-only JSON coverage report", () => {
   assert.equal(report.targets.find((target) => target.dir === ".agents/skills").foreign.length, 0);
 });
 
+test("alias pruning is explicit, dry-run first, and preserves the ordinary install path", () => {
+  const { aiosPath, homePath } = setupAios();
+  const source = path.join(aiosPath, "skills", "plan-today");
+  fs.writeFileSync(
+    path.join(source, "SKILL.md"),
+    "---\nname: daily-planning\ndescription: test\n---\n# Plan\n"
+  );
+
+  run(["skills", "install", "--path", aiosPath, "--home", homePath, "--all"]);
+  const targetDir = path.join(homePath, ".agents", "skills");
+  const alias = path.join(targetDir, "daily-planning");
+  fs.symlinkSync(source, alias, "dir");
+
+  run(["skills", "install", "--path", aiosPath, "--home", homePath, "--all"]);
+  assert.equal(fs.lstatSync(alias).isSymbolicLink(), true);
+
+  const preview = run([
+    "skills", "install", "--path", aiosPath, "--home", homePath, "--all",
+    "--prune-aliases", "--dry-run"
+  ]);
+  assert.match(preview.stdout, /would-remove.*daily-planning/);
+  assert.equal(fs.lstatSync(alias).isSymbolicLink(), true);
+
+  run([
+    "skills", "install", "--path", aiosPath, "--home", homePath, "--all",
+    "--prune-aliases"
+  ]);
+  assert.equal(fs.existsSync(alias), false);
+  assert.equal(fs.readlinkSync(path.join(targetDir, "plan-today")), source);
+});
+
 test("activation covers detected native clients and every Hermes profile without clobbering foreign skills", async () => {
   const { aiosPath, homePath } = setupAios();
   const skillName = "plan-today";

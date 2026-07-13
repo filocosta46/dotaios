@@ -5,6 +5,7 @@ import { MANAGED_END, MANAGED_START, isAgentInstalled, loadAgentRegistry } from 
 import { renderResolver, renderSkillsIndex, collectSkills } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
 import { discoverHermesConfigPaths } from "./hermes-config.mjs";
+import { findManagedSkillAliases } from "./skills-install.mjs";
 
 export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) {
   const registry = await loadAgentRegistry(aiosPath);
@@ -45,6 +46,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
     if (target.missing.length) issues.push(`${target.dir}: ${target.missing.length} source skill(s) missing`);
     if (target.broken.length) issues.push(`${target.dir}: ${target.broken.length} broken link(s)`);
     if (target.foreign.length) issues.push(`${target.dir}: ${target.foreign.length} unmanaged collision(s)`);
+    if (target.aliases.length) issues.push(`${target.dir}: ${target.aliases.length} duplicate managed alias(es)`);
     if (target.stale.length) issues.push(`${target.dir}: ${target.stale.length} stale extra link(s)`);
     const unmanagedExtras = target.extra.filter((entry) => entry.kind !== "stale-owned");
     if (unmanagedExtras.length) issues.push(`${target.dir}: ${unmanagedExtras.length} unmanaged extra link(s)`);
@@ -90,6 +92,8 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
   const missing = [];
   const broken = [];
   const foreign = [];
+  const aliases = await findManagedSkillAliases({ aiosPath, targetDir, skills: sourceSkills });
+  const aliasPaths = new Set(aliases.map((entry) => entry.path));
   const extra = [];
   const stale = [];
 
@@ -103,6 +107,7 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
       missing,
       broken,
       foreign,
+      aliases: [],
       extra,
       stale,
       complete: true
@@ -159,6 +164,7 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
     for (const entry of entries) {
       if (sourceNames.has(entry.name) || !entry.isSymbolicLink()) continue;
       const destination = path.join(targetDir, entry.name);
+      if (aliasPaths.has(destination)) continue;
       const rawTarget = await fs.readlink(destination);
       const resolvedTarget = path.resolve(path.dirname(destination), rawTarget);
       const owned = isWithin(sourceRoot, resolvedTarget);
@@ -189,11 +195,13 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
     missing,
     broken,
     foreign,
+    aliases,
     extra,
     stale,
     complete: missing.length === 0
       && broken.length === 0
       && foreign.length === 0
+      && aliases.length === 0
       && stale.length === 0
       && !hasUnmanagedExtras
   };

@@ -120,3 +120,23 @@ test("inspectSkillHealth flags readable foreign aliases that can confuse a clien
   assert.equal(target.complete, false);
   assert.equal(report.healthy, false);
 });
+
+test("inspectSkillHealth identifies a canonical frontmatter alias separately", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  const source = path.join(aiosPath, "skills", "today");
+  await fs.writeFile(
+    path.join(source, "SKILL.md"),
+    "---\nname: plan-today\ndescription: plan today\ntriggers:\n  - plan today\n---\n"
+  );
+  const targetDir = path.join(homePath, ".agents", "skills");
+  await fs.mkdir(targetDir, { recursive: true });
+  await fs.symlink(source, path.join(targetDir, "plan-today"), "dir");
+
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const target = report.targets.find((entry) => entry.dir === ".agents/skills");
+  assert.equal(target.aliases.length, 1);
+  assert.equal(target.aliases[0].alias, "plan-today");
+  assert.equal(target.aliases[0].canonical, "today");
+  assert.match(report.issues.join("\n"), /duplicate managed alias/);
+  assert.equal(target.complete, false);
+});

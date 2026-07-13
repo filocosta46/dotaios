@@ -19,7 +19,12 @@ import {
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
 import { symlinkTargets, retiredSymlinkTargets } from "../../../core/src/skill-targets.mjs";
-import { installSymlinkSkills, cleanupStaleLinks, removeManagedSkillLinks } from "../../../core/src/skills-install.mjs";
+import {
+  installSymlinkSkills,
+  cleanupStaleLinks,
+  removeManagedSkillLinks,
+  removeManagedSkillAliases
+} from "../../../core/src/skills-install.mjs";
 import { discoverHermesConfigPaths, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -116,6 +121,7 @@ function parseOptions(args = []) {
     dryRun: false,
     home: null,
     overwrite: false,
+    pruneAliases: false,
     path: null,
     positionals: [],
     project: null,
@@ -130,6 +136,8 @@ function parseOptions(args = []) {
       options.dryRun = true;
     } else if (arg === "--overwrite") {
       options.overwrite = true;
+    } else if (arg === "--prune-aliases") {
+      options.pruneAliases = true;
     } else if (arg === "--skills-first") {
       options.skillsFirst = true;
     } else if (arg === "--no-skills-first") {
@@ -162,6 +170,7 @@ Options:
   --all                 Connect every known AI tool, even ones not detected yet
   --dry-run             Show what would be written without changing files
   --overwrite           Replace existing unmanaged bridge files
+  --prune-aliases       Remove only exact DotAIOS frontmatter alias links
   --skills-first        Inline the skill catalog (INDEX+RESOLVER) into every bridge
                         file so agents that don't follow file refs still see it.
                         Persists into aios.json; re-run activate without the flag
@@ -255,6 +264,11 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
     results.push(...await installSymlinkSkills({
       aiosPath, targetDir, dryRun: options.dryRun, overwrite: options.overwrite
     }));
+    if (options.pruneAliases) {
+      results.push(...await removeManagedSkillAliases({
+        aiosPath, targetDir, dryRun: options.dryRun
+      }));
+    }
     results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: options.dryRun }));
   }
 
