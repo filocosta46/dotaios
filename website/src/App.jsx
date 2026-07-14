@@ -1,4 +1,4 @@
-import React, {useEffect, useMemo, useState} from 'react'
+import React, {useEffect, useMemo, useRef, useState} from 'react'
 import {
   COPY,
   DEFAULT_LANG,
@@ -23,8 +23,8 @@ function detectLanguage() {
   return navigator.language?.toLowerCase().startsWith('it') ? 'it' : DEFAULT_LANG
 }
 
-function updateMeta(copy) {
-  document.documentElement.lang = copy === dictionary.it ? 'it' : 'en'
+function updateMeta(copy, lang) {
+  document.documentElement.lang = lang
   document.title = copy.meta.title
   document.querySelector('meta[name="description"]')?.setAttribute('content', copy.meta.description)
   document.querySelector('meta[property="og:title"]')?.setAttribute('content', copy.meta.title)
@@ -33,14 +33,49 @@ function updateMeta(copy) {
     ?.setAttribute('content', copy.meta.description)
 }
 
+/**
+ * Reveal-on-scroll: adds .revealed to [data-reveal] elements the first time
+ * they enter the viewport. The initial hidden state only applies once the
+ * root has .reveal-ready, so content stays visible without JS and under
+ * prefers-reduced-motion (handled in CSS).
+ */
+function useReveal(deps) {
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return undefined
+
+    document.documentElement.classList.add('reveal-ready')
+    const targets = document.querySelectorAll('[data-reveal]:not(.revealed)')
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('revealed')
+            observer.unobserve(entry.target)
+          }
+        }
+      },
+      {rootMargin: '0px 0px -8% 0px', threshold: 0.1},
+    )
+
+    targets.forEach((el) => observer.observe(el))
+    return () => observer.disconnect()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+}
+
 function Icon({type}) {
   return <span className={`icon icon-${type}`} aria-hidden="true" />
 }
 
 function CopySnippet({text, children, label}) {
   const [copied, setCopied] = useState(false)
+  const timer = useRef(null)
 
   async function copyText() {
+    setCopied(true)
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setCopied(false), 1600)
+
     try {
       await navigator.clipboard.writeText(text)
     } catch {
@@ -51,10 +86,9 @@ function CopySnippet({text, children, label}) {
       document.execCommand('copy')
       area.remove()
     }
-
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1500)
   }
+
+  useEffect(() => () => window.clearTimeout(timer.current), [])
 
   return (
     <div className="snippet">
@@ -74,13 +108,13 @@ function Header({lang, setLang, t}) {
         <span>DotAIOS</span>
       </a>
       <nav className="nav" aria-label="Primary">
-        <a href="#folder">{t.nav.folder}</a>
+        <a href="#explorer">{t.nav.folder}</a>
         <a href="#ask">{t.nav.ask}</a>
         <a href="#packs">{t.nav.packs}</a>
         <a href="https://github.com/filocosta46/dotaios" target="_blank" rel="noreferrer">
           {t.nav.github}
         </a>
-        <div className="language-switch" aria-label={t.nav.language}>
+        <div className="language-switch" role="group" aria-label={t.nav.language}>
           {LANGUAGES.map((item) => (
             <button
               key={item.id}
@@ -107,27 +141,34 @@ function Hero({t}) {
         <p className="eyebrow">{t.hero.eyebrow}</p>
         <h1>{t.hero.title}</h1>
         <p className="hero-intro">{t.hero.intro}</p>
-        <ul className="tool-strip" aria-label="Supported tools">
-          {t.hero.tools.map((tool) => (
-            <li key={tool}>{tool}</li>
-          ))}
-        </ul>
+        <p className="hero-point">{t.hero.point}</p>
+        <div className="tool-strip-wrap">
+          <span className="tool-strip-label">{t.hero.toolsLabel}</span>
+          <ul className="tool-strip" aria-label={t.hero.toolsLabel}>
+            {t.hero.tools.map((tool) => (
+              <li key={tool}>{tool}</li>
+            ))}
+          </ul>
+        </div>
       </div>
 
       <aside className="install-panel" id="install" aria-label={t.hero.promptLabel}>
         <div>
           <p className="panel-kicker">{t.hero.promptLabel}</p>
-          <h2>{t.nav.cta}</h2>
-          <p>{t.hero.promptHelp}</p>
+          <p className="panel-help">{t.hero.promptHelp}</p>
         </div>
         <CopySnippet text={COPY.installPrompt} label={t}>
-          <span className="prompt">›</span>
-          <span>{COPY.installPrompt.replace('https://', '')}</span>
+          <span className="prompt" aria-hidden="true">
+            ›
+          </span>
+          <span>{COPY.installPrompt}</span>
         </CopySnippet>
         <details>
           <summary>{t.hero.terminal}</summary>
           <CopySnippet text={COPY.terminalCommand} label={t}>
-            <span className="prompt">$</span>
+            <span className="prompt" aria-hidden="true">
+              $
+            </span>
             <span>{COPY.terminalCommand}</span>
           </CopySnippet>
         </details>
@@ -136,13 +177,22 @@ function Hero({t}) {
   )
 }
 
-function FolderPreview({t}) {
+function SectionIntro({title, desc}) {
+  return (
+    <div className="section-intro">
+      <h2>{title}</h2>
+      <p>{desc}</p>
+    </div>
+  )
+}
+
+function FolderExplorer({t}) {
   const [active, setActive] = useState(folderViews[0].id)
   const activeItem = folderViews.find((item) => item.id === active) || folderViews[0]
   const view = t.folder.views[activeItem.id]
 
   return (
-    <section className="section" id="folder">
+    <section className="section" id="explorer" data-reveal>
       <SectionIntro title={t.folder.title} desc={t.folder.desc} />
       <div className="folder-preview">
         <div className="preview-topbar">
@@ -154,26 +204,27 @@ function FolderPreview({t}) {
           <code>{activeItem.path}</code>
         </div>
         <div className="preview-body">
-          <aside className="file-tree" aria-label={t.folder.tabsLabel}>
+          <nav className="file-tree" aria-label={t.folder.tabsLabel}>
             {folderViews.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 className={active === item.id ? 'active' : ''}
+                aria-pressed={active === item.id}
                 onClick={() => setActive(item.id)}
               >
                 <Icon type={item.icon} />
                 <span>{item.name}</span>
               </button>
             ))}
-          </aside>
-          <article className="document-pane">
+          </nav>
+          <article className="document-pane" key={activeItem.id}>
             <header>
+              <Icon type="folder" />
               <h3>{view.title}</h3>
             </header>
             <p className="lead">{view.lead}</p>
-            {view.body ? <p>{view.body}</p> : null}
-            {view.code ? <pre>{view.code}</pre> : null}
+            {view.body ? <p className="pane-body">{view.body}</p> : null}
             {view.files ? (
               <div className="file-list">
                 {view.files.map(([name, desc]) => (
@@ -194,41 +245,15 @@ function FolderPreview({t}) {
   )
 }
 
-function SectionIntro({title, desc}) {
-  return (
-    <div className="section-intro">
-      <h2>{title}</h2>
-      <p>{desc}</p>
-    </div>
-  )
-}
-
 function AskSection({t}) {
   return (
-    <section className="section section-muted" id="ask">
+    <section className="section" id="ask" data-reveal>
       <SectionIntro title={t.ask.title} desc={t.ask.desc} />
       <div className="ask-grid">
-        {t.ask.examples.map(([title, desc]) => (
-          <article key={title}>
-            <h3>{title}</h3>
-            <p>{desc}</p>
-          </article>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function Principles({t}) {
-  return (
-    <section className="section principles">
-      <h2>{t.principles.title}</h2>
-      <div className="principle-grid">
-        {t.principles.items.map(([title, desc]) => (
-          <article key={title}>
-            <span aria-hidden="true" />
-            <h3>{title}</h3>
-            <p>{desc}</p>
+        {t.ask.examples.map(([title, desc], index) => (
+          <article key={title} style={{'--stagger': index}}>
+            <p className="ask-bubble">{title}</p>
+            <p className="ask-result">{desc}</p>
           </article>
         ))}
       </div>
@@ -238,15 +263,22 @@ function Principles({t}) {
 
 function Packs({t}) {
   return (
-    <section className="section" id="packs">
+    <section className="section" id="packs" data-reveal>
       <SectionIntro title={t.packs.title} desc={t.packs.desc} />
       <div className="pack-grid">
-        {t.packs.items.map((pack) => (
-          <a className="pack-card" key={pack.href} href={pack.href} target="_blank" rel="noreferrer">
-            <span>{pack.eyebrow}</span>
+        {t.packs.items.map((pack, index) => (
+          <a
+            className="pack-card"
+            key={pack.href}
+            href={pack.href}
+            target="_blank"
+            rel="noreferrer"
+            style={{'--stagger': index}}
+          >
+            <span className="pack-eyebrow">{pack.eyebrow}</span>
             <h3>{pack.title}</h3>
             <p>{pack.desc}</p>
-            <div>
+            <div className="pack-foot">
               <strong>{pack.price}</strong>
               <em>{pack.cta}</em>
             </div>
@@ -260,12 +292,11 @@ function Packs({t}) {
 
 function BottomCta({t}) {
   return (
-    <section className="bottom-cta">
+    <section className="bottom-cta" data-reveal>
       <p>{t.cta.text}</p>
-      <CopySnippet text={COPY.installPrompt} label={t}>
-        <span className="prompt">›</span>
-        <span>{t.cta.button}</span>
-      </CopySnippet>
+      <a className="cta-button" href="#install">
+        {t.cta.button}
+      </a>
     </section>
   )
 }
@@ -280,8 +311,8 @@ function Footer({t}) {
         </a>
         <p>{t.footer.tagline}</p>
       </div>
-      <nav>
-        <a href="#folder">{t.nav.folder}</a>
+      <nav aria-label="Footer">
+        <a href="#explorer">{t.nav.folder}</a>
         <a href="#ask">{t.nav.ask}</a>
         <a href="#packs">{t.nav.packs}</a>
         <a href="https://github.com/filocosta46/dotaios/blob/main/docs/getting-started.md">
@@ -295,7 +326,8 @@ function Footer({t}) {
 
 export default function App() {
   const [lang, setLangState] = useState(detectLanguage)
-  const t = useMemo(() => dictionary[lang] || dictionary[DEFAULT_LANG], [lang])
+  const [dict, setDict] = useState(dictionary)
+  const t = useMemo(() => dict[lang] || dict[DEFAULT_LANG], [dict, lang])
 
   function setLang(nextLang) {
     setLangState(nextLang)
@@ -309,7 +341,26 @@ export default function App() {
     }
   }
 
-  useEffect(() => updateMeta(t), [t])
+  useEffect(() => updateMeta(t, lang), [t, lang])
+
+  // Copy stays bundled for first paint; Sanity hydrates after mount when the
+  // published document targets this release (or inside Studio preview).
+  useEffect(() => {
+    let cancelled = false
+    import('./sanity.js')
+      .then((mod) => mod.loadRemoteDictionary(dictionary))
+      .then((remote) => {
+        if (!cancelled && remote) setDict(remote)
+      })
+      .catch(() => {
+        /* offline or CMS unreachable: bundled copy is the fallback */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useReveal([dict])
 
   return (
     <>
@@ -320,9 +371,8 @@ export default function App() {
         <Header lang={lang} setLang={setLang} t={t} />
         <main>
           <Hero t={t} />
-          <FolderPreview t={t} />
+          <FolderExplorer t={t} />
           <AskSection t={t} />
-          <Principles t={t} />
           <Packs t={t} />
           <BottomCta t={t} />
         </main>

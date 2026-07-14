@@ -6,6 +6,11 @@ export const LANGUAGES = [
 export const DEFAULT_LANG = 'en'
 export const LANG_STORAGE_KEY = 'dotaios-lang'
 
+// Shown in the footer and used as the Sanity hydration gate:
+// the CMS document is applied only when its footer tagline mentions
+// this release (or when the site runs inside Studio preview).
+export const CURRENT_RELEASE = 'v1.22.0'
+
 export const COPY = {
   installPrompt:
     'Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.',
@@ -13,54 +18,22 @@ export const COPY = {
 }
 
 export const folderViews = [
-  {
-    id: 'start',
-    path: '~/aios/FIRST_SESSION.md',
-    icon: 'doc',
-    name: 'FIRST_SESSION.md',
-  },
-  {
-    id: 'agents',
-    path: '~/aios/AGENTS.md',
-    icon: 'doc',
-    name: 'AGENTS.md',
-  },
-  {
-    id: 'context',
-    path: '~/aios/context/',
-    icon: 'folder',
-    name: 'context/',
-  },
-  {
-    id: 'memory',
-    path: '~/aios/memory/',
-    icon: 'folder',
-    name: 'memory/',
-  },
-  {
-    id: 'vault',
-    path: '~/aios/vault/',
-    icon: 'folder',
-    name: 'vault/',
-  },
-  {
-    id: 'skills',
-    path: '~/aios/skills/',
-    icon: 'folder',
-    name: 'skills/',
-  },
+  {id: 'context', path: '~/aios/context/', icon: 'folder', name: 'context'},
+  {id: 'memory', path: '~/aios/memory/', icon: 'folder', name: 'memory'},
+  {id: 'vault', path: '~/aios/vault/', icon: 'folder', name: 'vault'},
+  {id: 'skills', path: '~/aios/skills/', icon: 'folder', name: 'skills'},
 ]
 
 export const dictionary = {
   en: {
     meta: {
-      title: 'DotAIOS - one folder every AI reads',
+      title: 'DotAIOS - stop re-explaining yourself to every AI',
       description:
-        'DotAIOS creates ~/aios, a local context folder for Claude, Cursor, Codex, Gemini, and other AI tools.',
+        'One folder on your computer that every AI reads: who you are, what you are working on, what you saved. Free, no account, no cloud memory.',
     },
     skipLink: 'Skip to install',
     nav: {
-      folder: 'Folder',
+      folder: 'The folder',
       ask: 'What to ask',
       packs: 'Packs',
       github: 'GitHub',
@@ -68,124 +41,104 @@ export const dictionary = {
       language: 'Language',
     },
     hero: {
-      eyebrow: 'local-first / open source / agent-agnostic',
-      title: 'One folder. Every AI reads it.',
+      eyebrow: 'Free · local · yours',
+      title: 'Stop re-explaining yourself to every AI.',
       intro:
-        'Stop re-explaining yourself to every AI tool. DotAIOS creates a local context folder with who you are, what you are building, what you saved, and the workflows you want agents to follow.',
-      promptLabel: 'Paste into your AI',
+        'One folder on your computer. Who you are, what you are working on, what you saved. Every AI reads the same files. No account. No cloud memory.',
+      point: 'Ask in plain words. Your AI picks the right workflow automatically.',
+      promptLabel: 'Paste this into your AI',
       promptHelp:
-        'Your AI reads the guide, creates the folder, asks a few questions, and connects your tools.',
-      terminal: 'Prefer Terminal?',
-      tools: ['Claude Code', 'Cursor', 'Codex', 'Gemini CLI', 'Hermes'],
+        'Your AI reads the guide, creates the folder, and asks you a few questions. That is the whole setup.',
+      terminal: 'Prefer the Terminal?',
+      toolsLabel: 'Works with',
+      tools: ['Claude Code', 'Cursor', 'Codex', 'Gemini'],
     },
     folder: {
-      title: 'The folder',
-      desc: 'Plain Markdown you own. Open it, edit it, move it, or sync it however you like.',
-      tabsLabel: 'Folder tree',
+      title: 'One folder. Everything your AI should know.',
+      desc: 'Every AI starts from the same page. Plain files you can open, edit, and move whenever you want.',
+      tabsLabel: 'Folder contents',
       views: {
-        start: {
-          title: 'FIRST_SESSION.md',
-          lead: 'A calm first-run guide for the agent helping you set things up.',
-          body:
-            'It explains what DotAIOS created, how to check the connection, and what to ask next.',
-        },
-        agents: {
-          title: 'AGENTS.md',
-          lead: 'The shared entrypoint for connected AI tools.',
-          body:
-            'Codex, Gemini, and generic agents can start here, then route into context, memory, vault, and skills.',
-          code:
-            '# AGENTS\n\nRead context/ for who I am.\nRead memory/ for recent work.\nRead vault/ for saved knowledge.\nRead skills/ for workflows I can ask you to run.\n\nStart with context/identity.md.',
-        },
         context: {
-          title: 'context/',
-          lead: 'Stable information your agents should know before helping.',
+          title: 'context',
+          lead: 'Who you are and what you are working on.',
+          body: 'Your AI reads this first, so you never start from zero.',
           files: [
             ['identity.md', 'Who you are'],
-            ['work.md', 'What you are building'],
-            ['priorities.md', 'What matters now'],
-            ['north-star.md', 'The direction to preserve'],
+            ['work.md', 'What you are working on'],
+            ['priorities.md', 'What matters right now'],
           ],
         },
         memory: {
-          title: 'memory/',
-          lead: 'Recent signals, daily notes, sessions, and decisions.',
+          title: 'memory',
+          lead: 'What happened recently. Sessions, notes, decisions.',
+          body: 'Your AI picks up where you left off, without bloating its memory.',
           files: [
-            ['daily/', 'Briefs and day plans'],
-            ['signals/', 'Quick captured notes'],
-            ['sessions/', 'Saved AI conversations'],
-            ['events.jsonl', 'Append-only activity log'],
+            ['sessions/', 'Saved conversations'],
+            ['daily/', 'Day plans and notes'],
+            ['decisions.md', 'Choices you already made'],
           ],
         },
         vault: {
-          title: 'vault/',
-          lead: 'Longer-lived knowledge that agents can search when needed.',
+          title: 'vault',
+          lead: 'Articles, PDFs, and files you saved.',
+          body: 'Ask for them later in your own words. They stay on your computer.',
           files: [
-            ['raw/', 'Imported pages and rough sources'],
-            ['wiki/', 'Clean durable summaries'],
-            ['assets/', 'PDFs, documents, and files'],
-            ['org/', 'People, companies, and projects'],
+            ['raw/', 'Pages and articles you saved'],
+            ['wiki/', 'Clean summaries'],
+            ['assets/', 'PDFs and documents'],
           ],
         },
         skills: {
-          title: 'skills/',
-          lead: 'Portable workflows written as plain instructions.',
+          title: 'skills',
+          lead: 'Things you can ask for in plain words.',
+          body: 'You never name these. Say what you want and the right one runs.',
           files: [
-            ['plan-today', 'Plan from priorities and recent work'],
-            ['ingest', 'Save a URL, PDF, or file'],
-            ['closeday', 'Close out the day cleanly'],
-            ['weekly-review', 'Refresh context and open loops'],
+            ['plan-today', '"Plan my day"'],
+            ['ingest', '"Save this article"'],
+            ['weekly-review', '"How did this week go?"'],
           ],
         },
       },
     },
     ask: {
-      title: 'What you can ask',
-      desc: 'Once setup is complete, connected agents use the same local context.',
+      title: 'Ask like you would ask a person',
+      desc: 'No commands to learn. No setup words. These work on day one.',
       examples: [
-        ['What am I working on?', 'A quick check that the bridge and context are connected.'],
-        ['Plan my day.', 'Builds a plan from priorities, memory, and active work.'],
-        ['Save this article for me.', 'Stores a page or PDF in your local vault.'],
-        ['What did I decide about this project?', 'Searches saved notes and sessions.'],
-      ],
-    },
-    principles: {
-      title: 'Why it works',
-      items: [
-        ['Local first', 'Your context is files on your machine, not a vendor account.'],
-        ['Tool neutral', 'Claude, Cursor, Codex, Gemini, and others can read the same source.'],
-        ['Human editable', 'Markdown stays understandable even if the CLI changes.'],
+        ['Plan my day', 'Builds a plan from your priorities and what you did yesterday.'],
+        ['Save this article', 'Stores it as clean text you can search later.'],
+        ['What did I decide about the trip?', 'Finds the answer in your saved notes and sessions.'],
+        ['Is everything connected?', 'Runs a quick connection check and tells you what needs attention.'],
       ],
     },
     packs: {
-      title: 'Get the packs',
-      desc: 'DotAIOS is free and open source. Packs add curated skills and automation recipes.',
+      title: 'Free forever. Packs when you want more.',
+      desc: 'The folder is free and open source. Paid packs add ready workflows and automation so you skip the setup.',
       items: [
         {
           eyebrow: 'Starter',
           title: 'Skip the setup. Start today.',
-          desc: 'A curated first set of skills for daily planning, capture, and review.',
+          desc: 'A curated folder with the workflows most people use first. Drop it in and go.',
           price: '€12.99',
           cta: 'Get Starter',
           href: 'https://filocosta.gumroad.com/l/tgaeui',
         },
         {
           eyebrow: 'Automations',
-          title: 'Add the engines. No wiring.',
-          desc: 'Research, transcripts, memory workflows, and ready-made automation patterns.',
+          title: 'Heavy work, already wired.',
+          desc: 'Everything in Starter, plus research, transcripts, and memory that looks after itself.',
           price: '€35',
           cta: 'Get Automations',
           href: 'https://filocosta.gumroad.com/l/baglw',
         },
       ],
-      note: 'Plain files you own forever. No subscription, no account, no lock-in.',
+      note: 'Plain files you own forever. No subscription, no account.',
     },
     cta: {
       text: 'Stop rebuilding context by hand.',
-      button: 'Copy setup prompt',
+      button: 'Get started',
     },
     footer: {
-      tagline: 'MIT / open source / local-first',
+      tagline: 'MIT · open source · v1.22.0',
       docs: 'Docs',
     },
     copied: 'Copied',
@@ -193,13 +146,13 @@ export const dictionary = {
   },
   it: {
     meta: {
-      title: 'DotAIOS - una cartella che ogni AI legge',
+      title: 'DotAIOS - smetti di rispiegarti a ogni AI',
       description:
-        'DotAIOS crea ~/aios, una cartella locale di contesto per Claude, Cursor, Codex, Gemini e altri strumenti AI.',
+        'Una cartella sul tuo computer che ogni AI legge: chi sei, a cosa stai lavorando, cosa hai salvato. Gratis, senza account, senza memoria nel cloud.',
     },
     skipLink: "Vai all'installazione",
     nav: {
-      folder: 'Cartella',
+      folder: 'La cartella',
       ask: 'Cosa chiedere',
       packs: 'Pacchetti',
       github: 'GitHub',
@@ -207,124 +160,104 @@ export const dictionary = {
       language: 'Lingua',
     },
     hero: {
-      eyebrow: 'locale / open source / agnostico agli agenti',
-      title: 'Una cartella. Ogni AI la legge.',
+      eyebrow: 'Gratis · locale · tuo',
+      title: 'Smetti di rispiegarti a ogni AI.',
       intro:
-        'Smetti di rispiegarti a ogni strumento AI. DotAIOS crea una cartella locale con chi sei, cosa stai costruendo, cosa hai salvato e i workflow che vuoi far seguire agli agenti.',
-      promptLabel: 'Incolla nella tua AI',
+        'Una cartella sul tuo computer. Chi sei, a cosa stai lavorando, cosa hai salvato. Ogni AI legge gli stessi file. Nessun account. Nessuna memoria nel cloud.',
+      point: 'Chiedi con parole normali. La tua AI sceglie da sola il workflow giusto.',
+      promptLabel: 'Incolla questo nella tua AI',
       promptHelp:
-        'La tua AI legge la guida, crea la cartella, fa qualche domanda e collega i tuoi strumenti.',
+        'La tua AI legge la guida, crea la cartella e ti fa qualche domanda. Il setup è tutto qui.',
       terminal: 'Preferisci il Terminale?',
-      tools: ['Claude Code', 'Cursor', 'Codex', 'Gemini CLI', 'Hermes'],
+      toolsLabel: 'Funziona con',
+      tools: ['Claude Code', 'Cursor', 'Codex', 'Gemini'],
     },
     folder: {
-      title: 'La cartella',
-      desc: 'Markdown semplice che possiedi. Puoi aprirlo, modificarlo, spostarlo o sincronizzarlo come vuoi.',
-      tabsLabel: 'Albero cartelle',
+      title: 'Una cartella. Tutto quello che la tua AI deve sapere.',
+      desc: 'Ogni AI parte dalla stessa pagina. File semplici che puoi aprire, modificare e spostare quando vuoi.',
+      tabsLabel: 'Contenuto della cartella',
       views: {
-        start: {
-          title: 'FIRST_SESSION.md',
-          lead: "Una guida tranquilla per l'agente che ti aiuta nella prima configurazione.",
-          body:
-            'Spiega cosa ha creato DotAIOS, come verificare la connessione e cosa chiedere dopo.',
-        },
-        agents: {
-          title: 'AGENTS.md',
-          lead: 'Il punto di ingresso condiviso per gli strumenti AI collegati.',
-          body:
-            'Codex, Gemini e agenti generici possono partire da qui e poi leggere context, memory, vault e skills.',
-          code:
-            '# AGENTS\n\nLeggi context/ per sapere chi sono.\nLeggi memory/ per il lavoro recente.\nLeggi vault/ per la conoscenza salvata.\nLeggi skills/ per i workflow che posso chiederti.\n\nInizia da context/identity.md.',
-        },
         context: {
-          title: 'context/',
-          lead: 'Informazioni stabili che gli agenti devono conoscere prima di aiutarti.',
+          title: 'context',
+          lead: 'Chi sei e a cosa stai lavorando.',
+          body: 'La tua AI legge questo per primo, così non ricominci mai da zero.',
           files: [
             ['identity.md', 'Chi sei'],
-            ['work.md', 'Cosa stai costruendo'],
-            ['priorities.md', 'Cosa conta ora'],
-            ['north-star.md', 'La direzione da mantenere'],
+            ['work.md', 'A cosa stai lavorando'],
+            ['priorities.md', 'Cosa conta adesso'],
           ],
         },
         memory: {
-          title: 'memory/',
-          lead: 'Segnali recenti, note giornaliere, sessioni e decisioni.',
+          title: 'memory',
+          lead: 'Cosa è successo di recente. Sessioni, note, decisioni.',
+          body: 'La tua AI riprende da dove avevi lasciato, senza appesantire la memoria.',
           files: [
-            ['daily/', 'Brief e piani del giorno'],
-            ['signals/', 'Note rapide salvate'],
-            ['sessions/', 'Conversazioni AI salvate'],
-            ['events.jsonl', 'Log append-only delle attività'],
+            ['sessions/', 'Conversazioni salvate'],
+            ['daily/', 'Piani e note del giorno'],
+            ['decisions.md', 'Scelte già fatte'],
           ],
         },
         vault: {
-          title: 'vault/',
-          lead: 'Conoscenza più duratura che gli agenti possono cercare quando serve.',
+          title: 'vault',
+          lead: 'Articoli, PDF e file che hai salvato.',
+          body: 'Chiedili più tardi con parole tue. Restano sul tuo computer.',
           files: [
-            ['raw/', 'Pagine importate e fonti grezze'],
-            ['wiki/', 'Sintesi pulite e durevoli'],
-            ['assets/', 'PDF, documenti e file'],
-            ['org/', 'Persone, aziende e progetti'],
+            ['raw/', 'Pagine e articoli salvati'],
+            ['wiki/', 'Sintesi pulite'],
+            ['assets/', 'PDF e documenti'],
           ],
         },
         skills: {
-          title: 'skills/',
-          lead: 'Workflow portabili scritti come istruzioni semplici.',
+          title: 'skills',
+          lead: 'Cose che puoi chiedere con parole normali.',
+          body: 'Non devi mai nominarle. Dici cosa vuoi e parte quella giusta.',
           files: [
-            ['plan-today', 'Pianifica da priorità e lavoro recente'],
-            ['ingest', 'Salva URL, PDF o file'],
-            ['closeday', 'Chiudi la giornata in modo pulito'],
-            ['weekly-review', 'Aggiorna contesto e loop aperti'],
+            ['plan-today', '"Pianifica la mia giornata"'],
+            ['ingest', '"Salva questo articolo"'],
+            ['weekly-review', '"Com\'è andata la settimana?"'],
           ],
         },
       },
     },
     ask: {
-      title: 'Cosa puoi chiedere',
-      desc: 'Dopo il setup, gli agenti collegati usano lo stesso contesto locale.',
+      title: 'Chiedi come chiederesti a una persona',
+      desc: 'Nessun comando da imparare. Nessuna parola tecnica. Funzionano dal primo giorno.',
       examples: [
-        ['Su cosa sto lavorando?', 'Controllo rapido che ponte e contesto siano collegati.'],
-        ['Pianifica la mia giornata.', 'Crea un piano da priorità, memoria e lavoro attivo.'],
-        ['Salva questo articolo per me.', 'Archivia una pagina o un PDF nel tuo vault locale.'],
-        ['Cosa ho deciso su questo progetto?', 'Cerca nelle note e sessioni salvate.'],
-      ],
-    },
-    principles: {
-      title: 'Perché funziona',
-      items: [
-        ['Locale prima di tutto', 'Il contesto è in file sul tuo computer, non in un account vendor.'],
-        ['Neutrale sugli strumenti', 'Claude, Cursor, Codex, Gemini e altri leggono la stessa fonte.'],
-        ['Modificabile da umani', 'Il Markdown resta comprensibile anche se cambia la CLI.'],
+        ['Pianifica la mia giornata', 'Crea un piano dalle tue priorità e da quello che hai fatto ieri.'],
+        ['Salva questo articolo', 'Lo archivia come testo pulito che puoi cercare dopo.'],
+        ['Cosa avevo deciso per il viaggio?', 'Trova la risposta nelle tue note e sessioni salvate.'],
+        ['È tutto collegato?', 'Fa un controllo rapido dei collegamenti e ti dice cosa sistemare.'],
       ],
     },
     packs: {
-      title: 'I pacchetti',
-      desc: 'DotAIOS è gratuito e open source. I pacchetti aggiungono skill curate e ricette di automazione.',
+      title: 'Gratis per sempre. Pacchetti quando vuoi di più.',
+      desc: 'La cartella è gratuita e open source. I pacchetti a pagamento aggiungono workflow pronti e automazioni, così salti il setup.',
       items: [
         {
           eyebrow: 'Starter',
           title: 'Salta il setup. Inizia oggi.',
-          desc: 'Un primo set curato di skill per pianificazione, cattura e review.',
+          desc: 'Una cartella curata con i workflow che quasi tutti usano per primi. La copi dentro e vai.',
           price: '€12.99',
           cta: 'Prendi Starter',
           href: 'https://filocosta.gumroad.com/l/tgaeui',
         },
         {
           eyebrow: 'Automazioni',
-          title: 'Aggiungi i motori. Senza cablaggio.',
-          desc: 'Ricerca, trascrizioni, memoria e pattern di automazione pronti.',
+          title: 'Il lavoro pesante, già cablato.',
+          desc: 'Tutto lo Starter, più ricerca, trascrizioni e una memoria che si mantiene da sola.',
           price: '€35',
           cta: 'Prendi Automazioni',
           href: 'https://filocosta.gumroad.com/l/baglw',
         },
       ],
-      note: 'File che possiedi per sempre. Nessun abbonamento, nessun account, nessun lock-in.',
+      note: 'File semplici, tuoi per sempre. Nessun abbonamento, nessun account.',
     },
     cta: {
       text: 'Smetti di ricostruire il contesto a mano.',
-      button: 'Copia il prompt',
+      button: 'Inizia',
     },
     footer: {
-      tagline: 'MIT / open source / locale',
+      tagline: 'MIT · open source · v1.22.0',
       docs: 'Documentazione',
     },
     copied: 'Copiato',
