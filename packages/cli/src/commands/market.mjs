@@ -19,6 +19,7 @@ Options:
                         Default: ${DEFAULT_REGISTRY_URL}
                         (also honors DOTAIOS_REGISTRY_URL env var)
   --path <dir>          Install into an AIOS folder other than ~/aios
+  --home <dir>          Write native agent bridges and skills under this home directory
   --dry-run             Validate only; do not copy files
 
 The registry is a single static JSON file. Anyone can host one and pass it
@@ -79,7 +80,7 @@ export async function marketCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { registry: null, path: null, dryRun: false };
+  const options = { registry: null, path: null, home: null, dryRun: false };
   const positionals = [];
   let subcommand = null;
 
@@ -90,6 +91,9 @@ function parseOptions(args = []) {
       index += 1;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--home") {
+      options.home = readOptionValue(args, index, "--home");
       index += 1;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
@@ -227,6 +231,7 @@ async function marketInstall(entry, options) {
   const installArgs = [source];
   if (entry.subdir) installArgs.push("--subdir", entry.subdir);
   if (options.path) installArgs.push("--path", options.path);
+  if (options.home) installArgs.push("--home", options.home);
   if (options.dryRun) installArgs.push("--dry-run");
 
   console.log(`Installing ${entry.id} from ${source}${entry.subdir ? ` (subdir: ${entry.subdir})` : ""}...`);

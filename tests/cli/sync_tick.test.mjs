@@ -11,8 +11,9 @@ async function tmpLock() {
   return { lockPath: path.join(dir, "sync.lock"), dir };
 }
 
-function makeGit({ dirty = false, pullResult = "up-to-date", commitSha = null, calls = [] } = {}) {
+function makeGit({ branch = "main", dirty = false, pullResult = "up-to-date", commitSha = null, calls = [] } = {}) {
   return {
+    async currentBranch() { calls.push(`branch-current:${branch ?? "unknown"}`); return branch; },
     async dirty() { calls.push("dirty"); return dirty; },
     async commitAll(msg) { calls.push(`commit:${msg.slice(0, 15)}`); return commitSha; },
     async push(b) { calls.push(`push:${b}`); },
@@ -23,6 +24,74 @@ function makeGit({ dirty = false, pullResult = "up-to-date", commitSha = null, c
     async hardResetToOrigin(b) { calls.push(`reset:${b}`); }
   };
 }
+
+test("tick skips without mutating a non-main checkout", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const written = [];
+    const events = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async (patch) => written.push(patch),
+      makeGit: () => makeGit({ branch: "codex/portable-skills-propagation", dirty: true, pullResult: "conflict", calls }),
+      appendEvent: async (event) => events.push(event),
+      now: () => Date.now()
+    });
+    assert.equal(result.skipped, "not-main-branch");
+    assert.deepEqual(calls, ["branch-current:codex/portable-skills-propagation"]);
+    assert.deepEqual(written, []);
+    assert.deepEqual(events, []);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick skips without mutating when the checkout branch is unknown", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const written = [];
+    const events = [];
+    const git = makeGit({ dirty: true, pullResult: "conflict", calls });
+    git.currentBranch = async () => {
+      calls.push("branch-current:unknown");
+      throw new Error("not a worktree");
+    };
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async (patch) => written.push(patch),
+      makeGit: () => git,
+      appendEvent: async (event) => events.push(event),
+      now: () => Date.now()
+    });
+    assert.equal(result.skipped, "not-main-branch");
+    assert.deepEqual(calls, ["branch-current:unknown"]);
+    assert.deepEqual(written, []);
+    assert.deepEqual(events, []);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick skips without mutating a detached HEAD", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const written = [];
+    const events = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async (patch) => written.push(patch),
+      makeGit: () => makeGit({ branch: null, dirty: true, pullResult: "conflict", calls }),
+      appendEvent: async (event) => events.push(event),
+      now: () => Date.now()
+    });
+    assert.equal(result.skipped, "not-main-branch");
+    assert.deepEqual(calls, ["branch-current:unknown"]);
+    assert.deepEqual(written, []);
+    assert.deepEqual(events, []);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
 
 test("tick skips when no config", async () => {
   const { lockPath, dir } = await tmpLock();
@@ -153,6 +222,7 @@ test("tick writes last_error on git failure and does not throw", async () => {
   try {
     const written = [];
     const failingGit = {
+      currentBranch: async () => "main",
       dirty: async () => true,
       commitAll: async () => "sha",
       push: async () => { throw new Error("network down"); },
@@ -201,6 +271,7 @@ test("tick does not throw when writeConfig/appendEvent reject in error path", as
   const { lockPath, dir } = await tmpLock();
   try {
     const failingGit = {
+      currentBranch: async () => "main",
       dirty: async () => true,
       commitAll: async () => "sha",
       push: async () => { throw new Error("network down"); },

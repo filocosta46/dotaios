@@ -18,13 +18,55 @@ const defaultRegistryPath = fileURLToPath(new URL("./agents.json", import.meta.u
 //   include "@" if the agent auto-includes a file referenced as @path, "" otherwise
 function normalizeAgent(raw) {
   if (!raw || typeof raw.name !== "string" || !raw.name.trim()) return null;
-  if (typeof raw.bridge !== "string" || !raw.bridge.trim()) return null;
+  const bridge = raw.bridge == null
+    ? null
+    : (typeof raw.bridge === "string" && raw.bridge.trim() ? raw.bridge.trim() : null);
+  if (raw.bridge != null && bridge == null) return null;
+  const skills = normalizeSkills(raw.skills);
   return {
     name: raw.name.trim(),
     detect: typeof raw.detect === "string" && raw.detect.trim() ? raw.detect.trim() : raw.bridge,
-    bridge: raw.bridge.trim(),
-    include: raw.include === "@" ? "@" : ""
+    ...(typeof raw.command === "string" && raw.command.trim() ? { command: raw.command.trim() } : {}),
+    bridge,
+    include: raw.include === "@" ? "@" : "",
+    ...(skills ? { skills } : {})
   };
+}
+
+function normalizeSkills(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const config = normalizeSkillTarget(raw);
+  if (!config) return null;
+
+  const project = normalizeSkillTarget(raw.project, { relativeOnly: true });
+  return project ? { ...config, project } : config;
+}
+
+function normalizeSkillTarget(raw, { relativeOnly = false } = {}) {
+  if (!raw || typeof raw !== "object") return null;
+  const mode = typeof raw.mode === "string" ? raw.mode.trim() : "";
+  if (mode !== "symlink" && mode !== "config-external-dir") return null;
+
+  const config = { mode };
+  if (typeof raw.dir === "string" && raw.dir.trim()) {
+    const dir = raw.dir.trim();
+    if (!relativeOnly || isSafeRelativePath(dir)) config.dir = dir;
+  }
+  if (typeof raw.configFile === "string" && raw.configFile.trim()) {
+    const configFile = raw.configFile.trim();
+    if (!relativeOnly || isSafeRelativePath(configFile)) config.configFile = configFile;
+  }
+  if (typeof raw.key === "string" && raw.key.trim()) config.key = raw.key.trim();
+
+  if (mode === "symlink" && !config.dir) return null;
+  if (mode === "config-external-dir" && (!config.configFile || !config.key)) return null;
+  return config;
+}
+
+function isSafeRelativePath(value) {
+  return !path.isAbsolute(value)
+    && !/^[a-zA-Z]:[\\/]/.test(value)
+    && !value.split(/[\\/]+/).includes("..");
 }
 
 function normalizeRegistry(data) {
@@ -50,7 +92,7 @@ export async function loadAgentRegistry(aiosPath) {
 }
 
 export function bridgePath(homePath, agent) {
-  return path.join(homePath, agent.bridge);
+  return agent.bridge ? path.join(homePath, agent.bridge) : null;
 }
 
 function detectPath(homePath, agent) {

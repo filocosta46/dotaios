@@ -77,13 +77,22 @@ export async function runTick({
     }
   }
 
+  const git = makeGit();
+  let currentBranch = null;
+  try {
+    currentBranch = await git.currentBranch();
+  } catch {
+    // An unknown checkout is not safe to mutate.
+  }
+  if (currentBranch !== "main") return { skipped: "not-main-branch" };
+
   const locked = await acquireLock(lockPath, { now });
   if (!locked) return { skipped: "locked" };
 
-  const git = makeGit();
   const startedIso = new Date(now()).toISOString();
 
   try {
+
     // 1. Commit local changes FIRST — rebase refuses to run on a dirty tree.
     let pushedSha = null;
     if (await git.dirty()) {

@@ -1,6 +1,16 @@
+import path from "node:path";
 import { readSyncConfig } from "../../../core/src/sync-config.mjs";
+import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { readOptionValue } from "../lib/args.mjs";
+import { createGit } from "./git.mjs";
 
-export function renderStatus(cfg) {
+function readPathOption(args = []) {
+  const index = args.indexOf("--path");
+  if (index === -1) return undefined;
+  return readOptionValue(args, index, "--path");
+}
+
+export function renderStatus(cfg, remote = null) {
   if (!cfg?.access_token) {
     return [
       "Sync is OFF.",
@@ -16,10 +26,31 @@ export function renderStatus(cfg) {
     `  Last push sha:  ${cfg.last_push_sha ? cfg.last_push_sha.slice(0, 7) : "(none)"}`
   ];
   if (cfg.last_error) lines.push(`  Last error:     ${cfg.last_error}`);
+  if (remote?.sha) {
+    lines.push(`  Remote main sha: ${remote.sha.slice(0, 7)}`);
+    if (!cfg.last_push_sha) {
+      lines.push("  Remote parity: UNKNOWN (no recorded push sha)");
+    } else if (cfg.last_push_sha === remote.sha) {
+      lines.push("  Remote parity: MATCH");
+    } else {
+      lines.push(`  Remote parity: MISMATCH (cached ${cfg.last_push_sha.slice(0, 7)}, remote ${remote.sha.slice(0, 7)})`);
+    }
+  } else if (remote?.error) {
+    lines.push(`  Remote parity: UNKNOWN (${remote.error})`);
+  }
   return lines.join("\n");
 }
 
-export async function runStatus() {
+export async function runStatus(args = []) {
   const cfg = await readSyncConfig();
-  console.log(renderStatus(cfg));
+  let remote = null;
+  if (cfg?.access_token) {
+    const aiosPath = path.resolve(expandHome(readPathOption(args) || defaultAiosPath()));
+    try {
+      remote = { sha: await createGit({ cwd: aiosPath }).remoteHead("main") };
+    } catch (error) {
+      remote = { error: error.message };
+    }
+  }
+  console.log(renderStatus(cfg, remote));
 }
