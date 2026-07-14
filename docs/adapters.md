@@ -80,6 +80,28 @@ Hermes as a native runtime without expecting a bridge file. If a temporary
 setup path tries to overwrite the real global bridges, `activate` refuses it;
 use a permanent AIOS folder instead.
 
+Configuration is not invocation proof. For a bounded acceptance check, run the
+explicit client probe against a disposable project fixture:
+
+```bash
+npx dotaios skills probe --client codex --path ~/aios --dry-run
+npx dotaios skills probe --client codex --path ~/aios --run \
+  --receipt /tmp/dotaios-codex-invocation.json
+```
+
+The probe defaults to dry-run and requires `--client` plus `--run` before it
+starts a model process. It links one temporary project skill through the
+registry-declared project target, runs the client with its safest bounded mode,
+and records a `dotaios.skill-invocation.v1` receipt. The receipt keeps
+`configured`, `discoverable`, `invoked`, and `produced` separate, includes the
+client version and `SKILL.md` SHA-256, and requires an exact marker line from
+the skill output. Unsupported or unsafe client surfaces are recorded as
+limitations, never as green invocation evidence.
+
+The probe is disposable and read-only with respect to the source AIOS folder.
+It is not a replacement for `skills doctor`, and a doctor report alone still
+cannot prove that a client used a skill.
+
 The doctor also reports managed aliases separately from foreign collisions. A
 managed alias is a symlink whose basename matches a skill's `name` in
 frontmatter while its target is that skill's canonical directory. Ordinary

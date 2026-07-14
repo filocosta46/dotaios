@@ -125,7 +125,7 @@ async function main(argv) {
   // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
   // A health report is deliberately a read-only operation. It must not mutate
   // the sync queue while the caller is checking whether the system is healthy.
-  const readOnly = commandName === "skills" && args[0] === "doctor";
+  const readOnly = commandName === "skills" && ["doctor", "probe"].includes(args[0]);
   await fireSyncHook({ command: commandName, dryRun: args.includes("--dry-run"), readOnly });
 }
 

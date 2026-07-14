@@ -1,0 +1,116 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+
+const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
+const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+
+function run(args, { allowNonZero = false } = {}) {
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+  if (!allowNonZero && result.status !== 0) {
+    throw new Error(`Command failed: dotaios ${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+  }
+  return result;
+}
+
+function setupAios() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-probe-test-"));
+  const aiosPath = path.join(root, "aios");
+  fs.mkdirSync(path.join(aiosPath, "skills", "source-skill"), { recursive: true });
+  fs.writeFileSync(
+    path.join(aiosPath, "skills", "source-skill", "SKILL.md"),
+    "---\nname: source-skill\ndescription: test source\n---\n"
+  );
+  return { root, aiosPath };
+}
+
+test("skills probe dry-run emits a receipt without invoking Codex", () => {
+  const { root, aiosPath } = setupAios();
+  try {
+    const result = run([
+      "skills", "probe", "--client", "codex", "--dry-run", "--json",
+      "--path", aiosPath
+    ]);
+    const receipt = JSON.parse(result.stdout);
+    assert.equal(receipt.schema, "dotaios.skill-invocation.v1");
+    assert.equal(receipt.client, "Codex");
+    assert.equal(receipt.evidence.configured, "yes");
+    assert.equal(receipt.evidence.discoverable, "path-ready");
+    assert.equal(receipt.evidence.invoked, "not-run");
+    assert.equal(receipt.evidence.produced, "not-run");
+    assert.match(receipt.command.join(" "), /--sandbox read-only/);
+    assert.equal(fs.existsSync(receipt.skill.path), false, "fixture is disposable by default");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skills probe requires an explicit client", () => {
+  const { root, aiosPath } = setupAios();
+  try {
+    const result = run(["skills", "probe", "--path", aiosPath], { allowNonZero: true });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /--client is required/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skills probe records a limitation without claiming invocation for Hermes", () => {
+  const { root, aiosPath } = setupAios();
+  try {
+    const result = run([
+      "skills", "probe", "--client", "hermes", "--json", "--path", aiosPath
+    ]);
+    const receipt = JSON.parse(result.stdout);
+    assert.equal(receipt.evidence.configured, "yes");
+    assert.equal(receipt.evidence.discoverable, "path-ready");
+    assert.equal(receipt.evidence.invoked, "not-run");
+    assert.equal(receipt.evidence.produced, "not-run");
+    assert.match(receipt.limitation, /read-only toolset/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skills probe writes the requested receipt without touching the source AIOS", () => {
+  const { root, aiosPath } = setupAios();
+  const receiptPath = path.join(root, "receipt.json");
+  const sourceBefore = fs.readFileSync(
+    path.join(aiosPath, "skills", "source-skill", "SKILL.md"),
+    "utf8"
+  );
+  try {
+    run([
+      "skills", "probe", "--client", "hermes", "--json", "--path", aiosPath,
+      "--receipt", receiptPath
+    ]);
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, "utf8"));
+    assert.equal(receipt.schema, "dotaios.skill-invocation.v1");
+    assert.equal(
+      fs.readFileSync(path.join(aiosPath, "skills", "source-skill", "SKILL.md"), "utf8"),
+      sourceBefore
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skills probe rejects unknown clients", () => {
+  const { root, aiosPath } = setupAios();
+  try {
+    const result = run([
+      "skills", "probe", "--client", "unknown", "--path", aiosPath
+    ], { allowNonZero: true });
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /Unknown probe client/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
