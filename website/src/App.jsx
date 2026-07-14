@@ -138,7 +138,6 @@ function Hero({t}) {
   return (
     <section className="hero" id="top">
       <div className="hero-copy">
-        <p className="eyebrow">{t.hero.eyebrow}</p>
         <h1>{t.hero.title}</h1>
         <p className="hero-intro">{t.hero.intro}</p>
         <p className="hero-point">{t.hero.point}</p>

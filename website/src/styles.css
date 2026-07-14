@@ -226,7 +226,6 @@ pre {
   padding: clamp(56px, 9vw, 108px) 0 clamp(48px, 7vw, 88px);
 }
 
-.eyebrow,
 .panel-kicker {
   color: var(--accent);
   font-size: 0.78rem;

@@ -6,10 +6,11 @@ export const LANGUAGES = [
 export const DEFAULT_LANG = 'en'
 export const LANG_STORAGE_KEY = 'dotaios-lang'
 
-// Shown in the footer and used as the Sanity hydration gate:
-// the CMS document is applied only when its footer tagline mentions
-// this release (or when the site runs inside Studio preview).
-export const CURRENT_RELEASE = 'v1.22.0'
+// Sanity hydration gate: the CMS document is applied only when its
+// `copyRelease` field equals this value (or inside Studio preview), so a
+// stale document can never overwrite newer bundled copy. Bump it whenever
+// the copy structure changes and regenerate the Studio patch.
+export const CURRENT_COPY_RELEASE = '2026-07-14-consumer'
 
 export const COPY = {
   installPrompt:
@@ -41,7 +42,6 @@ export const dictionary = {
       language: 'Language',
     },
     hero: {
-      eyebrow: 'Free · local · yours',
       title: 'Stop re-explaining yourself to every AI.',
       intro:
         'One folder on your computer. Who you are, what you are working on, what you saved. Every AI reads the same files. No account. No cloud memory.',
@@ -111,34 +111,34 @@ export const dictionary = {
       ],
     },
     packs: {
-      title: 'Free forever. Packs when you want more.',
-      desc: 'The folder is free and open source. Paid packs add ready workflows and automation so you skip the setup.',
+      title: 'The folder is free. The packs are the shortcut.',
+      desc: 'Everything in the packs exists somewhere on the internet, free. We find it, test it, package it, and keep it updated every week, so you never have to.',
       items: [
         {
-          eyebrow: 'Starter',
-          title: 'Skip the setup. Start today.',
-          desc: 'A curated folder with the workflows most people use first. Drop it in and go.',
+          eyebrow: 'Skills',
+          title: 'The best skills, picked for you.',
+          desc: 'The skills that actually matter for knowledge workers, curated from the whole internet and refreshed every week.',
           price: '€12.99',
-          cta: 'Get Starter',
+          cta: 'Get Skills',
           href: 'https://filocosta.gumroad.com/l/tgaeui',
         },
         {
           eyebrow: 'Automations',
-          title: 'Heavy work, already wired.',
-          desc: 'Everything in Starter, plus research, transcripts, and memory that looks after itself.',
+          title: 'Real systems. Your AI works like a pro.',
+          desc: 'Everything in Skills, plus complete working setups for research, transcripts, and memory. Full packaging, not pieces.',
           price: '€35',
           cta: 'Get Automations',
           href: 'https://filocosta.gumroad.com/l/baglw',
         },
       ],
-      note: 'Plain files you own forever. No subscription, no account.',
+      note: 'Each pack is one prompt. Paste it into your AI once: it installs everything, wires it into your folder, and keeps it updated.',
     },
     cta: {
       text: 'Stop rebuilding context by hand.',
       button: 'Get started',
     },
     footer: {
-      tagline: 'MIT · open source · v1.22.0',
+      tagline: 'Free and open source. Plain files you own.',
       docs: 'Docs',
     },
     copied: 'Copied',
@@ -160,7 +160,6 @@ export const dictionary = {
       language: 'Lingua',
     },
     hero: {
-      eyebrow: 'Gratis · locale · tuo',
       title: 'Smetti di rispiegarti a ogni AI.',
       intro:
         'Una cartella sul tuo computer. Chi sei, a cosa stai lavorando, cosa hai salvato. Ogni AI legge gli stessi file. Nessun account. Nessuna memoria nel cloud.',
@@ -230,34 +229,34 @@ export const dictionary = {
       ],
     },
     packs: {
-      title: 'Gratis per sempre. Pacchetti quando vuoi di più.',
-      desc: 'La cartella è gratuita e open source. I pacchetti a pagamento aggiungono workflow pronti e automazioni, così salti il setup.',
+      title: 'La cartella è gratis. I pacchetti sono la scorciatoia.',
+      desc: 'Tutto quello che c\'è nei pacchetti esiste da qualche parte su internet, gratis. Noi lo troviamo, lo testiamo, lo impacchettiamo e lo aggiorniamo ogni settimana, così non devi farlo tu.',
       items: [
         {
-          eyebrow: 'Starter',
-          title: 'Salta il setup. Inizia oggi.',
-          desc: 'Una cartella curata con i workflow che quasi tutti usano per primi. La copi dentro e vai.',
+          eyebrow: 'Skills',
+          title: 'Le skill migliori, scelte per te.',
+          desc: 'Le skill che contano davvero per chi lavora con la testa, selezionate da tutto internet e aggiornate ogni settimana.',
           price: '€12.99',
-          cta: 'Prendi Starter',
+          cta: 'Prendi Skills',
           href: 'https://filocosta.gumroad.com/l/tgaeui',
         },
         {
           eyebrow: 'Automazioni',
-          title: 'Il lavoro pesante, già cablato.',
-          desc: 'Tutto lo Starter, più ricerca, trascrizioni e una memoria che si mantiene da sola.',
+          title: 'Sistemi veri. La tua AI lavora da pro.',
+          desc: 'Tutto il pacchetto Skills, più setup completi e funzionanti per ricerca, trascrizioni e memoria. Pacchetti interi, non pezzi.',
           price: '€35',
           cta: 'Prendi Automazioni',
           href: 'https://filocosta.gumroad.com/l/baglw',
         },
       ],
-      note: 'File semplici, tuoi per sempre. Nessun abbonamento, nessun account.',
+      note: 'Ogni pacchetto è un prompt. Lo incolli nella tua AI una volta: installa tutto, lo collega alla tua cartella e lo tiene aggiornato.',
     },
     cta: {
       text: 'Smetti di ricostruire il contesto a mano.',
       button: 'Inizia',
     },
     footer: {
-      tagline: 'MIT · open source · v1.22.0',
+      tagline: 'Gratuito e open source. File semplici che possiedi.',
       docs: 'Documentazione',
     },
     copied: 'Copiato',

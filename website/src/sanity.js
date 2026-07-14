@@ -5,13 +5,12 @@
  * copy in content.js always renders first and the CMS can never block LCP.
  *
  * Stale-copy guard: the published document is applied ONLY when its
- * footerTagline mentions CURRENT_RELEASE (v1.22.0). Inside Studio preview
- * the gate is bypassed so Filippo can edit drafts live. This mirrors the
- * pre-React app.js behavior and prevents an outdated CMS document from
- * overwriting newer bundled copy.
+ * `copyRelease` field equals CURRENT_COPY_RELEASE. Inside Studio preview
+ * the gate is bypassed so Filippo can edit drafts live. This prevents an
+ * outdated CMS document from overwriting newer bundled copy.
  */
 import {createClient} from '@sanity/client'
-import {CURRENT_RELEASE} from './content.js'
+import {CURRENT_COPY_RELEASE} from './content.js'
 
 const PROJECT_ID = 'h7araeal'
 const DATASET = 'production'
@@ -43,8 +42,7 @@ function getClient() {
 
 function releaseMatches(doc) {
   if (isPreview) return true
-  const footer = doc?.footerTagline?.en ?? doc?.footerTagline
-  return typeof footer === 'string' && footer.includes(CURRENT_RELEASE)
+  return doc?.copyRelease === CURRENT_COPY_RELEASE
 }
 
 /** Localized string: returns undefined (not '') so merge() keeps the bundled value. */
@@ -86,7 +84,6 @@ function fromLegacyFields(doc) {
       language: ls(doc.navLangAria, lang),
     },
     hero: {
-      eyebrow: ls(doc.heroEyebrow, lang),
       title: ls(doc.heroH1, lang),
       intro: ls(doc.heroSub, lang),
       point: ls(doc.heroPoint, lang),
