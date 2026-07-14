@@ -42,3 +42,29 @@ test("renderStatus does not leak the access token", () => {
   });
   assert.ok(!out.includes("ghu_SUPERSECRET"), "status output must never print the token");
 });
+
+test("renderStatus reports stale cached push metadata against the remote ref", () => {
+  const out = renderStatus({
+    access_token: "T",
+    username: "alice",
+    repo_full_name: "alice/alice-aios",
+    last_push_sha: "780f61f2old"
+  }, {
+    sha: "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1"
+  });
+  assert.match(out, /Remote main sha:\s+e5b05df/);
+  assert.match(out, /Remote parity:\s+MISMATCH/);
+  assert.match(out, /cached 780f61f/);
+});
+
+test("renderStatus makes a failed remote check visible", () => {
+  const out = renderStatus({
+    access_token: "T",
+    username: "alice",
+    repo_full_name: "alice/alice-aios"
+  }, {
+    error: "git ls-remote failed"
+  });
+  assert.match(out, /Remote parity:\s+UNKNOWN/);
+  assert.match(out, /git ls-remote failed/);
+});

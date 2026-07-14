@@ -18,9 +18,21 @@ import {
   writeSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
-import { symlinkTargets, hermesConfigTargets } from "../../../core/src/skill-targets.mjs";
-import { installSymlinkSkills, cleanupStaleLinks } from "../../../core/src/skills-install.mjs";
-import { ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
+import {
+  symlinkTargets,
+  retiredSymlinkTargets,
+  projectSymlinkTargets,
+  projectHermesConfigTargets
+} from "../../../core/src/skill-targets.mjs";
+import {
+  installSymlinkSkills,
+  cleanupStaleLinks,
+  removeManagedSkillLinks,
+  removeManagedSkillAliases,
+  validateProjectPath,
+  validateProjectSourcePath
+} from "../../../core/src/skills-install.mjs";
+import { discoverHermesConfigPaths, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = MANAGED_START;
@@ -35,6 +47,13 @@ export async function activateCommand(args) {
   const options = parseOptions(args);
   const aiosPath = resolvePath(options.path || defaultAiosPath());
   const homePath = resolvePath(options.home || os.homedir());
+  const [realHomePath, realUserHomePath] = await Promise.all([
+    realpathThroughExistingAncestor(homePath),
+    realpathThroughExistingAncestor(os.homedir())
+  ]);
+  if (realHomePath === realUserHomePath && await isTemporaryAiosPath(aiosPath)) {
+    throw new Error("Refusing to connect a temporary AIOS path to the real home; use a permanent AIOS folder.");
+  }
   await ensureAiosFolder(aiosPath);
 
   const config = await readAiosConfig(aiosPath);
@@ -109,6 +128,7 @@ function parseOptions(args = []) {
     dryRun: false,
     home: null,
     overwrite: false,
+    pruneAliases: false,
     path: null,
     positionals: [],
     project: null,
@@ -123,6 +143,8 @@ function parseOptions(args = []) {
       options.dryRun = true;
     } else if (arg === "--overwrite") {
       options.overwrite = true;
+    } else if (arg === "--prune-aliases") {
+      options.pruneAliases = true;
     } else if (arg === "--skills-first") {
       options.skillsFirst = true;
     } else if (arg === "--no-skills-first") {
@@ -155,6 +177,7 @@ Options:
   --all                 Connect every known AI tool, even ones not detected yet
   --dry-run             Show what would be written without changing files
   --overwrite           Replace existing unmanaged bridge files
+  --prune-aliases       Remove only exact DotAIOS frontmatter alias links
   --skills-first        Inline the skill catalog (INDEX+RESOLVER) into every bridge
                         file so agents that don't follow file refs still see it.
                         Persists into aios.json; re-run activate without the flag
@@ -167,9 +190,10 @@ function printAttachHelp() {
   dotaios attach [project-dir] [options]
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/aios
-  --dry-run     Show what would be written without changing files
-  --overwrite   Replace existing unmanaged bridge files
+  --path <dir>     Use an AIOS folder other than ~/aios
+  --project <dir>  Attach this project directory explicitly
+  --dry-run        Show what would be written without changing files
+  --overwrite      Replace existing unmanaged bridge files
 `);
 }
 
@@ -185,7 +209,7 @@ async function createGlobalBridges(
   let installedCount = 0;
 
   for (const agent of registry) {
-    const destination = bridgePath(homePath, agent);
+    const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
     const installed = options.all || await isAgentInstalled(homePath, agent);
 
     if (!installed) {
@@ -193,6 +217,15 @@ async function createGlobalBridges(
       continue;
     }
     installedCount += 1;
+
+    if (!agent.bridge) {
+      results.push({
+        action: "detected",
+        path: destination,
+        note: `${agent.name} has no bridge file; its skills use the native runtime configuration`
+      });
+      continue;
+    }
 
     const result = await writeManagedFile(
       destination,
@@ -202,7 +235,7 @@ async function createGlobalBridges(
     results.push(result);
   }
 
-  const skills = await installAllSkills(aiosPath, homePath, options);
+  const skills = await installAllSkills(aiosPath, homePath, options, registry);
   return { results: [...results, ...skills], installedCount };
 }
 
@@ -221,38 +254,181 @@ async function previewSkillsIndex(aiosPath) {
   };
 }
 
-// Install DotAIOS skills natively into every supported tool: symlink into each
-// well-known skills dir (~/.claude/skills, ~/.agents/skills — the shared standard
-// read by Codex/Cursor/Gemini), and register the source dir in Hermes' config.
-async function installAllSkills(aiosPath, homePath, options) {
+// Install DotAIOS skills natively into each documented client directory plus
+// the shared Agent Skills root, then register the source dir in Hermes config.
+async function installAllSkills(aiosPath, homePath, options, registry) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
   const results = [];
-  for (const target of symlinkTargets()) {
+  for (const target of retiredSymlinkTargets(registry)) {
+    const targetDir = path.join(homePath, target.dir);
+    results.push(...await removeManagedSkillLinks({
+      aiosPath, targetDir, dryRun: options.dryRun
+    }));
+  }
+  for (const target of symlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     results.push(...await installSymlinkSkills({
       aiosPath, targetDir, dryRun: options.dryRun, overwrite: options.overwrite
     }));
+    if (options.pruneAliases) {
+      results.push(...await removeManagedSkillAliases({
+        aiosPath, targetDir, dryRun: options.dryRun
+      }));
+    }
     results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: options.dryRun }));
   }
 
-  for (const h of hermesConfigTargets()) {
-    const configPath = path.join(homePath, h.configFile);
-    const r = await ensureExternalSkillsDir({ configPath, skillsPath: aiosSkillsDir, dryRun: options.dryRun });
+  for (const configPath of await discoverHermesConfigPaths(homePath, registry)) {
+    const r = await ensureExternalSkillsDir({
+      configPath,
+      skillsPath: aiosSkillsDir,
+      dryRun: options.dryRun,
+      createMissing: true
+    });
     results.push({ action: `hermes:${r.action}`, path: configPath, note: r.reason });
   }
   return results;
 }
 
 async function createProjectBridges(aiosPath, projectPath, options) {
-  return Promise.all([
-    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath), options),
-    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath), options)
+  const registry = await loadAgentRegistry(aiosPath);
+  const bridges = await Promise.all([
+    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath), {
+      ...options,
+      projectRoot: projectPath
+    }),
+    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath), {
+      ...options,
+      projectRoot: projectPath
+    })
   ]);
+  const skills = await propagateProjectSkills(projectPath, options, registry);
+  return [...bridges, skills];
 }
 
-async function writeManagedFile(destination, content, { dryRun = false, overwrite = false } = {}) {
+async function propagateProjectSkills(projectPath, options, registry) {
+  const skillsDir = path.join(projectPath, "skills");
+  const symlinkTargetsForProject = projectSymlinkTargets(registry);
+  const hermesTargetsForProject = projectHermesConfigTargets(registry);
+  const details = [];
+  const sourceSafety = await validateProjectSourcePath({
+    projectRoot: projectPath,
+    sourcePath: skillsDir
+  });
+  if (!sourceSafety.safe) {
+    return { action: "project-skills:unsafe-source", path: skillsDir, note: sourceSafety.reason };
+  }
+  const skillsDirectoryExists = await isDirectory(skillsDir);
+  const skills = skillsDirectoryExists ? await collectSkills(projectPath) : [];
+
+  for (const target of symlinkTargetsForProject) {
+    const targetDir = path.join(projectPath, target.dir);
+    const safety = await validateProjectPath({ projectRoot: projectPath, targetPath: targetDir });
+    if (!safety.safe) {
+      details.push({ action: "project-skills:unsafe-target", path: targetDir, note: safety.reason });
+      continue;
+    }
+    if (skills.length === 0) {
+      details.push(...await cleanupStaleLinks({
+        sourceDir: skillsDir,
+        targetDir,
+        projectRoot: projectPath,
+        dryRun: options.dryRun
+      }));
+      continue;
+    }
+    details.push(...await installSymlinkSkills({
+      sourceDir: skillsDir,
+      targetDir,
+      projectRoot: projectPath,
+      dryRun: options.dryRun,
+      overwrite: options.overwrite
+    }));
+    if (options.pruneAliases) {
+      details.push(...await removeManagedSkillAliases({
+        sourceDir: skillsDir,
+        targetDir,
+        dryRun: options.dryRun
+      }));
+    }
+    details.push(...await cleanupStaleLinks({
+      sourceDir: skillsDir,
+      targetDir,
+      projectRoot: projectPath,
+      dryRun: options.dryRun
+    }));
+  }
+
+  if (skills.length === 0) {
+    return {
+      action: "project-skills",
+      path: skillsDir,
+      note: skillsDirectoryExists
+        ? "checked project skills/ with no readable SKILL.md entries"
+        : "checked missing project skills/ and cleaned owned links"
+    };
+  }
+
+  for (const target of hermesTargetsForProject) {
+    const configPath = path.join(projectPath, target.configFile);
+    const safety = await validateProjectPath({ projectRoot: projectPath, targetPath: configPath });
+    if (!safety.safe) {
+      details.push({ action: "project-skills:unsafe-hermes-config", path: configPath, note: safety.reason });
+      continue;
+    }
+    const result = await ensureExternalSkillsDir({
+      configPath,
+      skillsPath: skillsDir,
+      key: target.key,
+      dryRun: options.dryRun,
+      createMissing: true
+    });
+    details.push({ action: `hermes:${result.action}`, path: configPath, note: result.reason });
+  }
+
+  const linked = details.filter((result) => ["linked", "already-linked", "would link"].includes(result.action)).length;
+  const changed = details.filter((result) => result.action.startsWith("hermes:") && !result.action.endsWith("manual") && !result.action.endsWith("already-present")).length;
+  const verb = skills.length === 0
+    ? "checked"
+    : (options.dryRun ? "would propagate" : "propagated");
+  const skillLabel = skills.length === 0
+    ? (skillsDirectoryExists ? "no readable project skills" : "no project skills directory")
+    : skills.length === 1
+    ? `skill ${skills[0].name}`
+    : `${skills.length} skill(s)`;
+  const targetPaths = [
+    ...symlinkTargetsForProject.map((target) => target.dir),
+    ...hermesTargetsForProject.map((target) => target.configFile)
+  ];
+  const targetLabel = targetPaths.length > 0 ? targetPaths.join(", ") : "no registered targets";
+  const unsafe = details.filter((result) =>
+    result.action === "skipped-unsafe-target"
+    || result.action.startsWith("project-skills:unsafe-")
+  );
+  const safetyNote = unsafe.length > 0
+    ? `; ${unsafe.length} unsafe target(s) skipped`
+    : "";
+  const note = `${verb} ${skillLabel} to ${targetLabel}; ${linked} symlink action(s), ${changed} Hermes config action(s)${safetyNote}`;
+  return { action: "project-skills", path: skillsDir, note };
+}
+
+async function isDirectory(value) {
+  try {
+    return (await fs.stat(value)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function writeManagedFile(destination, content, { dryRun = false, overwrite = false, projectRoot = null } = {}) {
+  if (projectRoot) {
+    const safety = await validateProjectPath({ projectRoot, targetPath: destination });
+    if (!safety.safe) {
+      return { action: "unsafe-target", path: destination, note: safety.reason };
+    }
+  }
   const exists = await pathExists(destination);
 
   if (!exists) {
@@ -316,6 +492,40 @@ function bridgeFile(title, lines) {
 
 function resolvePath(value) {
   return path.resolve(expandHome(value));
+}
+
+async function isTemporaryAiosPath(aiosPath) {
+  const lexicalPath = path.resolve(aiosPath);
+  const lexicalTempRoot = path.resolve(os.tmpdir());
+  const [realPath, realTempRoot] = await Promise.all([
+    realpathThroughExistingAncestor(lexicalPath),
+    realpathThroughExistingAncestor(lexicalTempRoot)
+  ]);
+
+  // Check both representations. The lexical check catches a direct /tmp path,
+  // while the realpath check catches a permanent-looking alias that points into
+  // a temporary activation directory. We intentionally reject any path inside
+  // the OS temp root, not only names matching one historical temp prefix.
+  return isWithin(lexicalTempRoot, lexicalPath) || isWithin(realTempRoot, realPath);
+}
+
+async function realpathThroughExistingAncestor(value) {
+  let current = path.resolve(value);
+  while (true) {
+    try {
+      return await fs.realpath(current);
+    } catch (error) {
+      if (error.code !== "ENOENT" && error.code !== "ENOTDIR") throw error;
+      const parent = path.dirname(current);
+      if (parent === current) return current;
+      current = parent;
+    }
+  }
+}
+
+function isWithin(root, candidate) {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function printResults(title, results) {

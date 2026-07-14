@@ -8,6 +8,7 @@ import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { hasLicense } from "../../../core/src/licenses.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { activateCommand } from "./activate.mjs";
 
 export async function installCommand(args) {
   if (hasHelpFlag(args)) {
@@ -21,6 +22,7 @@ Accepts:
 
 Options:
   --path <dir>     Install into an AIOS folder other than ~/aios
+  --home <dir>     Write native agent bridges and skills under this home directory
   --dry-run        Validate and display permissions without copying files
   --subdir <path>  After cloning/resolving, install from this subdirectory
 `);
@@ -31,7 +33,7 @@ Options:
   const [pluginPath] = options.positionals;
 
   if (!pluginPath) {
-    throw new Error("Usage: dotaios install <plugin-path-or-url> [--path <aios-dir>] [--dry-run]");
+    throw new Error("Usage: dotaios install <plugin-path-or-url> [--path <aios-dir>] [--home <home-dir>] [--dry-run]");
   }
 
   // --subdir can come from a remote market registry entry, so it is untrusted:
@@ -97,6 +99,9 @@ async function runInstall(sourcePath, options) {
     await writeSkillsIndex(target);
     console.log(`\nInstalled skill '${skillName}' into ${path.join(target, "skills", skillName)}`);
     console.log("Refreshed skills/INDEX.md so every connected agent can see it.");
+    const activationArgs = ["--path", target];
+    if (options.home) activationArgs.push("--home", options.home);
+    await activateCommand(activationArgs);
     return;
   }
 
@@ -130,6 +135,9 @@ async function runInstall(sourcePath, options) {
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
   await installPlugin(sourcePath, target, manifest);
+  const activationArgs = ["--path", target];
+  if (options.home) activationArgs.push("--home", options.home);
+  await activateCommand(activationArgs);
   console.log(`\nInstalled ${manifest.name}@${manifest.version} into ${path.join(target, "plugins", manifest.name)}`);
 }
 
@@ -187,12 +195,15 @@ export function assertSafeSubdir(subdir) {
 }
 
 function parseOptions(args = []) {
-  const options = { dryRun: false, path: null, subdir: null, positionals: [] };
+  const options = { dryRun: false, home: null, path: null, subdir: null, positionals: [] };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--home") {
+      options.home = readOptionValue(args, index, "--home");
+      index += 1;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
       index += 1;
@@ -233,6 +244,7 @@ async function installPlugin(sourcePath, target, manifest) {
   await copyDirectory(sourcePath, tempTarget);
 
   let hasBackup = false;
+  let exposedSkills = [];
   try {
     try {
       await fs.rename(pluginTarget, backupTarget);
@@ -242,12 +254,17 @@ async function installPlugin(sourcePath, target, manifest) {
     }
 
     await fs.rename(tempTarget, pluginTarget);
+    exposedSkills = await exposePluginSkills(pluginTarget, target, manifest);
     await updateSkillRegistry(target, manifest);
+    await writeSkillsIndex(target);
 
     if (hasBackup) {
       await fs.rm(backupTarget, { recursive: true, force: true });
     }
   } catch (error) {
+    for (const skillPath of exposedSkills) {
+      await fs.rm(skillPath, { recursive: true, force: true });
+    }
     await fs.rm(tempTarget, { recursive: true, force: true });
     if (hasBackup) {
       await fs.rm(pluginTarget, { recursive: true, force: true });
@@ -258,20 +275,76 @@ async function installPlugin(sourcePath, target, manifest) {
 }
 
 async function copyDirectory(source, destination) {
+  return copyDirectoryWithOptions(source, destination);
+}
+
+async function copyDirectoryWithOptions(source, destination, { excludeNames = new Set() } = {}) {
   const entries = await fs.readdir(source, { withFileTypes: true });
   await fs.mkdir(destination, { recursive: true });
 
   for (const entry of entries) {
+    if (excludeNames.has(entry.name)) continue;
     const sourceEntry = path.join(source, entry.name);
     const destinationEntry = path.join(destination, entry.name);
 
     if (entry.isDirectory()) {
-      await copyDirectory(sourceEntry, destinationEntry);
+      await copyDirectoryWithOptions(sourceEntry, destinationEntry, { excludeNames });
     } else if (entry.isSymbolicLink()) {
       throw new Error(`Plugin contains unsupported symlink: ${sourceEntry}`);
     } else {
       await fs.copyFile(sourceEntry, destinationEntry);
     }
+  }
+}
+
+async function exposePluginSkills(pluginTarget, target, manifest) {
+  const providedSkills = manifest.provides?.skills || [];
+  const exposedSkills = [];
+  try {
+    for (const skillName of providedSkills) {
+      assertSafeSkillName(skillName);
+      const skillSource = await findPluginSkillSource(pluginTarget, skillName, providedSkills.length);
+      const skillTarget = path.join(target, "skills", skillName);
+      if (await pathEntryExists(skillTarget)) {
+        throw new Error(`Plugin skill "${skillName}" already exists at ${skillTarget}; remove the existing skill before installing this plugin.`);
+      }
+      await copyDirectoryWithOptions(skillSource, skillTarget, { excludeNames: new Set(["manifest.json"]) });
+      exposedSkills.push(skillTarget);
+    }
+  } catch (error) {
+    for (const skillPath of exposedSkills) {
+      await fs.rm(skillPath, { recursive: true, force: true });
+    }
+    throw error;
+  }
+  return exposedSkills;
+}
+
+async function findPluginSkillSource(pluginTarget, skillName, providedCount) {
+  const candidates = [
+    path.join(pluginTarget, "skills", skillName),
+    path.join(pluginTarget, skillName)
+  ];
+  if (providedCount === 1) candidates.push(pluginTarget);
+
+  for (const candidate of candidates) {
+    if (await pathExists(path.join(candidate, "SKILL.md"))) return candidate;
+  }
+  throw new Error(`Plugin declares skill "${skillName}" but no SKILL.md was found in ${candidates.join(" or ")}.`);
+}
+
+function assertSafeSkillName(skillName) {
+  if (typeof skillName !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(skillName)) {
+    throw new Error(`Plugin skill name is unsafe: ${String(skillName)}`);
+  }
+}
+
+async function pathEntryExists(value) {
+  try {
+    await fs.lstat(value);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -322,4 +395,3 @@ async function installRawSkill(sourcePath, target, skillName) {
   registry.skills = Array.from(new Set([...(registry.skills || []), skillName])).sort();
   await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
 }
-

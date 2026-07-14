@@ -48,14 +48,144 @@ Use `dotaios activate` (and `dotaios mcp install`) to wire these, see the README
 
 ### Skills: native in every tool
 
-`dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into:
+`dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into the client paths that are safe for the installed tools:
 
 - `~/.claude/skills/` for Claude Code, and
-- `~/.agents/skills/`, the shared skills folder that Codex, Cursor 2.5+, Antigravity, Warp, and VS Code all read.
+- `~/.agents/skills/` as the single shared Agent Skills path for Codex, Cursor, and Gemini CLI, and
+- `~/.gemini/config/skills/` for Antigravity's documented global skill path.
 
 For Hermes, DotAIOS adds your `~/aios/skills` folder to `skills.external_dirs` in `~/.hermes/config.yaml`.
 
-The link is live, so editing a skill once updates it everywhere. DotAIOS manages only the links it created, and removes a link when its source skill is gone. Surfaces that do not read a local skills folder, such as the Claude desktop app and browser based chat, keep using the AGENTS.md context that `activate` and `connect` set up.
+The shared path is intentionally canonical. DotAIOS does not also populate a
+second client-native path when that would make a client discover duplicate
+skill names. A migration removes only old DotAIOS-owned links from retired
+duplicate paths; real entries and foreign links are preserved. DotAIOS verifies
+that it created the filesystem targets, but client-version discovery remains an
+acceptance check for each installed tool. Surfaces that do not read a local
+skills folder, such as the Claude desktop app and browser based chat, keep
+using the AGENTS.md context that `activate` and `connect` set up.
+
+When you install or remove a skill through DotAIOS, propagation happens during
+that operation. If you create a skill folder manually, run `dotaios activate`
+to reconcile all native locations explicitly:
+
+```
+dotaios skills install
+dotaios skills doctor --json
+```
+
+`skills doctor` is read-only. It checks the generated catalogs, native-link
+coverage, managed bridges, and Hermes root/profile configuration. It reports
+Hermes as a native runtime without expecting a bridge file. If a temporary
+setup path tries to overwrite the real global bridges, `activate` refuses it;
+use a permanent AIOS folder instead.
+
+Configuration is not invocation proof. For a bounded acceptance check, run the
+explicit client probe against a disposable project fixture:
+
+```bash
+npx dotaios skills probe --client codex --path ~/aios --dry-run
+npx dotaios skills probe --client codex --path ~/aios --run \
+  --receipt /tmp/dotaios-codex-invocation.json
+```
+
+The probe defaults to dry-run and requires `--client` plus `--run` before it
+starts a model process. It links one temporary project skill through the
+registry-declared project target, runs the client with its safest bounded mode,
+and records a `dotaios.skill-invocation.v1` receipt. The receipt keeps
+`configured`, `discoverable`, `invoked`, and `produced` separate, includes the
+client version and `SKILL.md` SHA-256, and requires an exact marker line from
+the skill output. Unsupported or unsafe client surfaces are recorded as
+limitations, never as green invocation evidence.
+
+The probe is disposable and read-only with respect to the source AIOS folder.
+It is not a replacement for `skills doctor`, and a doctor report alone still
+cannot prove that a client used a skill.
+
+The doctor also reports managed aliases separately from foreign collisions. A
+managed alias is a symlink whose basename matches a skill's `name` in
+frontmatter while its target is that skill's canonical directory. Ordinary
+activation preserves these links. If a client reports duplicate skill names,
+preview an explicit cleanup first, then apply it only after review:
+
+```
+dotaios skills install --dry-run --prune-aliases
+dotaios skills install --prune-aliases
+```
+
+The prune flag removes only exact managed alias symlinks. It never removes real
+directories, broken foreign links, or links whose target does not match the
+canonical source. Foreign real-directory collisions still require an explicit
+ownership decision.
+
+### Project-owned skill adapters
+
+DotAIOS has two deliberately separate skill scopes:
+
+- **AIOS scope:** `~/aios/skills/` is the user's canonical cross-project skill
+  library. `dotaios activate` exposes it globally.
+- **Project scope:** `<project>/skills/` is the project's own portable skill
+  library. `dotaios attach <project>` (or `dotaios activate --project
+  <project>`) exposes it only inside that checkout.
+
+The bundled project targets are:
+
+- `<project>/.claude/skills/` for Claude Code;
+- `<project>/.agents/skills/` for Codex, Cursor, and Gemini CLI;
+- `<project>/.gemini/config/skills/` for Antigravity; and
+- `<project>/.hermes/config.yaml` with `<project>/skills` in
+  `skills.external_dirs` for Hermes.
+
+Each target is a symlink or config entry pointing to the project's own
+`skills/` folder. Editing a project skill therefore does not change the global
+AIOS skills. Existing real entries and foreign links are preserved, repeated
+attachment is idempotent, and `--dry-run` previews changes without writing.
+Attachment fails closed when a target root or Hermes config path is an
+unmanaged symlink, and a later attach removes only owned dangling skill links
+if the project deletes its `skills/` directory. Custom Hermes targets use the
+registry's declared `key` rather than assuming `skills.external_dirs`.
+Projects without a readable `skills/` directory are a no-op for this layer.
+
+```bash
+npx dotaios attach /path/to/project --path ~/aios
+npx dotaios attach /path/to/project --path ~/aios --dry-run
+```
+
+This proves filesystem/configuration propagation. It does not claim that every
+client version will discover or invoke a skill; native runtime acceptance is a
+separate client-level check.
+
+### Project-owned runtime adapters
+
+An AIOS folder may include an optional `agents.json` when it needs to add a
+runtime that is not in the bundled registry. Entries are merged by agent name
+and can declare a native skill target:
+
+```json
+{
+  "agents": [
+    {
+      "name": "Custom Runner",
+      "detect": ".custom-runner",
+      "bridge": null,
+      "skills": { "mode": "symlink", "dir": ".custom/skills" }
+    }
+  ]
+}
+```
+
+Run `dotaios activate --path ~/aios` after adding or changing this file. The
+same source skill tree is then propagated to the custom target, and
+`dotaios skills doctor --path ~/aios --json` reports its coverage. This is
+filesystem propagation; the custom runtime still needs its own client-level
+acceptance check to prove that it discovers and invokes the Agent Skills
+directory. A custom Hermes-style runtime may instead use
+`"mode": "config-external-dir"` with a home-relative `configFile` and
+`"key": "skills.external_dirs"`; activation and `skills doctor` include that
+configuration surface as well.
+
+For a project-local custom runtime, add a `project` object under `skills` with
+the same shape and run `dotaios attach <project> --path ~/aios`.
 
 ---
 

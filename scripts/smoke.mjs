@@ -33,7 +33,7 @@ const binaryFixture = path.join(tempRoot, "sample.bin");
 fs.writeFileSync(binaryFixture, Buffer.from([0xde, 0xad, 0xbe, 0xef]));
 run(["ingest", binaryFixture, "--path", aiosPath, "--dry-run"]);
 run(["ingest", binaryFixture, "--path", aiosPath]);
-run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--path", aiosPath]);
+run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--path", aiosPath, "--home", homePath]);
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--dry-run"]);
 run(["search", "smoke", "--path", aiosPath]);
 run(["search", "cloud-safe", "--scope", "skills", "--path", aiosPath]);

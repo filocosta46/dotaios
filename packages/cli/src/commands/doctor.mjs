@@ -136,11 +136,12 @@ async function checkAiosConfig(target) {
 async function checkAgentBridges(target, homePath) {
   const results = [];
   let foundBridge = false;
+  let foundNativeRuntime = false;
   let anyInstalled = false;
 
   const registry = await loadAgentRegistry(target);
   for (const agent of registry) {
-    const filePath = bridgePath(homePath, agent);
+    const filePath = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
 
     if (!await isAgentInstalled(homePath, agent)) {
       results.push({
@@ -151,6 +152,16 @@ async function checkAgentBridges(target, homePath) {
       continue;
     }
     anyInstalled = true;
+
+    if (!agent.bridge) {
+      foundNativeRuntime = true;
+      results.push({
+        name: `${agent.name} native skills`,
+        status: "ok",
+        detail: "Runtime has no DotAIOS bridge file; native skill configuration is checked separately."
+      });
+      continue;
+    }
 
     let content;
     try {
@@ -192,7 +203,7 @@ async function checkAgentBridges(target, homePath) {
       detail: "No known AI tools detected on this machine.",
       fix: "Install Claude Code, Cursor, Codex, or Gemini, then run `npx dotaios activate`."
     });
-  } else if (!foundBridge) {
+  } else if (!foundBridge && !foundNativeRuntime) {
     results.push({
       name: "At least one AI tool connected",
       status: "warn",

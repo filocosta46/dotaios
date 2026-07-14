@@ -2,6 +2,39 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## Unreleased
+
+## [1.22.0] - 2026-07-14
+### Added
+- **`dotaios skills doctor`** — health report for configured, discoverable, and
+  invoked skills across Claude Code, Agent Skills, Antigravity, Hermes, and
+  project targets. Surfaces source/bridge/native-link/Hermes evidence with
+  explicit canonical presence separate from warnings.
+- **`dotaios skills probe`** — bounded, disposable client invocation probe
+  with JSON receipt schema (`--client`, `--receipt`, `--dry-run`/`--run`) to
+  prove a skill is actually invocable on Codex, Gemini, Claude Code, Hermes,
+  Cursor, or Antigravity.
+- **Project-owned skill propagation.** `dotaios attach <project>` and
+  `dotaios activate --project <project>` expose a checkout's own `skills/`
+  directory to explicit Claude Code, Agent Skills, Antigravity, and Hermes
+  project targets while preserving the global AIOS skill library and foreign
+  entries.
+- **Remote sync parity in status.** `dotaios sync status` now verifies local
+  state against the remote branch so drift is visible before a tick runs.
+
+### Fixed
+- **Sync fail-closed outside `main`.** `dotaios sync tick` refuses writes when
+  the checkout is not on the exact `main` branch, preventing detached or
+  feature-branch sync from mutating the canonical AIOS remote.
+- **Unsafe project skill source guards.** Attachment fails closed on foreign
+  symlinked target roots and Hermes configs, rejects skill roots/files that
+  resolve outside the project, and refuses overlapping custom targets.
+- Project attachment cleans owned dangling links after a project removes its
+  skills, honors registry-provided Hermes skill keys, and does not overwrite
+  foreign symlinked bridge files.
+- Disabled unsafe detached sync hook path that could run outside controlled
+  worktree context.
+
 ## [1.21.0] - 2026-07-07
 ### Added
 - **Flagship: native agent skills-routing.** `dotaios skills resolve "<intent>"` ranks the installed skill that fits a free-text intent, with no embeddings, network, or model calls. Plain-text scoring over each skill's declared `triggers:` and `description`: exact-name hit, trigger token overlap, description overlap, specificity tiebreak. Prints the top match (name, dir, confidence, triggers, `SKILL.md` path); `--full` also prints the `SKILL.md` body, `--all` prints the ranked list, `--json` returns the documented shape for fleet and MCP callers. Exit 2 when nothing clears the bar so fleet scripts can branch on "no skill fits, hand-roll." The scoring lives in a new shared `packages/core/src/skill-resolver.mjs` so the CLI and MCP server use one function.

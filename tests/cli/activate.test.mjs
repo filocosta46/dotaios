@@ -61,4 +61,55 @@ describe("activateCommand — symlinks", () => {
     const content = await fs.readFile(skillFile, "utf8");
     assert.ok(content.includes("Test Skill"), "symlink should resolve to skill content");
   });
+
+  it("refuses to connect a temporary AIOS into the real home", async () => {
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    await assert.rejects(
+      activateCommand([
+        "--path", dirs.aiosPath,
+        "--home", os.homedir(),
+        "--all"
+      ]),
+      /temporary AIOS path/
+    );
+  });
+
+  it("refuses a permanent-looking symlink that resolves into the temp root", async () => {
+    const aliasRoot = await fs.mkdtemp(path.join(os.homedir(), ".dotaios-activate-alias-"));
+    const alias = path.join(aliasRoot, "aios");
+    await fs.symlink(dirs.aiosPath, alias, "dir");
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    await assert.rejects(
+      activateCommand([
+        "--path", alias,
+        "--home", os.homedir(),
+        "--all"
+      ]),
+      /temporary AIOS path/
+    );
+    await fs.rm(aliasRoot, { recursive: true, force: true });
+  });
+
+  it("refuses a home alias that resolves to the real user home", async () => {
+    const aliasHome = path.join(dirs.base, "home-alias");
+    await fs.symlink(os.homedir(), aliasHome, "dir");
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    await assert.rejects(
+      activateCommand([
+        "--path", dirs.aiosPath,
+        "--home", aliasHome,
+        "--all"
+      ]),
+      /temporary AIOS path/
+    );
+  });
 });

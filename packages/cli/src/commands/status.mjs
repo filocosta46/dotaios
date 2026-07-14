@@ -185,10 +185,15 @@ async function checkAgentBridges(target, homePath) {
   const registry = await loadAgentRegistry(target);
 
   for (const agent of registry) {
-    const filePath = bridgePath(homePath, agent);
+    const filePath = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
 
     if (!await isAgentInstalled(homePath, agent)) {
       results.push({ status: "[info]", path: filePath, note: `${agent.name} not installed` });
+      continue;
+    }
+
+    if (!agent.bridge) {
+      results.push({ status: "[ok]", path: filePath, note: `${agent.name} uses native runtime skill configuration` });
       continue;
     }
 

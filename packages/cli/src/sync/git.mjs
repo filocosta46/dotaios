@@ -59,6 +59,13 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
   }
 
   return {
+    async currentBranch() {
+      const { code, stdout } = await run(["symbolic-ref", "--quiet", "--short", "HEAD"]);
+      if (code !== 0) return null;
+      const branch = stdout.trim();
+      return branch || null;
+    },
+
     async dirty() {
       const { stdout } = await run(["status", "--porcelain"]);
       return stdout.trim().length > 0;
@@ -89,13 +96,35 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
     },
 
     async push(branch = "main") {
-      const { code, stderr } = await run(["push", "origin", branch]);
+      // Push the checked-out commit, not a possibly unrelated local branch.
+      // The tick guard ensures this is the exact local main checkout, so the
+      // checked-out HEAD is the one mirrored by this push.
+      const { code, stderr } = await run(["push", "origin", `HEAD:${branch}`]);
       if (code !== 0) throw new Error(`git push failed: ${redactToken(stderr.trim())}`);
     },
 
     async fetch() {
       const { code, stderr } = await run(["fetch", "origin"]);
       if (code !== 0) throw new Error(`git fetch failed: ${redactToken(stderr.trim())}`);
+    },
+
+    // Read the sync branch directly from the remote. This is deliberately
+    // separate from fetch/rebase: `sync status` must be able to verify the
+    // cached push receipt without changing the checkout or refs.
+    async remoteHead(branch = "main") {
+      if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-")) {
+        throw new Error("invalid sync branch");
+      }
+      const ref = `refs/heads/${branch}`;
+      const { code, stdout, stderr } = await run(["ls-remote", "origin", ref]);
+      if (code !== 0) {
+        throw new Error(`git ls-remote failed: ${redactToken(stderr.trim())}`);
+      }
+      const [sha, returnedRef] = stdout.trim().split(/\s+/);
+      if (!/^[0-9a-f]{40}$/i.test(sha || "") || returnedRef !== ref) {
+        throw new Error("git ls-remote returned no valid sync branch ref");
+      }
+      return sha;
     },
 
     // Pull by rebasing local commits on top of origin. Local changes must be

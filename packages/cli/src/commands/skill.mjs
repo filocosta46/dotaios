@@ -4,6 +4,7 @@ import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src
 import { readJson } from "../../../core/src/files.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { activateCommand } from "./activate.mjs";
 import { installCommand } from "./install.mjs";
 
 const HELP_TEXT = `Usage:
@@ -20,6 +21,7 @@ agent workflows. Plugins are skills that ship with code.
 
 Options:
   --path <dir>  Use an AIOS folder other than ~/aios
+  --home <dir>  Write native agent bridges and skills under this home directory
 `;
 
 export async function skillCommand(args) {
@@ -40,6 +42,7 @@ export async function skillCommand(args) {
     }
     const installArgs = [...positionals];
     if (options.path) installArgs.push("--path", options.path);
+    if (options.home) installArgs.push("--home", options.home);
     await installCommand(installArgs);
     return;
   }
@@ -61,7 +64,7 @@ export async function skillCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { path: null };
+  const options = { home: null, path: null };
   const positionals = [];
   let subcommand = null;
 
@@ -69,6 +72,9 @@ function parseOptions(args = []) {
     const arg = args[index];
     if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--home") {
+      options.home = readOptionValue(args, index, "--home");
       index += 1;
     } else if (!arg.startsWith("--") && !subcommand) {
       subcommand = arg;
@@ -134,8 +140,15 @@ async function removeSkill(name, options) {
   registry.plugins = plugins.filter((entry) => entry.name !== name);
   registry.skills = (registry.skills || []).filter((skill) => !removedSkillSet.has(skill));
 
+  for (const skill of removedSkillSet) {
+    await fs.rm(path.join(target, "skills", skill), { recursive: true, force: true });
+  }
+
   await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
   await writeSkillsIndex(target);
+  const activationArgs = ["--path", target];
+  if (options.home) activationArgs.push("--home", options.home);
+  await activateCommand(activationArgs);
   console.log(`Removed ${name} from ${pluginDir}.`);
   console.log("Refreshed skills/INDEX.md.");
 }

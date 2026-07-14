@@ -43,11 +43,22 @@ service.
   in the app), commit with a short message, and push. At the start of your next
   laptop session the `process-inbox` skill files the note into the right place
   and deletes the inbox file. This is the intended capture path from a phone.
-- **Let the laptop reconcile:** run `dotaios sync tick` on the laptop (it runs
-  automatically on a hook). The tick pulls your phone commit by rebasing the
-  local state on top of it, then pushes the combined history back. Your phone
-  receives the result on GitSync's next scheduled or manual sync. In MGit,
-  fetch and pull manually.
+- **Let the laptop reconcile:** run `dotaios sync tick` on the laptop, or use a
+  dedicated scheduled sync worktree. The tick pulls your phone commit by
+  rebasing the local state on top of it, then pushes the combined history back.
+  Your phone receives the result on GitSync's next scheduled or manual sync. In
+  MGit, fetch and pull manually.
+
+## Sync safety boundary
+
+DotAIOS does not detach a sync tick from ordinary commands by default. A
+feature checkout must never be able to commit, rebase, push, or reset itself
+because an unrelated command ran. Use the dedicated scoped sync wrapper or
+run `dotaios sync tick` explicitly from the intended sync worktree.
+
+The legacy detached hook is available only with the explicit
+`DOTAIOS_ALLOW_AUTO_SYNC_HOOK=1` opt-in. Set that variable only in a controlled
+main sync worktree. Do not set it in a normal project checkout.
 
 ## Keeping conflicts small
 
