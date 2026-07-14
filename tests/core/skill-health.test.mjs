@@ -25,6 +25,22 @@ async function makeAios() {
   return { aiosPath, homePath };
 }
 
+async function installProbeAgent({ aiosPath, homePath }) {
+  await fs.writeFile(
+    path.join(aiosPath, "agents.json"),
+    JSON.stringify({
+      agents: [{
+        name: "Probe Agent",
+        detect: ".probe-agent",
+        bridge: null,
+        command: "node",
+        skills: { mode: "symlink", dir: ".agents/skills" }
+      }]
+    })
+  );
+  await fs.mkdir(path.join(homePath, ".probe-agent"), { recursive: true });
+}
+
 test("inspectSkillHealth reports complete native coverage and fresh catalogs", async () => {
   const { aiosPath, homePath } = await makeAios();
   for (const targetDir of [
@@ -39,6 +55,7 @@ test("inspectSkillHealth reports complete native coverage and fresh catalogs", a
   assert.equal(report.catalogs.index.current, true);
   assert.equal(report.catalogs.resolver.current, true);
   assert.equal(report.targets.every((target) => target.complete), true);
+  assert.equal(report.targets.filter((target) => target.status === "active").every((target) => target.canonicalPresent), true);
   assert.equal(report.hermes.configs[0].status, "healthy");
 });
 
@@ -74,6 +91,7 @@ test("inspectSkillHealth reports missing, foreign, stale, and absent Hermes surf
   const shared = report.targets.find((target) => target.dir === ".agents/skills");
   assert.deepEqual(shared.missing, []);
   assert.equal(shared.foreign.length, 1);
+  assert.equal(shared.canonicalPresent, false);
   assert.equal(report.catalogs.resolver.current, false);
   assert.equal(report.bridges.find((bridge) => bridge.name === "Claude Code").status, "stale");
   assert.equal(report.hermes.configs[0].status, "missing");
@@ -87,6 +105,7 @@ test("inspectSkillHealth does not fail for agents and Hermes that are not instal
   const report = await inspectSkillHealth({ aiosPath, homePath });
   assert.equal(report.healthy, true);
   assert.ok(report.targets.every((target) => target.status === "not-detected"));
+  assert.ok(report.targets.every((target) => target.canonicalPresent === null));
   assert.ok(report.bridges.filter((bridge) => bridge.bridge !== false).every((bridge) => bridge.status === "not-detected"));
   assert.ok(report.bridges.filter((bridge) => bridge.bridge === false).every((bridge) => bridge.status === "not-applicable"));
   assert.equal(report.hermes.available, false);
@@ -95,7 +114,7 @@ test("inspectSkillHealth does not fail for agents and Hermes that are not instal
 test("inspectSkillHealth enumerates stale extra native links", async () => {
   const { aiosPath, homePath } = await makeAios();
   const targetDir = path.join(homePath, ".agents", "skills");
-  await fs.mkdir(targetDir, { recursive: true });
+  await installSymlinkSkills({ aiosPath, targetDir });
   const staleSource = path.join(aiosPath, "skills", "removed-skill");
   await fs.symlink(staleSource, path.join(targetDir, "removed-skill"), "dir");
 
@@ -104,20 +123,29 @@ test("inspectSkillHealth enumerates stale extra native links", async () => {
   assert.equal(target.extra.length, 1);
   assert.equal(target.stale.length, 1);
   assert.equal(target.extra[0].kind, "stale-owned");
+  assert.equal(target.canonicalPresent, true);
+  assert.equal(target.complete, false);
   assert.equal(report.healthy, false);
 });
 
 test("inspectSkillHealth flags readable foreign aliases that can confuse a client", async () => {
   const { aiosPath, homePath } = await makeAios();
   const targetDir = path.join(homePath, ".agents", "skills");
-  await fs.mkdir(targetDir, { recursive: true });
+  await installSymlinkSkills({ aiosPath, targetDir });
   await fs.symlink(path.join(aiosPath, "skills", "today"), path.join(targetDir, "vendor-today"), "dir");
+  await installProbeAgent({ aiosPath, homePath });
 
   const report = await inspectSkillHealth({ aiosPath, homePath });
   const target = report.targets.find((entry) => entry.dir === ".agents/skills");
   assert.equal(target.extra[0].kind, "foreign-symlink");
   assert.match(report.issues.join("\n"), /\.agents\/skills: 1 unmanaged extra link/);
+  assert.equal(target.canonicalPresent, true);
   assert.equal(target.complete, false);
+  const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
+  assert.equal(runtime.capabilities.configured, "yes");
+  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.capabilities.invocation, "not-run");
+  assert.equal(runtime.evidence.skillTarget.canonicalPresent, true);
   assert.equal(report.healthy, false);
 });
 
@@ -129,8 +157,9 @@ test("inspectSkillHealth identifies a canonical frontmatter alias separately", a
     "---\nname: plan-today\ndescription: plan today\ntriggers:\n  - plan today\n---\n"
   );
   const targetDir = path.join(homePath, ".agents", "skills");
-  await fs.mkdir(targetDir, { recursive: true });
+  await installSymlinkSkills({ aiosPath, targetDir });
   await fs.symlink(source, path.join(targetDir, "plan-today"), "dir");
+  await installProbeAgent({ aiosPath, homePath });
 
   const report = await inspectSkillHealth({ aiosPath, homePath });
   const target = report.targets.find((entry) => entry.dir === ".agents/skills");
@@ -138,7 +167,13 @@ test("inspectSkillHealth identifies a canonical frontmatter alias separately", a
   assert.equal(target.aliases[0].alias, "plan-today");
   assert.equal(target.aliases[0].canonical, "today");
   assert.match(report.issues.join("\n"), /duplicate managed alias/);
+  assert.equal(target.canonicalPresent, true);
   assert.equal(target.complete, false);
+  const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
+  assert.equal(runtime.capabilities.configured, "yes");
+  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.capabilities.invocation, "not-run");
+  assert.equal(runtime.evidence.skillTarget.canonicalPresent, true);
 });
 
 test("inspectSkillHealth separates configured and discoverable from unverified invocation", async () => {
@@ -171,7 +206,7 @@ test("inspectSkillHealth separates configured and discoverable from unverified i
   assert.equal(report.healthy, true);
 });
 
-test("inspectSkillHealth does not call a conflicted target path-ready", async () => {
+test("inspectSkillHealth keeps warning-only foreign extras path-ready", async () => {
   const { aiosPath, homePath } = await makeAios();
   const targetDir = path.join(homePath, ".agents", "skills");
   await installSymlinkSkills({ aiosPath, targetDir });
@@ -193,8 +228,56 @@ test("inspectSkillHealth does not call a conflicted target path-ready", async ()
   const report = await inspectSkillHealth({ aiosPath, homePath });
   const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
 
-  assert.equal(runtime.capabilities.discoverable, "no");
+  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.evidence.skillTarget.canonicalPresent, true);
   assert.equal(runtime.evidence.skillTarget.complete, false);
+});
+
+test("inspectSkillHealth keeps missing, broken, and same-name foreign canonical entries not discoverable", async () => {
+  const cases = [
+    {
+      name: "missing",
+      prepare: async ({ aiosPath, targetDir }) => {
+        await fs.mkdir(targetDir, { recursive: true });
+      }
+    },
+    {
+      name: "broken",
+      prepare: async ({ aiosPath, targetDir }) => {
+        await installSymlinkSkills({ aiosPath, targetDir });
+        await fs.rm(path.join(targetDir, "today"), { recursive: true, force: true });
+        await fs.symlink(path.join(targetDir, "missing-today"), path.join(targetDir, "today"), "dir");
+      }
+    },
+    {
+      name: "same-name foreign",
+      prepare: async ({ aiosPath, homePath, targetDir }) => {
+        await installSymlinkSkills({ aiosPath, targetDir });
+        await fs.rm(path.join(targetDir, "today"), { recursive: true, force: true });
+        const foreignSource = path.join(homePath, "foreign-skills", "today");
+        await fs.mkdir(foreignSource, { recursive: true });
+        await fs.symlink(foreignSource, path.join(targetDir, "today"), "dir");
+      }
+    }
+  ];
+
+  for (const current of cases) {
+    const { aiosPath, homePath } = await makeAios();
+    const targetDir = path.join(homePath, ".agents", "skills");
+    await current.prepare({ aiosPath, homePath, targetDir });
+    await installProbeAgent({ aiosPath, homePath });
+
+    const report = await inspectSkillHealth({ aiosPath, homePath });
+    const target = report.targets.find((entry) => entry.dir === ".agents/skills");
+    const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
+
+    assert.equal(target.canonicalPresent, false, current.name);
+    assert.equal(target.complete, false, current.name);
+    assert.equal(runtime.capabilities.configured, "yes", current.name);
+    assert.equal(runtime.capabilities.discoverable, "no", current.name);
+    assert.equal(runtime.capabilities.invocation, "not-run", current.name);
+    assert.equal(runtime.evidence.skillTarget.canonicalPresent, false, current.name);
+  }
 });
 
 test("inspectSkillHealth keeps configured paths separate from runtime installation", async () => {

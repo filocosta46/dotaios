@@ -135,7 +135,7 @@ function discoverableStatus({ agent, installed, bridge, targetByDir, hermes }) {
   if (agent.skills?.mode === "symlink") {
     const target = targetByDir.get(agent.skills.dir);
     if (!target || target.status !== "active") return installed ? "no" : "not-detected";
-    return target.complete ? "path-ready" : "no";
+    return target.canonicalPresent ? "path-ready" : "no";
   }
   if (agent.skills?.mode === "config-external-dir") {
     return hermes.configs.length > 0 && hermes.configs.every((entry) => entry.status === "healthy")
@@ -150,8 +150,18 @@ function skillTargetEvidence(agent, targetByDir) {
   if (agent.skills?.mode !== "symlink") return null;
   const target = targetByDir.get(agent.skills.dir);
   return target
-    ? { path: target.path, status: target.status, complete: target.complete }
-    : { path: agent.skills.dir, status: "not-detected", complete: false };
+    ? {
+      path: target.path,
+      status: target.status,
+      complete: target.complete,
+      canonicalPresent: target.canonicalPresent
+    }
+    : {
+      path: agent.skills.dir,
+      status: "not-detected",
+      complete: false,
+      canonicalPresent: null
+    };
 }
 
 function hermesEvidence(agent, homePath, hermes) {
@@ -211,7 +221,8 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
       aliases: [],
       extra,
       stale,
-      complete: true
+      complete: true,
+      canonicalPresent: null
     };
   }
 
@@ -287,6 +298,10 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
   }
 
   const hasUnmanagedExtras = extra.some((entry) => entry.kind !== "stale-owned");
+  const canonicalPresent = linked.length === sourceSkills.length
+    && missing.length === 0
+    && broken.length === 0
+    && foreign.length === 0;
   return {
     dir: path.relative(homePath, targetDir),
     path: targetDir,
@@ -299,6 +314,7 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
     aliases,
     extra,
     stale,
+    canonicalPresent,
     complete: missing.length === 0
       && broken.length === 0
       && foreign.length === 0
