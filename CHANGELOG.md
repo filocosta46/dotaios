@@ -3,16 +3,37 @@
 All notable changes to DotAIOS will be documented in this file.
 
 ## Unreleased
+
+## [1.22.0] - 2026-07-14
 ### Added
-- Project-owned skill propagation. `dotaios attach <project>` and
+- **`dotaios skills doctor`** — health report for configured, discoverable, and
+  invoked skills across Claude Code, Agent Skills, Antigravity, Hermes, and
+  project targets. Surfaces source/bridge/native-link/Hermes evidence with
+  explicit canonical presence separate from warnings.
+- **`dotaios skills probe`** — bounded, disposable client invocation probe
+  with JSON receipt schema (`--client`, `--receipt`, `--dry-run`/`--run`) to
+  prove a skill is actually invocable on Codex, Gemini, Claude Code, Hermes,
+  Cursor, or Antigravity.
+- **Project-owned skill propagation.** `dotaios attach <project>` and
   `dotaios activate --project <project>` expose a checkout's own `skills/`
   directory to explicit Claude Code, Agent Skills, Antigravity, and Hermes
   project targets while preserving the global AIOS skill library and foreign
   entries.
+- **Remote sync parity in status.** `dotaios sync status` now verifies local
+  state against the remote branch so drift is visible before a tick runs.
+
 ### Fixed
-- Project attachment now fails closed on foreign symlinked target roots and
-  Hermes configs, cleans owned dangling links after a project removes its
-  skills, and honors registry-provided Hermes skill keys.
+- **Sync fail-closed outside `main`.** `dotaios sync tick` refuses writes when
+  the checkout is not on the exact `main` branch, preventing detached or
+  feature-branch sync from mutating the canonical AIOS remote.
+- **Unsafe project skill source guards.** Attachment fails closed on foreign
+  symlinked target roots and Hermes configs, rejects skill roots/files that
+  resolve outside the project, and refuses overlapping custom targets.
+- Project attachment cleans owned dangling links after a project removes its
+  skills, honors registry-provided Hermes skill keys, and does not overwrite
+  foreign symlinked bridge files.
+- Disabled unsafe detached sync hook path that could run outside controlled
+  worktree context.
 
 ## [1.21.0] - 2026-07-07
 ### Added

@@ -1,6 +1,6 @@
 {
   "name": "dotaios",
-  "version": "1.21.0",
+  "version": "1.22.0",
   "description": "One folder every AI reads. Local-first context for Claude Code, Cursor, Codex, Antigravity, and other assistants.",
   "type": "module",
   "repository": {
