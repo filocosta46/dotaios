@@ -53,6 +53,14 @@ export const dictionary = {
       toolsLabel: 'Works with',
       tools: ['Claude Code', 'Cursor', 'Codex', 'Gemini'],
     },
+    demo: {
+      label: 'Setup preview',
+      windowTitle: 'DotAIOS setup',
+      promptLabel: 'You',
+      terminalLabel: 'Terminal',
+      questionsLabel: 'Onboarding',
+      initCommand: 'npx dotaios init',
+    },
     folder: {
       title: 'One folder. Everything your AI should know.',
       desc: 'Every AI starts from the same page. Plain files you can open, edit, and move whenever you want.',
@@ -170,6 +178,14 @@ export const dictionary = {
       terminal: 'Preferisci il Terminale?',
       toolsLabel: 'Funziona con',
       tools: ['Claude Code', 'Cursor', 'Codex', 'Gemini'],
+    },
+    demo: {
+      label: 'Anteprima setup',
+      windowTitle: 'Setup DotAIOS',
+      promptLabel: 'Tu',
+      terminalLabel: 'Terminale',
+      questionsLabel: 'Onboarding',
+      initCommand: 'npx dotaios init',
     },
     folder: {
       title: 'Una cartella. Tutto quello che la tua AI deve sapere.',

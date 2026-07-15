@@ -1,6 +1,7 @@
 /*
  * DotAIOS landing styles.
- * Identity: Apple-Finder light. Flat #f5f5f7 canvas, white cards, one blue accent.
+ * Identity: Apple-Finder light page, dark IDE folder band, one blue accent.
+ * Type: Geist + Geist Mono (no Inter default).
  * Radius system: panels/cards 16px, controls 10px, chips 999px.
  * Motion: enter transitions <= 300ms ease-out, explorer pane 180ms,
  * press feedback 120ms. Everything collapses under prefers-reduced-motion.
@@ -21,15 +22,19 @@
   --line-strong: rgba(29, 29, 31, 0.16);
   --shadow-soft: 0 2px 8px rgba(29, 29, 31, 0.05), 0 18px 44px rgba(29, 29, 31, 0.08);
   --shadow-lift: 0 4px 10px rgba(29, 29, 31, 0.06), 0 24px 56px rgba(29, 29, 31, 0.12);
+  --dark-bg: #0d1117;
+  --dark-surface: #161b22;
+  --dark-topbar: #21262d;
+  --dark-line: #30363d;
+  --dark-text: #e6edf3;
+  --dark-muted: #8b949e;
   --max: 1120px;
   --gutter: clamp(20px, 5vw, 44px);
   --radius-panel: 16px;
   --radius-control: 10px;
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
-  --sans:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica,
-    Arial, sans-serif;
-  --mono: "SF Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: "Geist Variable", "Geist", ui-sans-serif, system-ui, sans-serif;
+  --mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * {
@@ -221,9 +226,10 @@ pre {
 .hero {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
-  gap: clamp(32px, 6vw, 72px);
+  gap: clamp(28px, 5vw, 56px);
   align-items: center;
-  padding: clamp(56px, 9vw, 108px) 0 clamp(48px, 7vw, 88px);
+  min-height: calc(100dvh - 64px);
+  padding: clamp(32px, 5vw, 72px) 0 clamp(36px, 5vw, 64px);
 }
 
 .panel-kicker {
@@ -388,6 +394,21 @@ details .snippet {
   scroll-margin-top: 72px;
 }
 
+.section-dark {
+  margin-inline: calc(var(--gutter) * -1);
+  padding-inline: var(--gutter);
+  background: var(--dark-bg);
+  color: var(--dark-text);
+}
+
+.section-dark .section-intro p {
+  color: var(--dark-muted);
+}
+
+.section-dark .section-intro h2 {
+  color: var(--dark-text);
+}
+
 .section-intro {
   max-width: 640px;
   margin-bottom: clamp(24px, 4vw, 40px);
@@ -406,22 +427,159 @@ details .snippet {
   font-size: 1.02rem;
 }
 
-/* ---------- Folder explorer (light Finder window) ---------- */
+/* ---------- Install demo (animated terminal) ---------- */
+
+.install-demo {
+  margin-bottom: clamp(20px, 4vw, 32px);
+}
+
+.demo-window {
+  overflow: hidden;
+  border: 1px solid var(--dark-line);
+  border-radius: var(--radius-panel);
+  background: var(--dark-surface);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
+}
+
+.demo-topbar {
+  display: grid;
+  grid-template-columns: 52px 1fr 52px;
+  align-items: center;
+  border-bottom: 1px solid var(--dark-line);
+  background: var(--dark-topbar);
+  padding: 11px 15px;
+}
+
+.demo-title {
+  text-align: center;
+  color: var(--dark-muted);
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.demo-body {
+  display: grid;
+  gap: 18px;
+  padding: clamp(18px, 3vw, 24px);
+}
+
+.demo-block {
+  display: grid;
+  gap: 8px;
+}
+
+.demo-label {
+  color: var(--dark-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.demo-prompt {
+  margin: 0;
+  border: 1px solid var(--dark-line);
+  border-radius: var(--radius-control);
+  background: rgba(0, 113, 227, 0.1);
+  color: var(--dark-text);
+  padding: 12px 14px;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.demo-terminal {
+  border: 1px solid var(--dark-line);
+  border-radius: var(--radius-control);
+  background: #010409;
+  padding: 12px 14px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.demo-command,
+.demo-line {
+  margin: 0;
+  color: var(--dark-muted);
+}
+
+.demo-command {
+  color: var(--dark-text);
+  margin-bottom: 8px;
+}
+
+.demo-prompt-char {
+  color: var(--highlight);
+  font-weight: 700;
+}
+
+.demo-cursor {
+  color: var(--highlight);
+  animation: demo-blink 1s step-end infinite;
+}
+
+.demo-questions {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.demo-question {
+  border: 1px solid var(--dark-line);
+  border-radius: var(--radius-control);
+  background: rgba(255, 255, 255, 0.03);
+  padding: 12px 14px;
+  animation: demo-rise 280ms var(--ease-out);
+}
+
+.demo-question-text {
+  margin: 0;
+  color: var(--dark-text);
+  font-size: 0.88rem;
+  font-weight: 590;
+}
+
+.demo-answer {
+  margin: 8px 0 0;
+  color: var(--dark-muted);
+  font-size: 0.84rem;
+}
+
+@keyframes demo-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes demo-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---------- Folder explorer (dark IDE window) ---------- */
 
 .folder-preview {
   overflow: hidden;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--dark-line);
   border-radius: var(--radius-panel);
-  background: var(--surface);
-  box-shadow: var(--shadow-soft);
+  background: var(--dark-bg);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35);
 }
 
 .preview-topbar {
   display: grid;
   grid-template-columns: 52px 1fr 52px;
   align-items: center;
-  border-bottom: 1px solid var(--line);
-  background: linear-gradient(180deg, #f6f6f8, #ececef);
+  border-bottom: 1px solid var(--dark-line);
+  background: var(--dark-topbar);
   padding: 11px 15px;
 }
 
@@ -447,7 +605,7 @@ details .snippet {
 }
 
 .preview-topbar code {
-  color: var(--ink-2);
+  color: var(--dark-muted);
   text-align: center;
   font-size: 0.78rem;
 }
@@ -462,8 +620,8 @@ details .snippet {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  border-right: 1px solid var(--line);
-  background: #f0f0f3;
+  border-right: 1px solid var(--dark-line);
+  background: var(--dark-surface);
   padding: 12px 10px;
 }
 
@@ -476,21 +634,23 @@ details .snippet {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--ink);
+  color: var(--dark-muted);
   padding: 10px 11px;
   text-align: left;
-  font-size: 0.92rem;
+  font-family: var(--mono);
+  font-size: 0.84rem;
   font-weight: 500;
-  transition: background-color 160ms var(--ease-out);
+  transition: background-color 160ms var(--ease-out), color 160ms var(--ease-out);
 }
 
 .file-tree button:hover {
-  background: rgba(29, 29, 31, 0.05);
+  background: rgba(139, 211, 255, 0.08);
+  color: var(--dark-text);
 }
 
 .file-tree button.active {
-  background: rgba(0, 113, 227, 0.12);
-  color: var(--accent-deep);
+  background: rgba(0, 113, 227, 0.18);
+  color: #fff;
   font-weight: 590;
 }
 
@@ -522,23 +682,24 @@ details .snippet {
   width: 12px;
   height: 15px;
   border-radius: 2px;
-  background: #fff;
-  border: 1px solid rgba(29, 29, 31, 0.3);
-  box-shadow: inset 0 3px 0 rgba(100, 181, 255, 0.5);
+  background: #d6deeb;
+  border: 0;
+  box-shadow: none;
 }
 
 .icon-doc::after {
   content: "";
   position: absolute;
-  right: -1px;
-  top: -1px;
-  border-top: 5px solid rgba(29, 29, 31, 0.24);
+  right: 0;
+  top: 0;
+  border-top: 5px solid #8fa3ba;
   border-left: 5px solid transparent;
 }
 
 .document-pane {
   min-width: 0;
   padding: clamp(22px, 4vw, 34px);
+  color: var(--dark-text);
 }
 
 .document-pane header {
@@ -546,7 +707,7 @@ details .snippet {
   align-items: center;
   gap: 10px;
   margin-bottom: 16px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--dark-line);
   padding-bottom: 14px;
 }
 
@@ -558,7 +719,7 @@ details .snippet {
 
 .document-pane .lead {
   max-width: 58ch;
-  color: var(--ink);
+  color: #fff;
   font-size: 1.02rem;
   font-weight: 590;
 }
@@ -566,7 +727,7 @@ details .snippet {
 .document-pane .pane-body {
   margin-top: 8px;
   max-width: 58ch;
-  color: var(--ink-2);
+  color: var(--dark-muted);
 }
 
 .file-list {
@@ -580,7 +741,7 @@ details .snippet {
   gap: 12px;
   align-items: center;
   border-radius: var(--radius-control);
-  background: var(--bg);
+  background: rgba(255, 255, 255, 0.04);
   padding: 12px 14px;
 }
 
@@ -589,12 +750,13 @@ details .snippet {
   font-family: var(--mono);
   font-size: 0.84rem;
   font-weight: 600;
+  color: var(--dark-text);
 }
 
 .file-row span {
   display: block;
   margin-top: 2px;
-  color: var(--ink-2);
+  color: var(--dark-muted);
   font-size: 0.88rem;
 }
 
@@ -859,6 +1021,14 @@ details .snippet {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
   }
+
+  .demo-cursor {
+    animation: none;
+  }
+
+  .demo-question {
+    animation: none;
+  }
 }
 
 /* ---------- Responsive ---------- */
@@ -893,7 +1063,7 @@ details .snippet {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     border-right: 0;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid var(--dark-line);
   }
 
   .ask-grid,

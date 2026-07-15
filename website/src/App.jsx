@@ -7,6 +7,7 @@ import {
   dictionary,
   folderViews,
 } from './content.js'
+import InstallDemo from './InstallDemo.jsx'
 
 function detectLanguage() {
   const params = new URLSearchParams(window.location.search)
@@ -191,8 +192,9 @@ function FolderExplorer({t}) {
   const view = t.folder.views[activeItem.id]
 
   return (
-    <section className="section" id="explorer" data-reveal>
+    <section className="section section-dark" id="explorer" data-reveal>
       <SectionIntro title={t.folder.title} desc={t.folder.desc} />
+      <InstallDemo t={t} />
       <div className="folder-preview">
         <div className="preview-topbar">
           <div className="window-dots" aria-hidden="true">
