@@ -1180,7 +1180,7 @@ details .snippet {
   }
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 1280px) {
   .hero {
     grid-template-columns: 1fr;
     gap: clamp(20px, 4vw, 32px);
