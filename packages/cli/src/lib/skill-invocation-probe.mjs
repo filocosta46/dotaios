@@ -162,6 +162,25 @@ export async function runSkillInvocationProbe({
         startedAt,
         finishedAt: new Date().toISOString()
       });
+    } else if (dryRun) {
+      // An explicit dry run documents the would-be invocation and never
+      // spawns the client, so it must not require the binary on PATH
+      // (CI runners have no client CLIs installed).
+      receipt = createInvocationReceipt({
+        client: definition.label,
+        clientVersion: version,
+        configured,
+        discoverable,
+        targetPath: target.path,
+        skillName: PROBE_SKILL,
+        skillPath,
+        skillDigest: digest,
+        marker,
+        command: definition.build({ projectPath, outputPath: "<temporary-output>", prompt }).receiptCommand,
+        limitation: "client was not invoked; pass --run for the explicit live probe",
+        startedAt,
+        finishedAt: new Date().toISOString()
+      });
     } else if (!commandExists(definition.binary)) {
       receipt = createInvocationReceipt({
         client: definition.label,
@@ -177,7 +196,7 @@ export async function runSkillInvocationProbe({
         startedAt,
         finishedAt: new Date().toISOString()
       });
-    } else if (dryRun || !run) {
+    } else if (!run) {
       receipt = createInvocationReceipt({
         client: definition.label,
         clientVersion: version,
