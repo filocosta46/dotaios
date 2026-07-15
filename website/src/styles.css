@@ -31,12 +31,6 @@
   --mac-muted: rgba(235, 235, 245, 0.6);
   --mac-folder: #4a9eff;
   --mac-folder-tab: #6eb4ff;
-  --claude-bg: #2b2a27;
-  --claude-surface: #353432;
-  --claude-user: #3d3c38;
-  --claude-accent: #d97757;
-  --claude-text: #ececec;
-  --claude-muted: rgba(236, 236, 236, 0.65);
   --max: 1120px;
   --gutter: clamp(20px, 5vw, 44px);
   --radius-panel: 16px;
@@ -157,39 +151,6 @@ pre {
   box-shadow: 0 1px 0 rgba(29, 29, 31, 0.04);
 }
 
-.site-header--dark-zone {
-  background: color-mix(in srgb, var(--ink) 82%, transparent);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
-}
-
-.site-header--dark-zone .nav {
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.site-header--dark-zone .nav a:hover {
-  color: #fff;
-}
-
-.site-header--dark-zone .brand {
-  color: #fff;
-}
-
-.site-header--dark-zone .language-switch {
-  border-color: rgba(255, 255, 255, 0.16);
-  background: rgba(255, 255, 255, 0.08);
-}
-
-.site-header--dark-zone .language-switch button {
-  color: rgba(255, 255, 255, 0.72);
-}
-
-.site-header--dark-zone .language-switch button[aria-pressed="true"] {
-  background: rgba(255, 255, 255, 0.18);
-  color: #fff;
-}
-
 .brand {
   display: inline-flex;
   align-items: center;
@@ -288,8 +249,7 @@ pre {
   grid-template-columns: minmax(0, 1.05fr) minmax(340px, 0.95fr);
   gap: clamp(28px, 5vw, 56px);
   align-items: center;
-  min-height: calc(100dvh - 64px);
-  padding: clamp(32px, 5vw, 72px) 0 clamp(36px, 5vw, 64px);
+  padding: clamp(32px, 5vw, 56px) 0 clamp(40px, 5vw, 64px);
 }
 
 .panel-kicker {
@@ -301,60 +261,27 @@ pre {
 }
 
 .hero h1 {
-  max-width: 24ch;
+  max-width: 100%;
   margin-top: 14px;
   text-wrap: balance;
-  font-size: clamp(2.3rem, 5vw, 3.7rem);
+  font-size: clamp(2.5rem, 6vw, 4.25rem);
   font-weight: 700;
-  line-height: 1.05;
-  letter-spacing: -0.022em;
+  line-height: 1.04;
+  letter-spacing: -0.024em;
 }
 
 .hero-intro {
-  max-width: 52ch;
-  margin-top: 22px;
+  max-width: 42ch;
+  margin-top: 20px;
   color: var(--ink-2);
-  font-size: clamp(1.04rem, 2vw, 1.16rem);
+  font-size: clamp(1.02rem, 2vw, 1.12rem);
 }
 
-.hero-point {
-  max-width: 48ch;
-  margin-top: 14px;
-  font-size: clamp(1.04rem, 2vw, 1.16rem);
-  font-weight: 590;
-  color: var(--ink);
-}
-
-.tool-strip-wrap {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 28px;
-}
-
-.tool-strip-label {
+.hero-tools {
+  max-width: 42ch;
+  margin-top: 20px;
   color: var(--ink-2);
-  font-size: 0.85rem;
-}
-
-.tool-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.tool-strip li {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink);
-  padding: 6px 12px;
-  font-size: 0.85rem;
-  font-weight: 590;
+  font-size: 0.88rem;
 }
 
 /* ---------- Install panel ---------- */
@@ -450,12 +377,22 @@ details .snippet {
 /* ---------- Sections ---------- */
 
 .section {
-  padding-block: clamp(56px, 9vw, 104px);
+  padding-block: clamp(4rem, 6vw, 6rem);
   scroll-margin-top: 72px;
 }
 
 .section-explorer {
-  background: var(--surface);
+  position: relative;
+}
+
+.section-explorer::before {
+  content: "";
+  position: absolute;
+  inset: 8% -8vw;
+  z-index: -1;
+  border-radius: 24px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 55%, transparent), transparent);
+  pointer-events: none;
 }
 
 .section-intro {
@@ -491,10 +428,6 @@ details .snippet {
   background: var(--mac-surface);
 }
 
-.mac-window--claude {
-  background: var(--claude-bg);
-}
-
 .mac-titlebar {
   display: grid;
   grid-template-columns: 72px 1fr 72px;
@@ -503,11 +436,6 @@ details .snippet {
   padding: 0 12px;
   background: var(--mac-toolbar);
   border-bottom: 1px solid var(--mac-line);
-}
-
-.mac-window--claude .mac-titlebar {
-  background: #3a3936;
-  border-bottom-color: rgba(255, 255, 255, 0.06);
 }
 
 .mac-traffic-lights {
@@ -543,177 +471,12 @@ details .snippet {
   letter-spacing: -0.01em;
 }
 
-.mac-window--claude .mac-titlebar-title {
-  color: var(--claude-muted);
-}
-
 .mac-titlebar-spacer {
   width: 72px;
 }
 
 .mac-window-content {
   min-height: 0;
-}
-
-/* ---------- Claude chat demo ---------- */
-
-.install-demo {
-  margin-bottom: clamp(20px, 4vw, 32px);
-}
-
-.claude-chat {
-  display: grid;
-  gap: 16px;
-  max-height: 420px;
-  overflow-y: auto;
-  padding: 20px 18px 12px;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
-}
-
-.claude-msg {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-  animation: claude-rise 260ms var(--ease-out);
-}
-
-.claude-msg--user {
-  justify-content: flex-end;
-}
-
-.claude-msg--user .claude-msg-body {
-  max-width: min(92%, 560px);
-  border-radius: 18px 18px 4px 18px;
-  background: var(--claude-user);
-  color: var(--claude-text);
-  padding: 12px 16px;
-  font-size: 0.875rem;
-  line-height: 1.55;
-}
-
-.claude-msg--assistant .claude-msg-body {
-  flex: 1;
-  min-width: 0;
-  color: var(--claude-text);
-  font-size: 0.875rem;
-  line-height: 1.55;
-}
-
-.claude-avatar {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex: none;
-  border-radius: 50%;
-  background: var(--claude-accent);
-  color: #fff;
-}
-
-.claude-avatar-spacer {
-  width: 28px;
-  flex: none;
-}
-
-.claude-status-block {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  background: rgba(0, 0, 0, 0.18);
-  padding: 12px 14px;
-}
-
-.claude-status-label {
-  margin: 0 0 8px;
-  color: var(--claude-muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.claude-status-list {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.claude-status-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  color: var(--claude-text);
-  font-family: var(--mono);
-  font-size: 0.78rem;
-  line-height: 1.45;
-  animation: claude-rise 220ms var(--ease-out);
-}
-
-.claude-status-check {
-  color: #6dd58c;
-  font-size: 0.72rem;
-  line-height: 1.45;
-}
-
-.claude-question {
-  margin: 0;
-  font-weight: 590;
-}
-
-.claude-cursor {
-  color: var(--claude-accent);
-  animation: claude-blink 1s step-end infinite;
-}
-
-.claude-input-bar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(0, 0, 0, 0.12);
-  padding: 12px 14px 14px;
-}
-
-.claude-input-placeholder {
-  flex: 1;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
-  background: var(--claude-surface);
-  color: var(--claude-muted);
-  padding: 11px 14px;
-  font-size: 0.84rem;
-}
-
-.claude-send-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--claude-accent);
-  color: #fff;
-}
-
-@keyframes claude-blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-@keyframes claude-rise {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
 }
 
 /* ---------- Finder window ---------- */
@@ -729,7 +492,7 @@ details .snippet {
   gap: 12px;
   min-height: 44px;
   padding: 6px 12px;
-  background: var(--mac-surface);
+  background: var(--mac-toolbar);
   border-bottom: 1px solid var(--mac-line);
 }
 
@@ -1105,47 +868,6 @@ details .snippet {
   font-size: 0.94rem;
 }
 
-/* ---------- Bottom CTA ---------- */
-
-.bottom-cta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 22px;
-  margin-block: clamp(12px, 3vw, 32px) clamp(56px, 8vw, 96px);
-  border-radius: var(--radius-panel);
-  background: var(--ink);
-  color: #fff;
-  padding: clamp(26px, 4.5vw, 44px);
-}
-
-.bottom-cta p {
-  max-width: 20ch;
-  font-size: clamp(1.5rem, 3.4vw, 2.2rem);
-  font-weight: 700;
-  line-height: 1.1;
-  letter-spacing: -0.018em;
-}
-
-.cta-button {
-  border-radius: var(--radius-control);
-  background: var(--accent);
-  color: #fff;
-  padding: 14px 24px;
-  font-size: 1rem;
-  font-weight: 700;
-  transition: background-color 160ms var(--ease-out), transform 120ms var(--ease-out);
-}
-
-.cta-button:hover {
-  background: var(--accent-deep);
-}
-
-.cta-button:active {
-  transform: scale(0.98);
-}
-
 /* ---------- Footer ---------- */
 
 .site-footer {
@@ -1247,13 +969,7 @@ details .snippet {
     animation-duration: 0.01ms !important;
   }
 
-  .demo-cursor,
-  .claude-cursor {
-    animation: none;
-  }
-
-  .claude-msg,
-  .claude-status-item {
+  .demo-cursor {
     animation: none;
   }
 }
@@ -1267,12 +983,7 @@ details .snippet {
   }
 
   .hero h1 {
-    max-width: 16ch;
-  }
-
-  .bottom-cta {
-    flex-direction: column;
-    align-items: flex-start;
+    font-size: 2.35rem;
   }
 }
 

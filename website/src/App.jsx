@@ -7,7 +7,6 @@ import {
   dictionary,
   folderViews,
 } from './content.js'
-import InstallDemo from './InstallDemo.jsx'
 import MacWindow from './MacWindow.jsx'
 import useScrollNav from './useScrollNav.js'
 
@@ -143,15 +142,7 @@ function Hero({t}) {
       <div className="hero-copy">
         <h1>{t.hero.title}</h1>
         <p className="hero-intro">{t.hero.intro}</p>
-        <p className="hero-point">{t.hero.point}</p>
-        <div className="tool-strip-wrap">
-          <span className="tool-strip-label">{t.hero.toolsLabel}</span>
-          <ul className="tool-strip" aria-label={t.hero.toolsLabel}>
-            {t.hero.tools.map((tool) => (
-              <li key={tool}>{tool}</li>
-            ))}
-          </ul>
-        </div>
+        {t.hero.toolsLine ? <p className="hero-tools">{t.hero.toolsLine}</p> : null}
       </div>
 
       <aside className="install-panel" id="install" aria-label={t.hero.promptLabel}>
@@ -218,7 +209,6 @@ function FolderExplorer({t}) {
   return (
     <section className="section section-explorer" id="explorer" data-reveal>
       <SectionIntro title={t.folder.title} desc={t.folder.desc} />
-      <InstallDemo t={t} />
       <MacWindow title="DotAIOS" variant="finder" className="finder-window">
         <FinderToolbar title={activeItem.name} />
         <div className="finder-body">
@@ -310,17 +300,6 @@ function Packs({t}) {
   )
 }
 
-function BottomCta({t}) {
-  return (
-    <section className="bottom-cta" data-reveal>
-      <p>{t.cta.text}</p>
-      <a className="cta-button" href="#install">
-        {t.cta.button}
-      </a>
-    </section>
-  )
-}
-
 function Footer({t}) {
   return (
     <footer className="site-footer">
@@ -395,7 +374,6 @@ export default function App() {
           <FolderExplorer t={t} />
           <AskSection t={t} />
           <Packs t={t} />
-          <BottomCta t={t} />
         </main>
         <Footer t={t} />
       </div>

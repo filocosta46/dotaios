@@ -5,7 +5,6 @@ export default function useScrollNav() {
 
   useEffect(() => {
     const header = document.querySelector('.site-header')
-    const darkZone = document.querySelector('.bottom-cta')
     if (!header) return undefined
 
     let ticking = false
@@ -13,13 +12,6 @@ export default function useScrollNav() {
     function update() {
       ticking = false
       const y = window.scrollY
-      const darkRect = darkZone?.getBoundingClientRect()
-      const headerHeight = header.offsetHeight || 64
-
-      if (darkRect && darkRect.top <= headerHeight && darkRect.bottom > 0) {
-        setNavState('dark-zone')
-        return
-      }
 
       if (y > 24) {
         setNavState('scrolled')
