@@ -55,16 +55,36 @@ export const dictionary = {
     },
     demo: {
       label: 'Setup preview',
-      windowTitle: 'DotAIOS setup',
-      promptLabel: 'You',
-      terminalLabel: 'Terminal',
-      questionsLabel: 'Onboarding',
-      initCommand: 'npx dotaios init',
+      windowTitle: 'Claude',
+      inputPlaceholder: 'Reply to Claude...',
+      assistantIntro:
+        "I'll read the install guide and set up your local DotAIOS folder on your Mac.",
+      setupSteps: [
+        'Reading INSTALL.md from github.com/filocosta46/dotaios',
+        'Creating ~/aios',
+        'Writing context/identity.md, work.md, priorities.md',
+        'Installing default skills',
+      ],
+      onboarding: [
+        {
+          q: "What's your name, and what do you do for work?",
+          a: 'Filippo. I run product and engineering.',
+        },
+        {
+          q: "What are you working on right now? One thing or a few, whatever's taking up your mental energy.",
+          a: 'Shipping DotAIOS and keeping my AI tools on the same page.',
+        },
+        {
+          q: 'What matters most this week? What would make it a good week if it got done?',
+          a: 'Get the website and onboarding flow live.',
+        },
+      ],
     },
     folder: {
       title: 'One folder. Everything your AI should know.',
       desc: 'Every AI starts from the same page. Plain files you can open, edit, and move whenever you want.',
       tabsLabel: 'Folder contents',
+      sidebarHeading: 'Favorites',
       views: {
         context: {
           title: 'context',
@@ -181,16 +201,36 @@ export const dictionary = {
     },
     demo: {
       label: 'Anteprima setup',
-      windowTitle: 'Setup DotAIOS',
-      promptLabel: 'Tu',
-      terminalLabel: 'Terminale',
-      questionsLabel: 'Onboarding',
-      initCommand: 'npx dotaios init',
+      windowTitle: 'Claude',
+      inputPlaceholder: 'Rispondi a Claude...',
+      assistantIntro:
+        'Leggo la guida di installazione e configuro la cartella DotAIOS locale sul tuo Mac.',
+      setupSteps: [
+        'Lettura di INSTALL.md da github.com/filocosta46/dotaios',
+        'Creazione di ~/aios',
+        'Scrittura di context/identity.md, work.md, priorities.md',
+        'Installazione delle skill predefinite',
+      ],
+      onboarding: [
+        {
+          q: 'Come ti chiami e di cosa ti occupi?',
+          a: 'Filippo. Mi occupo di prodotto e ingegneria.',
+        },
+        {
+          q: 'A cosa stai lavorando adesso? Una cosa sola o più di una, quello che ti occupa la testa.',
+          a: 'Sto lanciando DotAIOS e tengo allineati i miei strumenti AI.',
+        },
+        {
+          q: 'Cosa conta di più questa settimana? Cosa renderebbe la settimana una buona settimana?',
+          a: 'Mettere online sito e flusso di onboarding.',
+        },
+      ],
     },
     folder: {
       title: 'Una cartella. Tutto quello che la tua AI deve sapere.',
       desc: 'Ogni AI parte dalla stessa pagina. File semplici che puoi aprire, modificare e spostare quando vuoi.',
       tabsLabel: 'Contenuto della cartella',
+      sidebarHeading: 'Preferiti',
       views: {
         context: {
           title: 'context',

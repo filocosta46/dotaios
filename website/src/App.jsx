@@ -8,6 +8,8 @@ import {
   folderViews,
 } from './content.js'
 import InstallDemo from './InstallDemo.jsx'
+import MacWindow from './MacWindow.jsx'
+import useScrollNav from './useScrollNav.js'
 
 function detectLanguage() {
   const params = new URLSearchParams(window.location.search)
@@ -101,9 +103,9 @@ function CopySnippet({text, children, label}) {
   )
 }
 
-function Header({lang, setLang, t}) {
+function Header({lang, setLang, t, navState}) {
   return (
-    <header className="site-header">
+    <header className={`site-header site-header--${navState}`}>
       <a className="brand" href="#top" aria-label="DotAIOS">
         <span className="brand-mark" aria-hidden="true" />
         <span>DotAIOS</span>
@@ -186,62 +188,79 @@ function SectionIntro({title, desc}) {
   )
 }
 
+function FinderToolbar({title}) {
+  return (
+    <div className="finder-toolbar">
+      <div className="finder-nav-pill" aria-hidden="true">
+        <span className="finder-nav-btn finder-nav-btn--back" />
+        <span className="finder-nav-btn finder-nav-btn--forward" />
+      </div>
+      <span className="finder-toolbar-title">{title}</span>
+      <div className="finder-toolbar-actions" aria-hidden="true">
+        <span className="finder-view-pill">
+          <span className="finder-view-icon" />
+          <span className="finder-view-icon finder-view-icon--active" />
+          <span className="finder-view-icon" />
+        </span>
+        <span className="finder-action-icon" />
+        <span className="finder-action-icon finder-action-icon--share" />
+        <span className="finder-search-icon" />
+      </div>
+    </div>
+  )
+}
+
 function FolderExplorer({t}) {
   const [active, setActive] = useState(folderViews[0].id)
   const activeItem = folderViews.find((item) => item.id === active) || folderViews[0]
   const view = t.folder.views[activeItem.id]
 
   return (
-    <section className="section section-dark" id="explorer" data-reveal>
+    <section className="section section-explorer" id="explorer" data-reveal>
       <SectionIntro title={t.folder.title} desc={t.folder.desc} />
       <InstallDemo t={t} />
-      <div className="folder-preview">
-        <div className="preview-topbar">
-          <div className="window-dots" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <code>{activeItem.path}</code>
-        </div>
-        <div className="preview-body">
-          <nav className="file-tree" aria-label={t.folder.tabsLabel}>
+      <MacWindow title="DotAIOS" variant="finder" className="finder-window">
+        <FinderToolbar title={activeItem.name} />
+        <div className="finder-body">
+          <nav className="finder-sidebar" aria-label={t.folder.tabsLabel}>
+            <p className="finder-sidebar-heading">{t.folder.sidebarHeading || 'Favorites'}</p>
             {folderViews.map((item) => (
               <button
                 key={item.id}
                 type="button"
-                className={active === item.id ? 'active' : ''}
+                className={`finder-sidebar-item${active === item.id ? ' active' : ''}`}
                 aria-pressed={active === item.id}
                 onClick={() => setActive(item.id)}
               >
-                <Icon type={item.icon} />
+                <Icon type="folder" />
                 <span>{item.name}</span>
               </button>
             ))}
           </nav>
-          <article className="document-pane" key={activeItem.id}>
-            <header>
+          <article className="finder-content" key={activeItem.id}>
+            <header className="finder-content-header">
               <Icon type="folder" />
-              <h3>{view.title}</h3>
+              <div>
+                <h3>{view.title}</h3>
+                <p className="finder-path">{activeItem.path}</p>
+              </div>
             </header>
-            <p className="lead">{view.lead}</p>
-            {view.body ? <p className="pane-body">{view.body}</p> : null}
+            <p className="finder-lead">{view.lead}</p>
+            {view.body ? <p className="finder-body-text">{view.body}</p> : null}
             {view.files ? (
-              <div className="file-list">
+              <div className="finder-file-grid">
                 {view.files.map(([name, desc]) => (
-                  <div className="file-row" key={name}>
+                  <div className="finder-file-item" key={name}>
                     <Icon type={name.endsWith('/') ? 'folder' : 'doc'} />
-                    <div>
-                      <strong>{name}</strong>
-                      <span>{desc}</span>
-                    </div>
+                    <strong>{name}</strong>
+                    <span>{desc}</span>
                   </div>
                 ))}
               </div>
             ) : null}
           </article>
         </div>
-      </div>
+      </MacWindow>
     </section>
   )
 }
@@ -328,6 +347,7 @@ function Footer({t}) {
 export default function App() {
   const [lang, setLangState] = useState(detectLanguage)
   const [dict, setDict] = useState(dictionary)
+  const navState = useScrollNav()
   const t = useMemo(() => dict[lang] || dict[DEFAULT_LANG], [dict, lang])
 
   function setLang(nextLang) {
@@ -369,7 +389,7 @@ export default function App() {
         {t.skipLink}
       </a>
       <div className="page-shell">
-        <Header lang={lang} setLang={setLang} t={t} />
+        <Header lang={lang} setLang={setLang} t={t} navState={navState} />
         <main>
           <Hero t={t} />
           <FolderExplorer t={t} />

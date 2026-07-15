@@ -1,29 +1,6 @@
-import React, {useEffect, useMemo, useRef, useState} from 'react'
+import React, {useEffect, useRef, useState} from 'react'
 import {COPY} from './content.js'
-
-const INIT_LINES = [
-  'DotAIOS creates local memory files for the AI tools you already use.',
-  '',
-  'Creating ~/aios ...',
-  'Writing context/identity.md, context/work.md, context/priorities.md',
-  'Installing default skills ...',
-  'Done. Your folder is ready.',
-]
-
-const ONBOARDING = [
-  {
-    q: "What's your name, and what do you do for work?",
-    a: 'Filippo. I run product and engineering.',
-  },
-  {
-    q: "What are you working on right now? One thing or a few, whatever's taking up your mental energy.",
-    a: 'Shipping DotAIOS and keeping my AI tools on the same page.',
-  },
-  {
-    q: 'What matters most this week? What would make it a good week if it got done?',
-    a: 'Get the website and onboarding flow live.',
-  },
-]
+import MacWindow from './MacWindow.jsx'
 
 function usePrefersReducedMotion() {
   const [reduce, setReduce] = useState(false)
@@ -56,7 +33,7 @@ function useInView(ref) {
           observer.disconnect()
         }
       },
-      {threshold: 0.25},
+      {threshold: 0.2},
     )
 
     observer.observe(node)
@@ -66,7 +43,7 @@ function useInView(ref) {
   return visible
 }
 
-function TypeLine({text, active, speed = 22, onDone}) {
+function TypeLine({text, active, speed = 16, onDone}) {
   const [value, setValue] = useState('')
   const doneRef = useRef(onDone)
   doneRef.current = onDone
@@ -95,7 +72,7 @@ function TypeLine({text, active, speed = 22, onDone}) {
     <span>
       {value}
       {active && value.length < text.length ? (
-        <span className="demo-cursor" aria-hidden="true">
+        <span className="claude-cursor" aria-hidden="true">
           |
         </span>
       ) : null}
@@ -103,62 +80,149 @@ function TypeLine({text, active, speed = 22, onDone}) {
   )
 }
 
+function ClaudeAvatar() {
+  return (
+    <div className="claude-avatar" aria-hidden="true">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z" />
+      </svg>
+    </div>
+  )
+}
+
+function AssistantMessage({children, showAvatar = true}) {
+  return (
+    <div className="claude-msg claude-msg--assistant">
+      {showAvatar ? <ClaudeAvatar /> : <span className="claude-avatar-spacer" aria-hidden="true" />}
+      <div className="claude-msg-body">{children}</div>
+    </div>
+  )
+}
+
+function UserMessage({children}) {
+  return (
+    <div className="claude-msg claude-msg--user">
+      <div className="claude-msg-body">{children}</div>
+    </div>
+  )
+}
+
+function SetupStatus({steps, visibleCount}) {
+  return (
+    <div className="claude-status-block">
+      <p className="claude-status-label">Setting up your folder</p>
+      <ul className="claude-status-list">
+        {steps.map((step, index) => {
+          if (index >= visibleCount) return null
+          return (
+            <li key={step} className="claude-status-item">
+              <span className="claude-status-check" aria-hidden="true">
+                ✓
+              </span>
+              {step}
+            </li>
+          )
+        })}
+      </ul>
+    </div>
+  )
+}
+
 export default function InstallDemo({t}) {
   const rootRef = useRef(null)
   const reduceMotion = usePrefersReducedMotion()
   const inView = useInView(rootRef)
+  const demo = t.demo || {}
+
+  const setupSteps = demo.setupSteps || [
+    'Reading INSTALL.md from github.com/filocosta46/dotaios',
+    'Creating ~/aios',
+    'Writing context/identity.md, work.md, priorities.md',
+    'Installing default skills',
+  ]
+
+  const onboarding = demo.onboarding || [
+    {
+      q: "What's your name, and what do you do for work?",
+      a: 'Filippo. I run product and engineering.',
+    },
+    {
+      q: "What are you working on right now? One thing or a few, whatever's taking up your mental energy.",
+      a: 'Shipping DotAIOS and keeping my AI tools on the same page.',
+    },
+    {
+      q: 'What matters most this week? What would make it a good week if it got done?',
+      a: 'Get the website and onboarding flow live.',
+    },
+  ]
+
   const [phase, setPhase] = useState(reduceMotion ? 'done' : 'idle')
-  const [visibleLines, setVisibleLines] = useState(reduceMotion ? INIT_LINES.length : 0)
-  const [visibleQuestions, setVisibleQuestions] = useState(reduceMotion ? ONBOARDING.length : 0)
-  const [typingQuestion, setTypingQuestion] = useState(-1)
+  const [showUserMsg, setShowUserMsg] = useState(reduceMotion)
+  const [showAssistantIntro, setShowAssistantIntro] = useState(reduceMotion)
+  const [visibleSteps, setVisibleSteps] = useState(reduceMotion ? setupSteps.length : 0)
+  const [visibleQuestions, setVisibleQuestions] = useState(reduceMotion ? onboarding.length : 0)
+  const [typingAnswer, setTypingAnswer] = useState(-1)
   const [finishedAnswers, setFinishedAnswers] = useState(() =>
-    reduceMotion ? ONBOARDING.map(() => true) : ONBOARDING.map(() => false),
+    reduceMotion ? onboarding.map(() => true) : onboarding.map(() => false),
   )
 
-  const prompt = COPY.installPrompt
-  const initCommand = t.demo?.initCommand || 'npx dotaios init'
+  const userPrompt = COPY.installPrompt
 
   useEffect(() => {
     if (!inView || reduceMotion) return undefined
-    if (phase === 'idle') setPhase('prompt')
+    if (phase === 'idle') setPhase('user')
     return undefined
   }, [inView, phase, reduceMotion])
 
   useEffect(() => {
-    if (phase !== 'init' || reduceMotion) return undefined
+    if (phase !== 'user' || reduceMotion) return undefined
+    const timer = window.setTimeout(() => {
+      setShowUserMsg(true)
+      setPhase('typing-user')
+    }, 300)
+    return () => window.clearTimeout(timer)
+  }, [phase, reduceMotion])
 
-    if (visibleLines >= INIT_LINES.length) {
+  useEffect(() => {
+    if (phase !== 'assistant' || reduceMotion) return undefined
+    const timer = window.setTimeout(() => setShowAssistantIntro(true), 200)
+    return () => window.clearTimeout(timer)
+  }, [phase, reduceMotion])
+
+  useEffect(() => {
+    if (phase !== 'setup' || reduceMotion) return undefined
+
+    if (visibleSteps >= setupSteps.length) {
       const timer = window.setTimeout(() => setPhase('questions'), 500)
       return () => window.clearTimeout(timer)
     }
 
-    const timer = window.setTimeout(() => setVisibleLines((count) => count + 1), 280)
+    const timer = window.setTimeout(() => setVisibleSteps((count) => count + 1), 420)
     return () => window.clearTimeout(timer)
-  }, [phase, reduceMotion, visibleLines])
+  }, [phase, reduceMotion, setupSteps.length, visibleSteps])
 
   useEffect(() => {
     if (phase !== 'questions' || reduceMotion) return undefined
 
-    if (visibleQuestions >= ONBOARDING.length) {
+    if (visibleQuestions >= onboarding.length) {
       const timer = window.setTimeout(() => setPhase('done'), 600)
       return () => window.clearTimeout(timer)
     }
 
     const timer = window.setTimeout(() => {
       setVisibleQuestions((count) => count + 1)
-      setTypingQuestion(visibleQuestions)
-    }, 700)
+      setTypingAnswer(visibleQuestions)
+    }, 800)
 
     return () => window.clearTimeout(timer)
-  }, [phase, reduceMotion, visibleQuestions])
+  }, [phase, reduceMotion, onboarding.length, visibleQuestions])
 
-  const initOutput = useMemo(
-    () => (reduceMotion || phase === 'done' ? INIT_LINES : INIT_LINES.slice(0, visibleLines)),
-    [phase, reduceMotion, visibleLines],
-  )
+  function handleUserDone() {
+    window.setTimeout(() => setPhase('assistant'), 350)
+  }
 
-  function handlePromptDone() {
-    window.setTimeout(() => setPhase('init'), 400)
+  function handleIntroDone() {
+    window.setTimeout(() => setPhase('setup'), 300)
   }
 
   function handleAnswerDone(index) {
@@ -167,94 +231,102 @@ export default function InstallDemo({t}) {
       next[index] = true
       return next
     })
-    setTypingQuestion(-1)
+    setTypingAnswer(-1)
   }
 
-  const showPrompt = reduceMotion || phase !== 'idle'
-  const showInit = reduceMotion || phase === 'init' || phase === 'questions' || phase === 'done'
+  const showSetup = reduceMotion || phase === 'setup' || phase === 'questions' || phase === 'done'
   const showQuestions = reduceMotion || phase === 'questions' || phase === 'done'
 
   return (
-    <div className="install-demo" ref={rootRef} aria-label={t.demo?.label || 'Setup preview'}>
-      <div className="demo-window">
-        <div className="demo-topbar">
-          <div className="window-dots" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <span className="demo-title">{t.demo?.windowTitle || 'DotAIOS setup'}</span>
+    <div className="install-demo" ref={rootRef} aria-label={demo.label || 'Setup preview'}>
+      <MacWindow title={demo.windowTitle || 'Claude'} variant="claude">
+        <div className="claude-chat" role="log" aria-live="polite">
+          {showUserMsg ? (
+            <UserMessage>
+              {reduceMotion ? (
+                userPrompt
+              ) : phase === 'typing-user' ? (
+                <TypeLine text={userPrompt} active speed={14} onDone={handleUserDone} />
+              ) : (
+                userPrompt
+              )}
+            </UserMessage>
+          ) : null}
+
+          {phase !== 'idle' && phase !== 'user' && phase !== 'typing-user' ? (
+            <>
+              {showAssistantIntro ? (
+                <AssistantMessage>
+                  {reduceMotion ? (
+                    demo.assistantIntro ||
+                      "I'll read the install guide and set up your local DotAIOS folder on your Mac."
+                  ) : phase === 'assistant' ? (
+                    <TypeLine
+                      text={
+                        demo.assistantIntro ||
+                        "I'll read the install guide and set up your local DotAIOS folder on your Mac."
+                      }
+                      active
+                      speed={12}
+                      onDone={handleIntroDone}
+                    />
+                  ) : (
+                    demo.assistantIntro ||
+                    "I'll read the install guide and set up your local DotAIOS folder on your Mac."
+                  )}
+                </AssistantMessage>
+              ) : null}
+
+              {showSetup ? (
+                <AssistantMessage showAvatar={false}>
+                  <SetupStatus steps={setupSteps} visibleCount={visibleSteps} />
+                </AssistantMessage>
+              ) : null}
+
+              {showQuestions
+                ? onboarding.map((item, index) => {
+                    if (!reduceMotion && index >= visibleQuestions) return null
+                    const answerVisible =
+                      reduceMotion || finishedAnswers[index] || typingAnswer === index
+
+                    return (
+                      <React.Fragment key={item.q}>
+                        <AssistantMessage showAvatar={index === 0 || reduceMotion}>
+                          <p className="claude-question">{item.q}</p>
+                        </AssistantMessage>
+                        {answerVisible ? (
+                          <UserMessage>
+                            {reduceMotion ? (
+                              item.a
+                            ) : typingAnswer === index && !finishedAnswers[index] ? (
+                              <TypeLine
+                                text={item.a}
+                                active
+                                speed={18}
+                                onDone={() => handleAnswerDone(index)}
+                              />
+                            ) : finishedAnswers[index] ? (
+                              item.a
+                            ) : null}
+                          </UserMessage>
+                        ) : null}
+                      </React.Fragment>
+                    )
+                  })
+                : null}
+            </>
+          ) : null}
         </div>
-        <div className="demo-body">
-          {showPrompt ? (
-            <div className="demo-block demo-prompt-block">
-              <p className="demo-label">{t.demo?.promptLabel || 'You'}</p>
-              <p className="demo-prompt">
-                {reduceMotion ? (
-                  prompt
-                ) : (
-                  <TypeLine
-                    text={prompt}
-                    active={phase === 'prompt'}
-                    speed={18}
-                    onDone={handlePromptDone}
-                  />
-                )}
-              </p>
-            </div>
-          ) : null}
 
-          {showInit ? (
-            <div className="demo-block demo-terminal-block">
-              <p className="demo-label">{t.demo?.terminalLabel || 'Terminal'}</p>
-              <div className="demo-terminal" role="log" aria-live="polite">
-                <p className="demo-command">
-                  <span className="demo-prompt-char">$</span> {initCommand}
-                </p>
-                {initOutput.map((line, index) => (
-                  <p className="demo-line" key={`${line}-${index}`}>
-                    {line || '\u00a0'}
-                  </p>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          {showQuestions ? (
-            <div className="demo-block demo-questions-block">
-              <p className="demo-label">{t.demo?.questionsLabel || 'Onboarding'}</p>
-              <ol className="demo-questions">
-                {ONBOARDING.map((item, index) => {
-                  if (!reduceMotion && index >= visibleQuestions) return null
-                  const showAnswer = reduceMotion || finishedAnswers[index] || typingQuestion === index
-
-                  return (
-                    <li key={item.q} className="demo-question">
-                      <p className="demo-question-text">{item.q}</p>
-                      {showAnswer ? (
-                        <p className="demo-answer">
-                          {reduceMotion ? (
-                            item.a
-                          ) : typingQuestion === index && !finishedAnswers[index] ? (
-                            <TypeLine
-                              text={item.a}
-                              active
-                              speed={20}
-                              onDone={() => handleAnswerDone(index)}
-                            />
-                          ) : finishedAnswers[index] ? (
-                            item.a
-                          ) : null}
-                        </p>
-                      ) : null}
-                    </li>
-                  )
-                })}
-              </ol>
-            </div>
-          ) : null}
+        <div className="claude-input-bar" aria-hidden="true">
+          <div className="claude-input-placeholder">{demo.inputPlaceholder || 'Reply to Claude...'}</div>
+          <button className="claude-send-btn" type="button" tabIndex={-1}>
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+              <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+            </svg>
+          </button>
         </div>
-      </div>
+      </MacWindow>
     </div>
   )
 }
