@@ -1,4 +1,4 @@
-import React, {useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react'
+import React, {useEffect, useMemo, useRef, useState} from 'react'
 import {
   COPY,
   DEFAULT_LANG,
@@ -187,78 +187,17 @@ function Header({lang, setLang, t, navState}) {
 }
 
 function Hero({t}) {
-  const heroRef = useRef(null)
-  const line1Ref = useRef(null)
-  const panelRef = useRef(null)
-
-  useLayoutEffect(() => {
-    const logLayout = (data, hypothesisId) => {
-      // #region agent log
-      fetch('http://127.0.0.1:7922/ingest/18d12561-8ab2-4574-ba1b-d83a5a15aa44', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json', 'X-Debug-Session-Id': 'f47d0b'},
-        body: JSON.stringify({
-          sessionId: 'f47d0b',
-          runId: 'post-fix-v2',
-          hypothesisId,
-          location: 'App.jsx:Hero',
-          message: 'hero layout snapshot',
-          data,
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {})
-      // #endregion
-    }
-
-    const measure = () => {
-      const line1 = line1Ref.current
-      const panel = panelRef.current
-      const hero = heroRef.current
-      if (!line1 || !panel || !hero) return
-
-      const line1Rect = line1.getBoundingClientRect()
-      const panelRect = panel.getBoundingClientRect()
-      const overlaps =
-        line1Rect.right > panelRect.left &&
-        line1Rect.top < panelRect.bottom &&
-        line1Rect.bottom > panelRect.top
-
-      logLayout(
-        {
-          viewportWidth: window.innerWidth,
-          gridTemplateColumns: getComputedStyle(hero).gridTemplateColumns,
-          line1Overflows: line1.scrollWidth > line1.clientWidth,
-          line1ScrollWidth: line1.scrollWidth,
-          line1ClientWidth: line1.clientWidth,
-          overlapsPanel: overlaps,
-        },
-        overlaps || line1.scrollWidth > line1.clientWidth ? 'A' : 'B',
-      )
-    }
-
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
-  }, [t])
-
   return (
-    <section className="hero" id="top" ref={heroRef}>
+    <section className="hero" id="top">
       <div className="hero-copy">
         <h1>
-          <span className="hero-line" ref={line1Ref}>
-            {t.hero.titleLine1}
-          </span>
+          <span className="hero-line">{t.hero.titleLine1}</span>
           <span className="hero-line">{t.hero.titleLine2}</span>
         </h1>
         <p className="hero-intro">{t.hero.intro}</p>
       </div>
 
-      <aside
-        className="install-panel"
-        id="install"
-        ref={panelRef}
-        aria-label={t.hero.promptLabel}
-      >
+      <aside className="install-panel" id="install" aria-label={t.hero.promptLabel}>
         <div>
           <p className="panel-label">{t.hero.promptLabel}</p>
           <p className="panel-help">{t.hero.promptHelp}</p>
