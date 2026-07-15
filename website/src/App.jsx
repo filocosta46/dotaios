@@ -140,14 +140,16 @@ function Hero({t}) {
   return (
     <section className="hero" id="top">
       <div className="hero-copy">
-        <h1>{t.hero.title}</h1>
+        <h1>
+          <span className="hero-line">{t.hero.titleLine1}</span>
+          <span className="hero-line">{t.hero.titleLine2}</span>
+        </h1>
         <p className="hero-intro">{t.hero.intro}</p>
-        {t.hero.toolsLine ? <p className="hero-tools">{t.hero.toolsLine}</p> : null}
       </div>
 
       <aside className="install-panel" id="install" aria-label={t.hero.promptLabel}>
         <div>
-          <p className="panel-kicker">{t.hero.promptLabel}</p>
+          <p className="panel-label">{t.hero.promptLabel}</p>
           <p className="panel-help">{t.hero.promptHelp}</p>
         </div>
         <CopySnippet text={COPY.installPrompt} label={t}>
@@ -256,16 +258,27 @@ function FolderExplorer({t}) {
 }
 
 function AskSection({t}) {
+  const [featured, ...rest] = t.ask.examples
+
   return (
     <section className="section" id="ask" data-reveal>
       <SectionIntro title={t.ask.title} desc={t.ask.desc} />
-      <div className="ask-grid">
-        {t.ask.examples.map(([title, desc], index) => (
-          <article key={title} style={{'--stagger': index}}>
-            <p className="ask-bubble">{title}</p>
-            <p className="ask-result">{desc}</p>
-          </article>
-        ))}
+      <div className="ask-layout">
+        <article className="ask-featured" style={{'--stagger': 0}}>
+          <p className="ask-bubble ask-bubble--large">{featured[0]}</p>
+          <p className="ask-result">{featured[1]}</p>
+        </article>
+        <ul className="ask-stack">
+          {rest.map(([title, desc], index) => (
+            <li key={title} style={{'--stagger': index + 1}}>
+              <span className="ask-icon" aria-hidden="true" />
+              <div>
+                <p className="ask-bubble">{title}</p>
+                <p className="ask-result">{desc}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
       </div>
     </section>
   )
@@ -285,7 +298,7 @@ function Packs({t}) {
             rel="noreferrer"
             style={{'--stagger': index}}
           >
-            <span className="pack-eyebrow">{pack.eyebrow}</span>
+            <span className="pack-label">{pack.eyebrow}</span>
             <h3>{pack.title}</h3>
             <p>{pack.desc}</p>
             <div className="pack-foot">

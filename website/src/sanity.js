@@ -84,9 +84,9 @@ function fromLegacyFields(doc) {
       language: ls(doc.navLangAria, lang),
     },
     hero: {
-      title: ls(doc.heroH1, lang),
+      titleLine1: ls(doc.heroH1Line1, lang),
+      titleLine2: ls(doc.heroH1Line2, lang),
       intro: ls(doc.heroSub, lang),
-      point: ls(doc.heroPoint, lang),
       promptLabel: ls(doc.installTitle, lang),
       promptHelp: ls(doc.installDesc, lang),
       terminal: ls(doc.installTerminalSummary, lang),

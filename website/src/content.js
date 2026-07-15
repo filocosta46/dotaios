@@ -10,7 +10,7 @@ export const LANG_STORAGE_KEY = 'dotaios-lang'
 // `copyRelease` field equals this value (or inside Studio preview), so a
 // stale document can never overwrite newer bundled copy. Bump it whenever
 // the copy structure changes and regenerate the Studio patch.
-export const CURRENT_COPY_RELEASE = '2026-07-15-v3'
+export const CURRENT_COPY_RELEASE = '2026-07-15-v4'
 
 export const COPY = {
   installPrompt:
@@ -42,12 +42,12 @@ export const dictionary = {
       language: 'Language',
     },
     hero: {
-      title: 'Stop re-explaining yourself to every AI.',
-      intro: 'One folder on your Mac. Every AI reads the same files.',
+      titleLine1: 'Stop re-explaining yourself',
+      titleLine2: 'to every AI.',
+      intro: 'One Mac folder. Every AI reads it.',
       promptLabel: 'Paste this into your AI',
       promptHelp: 'Your AI reads the guide and sets up the folder.',
       terminal: 'Prefer the Terminal?',
-      toolsLine: 'Claude Code, Cursor, Codex, Gemini',
     },
     folder: {
       title: 'One folder. Everything your AI should know.',
@@ -153,12 +153,12 @@ export const dictionary = {
       language: 'Lingua',
     },
     hero: {
-      title: 'Smetti di rispiegarti a ogni AI.',
-      intro: 'Una cartella sul Mac. Ogni AI legge gli stessi file.',
+      titleLine1: 'Smetti di rispiegarti',
+      titleLine2: 'a ogni AI.',
+      intro: 'Una cartella sul Mac. Ogni AI la legge.',
       promptLabel: 'Incolla questo nella tua AI',
       promptHelp: 'La tua AI legge la guida e configura la cartella.',
       terminal: 'Preferisci il Terminale?',
-      toolsLine: 'Claude Code, Cursor, Codex, Gemini',
     },
     folder: {
       title: 'Una cartella. Tutto quello che la tua AI deve sapere.',
