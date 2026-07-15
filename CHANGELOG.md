@@ -3,6 +3,13 @@
 All notable changes to DotAIOS will be documented in this file.
 
 ## Unreleased
+### Added
+- New default skill: **`update-skills`** - ask "update my skills" (or "is everything connected") and the agent checks skill health, looks for upstream changes to installed packs and plugins, reinstalls updated ones through the guarded install path, refreshes catalogs and native links, and records a `skills-update` event. New AIOS folders also include a disabled `weekly-skills-update` schedule (`dotaios skills doctor`, weekly cadence). Agents are encouraged to offer the check when the last recorded run is older than 7 days. Documented in `docs/schedules.md`.
+- README rewritten for non-developer readers: mirrors the dotaios.vercel.app landing copy (plain-words asks, packs, one-prompt install); terminal content and the project-skills `attach` guide now live in `docs/getting-started.md`.
+
+### Fixed
+- `dotaios skills probe --path <dir>` now actually probes the given AIOS folder. The CLI passed the option as `path` while the probe library expected `aiosPath`, so probes silently fell back to `~/aios`; on machines without a populated home folder (CI runners) every probe failed with "No readable skills found". This is why the merge-ref CI run went red on 2026-07-14.
+
 
 ## [1.22.0] - 2026-07-14
 ### Added

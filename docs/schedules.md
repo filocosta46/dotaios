@@ -68,3 +68,16 @@ Scheduled commands must start with `dotaios` or `aios`. Use cron, launchd, Task 
 DotAIOS does not install a background daemon. The OS handoff calls `dotaios schedule run-due` on an interval, and each schedule still runs only DotAIOS commands.
 
 Google Workspace beta setup lives behind `dotaios connect google`. Email and calendar routines must remain read-first by default, and must confirm before sending mail, creating events, or writing durable memory.
+
+## Keeping skills updated
+
+New AIOS folders also include a disabled `weekly-skills-update` schedule that
+runs `dotaios skills doctor` on a weekly cadence. Enable it if you want the
+health report on a schedule.
+
+The richer path is the `update-skills` skill: ask your agent "update my
+skills" and it checks installed packs and plugins for upstream changes,
+reinstalls updated ones through the guarded install path, refreshes catalogs
+and native links, and records a `skills-update` event in
+`memory/events.jsonl`. Agents are encouraged to offer this check when the
+last recorded run is more than 7 days old.

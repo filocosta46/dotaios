@@ -236,7 +236,7 @@ export const dictionary = {
           eyebrow: 'Skills',
           title: 'Le skill migliori, scelte per te.',
           desc: 'Le skill che contano davvero per chi lavora con la testa, selezionate da tutto internet e aggiornate ogni settimana.',
-          price: '€12.99',
+          price: '€12,99',
           cta: 'Prendi Skills',
           href: 'https://filocosta.gumroad.com/l/tgaeui',
         },

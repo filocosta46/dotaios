@@ -126,6 +126,7 @@ async function probeSkillCommand(args) {
 
   const result = await runSkillInvocationProbe({
     ...options,
+    aiosPath: options.path,
     receiptPath: options.receipt
   });
   if (options.json) {

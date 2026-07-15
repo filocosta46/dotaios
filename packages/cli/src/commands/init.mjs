@@ -259,9 +259,13 @@ async function createStarterFiles(target, data, writeMode) {
       "  - name: daily-brief",
       "    cadence: daily",
       "    command: \"dotaios brief\"",
+      "    enabled: false",
+      "  - name: weekly-skills-update",
+      "    cadence: weekly",
+      "    command: \"dotaios skills doctor\"",
       "    enabled: false"
     ].join("\n") + "\n",
-    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"
+    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"weekly-review\", \"update-skills\"]\n}\n"
   };
   const results = [];
 

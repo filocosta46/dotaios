@@ -1,29 +1,27 @@
 # DotAIOS
 
-[![npm version](https://img.shields.io/npm/v/dotaios.svg)](https://www.npmjs.com/package/dotaios)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![node 20+](https://img.shields.io/badge/node-20%2B-brightgreen)](https://nodejs.org/)
+**Stop re-explaining yourself to every AI.**
 
-**One folder on your computer that every AI knows you by.**
-
-Tell your AI who you are, what you are working on, and how you like to work. You do it once. After that, every AI tool you use reads from the same place, so you never have to explain yourself again.
+One folder on your computer. Who you are, what you are working on, what you saved. Every AI reads the same files. No account. No cloud memory.
 
 ## What it is
 
-DotAIOS makes one folder on your computer, called `~/aios`. It holds the things your AI should always know about you: your name, your work, your priorities, and your notes. Claude, Cursor, Codex, and Antigravity all read from it. There is no account, no website to log into, and nothing stored on anyone else's server. It is just files on your computer that belong to you.
+DotAIOS makes one folder on your computer, called `~/aios`. It holds the things your AI should always know about you: your name, your work, your priorities, and your notes. Claude, Cursor, Codex, and Gemini all read from it. There is no account, no website to log into, and nothing stored on anyone else's server. It is just files on your computer that belong to you.
 
 Here is the simplest way to think about it. Your phone keeps your contacts in one place so every app can use them. DotAIOS keeps *you* in one place so every AI can use that.
+
+And you never learn commands. Ask in plain words, and your AI picks the right workflow automatically.
 
 ## Get started
 
 You will not type a single command. Your AI does the whole setup for you.
 
-First, make sure you have one AI app on your computer. If you are not sure which to pick, start with Claude Code, the friendliest one. You can also use Cursor, Codex, or Antigravity.
+First, make sure you have one AI app on your computer. If you are not sure which to pick, start with Claude Code, the friendliest one.
 
 - [Claude Code](https://claude.com/download), recommended
 - [Cursor](https://www.cursor.com), an editor with AI built in
-- [Codex CLI](https://github.com/openai/codex) by OpenAI
-- [Antigravity](https://antigravity.google/download) by Google, agentic development platform
+- [Codex](https://github.com/openai/codex) by OpenAI
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
 
 Then open that app, paste this one sentence into the chat, and press Enter:
 
@@ -33,45 +31,24 @@ That is the whole install. The AI sets everything up, connects your tools, and a
 
 Want to check it worked? Ask your AI: **"What am I working on?"** It will answer from your folder.
 
-If anything ever looks off, run `npx dotaios doctor` and it will tell you what is wrong and how to fix it.
+If anything ever looks off, just ask: **"Is everything connected?"** Your AI runs a quick connection check and tells you what needs attention.
 
-**Already use ChatGPT or Claude in your browser?** Those work too. After setup, open the file `~/aios/AGENTS.md`, copy what is inside, and paste it at the start of any chat. Your AI instantly knows your context.
+**Already use ChatGPT, Claude, or Grok in your browser?** Those work too. After setup, open the file `~/aios/AGENTS.md`, copy what is inside, and paste it at the start of any chat. Your AI instantly knows your context.
 
-## What you can do with it
+## What you can ask
 
-Once it is set up, you can ask any connected AI things like:
+Once it is set up, ask any connected AI things like:
 
 - "Plan my day." It builds a plan from your priorities and your recent work.
 - "Save this article for me." It tucks a web page or PDF into your notes as clean, readable text.
-- "What did I decide about the launch?" It searches everything you have saved.
-- "What am I working on?" It reads your context and answers from your folder.
+- "What did I decide about the trip?" It searches everything you have saved.
+- "Update my skills." It checks everything you have installed and freshens what changed.
 
-Setup also links your skills into the documented local surfaces for Claude Code,
-Cursor, Codex, Antigravity, and Hermes. DotAIOS verifies filesystem propagation
-and Hermes configuration. Actual native discovery remains client and version
-specific. Edit a skill once in `~/aios/skills/` and every verified connected
-surface sees the update.
-
-Projects can carry their own skills without replacing that global library. Put
-`SKILL.md` workflows under a project's `skills/` directory and run:
-
-```bash
-npx dotaios attach /path/to/project
-```
-
-DotAIOS links project-owned skills into the checkout's Claude Code,
-Agent-Skills, Antigravity, and Hermes project surfaces. Re-running the command
-is safe and preserves foreign entries; use `--dry-run` to preview it. A native
-filesystem link is not treated as proof that a particular client version will
-invoke the skill, so runtime acceptance remains explicit.
-
-You can also let it remember your conversations automatically, so your AI gets to know you better over time.
+Ask in your own words. You never name a skill or type a command; your AI routes the request to the right workflow on its own. The same asks work in every connected tool, and your AI can remember your conversations automatically, so it gets to know you better over time.
 
 ## It is just your files
 
-Your folder lives at `~/aios` in your home directory. You can open it any time, read it, edit it, or move things around in any text editor. Nothing is hidden and nothing is locked away.
-
-Inside, it looks roughly like this:
+Your folder lives at `~/aios` in your home directory. You can open it any time, read it, edit it, or move things around. Nothing is hidden and nothing is locked away.
 
 ```
 ~/aios/
@@ -81,45 +58,26 @@ Inside, it looks roughly like this:
   skills/    things you can ask your AI to do
 ```
 
-If you ever want to read your memory on your phone, DotAIOS can mirror the folder to a private GitHub repository that only you can see. That part is optional, and you set it up with one command.
+If you ever want to read your memory on your phone, DotAIOS can mirror the folder to a private space that only you can see. That part is optional.
+
+## The folder is free. The packs are the shortcut.
+
+Everything in the packs exists somewhere on the internet, free. We find it, test it, package it, and keep it updated every week, so you never have to.
+
+- **[Skills, €12.99](https://filocosta.gumroad.com/l/tgaeui)**. The best skills, picked for you. The ones that actually matter for knowledge workers, curated from the whole internet and refreshed every week.
+- **[Automations, €35](https://filocosta.gumroad.com/l/baglw)**. Real systems. Your AI works like a pro. Everything in Skills, plus complete working setups for research, transcripts, and memory. Full packaging, not pieces.
+
+Each pack is one prompt. Paste it into your AI once: it installs everything, wires it into your folder, and keeps it updated.
 
 ## Pillars
 
-- **Local first.** No account, no server we run. Optional phone sync uses your own private GitHub repo.
+- **Local first.** No account, no server we run. Optional phone sync uses your own private space.
 - **Just files.** Plain Markdown and text, never a database. You can read everything yourself.
 - **Out of the way.** Your AI tools read your folder directly. DotAIOS stays invisible.
 
-## If you like the terminal
+## Want to go deeper?
 
-Comfortable with a terminal and have Node 20 or newer? You can run setup yourself:
-
-```bash
-npx dotaios setup
-```
-
-A few commands you will use most:
-
-```bash
-dotaios status              # check everything is connected and healthy
-dotaios update "note"       # jot something to memory in one line
-dotaios search "topic"      # search across everything you have saved
-dotaios ingest <url|file>   # save an article, PDF, or document
-dotaios brief               # write today's brief from your priorities
-dotaios brief --lean        # print a small high-signal surface (identity, priorities, north-star, today, active project)
-dotaios brief --compact     # print a compact working-memory digest for agents
-dotaios skills resolve "plan my day"   # route an intent to the skill that handles it
-dotaios plan "ship it" --steps "tests,implement"  # write a plan.md artifact agents pick up later
-dotaios memory audit        # find bloated hot memory and skill-tied lessons
-dotaios memory audit --apply-skills  # append explicit lessons to existing skills
-dotaios sync setup          # mirror your folder to a private GitHub repo
-dotaios export-okf          # export your knowledge as a portable Open Knowledge Format bundle
-```
-
-Run `dotaios --help` to see everything.
-
-## Learn more
-
-[Getting started](docs/getting-started.md) · [Saving conversations](docs/sessions.md) · [Phone sync and advanced memory](docs/advanced-memory.md) · [GitSync on mobile](docs/gitsync-mobile.md) · [Google Workspace](docs/google-workspace.md) · [Skill marketplace](docs/marketplace.md) · [Security](docs/security.md) · [Architecture](docs/architecture.md) · [OKF export](docs/okf.md)
+Comfortable with a terminal, or curious how it works inside? Start with the [getting started guide](docs/getting-started.md). More: [saving conversations](docs/sessions.md) · [phone sync](docs/advanced-memory.md) · [security](docs/security.md) · [all guides](docs/).
 
 ## License
 

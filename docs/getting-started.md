@@ -142,3 +142,22 @@ Skills live in `~/aios/skills/<name>/SKILL.md`. Open any skill folder to see wha
 `init` will stop if the target folder already contains files. Use `--force` to add missing generated files while preserving existing files. Use `--overwrite` only when you intentionally want to replace generated files.
 
 Store secrets in `~/aios/.env`, not in chat or memory files. The generated `.gitignore` ignores `.env`, token files, credentials, and private keys.
+
+## Project skills
+
+Projects can carry their own skills without replacing your global library. Put
+`SKILL.md` workflows under a project's `skills/` directory and run:
+
+```bash
+npx dotaios attach /path/to/project
+```
+
+DotAIOS links project-owned skills into the checkout's Claude Code,
+Agent-Skills, Antigravity, and Hermes project surfaces. Re-running the command
+is safe and preserves foreign entries; use `--dry-run` to preview it. A native
+filesystem link is not treated as proof that a particular client version will
+invoke the skill, so runtime acceptance remains explicit. Global skill links
+work the same way: `dotaios activate` links `~/aios/skills` into Claude Code,
+the shared Agent-Skills folder (Codex, Cursor, Gemini, Warp, VS Code),
+Antigravity, and Hermes, verifies filesystem propagation, and `dotaios skills
+doctor` reports configured / discoverable / invoked status per surface.
