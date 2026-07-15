@@ -103,17 +103,59 @@ function CopySnippet({text, children, label}) {
 }
 
 function Header({lang, setLang, t, navState}) {
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    if (!menuOpen) return undefined
+
+    function onKeyDown(event) {
+      if (event.key === 'Escape') setMenuOpen(false)
+    }
+
+    document.body.classList.add('nav-menu-open')
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.body.classList.remove('nav-menu-open')
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [menuOpen])
+
+  function closeMenu() {
+    setMenuOpen(false)
+  }
+
   return (
-    <header className={`site-header site-header--${navState}`}>
-      <a className="brand" href="#top" aria-label="DotAIOS">
+    <header className={`site-header site-header--${navState}${menuOpen ? ' site-header--menu-open' : ''}`}>
+      <a className="brand" href="#top" aria-label="DotAIOS" onClick={closeMenu}>
         <span className="brand-mark" aria-hidden="true" />
         <span>DotAIOS</span>
       </a>
-      <nav className="nav" aria-label="Primary">
-        <a href="#explorer">{t.nav.folder}</a>
-        <a href="#ask">{t.nav.ask}</a>
-        <a href="#packs">{t.nav.packs}</a>
-        <a href="https://github.com/filocosta46/dotaios" target="_blank" rel="noreferrer">
+      <button
+        className="nav-toggle"
+        type="button"
+        aria-expanded={menuOpen}
+        aria-controls="primary-nav"
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        <span className="nav-toggle-label">{menuOpen ? 'Close' : 'Menu'}</span>
+        <span className="nav-toggle-icon" aria-hidden="true" />
+      </button>
+      <nav className={`nav${menuOpen ? ' nav--open' : ''}`} id="primary-nav" aria-label="Primary">
+        <a href="#explorer" onClick={closeMenu}>
+          {t.nav.folder}
+        </a>
+        <a href="#ask" onClick={closeMenu}>
+          {t.nav.ask}
+        </a>
+        <a href="#packs" onClick={closeMenu}>
+          {t.nav.packs}
+        </a>
+        <a
+          href="https://github.com/filocosta46/dotaios"
+          target="_blank"
+          rel="noreferrer"
+          onClick={closeMenu}
+        >
           {t.nav.github}
         </a>
         <div className="language-switch" role="group" aria-label={t.nav.language}>
@@ -128,10 +170,18 @@ function Header({lang, setLang, t, navState}) {
             </button>
           ))}
         </div>
-        <a className="nav-cta" href="#install">
+        <a className="nav-cta" href="#install" onClick={closeMenu}>
           {t.nav.cta}
         </a>
       </nav>
+      {menuOpen ? (
+        <button
+          className="nav-backdrop"
+          type="button"
+          aria-label="Close menu"
+          onClick={closeMenu}
+        />
+      ) : null}
     </header>
   )
 }
@@ -222,10 +272,12 @@ function FolderExplorer({t}) {
                 type="button"
                 className={`finder-sidebar-item${active === item.id ? ' active' : ''}`}
                 aria-pressed={active === item.id}
+                aria-label={item.name}
+                title={item.name}
                 onClick={() => setActive(item.id)}
               >
                 <Icon type="folder" />
-                <span>{item.name}</span>
+                <span className="finder-sidebar-label">{item.name}</span>
               </button>
             ))}
           </nav>
