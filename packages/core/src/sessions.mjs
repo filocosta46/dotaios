@@ -144,8 +144,6 @@ export async function writeSession(aiosPath, session) {
     title: session.title || null,
     path: relativePath,
     content_hash: bodyHash,
-    last_accessed: null,
-    access_count: 0,
   };
 
   await appendIndexEntry(aiosPath, indexEntry);
@@ -166,30 +164,6 @@ export async function filterSessions(aiosPath, { agent, project, since } = {}) {
     if (project && entry.project !== project) return false;
     if (sinceTs && entry.captured_at < sinceTs) return false;
     return true;
-  });
-}
-
-export async function touchSession(aiosPath, sessionId) {
-  return touchSessions(aiosPath, [sessionId]);
-}
-
-export async function touchSessions(aiosPath, sessionIds) {
-  if (!sessionIds.length) return;
-  const ids = new Set(sessionIds);
-  const now = new Date().toISOString();
-  await withIndexLock(aiosPath, async () => {
-    const entries = await readSessionIndex(aiosPath);
-    let changed = false;
-    for (let i = 0; i < entries.length; i++) {
-      if (!ids.has(entries[i].session_id)) continue;
-      entries[i] = {
-        ...entries[i],
-        last_accessed: now,
-        access_count: (entries[i].access_count || 0) + 1,
-      };
-      changed = true;
-    }
-    if (changed) await writeSessionIndex(aiosPath, entries);
   });
 }
 
@@ -300,7 +274,7 @@ async function stealLock(lockPath) {
 }
 
 // Serialize index mutations across processes so a concurrent append and a full
-// rewrite (touchSessions) can't drop each other's changes. The lock records the
+// rewrite can't drop each other's changes. The lock records the
 // holder's PID so a crashed holder is reclaimed immediately; a still-live holder
 // is waited on (never overrun). Bounded by LOCK_WAIT_MS so the CLI never hangs.
 async function withIndexLock(aiosPath, fn) {
