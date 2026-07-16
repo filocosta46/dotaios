@@ -48,6 +48,20 @@ function writeConvFile(dir, name, content) {
   return p;
 }
 
+function registerProject(aiosPath, tempRoot, slug) {
+  const projectPath = path.join(tempRoot, `${slug}-checkout`);
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(path.join(projectPath, "source.txt"), `${slug}\n`);
+  run([
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    "--state-path", path.join(tempRoot, "home", ".dotaios", "projects.json"),
+    "--slug", slug,
+    "--apply"
+  ]);
+  return projectPath;
+}
+
 const SAMPLE_CONV = [
   "**user · 14:30**",
   "",
@@ -122,6 +136,7 @@ test("capture import file deduplicates same file", () => {
 test("capture import file with --project tags the session", () => {
   const { aiosPath, tempRoot } = setupAios();
   const file = writeConvFile(tempRoot, "tagged.md", DIALOGUE_CONV);
+  registerProject(aiosPath, tempRoot, "my-project");
 
   run(["capture", "import", "file", file, "--path", aiosPath, "--project", "my-project"]);
 
@@ -179,6 +194,8 @@ test("capture list --agent filters by agent", () => {
 test("capture list --project filters by project", () => {
   const { aiosPath, tempRoot } = setupAios();
   const file = writeConvFile(tempRoot, "projf.md", SAMPLE_CONV);
+  registerProject(aiosPath, tempRoot, "brain");
+  registerProject(aiosPath, tempRoot, "other");
   run(["capture", "import", "file", file, "--path", aiosPath, "--project", "brain"]);
 
   const result = run(["capture", "list", "--path", aiosPath, "--project", "brain"]);
@@ -186,6 +203,60 @@ test("capture list --project filters by project", () => {
 
   const empty = run(["capture", "list", "--path", aiosPath, "--project", "other"]);
   assert.match(empty.stdout, /No saved conversations/);
+});
+
+test("capture rejects an explicit project that is not in the catalog", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const file = writeConvFile(tempRoot, "unknown-project.md", DIALOGUE_CONV);
+  const result = runFail([
+    "capture", "import", "file", file,
+    "--path", aiosPath,
+    "--project", "not-registered"
+  ]);
+  assert.match(result.stderr, /is not registered/);
+});
+
+test("capture infers the registered project from the checkout path in both directions", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const alphaPath = registerProject(aiosPath, tempRoot, "alpha");
+  const betaPath = registerProject(aiosPath, tempRoot, "beta");
+  const alphaFile = writeConvFile(tempRoot, "alpha.md", "Human: Alpha fact\nAssistant: Alpha response\n");
+  const betaFile = writeConvFile(tempRoot, "beta.md", "Human: Beta fact\nAssistant: Beta response\n");
+
+  const env = { ...process.env, HOME: path.join(tempRoot, "home") };
+  run(["capture", "import", "file", alphaFile, "--path", aiosPath], { cwd: alphaPath, env });
+  run(["capture", "import", "file", betaFile, "--path", aiosPath], { cwd: betaPath, env });
+
+  const index = fs.readFileSync(path.join(aiosPath, "memory", "sessions", "index.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(index.map((entry) => entry.project).sort(), ["alpha", "beta"]);
+  assert.ok(index.every((entry) => typeof entry.project_id === "string" && entry.project_id.length > 0));
+});
+
+test("Claude live hook attributes a session through the checkout path", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const alphaPath = registerProject(aiosPath, tempRoot, "alpha");
+  const transcriptPath = path.join(tempRoot, "claude-transcript.jsonl");
+  fs.writeFileSync(transcriptPath, [
+    { type: "user", sessionId: "hook-session", timestamp: "2026-07-16T10:00:00.000Z", message: { role: "user", content: "Hook fact" } },
+    { type: "assistant", sessionId: "hook-session", timestamp: "2026-07-16T10:01:00.000Z", message: { role: "assistant", content: "Hook response" } }
+  ].map((line) => JSON.stringify(line)).join("\n") + "\n");
+
+  run(["capture", "hook", "claude-code", "--path", aiosPath], {
+    cwd: alphaPath,
+    env: { ...process.env, HOME: path.join(tempRoot, "home") },
+    input: `${JSON.stringify({ transcript_path: transcriptPath, cwd: alphaPath })}\n`
+  });
+
+  const entries = fs.readFileSync(path.join(aiosPath, "memory", "sessions", "index.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].project, "alpha");
+  assert.equal(typeof entries[0].project_id, "string");
 });
 
 // ---------- capture delete ----------

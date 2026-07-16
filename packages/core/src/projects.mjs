@@ -279,12 +279,7 @@ export async function resolveProjectRecord(referenceOrOptions, additionalOptions
   return project;
 }
 
-/**
- * Resolve the project context for a writer or bridge. Explicit references are
- * catalog-backed; an empty catalog keeps legacy free-form tags usable until a
- * project is registered. Once the catalog has records, unknown references fail
- * closed so a typo cannot create a second project identity.
- */
+/** Resolve a writer or bridge project reference through the project catalog. */
 export async function resolveProjectContext(options = {}) {
   const context = createContext(options);
   await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
@@ -300,28 +295,18 @@ export async function resolveProjectContext(options = {}) {
       throw new Error(`Project reference "${reference}" is ambiguous. Resolve it by its stable id.`);
     }
     if (matches.length === 0) {
-      if (projects.length > 0 || options.allowLegacyWhenCatalogEmpty === false) {
-        throw new Error(`Project "${reference}" is not registered. Run \`dotaios project list\` to see available projects.`);
-      }
-      return {
-        id: null,
-        slug: reference,
-        project: reference,
-        projectPath: null,
-        registered: false
-      };
+      throw new Error(`Project "${reference}" is not registered. Run \`dotaios project list\` to see available projects.`);
     }
     return toProjectContext(matches[0]);
   }
 
   const cwd = path.resolve(options.cwd || process.cwd());
-  const matches = [];
-  for (const project of projects) {
-    if (!project.projectPath || !project.pathAvailable) continue;
-    if (await isPathWithin(project.projectPath, cwd, { fileSystem: context.fs })) {
-      matches.push(project);
-    }
-  }
+  const matches = (await Promise.all(projects.map(async (project) => {
+    if (!project.projectPath || !project.pathAvailable) return null;
+    return await isPathWithin(project.projectPath, cwd, { fileSystem: context.fs })
+      ? project
+      : null;
+  }))).filter(Boolean);
   matches.sort((left, right) => right.projectPath.length - left.projectPath.length);
   return matches[0] ? toProjectContext(matches[0]) : null;
 }

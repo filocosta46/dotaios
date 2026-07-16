@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { pathExists } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import {
@@ -19,7 +18,7 @@ import {
   writeSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
-import { resolveProjectContext } from "../../../core/src/projects.mjs";
+import { registerProject, resolveProjectContext } from "../../../core/src/projects.mjs";
 import {
   symlinkTargets,
   retiredSymlinkTargets,
@@ -306,11 +305,26 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
 }
 
 async function createProjectBridges(aiosPath, projectPath, options) {
-  const project = await resolveProjectContext({
+  let project = await resolveProjectContext({
     aiosPath,
     homePath: resolvePath(options.home || os.homedir()),
     cwd: projectPath
-  }) || fallbackProjectIdentity(projectPath);
+  });
+  if (!project) {
+    const registration = await registerProject({
+      aiosPath,
+      homePath: resolvePath(options.home || os.homedir()),
+      projectPath,
+      apply: !options.dryRun
+    });
+    project = {
+      id: registration.id,
+      slug: registration.slug,
+      project: registration.slug,
+      projectPath,
+      registered: registration.applied
+    };
+  }
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = await Promise.all([
     writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
@@ -499,17 +513,6 @@ function cursorRule(aiosPath, project) {
     managedEnd,
     ""
   ].join("\n");
-}
-
-function fallbackProjectIdentity(projectPath) {
-  const slug = path.basename(path.resolve(projectPath))
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "") || "project";
-  const id = `unregistered-${createHash("sha256").update(path.resolve(projectPath)).digest("hex").slice(0, 12)}`;
-  return { id, slug, project: slug, projectPath, registered: false };
 }
 
 function bridgeFile(title, lines) {

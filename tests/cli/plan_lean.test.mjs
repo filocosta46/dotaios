@@ -26,6 +26,19 @@ function setupAios() {
   return { aiosPath, tempRoot };
 }
 
+function registerProject(aiosPath, tempRoot, slug) {
+  const projectPath = path.join(tempRoot, `${slug}-checkout`);
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(path.join(projectPath, "source.txt"), `${slug}\n`);
+  run([
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    "--state-path", path.join(tempRoot, "project-state.json"),
+    "--slug", slug,
+    "--apply"
+  ]);
+}
+
 function today() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
@@ -95,7 +108,8 @@ test("plan with no title exits 2", () => {
 });
 
 test("plan --project tags the artifact and the event", () => {
-  const { aiosPath } = setupAios();
+  const { aiosPath, tempRoot } = setupAios();
+  registerProject(aiosPath, tempRoot, "demo");
   run(["plan", "ship it", "--project", "demo", "--path", aiosPath]);
   const plansDir = path.join(aiosPath, "memory", "plans");
   const body = fs.readFileSync(path.join(plansDir, fs.readdirSync(plansDir)[0]), "utf8");

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
 import { writeSession, readSessionIndex } from "../../../core/src/sessions.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
 export const name = "claude-code";
 export const level = ADAPTER_LEVELS.FULL_AUTO;
@@ -101,7 +102,7 @@ export async function importClaudeCode(aiosPath, { all = false, project = null, 
 
 // ---------- live hook ----------
 
-export async function handleHookPayload(aiosPath) {
+export async function handleHookPayload(aiosPath, { cwd = process.cwd() } = {}) {
   let input = "";
   process.stdin.setEncoding("utf8");
   for await (const chunk of process.stdin) {
@@ -137,10 +138,14 @@ export async function handleHookPayload(aiosPath) {
     return;
   }
 
-  const inferredProject = null;
+  const project = await resolveProjectContext({
+    aiosPath,
+    cwd: payload.cwd || cwd
+  });
 
   const session = parseTranscript(lines, {
-    project: inferredProject,
+    project: project?.slug || null,
+    projectId: project?.id || null,
     sourcePath: transcriptPath,
   });
 
