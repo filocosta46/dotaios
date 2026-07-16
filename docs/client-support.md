@@ -8,7 +8,7 @@ DotAIOS separates three different claims:
 
 A successful file write proves only configured. It does not prove that a particular client version invoked the file.
 
-| Client | Context path in v1.23 | Skills path in v1.23 | Public claim |
+| Client | Context path in v1.24 | Skills path in v1.24 | Public claim |
 |---|---|---|---|
 | Claude Code | Global `~/.claude/CLAUDE.md` bridge | Global and project `skills/` links | Configured locally; verify invocation in the client |
 | Codex | Global `~/.codex/AGENTS.md` bridge | Native shared Agent Skills links | Configured locally; verify invocation in the client |

@@ -2,6 +2,18 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.24.0] - 2026-07-16
+### Added
+- End-to-end project identity binding: registered slugs and stable IDs now flow through bridges, writers, Claude live hooks, and scoped briefs.
+- Identity and priorities are included in the bounded `brief --compact` projection.
+- Promotion truth lifecycle with duplicate no-op receipts, replace/remove/supersede operations, persisted preview plans, and audit findings for conflicting blocks.
+- Safety contracts for README-first project registration, orphan-aware project doctor, AIOS-root export rejection, and stale persisted-plan refusal.
+- Committed client invocation receipts for Codex, Claude Code, and Gemini CLI, with Cursor documented as configured but invocation-unproven.
+
+### Changed
+- Explicit project references now resolve through the catalog and fail closed when unknown; attach creates a durable registration before stamping project bridges.
+- Shipped skills route working-memory reads through `dotaios brief --compact`, including the corrected `plan-today` workflow.
+
 ## [1.23.0] - 2026-07-16
 ### Added
 - Project catalog commands: `project add`, `list`, `resolve`, and `doctor`. Durable project metadata and repository URLs sync inside `projects/`, while checkout paths stay machine-local in `~/.dotaios/projects.json`.
