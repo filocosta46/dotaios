@@ -206,7 +206,16 @@ async function checkAgentBridges(target, homePath) {
     }
 
     if (content.includes(MANAGED_START) && content.includes(target)) {
-      results.push({ name: `${agent.name} bridge`, status: "ok" });
+      if (content.includes("read_session_digest")) {
+        results.push({
+          name: `${agent.name} bridge`,
+          status: "warn",
+          detail: "Managed bridge predates v1.23 and still calls the retired read_session_digest surface.",
+          fix: `Run \`npx dotaios activate --path ${target} --overwrite\` to refresh it.`
+        });
+      } else {
+        results.push({ name: `${agent.name} bridge`, status: "ok" });
+      }
       foundBridge = true;
     } else if (content.includes(MANAGED_START)) {
       results.push({

@@ -30,7 +30,7 @@ Try saying:
 
 ## Agent steps
 
-1. Read `context/priorities.md`, `context/work.md`, active project READMEs, recent `memory/events.jsonl`, recent `memory/signals/`, and `memory/daily/` if present.
+1. Run `dotaios brief --compact` (with `--project <slug-or-id>` when scoped) for identity, priorities, active work, and bounded recent memory; read active project READMEs and daily notes only when the projection points to them.
 2. Group findings into stale, repeated, blocked, and promotable.
 3. Recommend at most 5 updates.
 4. Ask before durable writes to `context/`, `projects/`, `vault/wiki/`, or `vault/org/`.

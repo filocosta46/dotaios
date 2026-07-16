@@ -38,7 +38,7 @@ Try saying:
 3. `projects/*/README.md`
 4. `connections/registry.md`, if present
 5. `skills/_registry.json`, if present
-6. recent `memory/events.jsonl`, if present
+6. `dotaios brief --compact` for the bounded recent-memory projection
 
 ### Check
 

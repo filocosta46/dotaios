@@ -38,8 +38,7 @@ Try saying:
 2. If `prompt.md` is missing, fall back to:
    - `context/priorities.md`
    - `context/work.md`
-3. `memory/events.jsonl` last 50 entries, if present
-4. Today and yesterday from `memory/signals/`, if present
+3. `dotaios brief --compact` for the bounded recent-memory projection
 5. `memory/daily/YYYY-MM-DD.md` where YYYY-MM-DD is today's date, check if it already exists
 
 ### Process

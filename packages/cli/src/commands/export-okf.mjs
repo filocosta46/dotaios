@@ -59,8 +59,10 @@ function renderFrontmatter(raw, hasType, type) {
   return `---\ntype: ${type}\n${raw}\n---\n`;
 }
 
-async function assertSafeOutput(srcRoot, outDir, entries) {
-  if (await isPathWithin(outDir, srcRoot)) {
+async function assertSafeOutput(srcRoot, outDir, entries, { allowInternalOutput = false } = {}) {
+  const resolvedSource = path.resolve(srcRoot);
+  const resolvedOutput = path.resolve(outDir);
+  if (resolvedSource === resolvedOutput || await isPathWithin(outDir, srcRoot)) {
     throw new Error("Unsafe OKF output: --out cannot equal or contain the AIOS folder");
   }
 
@@ -69,6 +71,10 @@ async function assertSafeOutput(srcRoot, outDir, entries) {
     if (await isPathWithin(dir, outDir) || await isPathWithin(outDir, dir)) {
       throw new Error(`Unsafe OKF output: --out overlaps source folder ${path.resolve(dir)}`);
     }
+  }
+
+  if (!allowInternalOutput && await isPathWithin(srcRoot, outDir)) {
+    throw new Error("Unsafe OKF output: --out cannot be inside the AIOS folder");
   }
 }
 
@@ -155,7 +161,7 @@ async function replaceDirectory(stagingDir, outDir) {
  * The format is plumbing; this is a disposable projection, never a migration.
  * Returns a stats object.
  */
-export async function exportBundle({ srcRoot, outDir, roots = SRC_ROOTS, vaultPath = null }) {
+export async function exportBundle({ srcRoot, outDir, roots = SRC_ROOTS, vaultPath = null, allowInternalOutput = false }) {
   srcRoot = path.resolve(srcRoot);
   outDir = path.resolve(outDir);
 
@@ -164,7 +170,7 @@ export async function exportBundle({ srcRoot, outDir, roots = SRC_ROOTS, vaultPa
     name,
     dir: name === "vault" && vaultPath ? path.resolve(vaultPath) : path.join(srcRoot, name)
   }));
-  await assertSafeOutput(srcRoot, outDir, entries);
+  await assertSafeOutput(srcRoot, outDir, entries, { allowInternalOutput });
 
   const stagingDir = `${outDir}.staging-${randomUUID()}`;
   await fs.rm(stagingDir, { recursive: true, force: true });
@@ -302,7 +308,7 @@ export async function exportOkfCommand(args) {
     await fs.writeFile(path.join(buildDir, ".gitignore"), "*\n");
   }
 
-  const stats = await exportBundle({ srcRoot: target, outDir, vaultPath });
+  const stats = await exportBundle({ srcRoot: target, outDir, vaultPath, allowInternalOutput: usingDefaultOut });
 
   console.log(`OKF export -> ${stats.outDir}`);
   console.log(`  concepts exported : ${stats.concepts}`);

@@ -156,4 +156,31 @@ describe("doctorCommand", () => {
       `expected migration warning, got: ${lines.join("\n").slice(0, 400)}`
     );
   });
+
+  it("warns when a managed bridge still references the pre-1.23 digest tool", async () => {
+    const aiosPath = await makeMinimalAios(tmpBase);
+    const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-home-legacy-"));
+    const bridgePath = path.join(tmpHome, ".claude", "CLAUDE.md");
+    await fs.mkdir(path.dirname(bridgePath), { recursive: true });
+    await fs.writeFile(bridgePath, [
+      "# DotAIOS Claude Code Bridge",
+      "<!-- dotaios-managed:start -->",
+      `Read ${path.join(aiosPath, "AGENTS.md")} first.`,
+      "Run read_session_digest at session start.",
+      "<!-- dotaios-managed:end -->"
+    ].join("\n"));
+    const { doctorCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    const lines = [];
+    const origLog = console.log.bind(console);
+    console.log = (...args) => lines.push(args.join(" "));
+    try {
+      await doctorCommand(["--path", aiosPath, "--home", tmpHome]);
+    } finally {
+      console.log = origLog;
+      await fs.rm(tmpHome, { recursive: true, force: true });
+    }
+    assert.match(lines.join("\n"), /predates v1\.23.*read_session_digest/i);
+  });
 });

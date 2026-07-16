@@ -72,3 +72,25 @@ test("public context guidance documents only the current MCP tools and one memor
   assert.match(agentsTemplate, /Route `memory\/events\.jsonl`, `memory\/signals\/`, and `memory\/sessions\/`/);
   assert.doesNotMatch(agentsTemplate, /load the last 50|load the single most recent file/i);
 });
+
+test("shipped skills route working-memory reads through the bounded projection", async () => {
+  const skillsRoot = path.join(repoRoot, "skills");
+  const entries = await fs.readdir(skillsRoot, { withFileTypes: true });
+  const skillFiles = await Promise.all(entries
+    .filter((entry) => entry.isDirectory())
+    .map(async (entry) => {
+      const file = path.join(skillsRoot, entry.name, "SKILL.md");
+      try {
+        return { file, content: await fs.readFile(file, "utf8") };
+      } catch (error) {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      }
+    }));
+  const directRead = /(?:read|load|scan|review|inspect)[^\n`]*(?:memory\/(?:events\.jsonl|signals|sessions))/i;
+  for (const skill of skillFiles.filter(Boolean)) {
+    for (const line of skill.content.split(/\r?\n/)) {
+      assert.doesNotMatch(line, directRead, `${skill.file} directly reads working memory: ${line}`);
+    }
+  }
+});
