@@ -20,7 +20,9 @@ export async function ingestBinary(rawInput, options) {
     assetsDir,
     eventsPath,
     overwrite = false,
-    dryRun = false
+    dryRun = false,
+    project = null,
+    project_id = null
   } = options;
 
   const sourcePath = path.resolve(rawInput);
@@ -59,7 +61,9 @@ export async function ingestBinary(rawInput, options) {
     asset: target.asset,
     kind: "binary",
     parser: "copy",
-    summary: fileName
+    summary: fileName,
+    ...(project ? { project } : {}),
+    ...(project_id ? { project_id } : {})
   });
 
   return { action: "written", asset: target.asset, parser: "copy", kind: "binary", canonical: sourcePath };

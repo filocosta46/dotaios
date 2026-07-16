@@ -11,6 +11,7 @@ const MAX_PLAN_ITEMS = 4;
 const MAX_CARRY_OVER_ITEMS = 5;
 const MAX_SIGNAL_ITEMS = 8;
 const MAX_EVENT_ITEMS = 8;
+const MAX_HEADER_CHARS = 800;
 
 const localClock = () => new Date();
 
@@ -52,8 +53,10 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const visibleCharacterBudget = normalizeBudget(options);
 
   const dailyDir = path.join(aiosPath, "memory", "daily");
-  const [todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
+  const [identity, priorities, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
     await Promise.all([
+      readText(filesystem, path.join(aiosPath, "context", "identity.md")),
+      readText(filesystem, path.join(aiosPath, "context", "priorities.md")),
       readText(filesystem, path.join(dailyDir, `${today}.md`)),
       readText(filesystem, path.join(dailyDir, `${yesterday}.md`)),
       readJsonl(filesystem, path.join(aiosPath, "memory", "sessions", "index.jsonl")),
@@ -66,17 +69,23 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
 
   const projectFilter = resolveProjectFilter(requestedProject, projects);
   const sessions = stableSessionOrder(sessionEntries)
-    .filter((session) => matchesProject(session, projectFilter));
+    .filter((session) => matchesProject(session, projectFilter))
+    .map((session) => markUnscoped(session, projectFilter));
   const signals = stableTimelineOrder(signalEntries)
     .filter((signal) => isOperationalDate(signal.date, today, yesterday))
     .filter((signal) => matchesProject(signal, projectFilter))
-    .filter(hasTimelineSummary);
+    .filter(hasTimelineSummary)
+    .map((signal) => markUnscoped(signal, projectFilter));
   const events = stableTimelineOrder(eventEntries)
     .filter((event) => isOperationalDate(event.date, today, yesterday))
     .filter((event) => matchesProject(event, projectFilter))
-    .filter(hasTimelineSummary);
+    .filter(hasTimelineSummary)
+    .map((event) => markUnscoped(event, projectFilter));
+  const deduped = dedupeUpdateChannels(signals, events, projectFilter);
 
   const candidates = {
+    identity: compactHeader(identity),
+    priorities: compactHeader(priorities),
     today: {
       focus: firstLine(readSection(todayNote, "Focus")),
       plan: compactLines(readSection(todayNote, "Plan")).slice(0, MAX_PLAN_ITEMS),
@@ -84,8 +93,8 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     carryOver: extractCarryOver(todayNote, yesterdayNote),
     activeProject: selectActiveProject(projectFilter, sessions, projects),
     sessions: sessions.slice(0, sessionLimit),
-    signals: signals.slice(0, MAX_SIGNAL_ITEMS),
-    events: events.slice(0, MAX_EVENT_ITEMS),
+    signals: deduped.signals.slice(0, MAX_SIGNAL_ITEMS),
+    events: deduped.events.slice(0, MAX_EVENT_ITEMS),
   };
 
   return applyVisibleCharacterBudget(
@@ -118,6 +127,8 @@ export function renderWorkingContext(context) {
 function applyVisibleCharacterBudget(base, candidates, limit) {
   let selected = {
     ...base,
+    identity: "",
+    priorities: "",
     todayContext: { focus: "", plan: [] },
     carryOver: [],
     activeProject: null,
@@ -135,6 +146,9 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
     selected = candidate;
     return true;
   };
+
+  if (candidates.identity) consider({ ...selected, identity: candidates.identity });
+  if (candidates.priorities) consider({ ...selected, priorities: candidates.priorities });
 
   if (base.projectFilter && candidates.activeProject) {
     consider({ ...selected, activeProject: candidates.activeProject });
@@ -209,6 +223,9 @@ function renderUnbounded(context) {
   const events = context?.events || [];
   const lines = [`## Active Context · ${today}`, ""];
 
+  if (context?.identity) lines.push("### Identity", context.identity, "");
+  if (context?.priorities) lines.push("### Priorities", context.priorities, "");
+
   const todayLines = [];
   if (todayContext.focus) todayLines.push(`**Focus:** ${todayContext.focus}`);
   for (const item of todayContext.plan || []) todayLines.push(`- ${item}`);
@@ -228,22 +245,27 @@ function renderUnbounded(context) {
       const date = String(session.captured_at || "").slice(0, 10);
       const agent = session.agent || "unknown";
       const project = session.project ? ` · ${session.project}` : "";
+      const scope = session.unscoped ? " (unscoped)" : "";
       const title = session.title || "(untitled)";
       const turns = Number.isInteger(session.turns) ? session.turns : 0;
-      lines.push(`- ${date} · ${agent}${project} · "${title}" (${turns} turns)`);
+      lines.push(`- ${date} · ${agent}${project}${scope} · "${title}" (${turns} turns)`);
     }
     lines.push("");
   }
 
   if (signals.length > 0) {
     lines.push("### Recent Signals");
-    for (const signal of signals) lines.push(`- [${signal.date || today}] ${timelineSummary(signal)}`);
+    for (const signal of signals) {
+      lines.push(`- [${signal.date || today}]${signal.unscoped ? " (unscoped)" : ""} ${timelineSummary(signal)}`);
+    }
     lines.push("");
   }
 
   if (events.length > 0) {
     lines.push("### Recent Events");
-    for (const event of events) lines.push(`- [${event.date || today}] ${timelineSummary(event)}`);
+    for (const event of events) {
+      lines.push(`- [${event.date || today}]${event.unscoped ? " (unscoped)" : ""} ${timelineSummary(event)}`);
+    }
     lines.push("");
   }
 
@@ -288,6 +310,14 @@ function compactLines(content) {
     .filter((line) => line && !line.startsWith("<!--"))
     .map((line) => line.replace(/^- \[[ x]\]\s*/i, "").replace(/^[-*]\s*/, "").trim())
     .filter(Boolean);
+}
+
+function compactHeader(content) {
+  const visible = String(content || "").trim();
+  if (!visible) return "";
+  return visible.length > MAX_HEADER_CHARS
+    ? `${visible.slice(0, MAX_HEADER_CHARS - 1).trimEnd()}…`
+    : visible;
 }
 
 function firstLine(content) {
@@ -352,7 +382,32 @@ function normalizeTimelineEntry(entry, {
 }
 
 function matchesProject(entry, projectFilter) {
-  return !projectFilter || entry.project === projectFilter;
+  return !projectFilter || !entry.project || entry.project === projectFilter;
+}
+
+function markUnscoped(entry, projectFilter) {
+  return projectFilter && !entry.project ? { ...entry, unscoped: true } : entry;
+}
+
+function dedupeUpdateChannels(signals, events, projectFilter) {
+  if (projectFilter) return { signals, events };
+  const updateKeys = new Set(
+    events
+      .filter((event) => event.type === "update" && event.source === "dotaios update")
+      .map(timelineKey)
+  );
+  return {
+    signals: signals.filter((signal) => !(
+      signal.type === "update" &&
+      signal.source === "dotaios update" &&
+      updateKeys.has(timelineKey(signal))
+    )),
+    events
+  };
+}
+
+function timelineKey(entry) {
+  return [entry.type, entry.source, entry.project || "", entry.project_id || "", timelineSummary(entry)].join("\n");
 }
 
 function resolveProjectFilter(reference, projects) {

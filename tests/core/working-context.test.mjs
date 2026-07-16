@@ -99,6 +99,50 @@ test("project filter scopes sessions, namespaced signals, and events with stable
   assert.doesNotMatch(rendered, /Project B|Stale A/);
 });
 
+test("scoped views retain unattributed evidence without leaking another project", async () => {
+  const aiosPath = tmpAios();
+  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
+    { session_id: "a", project: "project-a", captured_at: "2026-07-15T09:00:00.000Z", title: "A fact" },
+    { session_id: "b", project: "project-b", captured_at: "2026-07-15T08:00:00.000Z", title: "B fact" },
+    { session_id: "unscoped", captured_at: "2026-07-15T07:00:00.000Z", title: "Unscoped fact" },
+  ]);
+  writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", type: "update", source: "dotaios update", project: "project-a", summary: "A update" },
+    { ts: "2026-07-15T08:00:00.000Z", type: "update", source: "dotaios update", project: "project-b", summary: "B update" },
+    { ts: "2026-07-15T07:00:00.000Z", type: "update", source: "dotaios update", summary: "Unscoped update" },
+  ]);
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", type: "update", source: "dotaios update", project: "project-a", summary: "A update" },
+    { ts: "2026-07-15T08:00:00.000Z", type: "update", source: "dotaios update", project: "project-b", summary: "B update" },
+    { ts: "2026-07-15T07:00:00.000Z", type: "update", source: "dotaios update", summary: "Unscoped update" },
+  ]);
+
+  const scopedA = await buildWorkingContext(aiosPath, { project: "project-a" }, { clock: fixedClock });
+  const scopedB = await buildWorkingContext(aiosPath, { project: "project-b" }, { clock: fixedClock });
+  const unscoped = await buildWorkingContext(aiosPath, {}, { clock: fixedClock });
+
+  assert.match(scopedA.rendered, /A fact|A update/);
+  assert.doesNotMatch(scopedA.rendered, /B fact|B update/);
+  assert.match(scopedA.rendered, /Unscoped fact|Unscoped update/);
+  assert.match(scopedA.rendered, /unscoped/);
+  assert.match(scopedB.rendered, /B fact|B update/);
+  assert.doesNotMatch(scopedB.rendered, /A fact|A update/);
+  assert.equal((unscoped.rendered.match(/Unscoped update/g) || []).length, 1);
+});
+
+test("compact projection answers identity and priorities within the same budget", async () => {
+  const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "context"), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nI am the launch owner.\n");
+  fs.writeFileSync(path.join(aiosPath, "context", "priorities.md"), "# Priorities\n\nShip the hardening release this week.\n");
+
+  const result = await buildWorkingContext(aiosPath, { visibleCharacterBudget: 220 }, { clock: fixedClock });
+  assert.match(result.rendered, /### Identity[\s\S]*launch owner/);
+  assert.match(result.rendered, /### Priorities[\s\S]*hardening release/);
+  assert.ok(result.rendered.length <= 220);
+  assert.equal(result.context.budget.used, result.rendered.length);
+});
+
 test("projection reads durable project metadata from the local README", async () => {
   const aiosPath = tmpAios();
   fs.mkdirSync(path.join(aiosPath, "projects", "project-a"), { recursive: true });

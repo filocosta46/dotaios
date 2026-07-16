@@ -123,15 +123,17 @@ export async function placeMarkdown(opts) {
     interactive = false,
     asset = null,
     warning = null,
+    project = null,
+    project_id = null,
     now = () => new Date()
   } = opts;
 
   if (shelf === "raw") {
-    return placeRaw({ rawDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, warning });
+    return placeRaw({ rawDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, warning, project, project_id });
   }
 
   if (shelf === "signal") {
-    return placeSignal({ rawDir, signalsDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, now });
+    return placeSignal({ rawDir, signalsDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, now, project, project_id });
   }
 
   // wiki | company | person — durable knowledge shelves.
@@ -173,6 +175,8 @@ export async function placeMarkdown(opts) {
     parser,
     summary: title,
     shelf,
+    ...(project ? { project } : {}),
+    ...(project_id ? { project_id } : {}),
     ...(asset ? { asset } : {})
   });
 
@@ -189,7 +193,7 @@ export async function placeMarkdown(opts) {
   };
 }
 
-async function placeRaw({ rawDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, warning }) {
+async function placeRaw({ rawDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, warning, project, project_id }) {
   const target = await resolveMarkdownDestination({ rawDir, baseSlug, source, overwrite });
 
   if (target.action === "skip") {
@@ -214,6 +218,8 @@ async function placeRaw({ rawDir, eventsPath, baseSlug, source, title, body, kin
     kind,
     parser,
     summary: title,
+    ...(project ? { project } : {}),
+    ...(project_id ? { project_id } : {}),
     ...(asset ? { asset } : {})
   });
 
@@ -229,7 +235,7 @@ async function placeRaw({ rawDir, eventsPath, baseSlug, source, title, body, kin
   };
 }
 
-async function placeSignal({ rawDir, signalsDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, now }) {
+async function placeSignal({ rawDir, signalsDir, eventsPath, baseSlug, source, title, body, kind, parser, overwrite, asset, now, project, project_id }) {
   const inline = stripFrontmatter(body).trim();
   let destination = null;
 
@@ -247,6 +253,8 @@ async function placeSignal({ rawDir, signalsDir, eventsPath, baseSlug, source, t
     type: "ingest-note",
     summary: title,
     source,
+    ...(project ? { project } : {}),
+    ...(project_id ? { project_id } : {}),
     ...(destination ? { destination } : { note: inline })
   });
 
@@ -258,6 +266,8 @@ async function placeSignal({ rawDir, signalsDir, eventsPath, baseSlug, source, t
     parser,
     summary: title,
     shelf: "signal",
+    ...(project ? { project } : {}),
+    ...(project_id ? { project_id } : {}),
     ...(asset ? { asset } : {})
   });
 

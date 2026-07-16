@@ -183,9 +183,45 @@ export async function applyProjectRegistration(plan, options = {}) {
     throw new Error("The machine-local project path state changed after the preview. Preview project add again.");
   }
 
-  await writeProjectState(context, plan.stateAfter);
   await context.fs.mkdir(path.dirname(plan.readmePath), { recursive: true });
+  const stateBeforeText = await readTextIfPresent(context.fs, context.statePath);
+  const stateBeforeExists = stateBeforeText !== "" || await pathExists(context.fs, context.statePath);
+
+  // Durable truth is the first write. If machine-local state cannot be
+  // persisted, roll the README back so a later doctor run cannot see a
+  // half-registered project.
   await context.fs.writeFile(plan.readmePath, plan.readme, "utf8");
+  try {
+    await writeProjectState(context, plan.stateAfter);
+  } catch (error) {
+    const rollbackErrors = [];
+    try {
+      if (plan.readmeExists) {
+        await context.fs.writeFile(plan.readmePath, plan.readmeBefore, "utf8");
+      } else {
+        await context.fs.rm(plan.readmePath, { force: true });
+      }
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+    try {
+      if (stateBeforeExists) {
+        await context.fs.mkdir(path.dirname(context.statePath), { recursive: true });
+        await context.fs.writeFile(context.statePath, stateBeforeText, "utf8");
+      } else {
+        await context.fs.rm(context.statePath, { force: true });
+      }
+    } catch (rollbackError) {
+      rollbackErrors.push(rollbackError);
+    }
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "Project registration failed and its rollback could not be completed."
+      );
+    }
+    throw new Error(`Project registration rolled back because local state could not be saved: ${error.message}`);
+  }
 
   return {
     ...plan,
@@ -204,6 +240,12 @@ export async function listProjects(options = {}) {
 
 /** Resolve a project id or slug to an existing path on this machine. */
 export async function resolveProject(referenceOrOptions, additionalOptions = {}) {
+  const project = await resolveProjectRecord(referenceOrOptions, additionalOptions);
+  return project.projectPath;
+}
+
+/** Resolve a project reference to its catalog record, including its stable id. */
+export async function resolveProjectRecord(referenceOrOptions, additionalOptions = {}) {
   const options = typeof referenceOrOptions === "string"
     ? { ...additionalOptions, project: referenceOrOptions }
     : { ...(referenceOrOptions || {}) };
@@ -234,7 +276,64 @@ export async function resolveProject(referenceOrOptions, additionalOptions = {})
       `Run \`dotaios project add <repo-path> --slug ${project.slug}\` to update it.`
     ].join(" "));
   }
-  return project.projectPath;
+  return project;
+}
+
+/**
+ * Resolve the project context for a writer or bridge. Explicit references are
+ * catalog-backed; an empty catalog keeps legacy free-form tags usable until a
+ * project is registered. Once the catalog has records, unknown references fail
+ * closed so a typo cannot create a second project identity.
+ */
+export async function resolveProjectContext(options = {}) {
+  const context = createContext(options);
+  await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
+  await assertStateOutsideAios(context);
+  const projects = await listProjectRecords(context);
+  const reference = readOptionalString(options.project ?? options.slug ?? options.id);
+
+  if (reference) {
+    const matches = projects.filter((project) =>
+      project.id === reference || project.slug === reference || project.project === reference
+    );
+    if (matches.length > 1) {
+      throw new Error(`Project reference "${reference}" is ambiguous. Resolve it by its stable id.`);
+    }
+    if (matches.length === 0) {
+      if (projects.length > 0 || options.allowLegacyWhenCatalogEmpty === false) {
+        throw new Error(`Project "${reference}" is not registered. Run \`dotaios project list\` to see available projects.`);
+      }
+      return {
+        id: null,
+        slug: reference,
+        project: reference,
+        projectPath: null,
+        registered: false
+      };
+    }
+    return toProjectContext(matches[0]);
+  }
+
+  const cwd = path.resolve(options.cwd || process.cwd());
+  const matches = [];
+  for (const project of projects) {
+    if (!project.projectPath || !project.pathAvailable) continue;
+    if (await isPathWithin(project.projectPath, cwd, { fileSystem: context.fs })) {
+      matches.push(project);
+    }
+  }
+  matches.sort((left, right) => right.projectPath.length - left.projectPath.length);
+  return matches[0] ? toProjectContext(matches[0]) : null;
+}
+
+function toProjectContext(project) {
+  return {
+    id: project.id,
+    slug: project.slug,
+    project: project.project || project.slug,
+    projectPath: project.projectPath,
+    registered: true
+  };
 }
 
 /** Check local paths and Git remotes without changing metadata or local state. */
@@ -242,10 +341,40 @@ export async function doctorProjects(options = {}) {
   const context = createContext(options);
   await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
   await assertStateOutsideAios(context);
-  const projects = await listProjectRecords(context);
+  const [projects, state] = await Promise.all([
+    listProjectRecords(context),
+    readProjectState(context)
+  ]);
+  const durableIds = new Set(projects.map((project) => project.id).filter(Boolean));
+  const orphanProjects = Object.entries(state.paths)
+    .filter(([id]) => !durableIds.has(id))
+    .map(([id, localPath]) => ({
+      id,
+      slug: `orphan-${id}`,
+      project: null,
+      name: "orphaned local project mapping",
+      status: null,
+      domain: [],
+      repoUrl: null,
+      projectPath: readMappedPath(localPath),
+      pathAvailable: false,
+      readmePath: null,
+      readme: ""
+    }));
+  const checkedProjects = [...projects, ...orphanProjects];
   const issues = [];
 
-  for (const project of projects) {
+  for (const project of checkedProjects) {
+    if (orphanProjects.includes(project)) {
+      issues.push({
+        type: "orphan_state",
+        reason: "missing_readme",
+        project,
+        actual: project.projectPath,
+        message: `Orphaned local project state for id ${project.id} has no durable project README.`
+      });
+      continue;
+    }
     if (!project.projectPath) {
       issues.push({
         type: "missing_path",
@@ -283,8 +412,8 @@ export async function doctorProjects(options = {}) {
 
   return {
     ok: issues.length === 0,
-    checked: projects.length,
-    projects,
+    checked: checkedProjects.length,
+    projects: checkedProjects,
     issues
   };
 }
@@ -457,6 +586,24 @@ async function writeProjectState(context, state) {
     `${JSON.stringify({ ...state, version: PROJECT_STATE_VERSION, paths }, null, 2)}\n`,
     "utf8"
   );
+}
+
+async function pathExists(fileSystem, filePath) {
+  try {
+    await fileSystem.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readTextIfPresent(fileSystem, filePath) {
+  try {
+    return await fileSystem.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  }
 }
 
 async function findIdForPath(context, paths, projectPath) {

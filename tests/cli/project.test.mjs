@@ -556,6 +556,19 @@ test("doctorProjects reports missing paths and remote mismatches without writing
   assert.deepEqual(after, before, "doctor must be read-only");
 });
 
+test("doctorProjects reports local state whose durable project README is missing", async (t) => {
+  const { aiosPath, statePath } = await fixture(t);
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, JSON.stringify({ version: 1, paths: { "orphan-id": "/tmp/missing-project" } }));
+
+  const report = await doctorProjects({ aiosPath, statePath });
+
+  assert.equal(report.ok, false);
+  assert.equal(report.checked, 1);
+  assert.equal(report.issues[0].type, "orphan_state");
+  assert.match(report.issues[0].message, /no durable project README/);
+});
+
 test("local state overrides are rejected when they point or resolve inside synced AIOS content", async (t) => {
   const { root, aiosPath } = await fixture(t);
   const projectPath = await makeRepo(root, "outside");

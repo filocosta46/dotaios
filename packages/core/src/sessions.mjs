@@ -58,6 +58,7 @@ export function renderSessionMarkdown(session) {
   ];
   if (session.source_path) lines.push(`source_path: ${session.source_path}`);
   if (session.project) lines.push(`project: ${session.project}`);
+  if (session.project_id) lines.push(`project_id: ${session.project_id}`);
   lines.push(`turns: ${turnCount}`);
   if (session.title) lines.push(`title: "${escapeYaml(session.title)}"`);
   lines.push("schema: 1");
@@ -107,6 +108,8 @@ export async function writeSession(aiosPath, session) {
         ...priorEntry,
         turns: Array.isArray(session.turns) ? session.turns.length : priorEntry.turns,
         title: session.title || priorEntry.title,
+        ...(session.project && { project: session.project }),
+        ...(session.project_id && { project_id: session.project_id }),
         path: updatedRelative,
         content_hash: bodyHash,
       };
@@ -136,6 +139,7 @@ export async function writeSession(aiosPath, session) {
     source_type: session.source_type || "manual",
     ...(session.source_path && { source_path: session.source_path }),
     ...(session.project && { project: session.project }),
+    ...(session.project_id && { project_id: session.project_id }),
     turns: Array.isArray(session.turns) ? session.turns.length : 0,
     title: session.title || null,
     path: relativePath,

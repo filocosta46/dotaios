@@ -4,7 +4,7 @@ import { generateSessionId, inferTitle } from "../../../core/src/sessions.mjs";
 export const name = "manual";
 export const level = ADAPTER_LEVELS.MANUAL_ASSIST;
 
-export function parseRawText(text, { project, sourceType = "import" } = {}) {
+export function parseRawText(text, { project, projectId = null, sourceType = "import" } = {}) {
   const turns = parseTurns(text);
   const now = new Date().toISOString();
   const session_id = generateSessionId();
@@ -15,6 +15,7 @@ export function parseRawText(text, { project, sourceType = "import" } = {}) {
     captured_at: now,
     source_type: sourceType,
     ...(project && { project }),
+    ...(projectId && { project_id: projectId }),
     title: inferTitle(turns),
     turns,
   };

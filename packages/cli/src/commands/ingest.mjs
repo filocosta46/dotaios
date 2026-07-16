@@ -8,6 +8,7 @@ import { ingestDocument } from "../ingest/pdf.mjs";
 import { ingestText } from "../ingest/text.mjs";
 import { ingestBinary } from "../ingest/binary.mjs";
 import { SHELVES, isShelf, isDurableShelf, shelfNeedsName } from "../ingest/placement.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios ingest <input> [options]
@@ -35,6 +36,7 @@ Options:
   --overwrite       Replace an existing destination (default skips)
   --dry-run         Classify the input and print the plan without writing
   --timeout <secs>  URL fetch timeout (default 10)
+  --project <slug-or-id>  Attribute the ingest to a registered project
 
 Examples:
   dotaios ingest report.pdf --to raw
@@ -71,6 +73,11 @@ export async function ingestCommand(args) {
   }
 
   const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
+  const project = await resolveProjectContext({
+    aiosPath,
+    project: options.project,
+    cwd: process.cwd()
+  });
   const config = await readConfig(aiosPath);
   const vaultRoot = resolveVaultPath(config || {}, aiosPath);
   const rawDir = path.join(vaultRoot, "raw");
@@ -117,7 +124,9 @@ export async function ingestCommand(args) {
     vaultRoot,
     signalsDir,
     apply: options.apply,
-    interactive
+    interactive,
+    ...(project?.slug ? { project: project.slug } : {}),
+    ...(project?.id ? { project_id: project.id } : {})
   };
 
   const flags = {
@@ -166,7 +175,8 @@ export async function ingestCommand(args) {
       const result = await ingestBinary(classification.target, {
         assetsDir,
         eventsPath,
-        ...flags
+        ...flags,
+        ...shelfOptions
       });
       reportResult(result, { routedByDefault });
       return;
@@ -299,6 +309,7 @@ function parseOptions(args = []) {
     to: null,
     name: null,
     apply: false,
+    project: null,
     positionals: []
   };
 
@@ -318,6 +329,9 @@ function parseOptions(args = []) {
       index += 1;
     } else if (arg === "--name") {
       options.name = readOptionValue(args, index, "--name");
+      index += 1;
+    } else if (arg === "--project") {
+      options.project = readOptionValue(args, index, "--project");
       index += 1;
     } else if (arg === "--timeout") {
       const raw = readOptionValue(args, index, "--timeout");

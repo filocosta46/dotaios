@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { pathExists } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import {
@@ -18,6 +19,7 @@ import {
   writeSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
 import {
   symlinkTargets,
   retiredSymlinkTargets,
@@ -304,13 +306,18 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
 }
 
 async function createProjectBridges(aiosPath, projectPath, options) {
+  const project = await resolveProjectContext({
+    aiosPath,
+    homePath: resolvePath(options.home || os.homedir()),
+    cwd: projectPath
+  }) || fallbackProjectIdentity(projectPath);
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = await Promise.all([
-    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath), {
+    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
       ...options,
       projectRoot: projectPath
     }),
-    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath), {
+    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath, project), {
       ...options,
       projectRoot: projectPath
     })
@@ -463,9 +470,11 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
   return { action: dryRun ? "would update" : "updated", path: destination };
 }
 
-function projectAgentsBridge(aiosPath) {
+function projectAgentsBridge(aiosPath, project) {
   return bridgeFile("DotAIOS Project Bridge", [
-    "This project is attached to the user's DotAIOS memory.",
+    `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
+    `At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
+    ...(project.registered ? [] : ["This checkout is not in the project catalog yet; run `dotaios project add <repo-path>` to enable automatic writer attribution."]),
     "",
     `Before personal recommendations or cross-project planning, read: ${path.join(aiosPath, "AGENTS.md")}`,
     "",
@@ -473,7 +482,7 @@ function projectAgentsBridge(aiosPath) {
   ]);
 }
 
-function cursorRule(aiosPath) {
+function cursorRule(aiosPath, project) {
   return [
     "---",
     "description: DotAIOS personal context",
@@ -484,10 +493,23 @@ function cursorRule(aiosPath) {
     managedStart,
     "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
     "",
+    `This checkout is project \`${project.slug}\` (id \`${project.id}\`). At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
+    "",
     `@${path.join(aiosPath, "AGENTS.md")}`,
     managedEnd,
     ""
   ].join("\n");
+}
+
+function fallbackProjectIdentity(projectPath) {
+  const slug = path.basename(path.resolve(projectPath))
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "project";
+  const id = `unregistered-${createHash("sha256").update(path.resolve(projectPath)).digest("hex").slice(0, 12)}`;
+  return { id, slug, project: slug, projectPath, registered: false };
 }
 
 function bridgeFile(title, lines) {
