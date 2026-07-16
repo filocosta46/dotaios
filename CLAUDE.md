@@ -8,8 +8,8 @@
 DotAIOS is a local-first CLI + conventions package (`npx dotaios`) that creates a
 user's `~/aios/` personal-context folder and bridges it into the global memory
 files of AI agents (Claude Code, Codex, Cursor, Gemini, OpenCode). Plain text,
-no server, no cloud DB. Optional private GitHub sync. Search is term-frequency
-text match (not semantic).
+no hosted server, no cloud DB. Optional manual private GitHub sync. Search is
+term-frequency text match (not semantic).
 
 **ICP:** Non-technical users, agent-led onboarding, minimal/zero terminal. Keep
 language and UX simple. No jargon, no cloud requirements, no heavy dependencies.
@@ -20,7 +20,7 @@ language and UX simple. No jargon, no cloud requirements, no heavy dependencies.
 packages/
   cli/      # All CLI commands. Entry: packages/cli/src/index.mjs
   core/     # Shared helpers: memory, paths, render, schema, search, sessions, digest, ...
-  mcp/      # Local MCP server (single file: packages/mcp/src/server.mjs)
+  mcp/      # Optional read-only MCP adapter (single file: packages/mcp/src/server.mjs)
 scripts/
   smoke.mjs            # End-to-end smoke test (spawns the CLI in a temp dir)
   release-checklist.mjs # Pre-publish checklist (node scripts/release-checklist.mjs)
@@ -34,12 +34,39 @@ docs/       # Architecture and user docs
 website/    # React and Vite marketing site with optional Sanity copy hydration; not shipped in the npm package
 ```
 
+## v1.23 architecture boundaries
+
+- **Portable projects, local paths.** `projects/<slug>/README.md` is the synced
+  record (stable ID, name, status, domain, repo URL). Actual repositories stay
+  outside AIOS; `~/.dotaios/projects.json` maps IDs to checkout paths on one
+  machine. Never put absolute paths in portable metadata or working context.
+- **Promotion is preview-first.** Captured sessions are evidence. `dotaios memory
+  promote` plans and previews by default; only explicit `--apply` may append to a
+  signal, context, project, vault, or skill, or record `session-only`. Apply
+  rechecks source/destination state and appends a receipt to `memory/events.jsonl`.
+- **One working-context selector.** `working-context.mjs` owns deterministic,
+  bounded selection and applies one project filter to projects, sessions,
+  signals, and events. CLI, MCP, briefs, and bridge instructions must consume
+  that policy rather than recreate memory windows.
+- **Sync is optional, manual, and fail-closed.** `dotaios sync setup` is an
+  explicit opt-in; `dotaios sync now` is the reconciliation boundary. It runs
+  only from the expected `main` checkout under a lock; conflicts abort without
+  a push, reset, or recovery branch.
+- **MCP is optional and read-only.** It exposes only `read_working_context`,
+  `search_aios`, and `resolve_skill`. It does not write AIOS or client config,
+  and it does not execute external commands.
+- **No Google command layer.** Do not add `dotaios google`, `connect google`,
+  `gws` wrappers, or Google tools to MCP. Third-party integrations belong in
+  separately permissioned plugins or client-native apps.
+
 ## Hard rules (never violate)
 
 1. **ESM only.** All source is `.mjs`, `"type": "module"`. No CommonJS `require()`.
 2. **Node >= 20.** Both the root and the `mcp` package declare `>=20`. Don't use APIs that need a newer floor without bumping `engines` deliberately.
 3. **No build step for the CLI packages.** Source under `packages/` ships directly. The separate `website/` uses React and Vite.
-4. **KISS.** No new heavy dependencies (linters, formatters, bundlers, ORMs, cloud SDKs, vector DBs). The 4 runtime deps all serve ingest (readability, linkedom, turndown, unpdf).
+4. **KISS.** No new heavy dependencies (linters, formatters, bundlers, ORMs,
+   cloud SDKs, vector DBs). Four runtime dependencies serve ingest; `yaml`
+   validates portable project frontmatter.
 5. **No semantic/vector search.** Search is intentionally TF term-frequency. Do not add embeddings.
 6. **Local-first.** Core logic makes no external network calls. Network belongs in ingest/adapters/plugins, never in `packages/core`.
 7. **Conventional commits**, single concern each: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `release`.
@@ -63,16 +90,20 @@ Windows (`lightpanda.exe` path).
 | File | What it does |
 |---|---|
 | `paths.mjs` | Default paths (`~/aios`, `~/.dotaios`), vault/sync path resolution |
+| `projects.mjs` | Portable project records plus machine-local checkout mapping and diagnostics |
 | `memory.mjs` | Read/write events + signals (JSONL). Exports `isoDate()` (**local** date), tolerant `readJsonl()` |
 | `sessions.mjs` | Session index read/write under `withIndexLock()` (cross-process file lock) |
+| `promotion.mjs` | Preview/apply memory promotion with shelf containment, drift checks, and receipts |
+| `working-context.mjs` | Canonical bounded, deterministic, project-filtered context selection and rendering |
 | `search.mjs` | TF text-match search across memory/vault/context/skills/...; reads files in bounded-concurrency batches |
-| `digest.mjs` | Builds the compact working-memory digest (today/carry-over/signals/sessions) |
+| `digest.mjs` | Compatibility wrapper over the canonical working-context projection |
 | `render.mjs` / `sections.mjs` | Template rendering / named-section markdown helpers |
 | `schema.mjs` / `manifest.mjs` | `aios.json` and plugin `manifest.json` validation |
 
-Notable CLI commands: `connect.mjs` (Gemini SessionStart hook + OpenCode MCP + Google Workspace),
-`sync/` (private-GitHub cross-device sync), `capture.mjs` + `adapters/` (save/import AI conversations),
-`install.mjs` + `market.mjs` (plugins/skills).
+Notable CLI commands: `project.mjs` (portable catalog + local checkout mapping),
+`memory.mjs` (preview-first promotion), `brief.mjs` (working-context consumer),
+`sync/` (manual private-GitHub reconciliation), `capture.mjs` + `adapters/`
+(session evidence), `install.mjs` + `market.mjs` (plugins/skills).
 
 ## Known gotchas
 
@@ -90,11 +121,10 @@ crashed holder is reclaimed via a liveness check; a live holder is waited on
 only removes the lock if it's still ours. Don't reintroduce an unlocked
 best-effort fallback — that corrupts the index under concurrency.
 
-### MCP gws binary
-The MCP server resolves the `gws` binary only from its environment
-(`DOTAIOS_GWS_BIN`) or `PATH`, never from a tool argument. Do not add a `gwsBin`
-tool parameter back — it would let a client make the server execute an arbitrary
-binary.
+### MCP capability boundary
+The MCP server is an optional read adapter, not a command or memory authority.
+Keep its tool list allowlisted and read-only. Never add durable writes, shell or
+third-party command execution, credential handling, or Google Workspace tools.
 
 ### Smoke temp dirs
 `scripts/smoke.mjs` creates `os.tmpdir()/dotaios-smoke-*` and intentionally
