@@ -21,10 +21,11 @@ export function formatJsonlEntry(entry) {
 /**
  * Read all entries from a JSONL file. Returns an empty array if file is missing.
  */
-export async function readJsonl(filePath) {
+export async function readJsonl(filePath, options = {}) {
+  const fileSystem = options.filesystem || fs;
   let content;
   try {
-    content = await fs.readFile(filePath, "utf8");
+    content = await fileSystem.readFile(filePath, "utf8");
   } catch (error) {
     if (error.code === "ENOENT") return [];
     throw error;
@@ -55,23 +56,37 @@ export async function readRecentEvents(filePath, limit = RECENT_EVENT_LIMIT) {
  * @param {string} fromDate - ISO date string "YYYY-MM-DD"
  * @param {string} toDate - ISO date string "YYYY-MM-DD"
  */
-export async function readSignals(signalsDir, fromDate, toDate) {
+export async function readSignals(signalsDir, fromDate, toDate, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  const transform = typeof options.transform === "function" ? options.transform : null;
   let entries;
   try {
-    entries = await fs.readdir(signalsDir);
+    entries = await fileSystem.readdir(signalsDir);
   } catch {
     return [];
   }
 
   const signals = [];
   for (const file of entries.filter((f) => f.endsWith(".jsonl")).sort()) {
-    const date = file.replace(".jsonl", "");
+    const date = signalFileDate(file);
     if (date < fromDate || date > toDate) continue;
     const filePath = path.join(signalsDir, file);
-    const lines = await readJsonl(filePath);
-    signals.push(...lines);
+    const lines = await readJsonl(filePath, { filesystem: fileSystem });
+    for (const [index, entry] of lines.entries()) {
+      signals.push(transform
+        ? transform(entry, {
+          file,
+          date,
+          sourceLine: index + 1,
+        })
+        : entry);
+    }
   }
   return signals;
+}
+
+function signalFileDate(filename) {
+  return String(filename).match(/(?:^|-)(\d{4}-\d{2}-\d{2})\.jsonl$/)?.[1] || "";
 }
 
 /**

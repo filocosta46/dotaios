@@ -167,6 +167,8 @@ test("projection reads durable project metadata from the local README", async ()
       return fs.promises.readFile(filePath, encoding);
     },
     readdir: (...args) => fs.promises.readdir(...args),
+    lstat: (...args) => fs.promises.lstat(...args),
+    realpath: (...args) => fs.promises.realpath(...args),
   };
   const projection = createWorkingContextProjection({ filesystem, clock: fixedClock });
 

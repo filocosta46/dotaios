@@ -238,6 +238,13 @@ export async function listProjects(options = {}) {
   return listProjectRecords(context);
 }
 
+/** Read the portable project catalog without consulting machine-local paths. */
+export async function readProjectCatalog(options = {}) {
+  const context = createContext(options);
+  const records = await readProjectRecords(context);
+  return records.map(toProjectCatalogRecord);
+}
+
 /** Resolve a project id or slug to an existing path on this machine. */
 export async function resolveProject(referenceOrOptions, additionalOptions = {}) {
   const project = await resolveProjectRecord(referenceOrOptions, additionalOptions);
@@ -489,6 +496,22 @@ function projectRecord(directorySlug, readmePath, source) {
   };
 }
 
+function toProjectCatalogRecord(record) {
+  const body = record.source.body;
+  return {
+    id: record.id,
+    slug: record.slug,
+    project: record.project,
+    name: record.name,
+    status: record.status,
+    domains: record.domain,
+    repoUrl: record.repoUrl,
+    description: readOptionalString(record.metadata.description) || firstDescription(body),
+    contextExcerpt: projectExcerpt(body),
+    readme: record.source.content,
+  };
+}
+
 function readProjectId(metadata, source) {
   const id = readOptionalString(metadata.id);
   const legacyId = readOptionalString(metadata.project_id);
@@ -713,6 +736,21 @@ function firstHeading(body) {
     if (match) return match[1].trim();
   }
   return null;
+}
+
+function firstDescription(body) {
+  return String(body || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line && !line.startsWith("#") && !line.startsWith("<!--") && !/^[-*]\s/.test(line)) || "";
+}
+
+function projectExcerpt(body, limit = 1200) {
+  const excerpt = String(body || "")
+    .replace(/^#\s+.+(?:\r?\n|$)/, "")
+    .trim();
+  if (excerpt.length <= limit) return excerpt;
+  return `${excerpt.slice(0, limit - 1).trimEnd()}…`;
 }
 
 function resolveUserPath(value, homePath) {

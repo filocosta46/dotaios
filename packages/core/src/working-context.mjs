@@ -1,7 +1,8 @@
 import localFilesystem from "node:fs/promises";
 import path from "node:path";
 
-import { isoDate } from "./memory.mjs";
+import { isoDate, readSignals as readMemorySignals } from "./memory.mjs";
+import { readProjectCatalog } from "./projects.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
@@ -60,11 +61,23 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
       readText(filesystem, path.join(dailyDir, `${today}.md`)),
       readText(filesystem, path.join(dailyDir, `${yesterday}.md`)),
       readJsonl(filesystem, path.join(aiosPath, "memory", "sessions", "index.jsonl")),
-      readSignals(filesystem, path.join(aiosPath, "memory", "signals"), { today, yesterday }),
+      readMemorySignals(
+        path.join(aiosPath, "memory", "signals"),
+        yesterday,
+        today,
+        {
+          filesystem,
+          transform: (entry, { file, date, sourceLine }) => normalizeTimelineEntry(entry, {
+            fallbackDate: date,
+            sourcePath: path.posix.join("memory", "signals", file),
+            sourceLine,
+          }),
+        },
+      ),
       readTimelineJsonl(filesystem, path.join(aiosPath, "memory", "events.jsonl"), {
         sourcePath: "memory/events.jsonl",
       }),
-      readProjects(filesystem, path.join(aiosPath, "projects")),
+      readProjectCatalog({ aiosPath, fs: filesystem }),
     ]);
 
   const projectFilter = resolveProjectFilter(requestedProject, projects);
@@ -474,120 +487,6 @@ function syntheticProject(project) {
   };
 }
 
-async function readSignals(filesystem, signalsDir, { today, yesterday }) {
-  const entries = await readDirectory(filesystem, signalsDir);
-  const files = entries
-    .map((entry) => typeof entry === "string" ? entry : entry.name)
-    .filter((name) => name?.endsWith(".jsonl"))
-    .map((name) => ({ name, date: signalFileDate(name) }))
-    .filter(({ date }) => isOperationalDate(date, today, yesterday))
-    .sort((left, right) => left.name.localeCompare(right.name));
-
-  const fileEntries = await Promise.all(files.map(async ({ name, date }) => {
-    return readTimelineJsonl(filesystem, path.join(signalsDir, name), {
-      fallbackDate: date,
-      sourcePath: path.posix.join("memory", "signals", name),
-    });
-  }));
-  return fileEntries.flat();
-}
-
-function signalFileDate(filename) {
-  return filename.match(/(?:^|-)(\d{4}-\d{2}-\d{2})\.jsonl$/)?.[1] || null;
-}
-
-async function readProjects(filesystem, projectsDir) {
-  const entries = await readDirectory(filesystem, projectsDir, { withFileTypes: true });
-  const names = entries
-    .filter((entry) => typeof entry === "string" || entry.isDirectory())
-    .map((entry) => typeof entry === "string" ? entry : entry.name)
-    .sort((left, right) => left.localeCompare(right));
-  const projects = await Promise.all(names.map(async (slug) => {
-    const readmePath = path.join(projectsDir, slug, "README.md");
-    const content = await readText(filesystem, readmePath);
-    return content ? parseProjectMetadata(slug, content) : null;
-  }));
-  return projects.filter(Boolean).sort((left, right) => left.slug.localeCompare(right.slug));
-}
-
-function parseProjectMetadata(slug, content) {
-  const frontmatter = parseFrontmatter(content);
-  const title = content.match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
-  const project = stringValue(frontmatter.project) || slug;
-  return {
-    id: stringValue(frontmatter.id) || stringValue(frontmatter.project_id) || null,
-    slug,
-    project,
-    name: stringValue(frontmatter.name) || title || project,
-    status: stringValue(frontmatter.status) || null,
-    domains: arrayValue(frontmatter.domain),
-    repoUrl: stringValue(frontmatter.repo_url) || stringValue(frontmatter.repo) || null,
-    description: stringValue(frontmatter.description) || firstDescription(content),
-    contextExcerpt: projectExcerpt(content),
-    readme: content,
-  };
-}
-
-function parseFrontmatter(content) {
-  const match = String(content).match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) return {};
-  const result = {};
-  let listKey = null;
-  for (const line of match[1].split(/\r?\n/)) {
-    const listItem = line.match(/^\s+-\s+(.+)$/);
-    if (listItem && listKey) {
-      result[listKey] = [...arrayValue(result[listKey]), parseScalar(listItem[1])];
-      continue;
-    }
-    const field = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!field) continue;
-    listKey = field[1];
-    result[listKey] = parseScalar(field[2]);
-  }
-  return result;
-}
-
-function parseScalar(value) {
-  const trimmed = String(value).trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return trimmed.slice(1, -1).split(",").map((item) => unquote(item.trim())).filter(Boolean);
-  }
-  return unquote(trimmed);
-}
-
-function unquote(value) {
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value : "";
-}
-
-function arrayValue(value) {
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
-  return value ? [String(value)] : [];
-}
-
-function firstDescription(content) {
-  const body = String(content).replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
-  return body.split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith("#") && !line.startsWith("<!--") && !/^[-*]\s/.test(line)) || "";
-}
-
-function projectExcerpt(content, limit = 1200) {
-  const body = String(content)
-    .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
-    .replace(/^#\s+.+(?:\r?\n|$)/, "")
-    .trim();
-  if (body.length <= limit) return body;
-  return `${body.slice(0, limit - 1).trimEnd()}…`;
-}
-
 async function readJsonl(filesystem, filePath) {
   const content = await readText(filesystem, filePath);
   return content.split(/\r?\n/).flatMap((line) => {
@@ -624,15 +523,6 @@ async function readText(filesystem, filePath) {
     return await filesystem.readFile(filePath, "utf8");
   } catch (error) {
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return "";
-    throw error;
-  }
-}
-
-async function readDirectory(filesystem, directoryPath, options) {
-  try {
-    return await filesystem.readdir(directoryPath, options);
-  } catch (error) {
-    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return [];
     throw error;
   }
 }
