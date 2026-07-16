@@ -139,7 +139,7 @@ async function runPromotion(args) {
 
   console.log(renderPromotionPreview(plan));
   if (!options.apply) {
-    console.log("\nPreview only. No files changed. Re-run with --apply when this looks right.");
+    console.log(`\nPreview only. No files changed in durable memory; the persisted preview plan is ${path.relative(target, plan.planPath)}. Re-run with --apply when this looks right.`);
     return;
   }
 
@@ -165,8 +165,11 @@ async function findMatchingSavedPlan(aiosPath, options) {
     if (error.code === "ENOENT") return null;
     throw error;
   }
-  for (const name of names.filter((entry) => entry.endsWith(".json")).sort()) {
-    const plan = await loadPromotionPlan(path.join(directory, name));
+  const plans = await Promise.all(names
+    .filter((entry) => entry.endsWith(".json"))
+    .sort()
+    .map((name) => loadPromotionPlan(path.join(directory, name))));
+  for (const plan of plans) {
     if (!plan) continue;
     const sourceMatches = options.source === plan.source.sessionId
       || String(plan.source.sessionId || "").startsWith(String(options.source || ""));

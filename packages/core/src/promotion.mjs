@@ -19,6 +19,8 @@ export const PROMOTION_OPERATIONS = Object.freeze(["add", "replace", "remove", "
 const MARKDOWN_DESTINATIONS = new Set(["context", "project", "vault", "skill"]);
 const PROMOTION_PLAN_VERSION = 1;
 const PROMOTION_PLAN_DIRECTORY = path.join(".dotaios", "promotion-plans");
+const PROMOTION_PLAN_ID_LENGTH = 24;
+const PROMOTION_PREVIEW_LINE_LIMIT = 12;
 
 /**
  * Build a read-only promotion plan for captured session evidence.
@@ -65,9 +67,9 @@ export async function planPromotion(aiosPath, options = {}) {
       type: "promoted-evidence",
       ...(project && { project }),
       summary,
-      source: source.relativePath
+      source: source.relativePath,
+      content_hash: promotedContentHash
     };
-    destinationEntry.content_hash = promotedContentHash;
     const change = buildSignalPromotionChange({
       before,
       destinationEntry,
@@ -149,6 +151,7 @@ export async function planPromotion(aiosPath, options = {}) {
 
 export const previewPromotion = planPromotion;
 
+/** Return the deterministic local path for a preview's persisted plan. */
 export function promotionPlanPathFor(aiosPath, options = {}) {
   const root = path.resolve(aiosPath);
   const planInput = {
@@ -163,6 +166,7 @@ export function promotionPlanPathFor(aiosPath, options = {}) {
   return path.join(root, PROMOTION_PLAN_DIRECTORY, `${promotionPlanId(planInput)}.json`);
 }
 
+/** Persist a preview plan so a later apply can consume the exact reviewed state. */
 export async function persistPromotionPlan(plan) {
   assertPromotionPlan(plan);
   await fs.mkdir(path.dirname(plan.planPath), { recursive: true });
@@ -170,6 +174,7 @@ export async function persistPromotionPlan(plan) {
   return plan.planPath;
 }
 
+/** Load and validate a previously persisted preview plan, if it exists. */
 export async function loadPromotionPlan(planPath) {
   let content;
   try {
@@ -188,6 +193,7 @@ export async function loadPromotionPlan(planPath) {
   return plan;
 }
 
+/** Remove a persisted plan after its apply attempt has completed. */
 export async function consumePromotionPlan(plan) {
   assertPromotionPlan(plan);
   if (plan.planPath) await fs.rm(plan.planPath, { force: true });
@@ -723,10 +729,10 @@ function renderPromotionDiff({ destinationPath, destinationType, destinationExis
     return renderDiff(destinationPath, addition, destinationType, destinationExists);
   }
   const removed = before && before !== after
-    ? before.split("\n").filter((line) => line.trim()).slice(-12).map((line) => `-${line}`)
+    ? before.split("\n").filter((line) => line.trim()).slice(-PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `-${line}`)
     : [];
   const added = after && before !== after
-    ? after.split("\n").filter((line) => line.trim()).slice(-12).map((line) => `+${line}`)
+    ? after.split("\n").filter((line) => line.trim()).slice(-PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `+${line}`)
     : [];
   return [`Operation: ${operation}`, `--- ${destinationPath}`, `+++ ${destinationPath}`, "@@ replace @@", ...removed, ...added].join("\n");
 }
@@ -771,7 +777,7 @@ function normalizeMatch(value) {
 }
 
 function promotionPlanId(input) {
-  return contentHash(JSON.stringify(input)).slice(0, 24);
+  return contentHash(JSON.stringify(input)).slice(0, PROMOTION_PLAN_ID_LENGTH);
 }
 
 function normalizeProject(value) {
