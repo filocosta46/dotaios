@@ -359,9 +359,7 @@ function stableSessionOrder(sessions) {
 
 function sessionScore(session) {
   const capturedAt = Date.parse(session.captured_at || "");
-  const recency = Number.isFinite(capturedAt) ? capturedAt : 0;
-  const accessCount = Number.isFinite(Number(session.access_count)) ? Number(session.access_count) : 0;
-  return recency + accessCount * 3_600_000;
+  return Number.isFinite(capturedAt) ? capturedAt : 0;
 }
 
 function stableTimelineOrder(entries) {
