@@ -341,24 +341,29 @@ function Packs({t}) {
     <section className="section" id="packs" data-reveal>
       <SectionIntro title={t.packs.title} desc={t.packs.desc} />
       <div className="pack-grid">
-        {t.packs.items.map((pack, index) => (
-          <a
-            className="pack-card"
-            key={pack.href}
-            href={pack.href}
-            target="_blank"
-            rel="noreferrer"
-            style={{'--stagger': index}}
-          >
-            <span className="pack-label">{pack.eyebrow}</span>
-            <h3>{pack.title}</h3>
-            <p>{pack.desc}</p>
-            <div className="pack-foot">
-              <strong>{pack.price}</strong>
-              <em>{pack.cta}</em>
-            </div>
-          </a>
-        ))}
+        {t.packs.items.map((pack, index) => {
+          const Card = pack.href ? 'a' : 'article'
+          const linkProps = pack.href
+            ? {href: pack.href, target: '_blank', rel: 'noreferrer'}
+            : {'aria-disabled': true}
+
+          return (
+            <Card
+              className={`pack-card${pack.href ? '' : ' pack-card--planned'}`}
+              key={pack.eyebrow}
+              style={{'--stagger': index}}
+              {...linkProps}
+            >
+              <span className="pack-label">{pack.eyebrow}</span>
+              <h3>{pack.title}</h3>
+              <p>{pack.desc}</p>
+              <div className="pack-foot">
+                <strong>{pack.price}</strong>
+                <em>{pack.cta}</em>
+              </div>
+            </Card>
+          )
+        })}
       </div>
       <p className="section-note">{t.packs.note}</p>
     </section>

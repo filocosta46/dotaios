@@ -156,7 +156,7 @@ export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skil
     lines.push(`Routing: to choose a skill for a request, match the user's intent against ${resolver} (trigger phrases -> skill), then open that SKILL.md before acting. If the user keeps repeating a workflow, offer to run the skillify skill to make it reusable (draft it, then ask before saving).`);
   }
 
-  lines.push("Working memory: call the `read_session_digest` MCP tool, or run `dotaios brief --compact` to get today's focus, carry-overs, and recent sessions.");
+  lines.push("Working memory: run `dotaios brief --compact` at session start. For project work, add `--project <slug-or-id>`.");
   lines.push(MANAGED_END, "");
 
   return lines.join("\n");

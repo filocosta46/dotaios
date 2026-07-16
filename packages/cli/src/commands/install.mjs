@@ -98,7 +98,7 @@ async function runInstall(sourcePath, options) {
     await installRawSkill(sourcePath, target, skillName);
     await writeSkillsIndex(target);
     console.log(`\nInstalled skill '${skillName}' into ${path.join(target, "skills", skillName)}`);
-    console.log("Refreshed skills/INDEX.md so every connected agent can see it.");
+    console.log("Refreshed skills/INDEX.md for supported local clients.");
     const activationArgs = ["--path", target];
     if (options.home) activationArgs.push("--home", options.home);
     await activateCommand(activationArgs);

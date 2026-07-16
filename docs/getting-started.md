@@ -18,8 +18,13 @@ The init flow asks five questions, then creates starter context and memory files
 For Cursor or project-scoped agents, attach a project folder:
 
 ```bash
+npx dotaios project add /path/to/project
 npx dotaios attach /path/to/project
 ```
+
+The project catalog syncs the durable README and repository URL. Each machine
+keeps its own checkout path outside the synced AIOS content. The project source
+repository stays independent and is never copied into `~/aios`.
 
 After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Cursor, or another repo-aware assistant.
 
@@ -74,7 +79,7 @@ Durable shelves (`wiki`, `company`, `person`) preview without `--apply` and will
 
 Dynamic or paywalled pages may ingest partial content. If the saved markdown ends abruptly or misses expected sections, save the logged-in page as a PDF from your browser and ingest the PDF.
 
-Save your AI conversations locally so every agent on your machine can remember what you've discussed:
+Save selected AI conversations locally so other agents on your machine can find what mattered:
 
 ```bash
 npx dotaios capture enable claude-code     # auto-save every Claude Code session
@@ -87,7 +92,11 @@ npx dotaios search "any topic"             # search includes saved sessions
 
 For agents that can write local files, you can also ask: "use save-session" or "save this session". It writes a clean summary with decisions, open threads, and action items.
 
-All conversations save to `~/aios/memory/sessions/` as plain Markdown files. See [sessions.md](sessions.md) and [adapters.md](adapters.md) for supported tools and capability levels.
+Captured sessions do not silently change durable context. Use
+`dotaios memory promote` to preview one explicit destination and add `--apply` only after the
+change looks right. See [saving conversations](sessions.md).
+
+Sessions you save or capture with an enabled adapter go to `~/aios/memory/sessions/` as plain Markdown files. See [sessions.md](sessions.md) and [adapters.md](adapters.md) for supported tools and capability levels.
 
 Write today's local brief into your daily note:
 
@@ -110,7 +119,7 @@ npx dotaios install https://github.com/example/my-plugin.git
 npx dotaios install https://github.com/owner/repo.git --subdir packages/my-plugin
 ```
 
-Browse the public skill registry and install paid or free packs:
+Browse the public outcome catalog. Draft entries are visible as coming soon but cannot be purchased or installed:
 
 ```bash
 npx dotaios market list
@@ -118,7 +127,7 @@ npx dotaios market info <id>
 npx dotaios market install <id>
 ```
 
-Paid skills need a license key (delivered by the vendor's checkout, e.g. Gumroad):
+When a paid package is released, its publisher can require a license key:
 
 ```bash
 npx dotaios license add <product-id> <license-key>

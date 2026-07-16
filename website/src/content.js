@@ -10,7 +10,7 @@ export const LANG_STORAGE_KEY = 'dotaios-lang'
 // `copyRelease` field equals this value (or inside Studio preview), so a
 // stale document can never overwrite newer bundled copy. Bump it whenever
 // the copy structure changes and regenerate the Studio patch.
-export const CURRENT_COPY_RELEASE = '2026-07-15-v4'
+export const CURRENT_COPY_RELEASE = '2026-07-15-v5'
 
 export const COPY = {
   installPrompt:
@@ -20,6 +20,7 @@ export const COPY = {
 
 export const folderViews = [
   {id: 'context', path: '~/aios/context/', icon: 'folder', name: 'context'},
+  {id: 'projects', path: '~/aios/projects/', icon: 'folder', name: 'projects'},
   {id: 'memory', path: '~/aios/memory/', icon: 'folder', name: 'memory'},
   {id: 'vault', path: '~/aios/vault/', icon: 'folder', name: 'vault'},
   {id: 'skills', path: '~/aios/skills/', icon: 'folder', name: 'skills'},
@@ -30,7 +31,7 @@ export const dictionary = {
     meta: {
       title: 'DotAIOS - stop re-explaining yourself to every AI',
       description:
-        'One folder on your Mac that every AI reads. Free, no account, no cloud memory.',
+        'One local Mac folder for durable context across supported agents. Free, local-first, and yours.',
     },
     skipLink: 'Skip to install',
     nav: {
@@ -44,7 +45,7 @@ export const dictionary = {
     hero: {
       titleLine1: 'Stop re-explaining yourself',
       titleLine2: 'to every AI.',
-      intro: 'One Mac folder. Every AI reads it.',
+      intro: 'One Mac folder. Supported local agents can use it.',
       promptLabel: 'Paste this into your AI',
       promptHelp: 'Your AI reads the guide and sets up the folder.',
       terminal: 'Prefer the Terminal?',
@@ -58,11 +59,21 @@ export const dictionary = {
         context: {
           title: 'context',
           lead: 'Who you are and what you are working on.',
-          body: 'Your AI reads this first.',
+          body: 'Your connected local agent can read this first.',
           files: [
             ['identity.md', 'Who you are'],
             ['work.md', 'What you are working on'],
             ['priorities.md', 'What matters right now'],
+          ],
+        },
+        projects: {
+          title: 'projects',
+          lead: 'Every project you own, reachable from one place.',
+          body: 'Context and repository links travel with you. Each project keeps its own Git history.',
+          files: [
+            ['personal-site/', 'What matters and where the code lives'],
+            ['job-search/', 'Status, decisions, and next steps'],
+            ['new-idea/', 'A clean starting point for any agent'],
           ],
         },
         memory: {
@@ -108,27 +119,27 @@ export const dictionary = {
       ],
     },
     packs: {
-      title: 'The folder is free. The packs are the shortcut.',
-      desc: 'Curated skills and automations, tested and updated weekly.',
+      title: 'The folder is free. The packs help you do more with it.',
+      desc: 'Outcome-led agent setups for people who do not want to research prompts or plugins.',
       items: [
         {
-          eyebrow: 'Skills',
-          title: 'The best skills, picked for you.',
-          desc: 'Skills that matter for knowledge workers, refreshed every week.',
+          eyebrow: 'Guided work',
+          title: 'Get better work from your agent.',
+          desc: 'Clearer writing, research, applications, CRM work, and design without hunting for the right setup.',
           price: '€12.99',
-          cta: 'Get Skills',
-          href: 'https://filocosta.gumroad.com/l/tgaeui',
+          cta: 'Coming soon',
+          href: null,
         },
         {
-          eyebrow: 'Automations',
-          title: 'Real systems. Your AI works like a pro.',
-          desc: 'Skills plus working setups for research, transcripts, and memory.',
+          eyebrow: 'Done-for-you systems',
+          title: 'Hand repeatable work to your agent.',
+          desc: 'Guided systems for recurring work, with setup, verification, and instructions you can actually follow.',
           price: '€35',
-          cta: 'Get Automations',
-          href: 'https://filocosta.gumroad.com/l/baglw',
+          cta: 'Coming soon',
+          href: null,
         },
       ],
-      note: 'One prompt per pack. Paste once; it installs and wires everything in.',
+      note: 'In preparation. Checkout opens only when installation and updates are ready.',
     },
     footer: {
       tagline: 'Free and open source. Plain files you own.',
@@ -141,7 +152,7 @@ export const dictionary = {
     meta: {
       title: 'DotAIOS - smetti di rispiegarti a ogni AI',
       description:
-        'Una cartella sul Mac che ogni AI legge. Gratis, senza account, senza memoria nel cloud.',
+        'Una cartella locale sul Mac per il contesto degli agenti supportati. Gratis, locale e tua.',
     },
     skipLink: "Vai all'installazione",
     nav: {
@@ -155,7 +166,7 @@ export const dictionary = {
     hero: {
       titleLine1: 'Smetti di rispiegarti',
       titleLine2: 'a ogni AI.',
-      intro: 'Una cartella sul Mac. Ogni AI la legge.',
+      intro: 'Una cartella sul Mac. Gli agenti locali supportati possono usarla.',
       promptLabel: 'Incolla questo nella tua AI',
       promptHelp: 'La tua AI legge la guida e configura la cartella.',
       terminal: 'Preferisci il Terminale?',
@@ -169,11 +180,21 @@ export const dictionary = {
         context: {
           title: 'context',
           lead: 'Chi sei e a cosa stai lavorando.',
-          body: 'La tua AI legge questo per primo.',
+          body: 'Il tuo agente locale collegato può leggere prima questo.',
           files: [
             ['identity.md', 'Chi sei'],
             ['work.md', 'A cosa stai lavorando'],
             ['priorities.md', 'Cosa conta adesso'],
+          ],
+        },
+        projects: {
+          title: 'projects',
+          lead: 'Ogni tuo progetto, raggiungibile da un solo posto.',
+          body: 'Contesto e link al repository viaggiano con te. Ogni progetto mantiene la propria cronologia Git.',
+          files: [
+            ['sito-personale/', 'Cosa conta e dove si trova il codice'],
+            ['ricerca-lavoro/', 'Stato, decisioni e prossimi passi'],
+            ['nuova-idea/', 'Un punto di partenza pulito per ogni agente'],
           ],
         },
         memory: {
@@ -219,27 +240,27 @@ export const dictionary = {
       ],
     },
     packs: {
-      title: 'La cartella è gratis. I pacchetti sono la scorciatoia.',
-      desc: 'Skill e automazioni curate, testate e aggiornate ogni settimana.',
+      title: 'La cartella è gratis. I pacchetti ti aiutano a fare di più.',
+      desc: 'Setup orientati ai risultati per chi non vuole cercare prompt o plugin.',
       items: [
         {
-          eyebrow: 'Skills',
-          title: 'Le skill migliori, scelte per te.',
-          desc: 'Skill utili per chi lavora con la testa, aggiornate ogni settimana.',
+          eyebrow: 'Lavoro guidato',
+          title: 'Ottieni un lavoro migliore dal tuo agente.',
+          desc: 'Scrittura, ricerca, candidature, CRM e design senza dover cercare il setup giusto.',
           price: '€12,99',
-          cta: 'Prendi Skills',
-          href: 'https://filocosta.gumroad.com/l/tgaeui',
+          cta: 'In arrivo',
+          href: null,
         },
         {
-          eyebrow: 'Automations',
-          title: 'Sistemi veri. La tua AI lavora da pro.',
-          desc: 'Skills più setup completi per ricerca, trascrizioni e memoria.',
+          eyebrow: 'Sistemi pronti',
+          title: 'Affida il lavoro ripetitivo al tuo agente.',
+          desc: 'Sistemi guidati per attività ricorrenti, con configurazione, verifica e istruzioni chiare.',
           price: '€35',
-          cta: 'Prendi Automazioni',
-          href: 'https://filocosta.gumroad.com/l/baglw',
+          cta: 'In arrivo',
+          href: null,
         },
       ],
-      note: 'Un prompt per pacchetto. Lo incolli una volta: installa e collega tutto.',
+      note: "In preparazione. Il checkout apre solo quando installazione e aggiornamenti sono pronti.",
     },
     footer: {
       tagline: 'Gratuito e open source. File semplici che possiedi.',

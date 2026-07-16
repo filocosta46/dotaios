@@ -121,6 +121,7 @@ test("setupCommand prints web browsing engine step (download skipped via env)", 
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--path", aiosPath,
+    "--home", path.join(tmp, "home"),
     "--yes",
     "--skip-reveal"
   ], {
@@ -129,4 +130,6 @@ test("setupCommand prints web browsing engine step (download skipped via env)", 
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Web browsing engine.*skipped/);
+  assert.match(result.stdout, /Folder ready\. No supported local AI app was connected yet\./);
+  assert.doesNotMatch(result.stdout, /All set\./);
 });

@@ -80,4 +80,4 @@ Ask for explicit approval before:
 
 ## Why Not MCP First?
 
-MCP is useful only after a workflow is proven safe. DotAIOS exposes read-only MCP tools for status, Gmail search, Calendar agenda, and Drive search. These tools call fixed DotAIOS wrappers and never expose arbitrary `gws` command execution.
+Google Workspace stays behind the explicit `dotaios google` CLI workflows. The optional DotAIOS MCP adapter does not expose Google commands.

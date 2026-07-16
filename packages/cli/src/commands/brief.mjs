@@ -17,6 +17,8 @@ Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Print the brief without writing the daily note
   --compact     Print a compact working-memory digest to stdout (no file write)
+  --project <slug-or-id>  With --compact: include only continuity for this project
+  --budget <n>    With --compact: visible character budget (default 6000)
   --lean        Print a small high-signal surface to stdout: identity, priorities,
                 north-star, today's daily note, and the first active project
                 README. The rest of memory/ stays opt-in. No file write.
@@ -36,9 +38,15 @@ export async function briefCommand(args) {
   await ensureAiosFolder(target);
 
   if (options.compact) {
-    const { digest } = await buildSessionDigest(target);
+    const { digest, budget } = await buildSessionDigest(target, {
+      project: options.project,
+      visibleCharacterBudget: options.budget
+    });
     if (options.json) {
-      process.stdout.write(JSON.stringify({ hookSpecificOutput: { additionalContext: digest } }) + "\n");
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { additionalContext: digest },
+        contextBudget: budget
+      }) + "\n");
     } else {
       process.stdout.write(digest + "\n");
     }
@@ -77,7 +85,15 @@ export async function briefCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { dryRun: false, compact: false, lean: false, json: false, path: null };
+  const options = {
+    dryRun: false,
+    compact: false,
+    lean: false,
+    json: false,
+    path: null,
+    project: null,
+    budget: undefined
+  };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -93,6 +109,14 @@ function parseOptions(args = []) {
       options.json = true;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--project") {
+      options.project = readOptionValue(args, index, "--project");
+      index += 1;
+    } else if (arg === "--budget") {
+      const value = readOptionValue(args, index, "--budget");
+      if (!/^\d+$/.test(value)) throw new Error("--budget must be a non-negative whole number.");
+      options.budget = Number(value);
       index += 1;
     } else {
       throw new Error(`Unknown option: ${arg}`);

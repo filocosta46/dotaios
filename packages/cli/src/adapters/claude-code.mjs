@@ -192,7 +192,7 @@ export async function enable(aiosPath) {
 
   await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
   console.log("Claude Code auto-save enabled.");
-  console.log("Future conversations will be saved automatically when you close a session.");
+  console.log("Future conversations will be saved incrementally after each completed Claude Code response.");
 }
 
 export async function disable(aiosPath) {

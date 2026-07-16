@@ -95,6 +95,29 @@ test("orchestrateSetup opens the browser to the token page and the create-repo p
   assert.ok(opened.some((u) => u.includes("github.com/new")));
 });
 
+test("orchestrateSetup describes sync as optional and manual", async () => {
+  const logs = [];
+  await orchestrateSetup({
+    aiosPath: "/tmp/x",
+    gitignoreContent: ".env",
+    readToken: async () => "ghp_T",
+    validateToken: async () => "alice",
+    writeConfig: async () => {},
+    openInBrowser: async () => {},
+    pollForRepoExists: async () => true,
+    initialMirrorPush: async () => {},
+    runFirstTick: async () => {},
+    log: (message) => logs.push(message)
+  });
+
+  const copy = logs.join("\n");
+  assert.match(copy, /Sync is optional and manual by default\./);
+  assert.match(copy, /legacy automatic hook.*explicit opt-in/i);
+  assert.match(copy, /dotaios sync now/);
+  assert.doesNotMatch(copy, /syncs automatically|every dotaios command|agent session/i);
+  assert.doesNotMatch(copy, /[—–]/, "user-facing sync copy must use plain punctuation");
+});
+
 test("runSetup throws on failure and does not leak process.exitCode", async () => {
   // Regression: a failing optional sync step inside `dotaios setup` must not
   // set process.exitCode — that leaked and made the whole wizard exit 1.

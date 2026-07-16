@@ -977,14 +977,14 @@ details .snippet {
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .pack-card:hover {
+  .pack-card:not(.pack-card--planned):hover {
     transform: translateY(-3px);
     border-color: rgba(0, 113, 227, 0.45);
     box-shadow: var(--shadow-lift);
   }
 }
 
-.pack-card:active {
+.pack-card:not(.pack-card--planned):active {
   transform: scale(0.98);
 }
 
@@ -1032,8 +1032,14 @@ details .snippet {
   transition: background-color 160ms var(--ease-out);
 }
 
-.pack-card:hover .pack-foot em {
+.pack-card:not(.pack-card--planned):hover .pack-foot em {
   background: var(--accent-deep);
+}
+
+.pack-card--planned .pack-foot em {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
 }
 
 .section-note {

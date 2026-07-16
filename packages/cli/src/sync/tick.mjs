@@ -4,6 +4,8 @@ const MIN_TICK_GAP_MS = 10_000;
 const STALE_LOCK_MS = 5 * 60 * 1000;
 const LOCK_RETRY_MS = 50;
 const LOCK_WAIT_MS = 5_000;
+const SYNC_CONFLICT_SUMMARY =
+  "Sync stopped because local and remote changes overlap. Your pre-existing edits were preserved. DotAIOS recorded the conflict locally and did not create a recovery branch, reset files, or push. Ask your agent to resolve it safely, then run `dotaios sync now` again.";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -102,19 +104,30 @@ export async function runTick({
     // 2. Pull by rebasing the local commit(s) on top of origin.
     const pullResult = await git.pullRebase("main");
 
-    // 3. A real same-file conflict is the only case that needs the escape
-    //    hatch: park the (already-aborted, restored) local commit on a branch
-    //    so it is recoverable, then align main with origin. Any other
-    //    divergence rebased cleanly above and needs nothing special.
+    // 3. pullRebase aborts a conflicted rebase before returning. The local sync
+    //    commit remains, and no remote push or destructive reset occurs.
     let pushed = false;
     let pushedHead = null;
     if (pullResult === "conflict") {
-      const localSha = await git.currentSha();
-      const branchName = `local-${startedIso.replace(/[:.]/g, "-")}`;
-      await git.branchFromSha(branchName, localSha);
-      await git.hardResetToOrigin("main");
-      await appendEvent({ type: "sync-conflict", branch: branchName, at: startedIso });
-    } else if (pushedSha) {
+      await appendEvent({
+        type: "sync-conflict",
+        summary: SYNC_CONFLICT_SUMMARY,
+        at: startedIso
+      });
+      await writeConfig({
+        last_tick_at: startedIso,
+        last_error: SYNC_CONFLICT_SUMMARY
+      });
+      return {
+        conflict: true,
+        pulled: pullResult,
+        pushed: false,
+        sha: null,
+        error: SYNC_CONFLICT_SUMMARY
+      };
+    }
+
+    if (pushedSha) {
       // 4. Local commit (now replayed on top of origin) goes up.
       await git.push("main");
       // Record the actual HEAD after push: a rebase above may have rewritten

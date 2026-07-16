@@ -20,6 +20,9 @@ importers:
       unpdf:
         specifier: ^1.6.2
         version: 1.6.2
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
 
   packages/cli: {}
 
@@ -103,6 +106,11 @@ packages:
       '@napi-rs/canvas':
         optional: true
 
+  yaml@2.9.0:
+    resolution: {integrity: sha512-2AvhNX3mb8zd6Zy7INTtSpl1F15HW6Wnqj0srWlkKLcpYl/gMIMJiyuGq2KeI2YFxUPjdlB+3Lc10seMLtL4cA==}
+    engines: {node: '>= 14.6'}
+    hasBin: true
+
 snapshots:
 
   '@mixmark-io/domino@2.2.0': {}
@@ -173,3 +181,5 @@ snapshots:
   uhyphen@0.2.0: {}
 
   unpdf@1.6.2: {}
+
+  yaml@2.9.0: {}

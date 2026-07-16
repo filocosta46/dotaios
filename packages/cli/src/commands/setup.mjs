@@ -70,13 +70,16 @@ export async function setupCommand(args) {
 
   // Step 2: activate (requires aios.json from init)
   let activateOk = true;
+  let configuredContextCount = 0;
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
   console.log("");
   await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "activate", run_id: runId });
   try {
-    await activateCommand(passthrough);
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "ok" });
+    const activation = await activateCommand(passthrough);
+    configuredContextCount = activation.configuredContextCount;
+    const outcome = configuredContextCount > 0 ? "ok" : "warn";
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome });
   } catch (err) {
     activateOk = false;
     await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
@@ -107,10 +110,10 @@ export async function setupCommand(args) {
     let wantsSync = false;
     const rl = readline.createInterface({ input, output });
     try {
-      const answer = (await rl.question("\nConnect to GitHub for cross-device access? (Y/n): "))
+      const answer = (await rl.question("\nConnect to GitHub for cross-device access? This is optional. (y/N): "))
         .trim()
         .toLowerCase();
-      wantsSync = answer === "" || answer === "y" || answer === "yes";
+      wantsSync = answer === "y" || answer === "yes";
     } finally {
       rl.close();
     }
@@ -187,8 +190,13 @@ export async function setupCommand(args) {
   if (!activateOk) {
     console.log("Folder created. Tool connection needs attention — run `dotaios activate` to finish.");
     console.log("Once connected, to get started:");
+  } else if (configuredContextCount === 0) {
+    console.log("Folder ready. No supported local AI app was connected yet.");
+    console.log("Install Claude Code, Codex, or Gemini CLI, then run `dotaios activate`.");
+    console.log("To explore the folder now:");
   } else {
-    console.log("All set. To get started:");
+    console.log(`Folder ready. Connected context for ${configuredContextCount} local AI app${configuredContextCount === 1 ? "" : "s"}.`);
+    console.log("To get started:");
   }
   console.log("  1. Open your AI agent — Claude Code, Codex, Gemini CLI, Cursor, or any other.");
   console.log("  2. Open the ~/aios folder or make it your working directory.");
@@ -197,7 +205,7 @@ export async function setupCommand(args) {
   await emitPilotMetric(aiosPath, {
     type: "install_end",
     command: "setup",
-    outcome: activateOk ? "ok" : "warn",
+    outcome: activateOk && configuredContextCount > 0 ? "ok" : "warn",
     run_id: runId,
     duration_ms: Date.now() - startedAt
   });

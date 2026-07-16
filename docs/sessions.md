@@ -66,6 +66,21 @@ Filter by tool or date:
 dotaios search "launch timing" --agent claude-code --since 7d
 ```
 
+## Promote something that should last
+
+A saved session is evidence, not automatic truth. To turn one fact into durable
+context, preview the exact destination first:
+
+```bash
+dotaios memory promote <session-id> --to project --project my-project \
+  --summary "The beta ships Friday"
+```
+
+Nothing changes during the preview. Re-run with `--apply` only after the source,
+destination, and appended text look right. Every applied disposition writes a
+receipt to `memory/events.jsonl`. Use `--to session-only` when the session should
+remain evidence without creating a knowledge file.
+
 ## How to delete a saved conversation
 
 First, find the conversation ID with `dotaios capture list`. It's the 8-character code on the left.
@@ -100,7 +115,7 @@ Auto-saving stops immediately. Past saved conversations are not deleted.
 - Thinking blocks or internal reasoning steps.
 - Anything in `.env` or other secret files.
 
-All data stays on your machine. Nothing is sent to any external service.
+DotAIOS stores these saved files on your machine. Your AI provider still processes the conversation you have with it, according to that provider's terms and settings. Optional GitHub sync copies the saved files to your own private repository.
 
 ## Which tools support what
 

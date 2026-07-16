@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { hasLicense } from "../../../core/src/licenses.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { installCommand } from "./install.mjs";
+import { validateMarketRegistry } from "../../../core/src/market-registry.mjs";
 
 const DEFAULT_REGISTRY_URL = "https://dotaios.com/registry.json";
 
@@ -10,7 +11,7 @@ const HELP_TEXT = `Usage:
   dotaios market <subcommand> [options]
 
 Subcommands:
-  list                  Show every skill available in the public registry.
+  list                  Show available and planned outcome packs.
   info <id>             Show details for one entry.
   install <id>          Install one entry (verifies license first if paid).
 
@@ -46,7 +47,7 @@ export async function marketCommand(args) {
   } catch (err) {
     const isNetwork = err.message.includes("Could not reach") || err.message.includes("fetch");
     if (isNetwork) {
-      console.error("Could not reach the skill registry. Check your internet connection and try again.");
+      console.error("Could not reach the outcome catalog. Check your internet connection and try again.");
       console.error(`(Registry URL: ${registryUrl})`);
     } else {
       console.error(`Registry error: ${err.message}`);
@@ -117,10 +118,7 @@ async function fetchRegistry(url) {
     payload = await fetchHttpRegistry(url);
   }
 
-  if (!payload || !Array.isArray(payload.skills)) {
-    throw new Error(`Registry at ${url} is missing a "skills" array.`);
-  }
-  return payload;
+  return validateMarketRegistry(payload, { source: url });
 }
 
 async function readFileRegistry(url) {
@@ -162,9 +160,9 @@ async function fetchHttpRegistry(url) {
 }
 
 function findEntry(registry, id) {
-  const entry = registry.skills.find((item) => item.id === id);
+  const entry = registry.entries.find((item) => item.id === id);
   if (!entry) {
-    throw new Error(`No skill named "${id}" in the registry.`);
+    throw new Error(`No catalog entry named "${id}".`);
   }
   return entry;
 }
@@ -172,12 +170,12 @@ function findEntry(registry, id) {
 function printList(registry, url) {
   console.log(`DotAIOS market (${url})`);
   console.log("");
-  if (registry.skills.length === 0) {
+  if (registry.entries.length === 0) {
     console.log("  (empty)");
     return;
   }
-  for (const entry of registry.skills) {
-    const price = entry.paid ? `paid ($${entry.price ?? "?"})` : "free";
+  for (const entry of registry.entries) {
+    const price = formatEntryAvailability(entry);
     const vendor = entry.vendor ? `${entry.vendor}/` : "";
     console.log(`  ${entry.id}  [${price}]  ${vendor}${entry.name || entry.id}`);
     if (entry.description) {
@@ -185,15 +183,17 @@ function printList(registry, url) {
     }
   }
   console.log("");
-  console.log("Install one: `dotaios market install <id>`.");
+  console.log("Install an available entry with `dotaios market install <id>`.");
 }
 
 function printEntry(entry) {
   console.log(`${entry.id}`);
   if (entry.name) console.log(`  name:        ${entry.name}`);
   if (entry.vendor) console.log(`  vendor:      ${entry.vendor}`);
+  console.log(`  status:      ${entry.status || "available"}`);
   console.log(`  paid:        ${entry.paid ? "yes" : "no"}`);
-  if (entry.price) console.log(`  price:       $${entry.price}`);
+  if (entry.price_eur) console.log(`  price:       EUR ${entry.price_eur}`);
+  else if (entry.price) console.log(`  price:       $${entry.price}`);
   if (entry.product_id) console.log(`  product_id:  ${entry.product_id}`);
   if (entry.git_url) console.log(`  git_url:     ${entry.git_url}`);
   if (entry.subdir) console.log(`  subdir:      ${entry.subdir}`);
@@ -208,6 +208,10 @@ function printEntry(entry) {
 }
 
 async function marketInstall(entry, options) {
+  if (entry.status === "draft" || entry.status === "planned") {
+    throw new Error(`"${entry.id}" is still in preparation. There is no checkout or install yet.`);
+  }
+
   const source = entry.git_url || entry.install_url;
   if (!source) {
     throw new Error(`Entry "${entry.id}" has no git_url or install_url.`);
@@ -236,4 +240,13 @@ async function marketInstall(entry, options) {
 
   console.log(`Installing ${entry.id} from ${source}${entry.subdir ? ` (subdir: ${entry.subdir})` : ""}...`);
   await installCommand(installArgs);
+}
+
+function formatEntryAvailability(entry) {
+  if (entry.status === "draft" || entry.status === "planned") {
+    const price = entry.price_eur ? `, planned EUR ${entry.price_eur}` : "";
+    return `coming soon${price}`;
+  }
+  if (entry.paid) return `paid ($${entry.price ?? "?"})`;
+  return "free";
 }

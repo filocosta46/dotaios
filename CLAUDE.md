@@ -31,14 +31,14 @@ tests/
 templates/  # Templates rendered during `dotaios init` / `dotaios activate`
 skills/     # Bundled skill markdown (shipped inside the npm package)
 docs/       # Architecture and user docs
-website/    # Marketing site: static index.html + styles.css with an optional Sanity CMS overlay (app.js, sanity-client.js; devDeps only, never shipped in the npm package)
+website/    # React and Vite marketing site with optional Sanity copy hydration; not shipped in the npm package
 ```
 
 ## Hard rules (never violate)
 
 1. **ESM only.** All source is `.mjs`, `"type": "module"`. No CommonJS `require()`.
 2. **Node >= 20.** Both the root and the `mcp` package declare `>=20`. Don't use APIs that need a newer floor without bumping `engines` deliberately.
-3. **No build step.** Source ships directly. Do not add Babel, esbuild, tsc, or any transpiler.
+3. **No build step for the CLI packages.** Source under `packages/` ships directly. The separate `website/` uses React and Vite.
 4. **KISS.** No new heavy dependencies (linters, formatters, bundlers, ORMs, cloud SDKs, vector DBs). The 4 runtime deps all serve ingest (readability, linkedom, turndown, unpdf).
 5. **No semantic/vector search.** Search is intentionally TF term-frequency. Do not add embeddings.
 6. **Local-first.** Core logic makes no external network calls. Network belongs in ingest/adapters/plugins, never in `packages/core`.

@@ -11,6 +11,7 @@ test("syncCommand with --help prints usage", async () => {
   } finally { console.log = orig; }
   assert.ok(logs.join("\n").includes("dotaios sync"));
   assert.ok(logs.join("\n").includes("setup"));
+  assert.ok(logs.join("\n").includes("now"));
   assert.ok(logs.join("\n").includes("tick"));
   assert.ok(logs.join("\n").includes("status"));
 });

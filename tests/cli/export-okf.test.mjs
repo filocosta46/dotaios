@@ -69,3 +69,87 @@ test("preserves custom frontmatter keys (OKF: keep unknown keys)", async () => {
   assert.match(t, /adopt: YES/, "custom key preserved");
   assert.match(t, /confidence: high/, "custom key preserved");
 });
+
+test("rejects an output path equal to the AIOS root without deleting sources", async () => {
+  const src = await fixture();
+  const identity = path.join(src, "context", "identity.md");
+  const before = await fs.readFile(identity, "utf8");
+
+  await assert.rejects(
+    () => exportBundle({ srcRoot: src, outDir: src }),
+    /cannot equal or contain the AIOS folder/
+  );
+
+  assert.equal(await fs.readFile(identity, "utf8"), before);
+});
+
+test("rejects output paths that overlap a source shelf", async () => {
+  const src = await fixture();
+  const out = path.join(src, "vault", "okf-export");
+
+  await assert.rejects(
+    () => exportBundle({ srcRoot: src, outDir: out }),
+    /overlaps source folder/
+  );
+
+  assert.equal(await fs.readFile(path.join(src, "vault", "raw", "orders.md"), "utf8"), "# Orders\nno frontmatter here\n");
+});
+
+test("invalid YAML fails before replacing an existing export", async () => {
+  const src = await fixture();
+  const out = path.join(src, "build", "okf");
+  await fs.mkdir(out, { recursive: true });
+  await fs.writeFile(path.join(out, "sentinel.txt"), "keep me");
+  await fs.writeFile(path.join(src, "context", "broken.md"), "---\ntype: Reference\ntags: [broken\n---\nbody\n");
+
+  await assert.rejects(
+    () => exportBundle({ srcRoot: src, outDir: out }),
+    /Invalid YAML frontmatter/
+  );
+
+  assert.equal(await fs.readFile(path.join(out, "sentinel.txt"), "utf8"), "keep me");
+});
+
+test("ambiguous bare wikilinks remain unresolved", async () => {
+  const src = await fixture();
+  await fs.mkdir(path.join(src, "vault", "wiki", "alpha"), { recursive: true });
+  await fs.mkdir(path.join(src, "vault", "wiki", "beta"), { recursive: true });
+  await fs.writeFile(path.join(src, "vault", "wiki", "alpha", "note.md"), "# Alpha\n");
+  await fs.writeFile(path.join(src, "vault", "wiki", "beta", "note.md"), "# Beta\n");
+  await fs.writeFile(path.join(src, "context", "identity.md"), "# Identity\n\nSee [[note]].\n");
+  const out = path.join(src, "build", "okf");
+
+  const stats = await exportBundle({ srcRoot: src, outDir: out });
+  const identity = await fs.readFile(path.join(out, "context", "identity.md"), "utf8");
+
+  assert.match(identity, /\[\[note\]\]/);
+  assert.equal(stats.ambiguous, 1);
+});
+
+test("qualified wikilinks resolve when stems are duplicated", async () => {
+  const src = await fixture();
+  await fs.mkdir(path.join(src, "vault", "wiki", "alpha"), { recursive: true });
+  await fs.mkdir(path.join(src, "vault", "wiki", "beta"), { recursive: true });
+  await fs.writeFile(path.join(src, "vault", "wiki", "alpha", "note.md"), "# Alpha\n");
+  await fs.writeFile(path.join(src, "vault", "wiki", "beta", "note.md"), "# Beta\n");
+  await fs.writeFile(path.join(src, "context", "identity.md"), "# Identity\n\nSee [[vault/wiki/alpha/note]].\n");
+  const out = path.join(src, "build", "okf");
+
+  await exportBundle({ srcRoot: src, outDir: out });
+  const identity = await fs.readFile(path.join(out, "context", "identity.md"), "utf8");
+
+  assert.match(identity, /\[vault\/wiki\/alpha\/note\]\(\/vault\/wiki\/alpha\/note\.md\)/);
+});
+
+test("writes ancestor indexes for nested concepts", async () => {
+  const src = await fixture();
+  await fs.mkdir(path.join(src, "vault", "wiki", "topic"), { recursive: true });
+  await fs.writeFile(path.join(src, "vault", "wiki", "topic", "note.md"), "# Note\n");
+  const out = path.join(src, "build", "okf");
+
+  await exportBundle({ srcRoot: src, outDir: out });
+
+  await fs.access(path.join(out, "vault", "index.md"));
+  await fs.access(path.join(out, "vault", "wiki", "index.md"));
+  await fs.access(path.join(out, "vault", "wiki", "topic", "index.md"));
+});

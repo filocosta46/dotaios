@@ -43,11 +43,13 @@ describe("activateCommand — symlinks", () => {
       path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
     );
 
-    await activateCommand([
+    const activation = await activateCommand([
       "--path", dirs.aiosPath,
       "--home", dirs.homePath,
       "--all"
     ]);
+    assert.ok(activation.configuredContextCount > 0);
+    assert.ok(activation.detectedClientCount > 0);
 
     const symlinkPath = path.join(dirs.homePath, ".claude", "skills", "test-skill");
     const stat = await fs.lstat(symlinkPath);

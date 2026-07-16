@@ -52,13 +52,15 @@ npx dotaios sync setup
 
 Notes you save from another device land in `memory/inbox/`, and the
 `process-inbox` skill files them into the right place next time you sit down.
+Run `dotaios sync now` when you want to reconcile devices. Automatic sync is
+off by default.
 Turn it off any time with `dotaios sync logout`, which also removes the access
 token it used.
 
 ## Rung 3: Saved conversations
 
-Let DotAIOS keep your AI sessions as local Markdown, so every tool on your
-machine can remember what you and another tool talked about.
+Save useful AI sessions as local Markdown so other tools on your machine can
+find the decisions and open threads later.
 
 ```bash
 npx dotaios capture enable claude-code   # save sessions automatically

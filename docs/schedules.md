@@ -69,15 +69,12 @@ DotAIOS does not install a background daemon. The OS handoff calls `dotaios sche
 
 Google Workspace beta setup lives behind `dotaios connect google`. Email and calendar routines must remain read-first by default, and must confirm before sending mail, creating events, or writing durable memory.
 
-## Keeping skills updated
+## Checking skill health
 
-New AIOS folders also include a disabled `weekly-skills-update` schedule that
+New AIOS folders also include a disabled `weekly-health-check` schedule that
 runs `dotaios skills doctor` on a weekly cadence. Enable it if you want the
 health report on a schedule.
 
-The richer path is the `update-skills` skill: ask your agent "update my
-skills" and it checks installed packs and plugins for upstream changes,
-reinstalls updated ones through the guarded install path, refreshes catalogs
-and native links, and records a `skills-update` event in
-`memory/events.jsonl`. Agents are encouraged to offer this check when the
-last recorded run is more than 7 days old.
+DotAIOS does not claim to update third-party packages automatically. Package
+updates remain unavailable until install ownership, rollback, and delivery are
+verified end to end.

@@ -70,4 +70,37 @@ test("mergeGeminiSettings writes a SessionStart hook into a fresh config", async
   const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   const names = written.hooks.SessionStart.flatMap((h) => h.hooks.map((hh) => hh.name));
   assert.ok(names.includes("dotaios-context"));
+  assert.equal(written.mcp, undefined);
+});
+
+test("mergeGeminiSettings removes only the legacy DotAIOS MCP entry", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "settings.json");
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    mcp: {
+      servers: {
+        dotaios: { command: "npx", args: ["dotaios-mcp", "--path", "/old/aios"] },
+        custom: { command: "custom-server", args: [] }
+      }
+    }
+  }));
+
+  await mergeGeminiSettings(settingsPath, path.join(dir, "hook.sh"), "/home/u/aios");
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(written.mcp.servers.dotaios, undefined);
+  assert.equal(written.mcp.servers.custom.command, "custom-server");
+});
+
+test("mergeOpenCodeSettings uses the packaged server directly", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+
+  await mergeOpenCodeSettings(settingsPath, "/home/u/aios");
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  const entry = written.mcp.servers.dotaios;
+  assert.equal(entry.command, process.execPath);
+  assert.match(entry.args[0], /packages[\\/]mcp[\\/]src[\\/]server\.mjs$/);
+  assert.deepEqual(entry.args.slice(1), ["--path", "/home/u/aios"]);
 });

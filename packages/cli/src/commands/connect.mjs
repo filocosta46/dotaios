@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -9,6 +10,7 @@ import { assertAiosFolder, assessGwsAuth, firstLine, printCaptured, resolveAiosT
 const googleAliases = new Set(["google", "gmail", "gws"]);
 const geminiAliases = new Set(["gemini", "gemini-cli"]);
 const opencodeAliases = new Set(["opencode"]);
+const mcpServerPath = fileURLToPath(new URL("../../../mcp/src/server.mjs", import.meta.url));
 
 export async function connectCommand(args) {
   if (hasHelpFlag(args)) {
@@ -353,7 +355,7 @@ async function connectGemini(aiosPath, options) {
   if (options.dryRun) {
     console.log("\nWould write:");
     console.log("  ~/.gemini/GEMINI.md  — DotAIOS context bridge");
-    console.log("  ~/.gemini/settings.json  — SessionStart hook + MCP server entry");
+    console.log("  ~/.gemini/settings.json: SessionStart hook");
     return;
   }
 
@@ -366,7 +368,7 @@ async function connectGemini(aiosPath, options) {
   // Merge settings first: it validates an existing settings.json and aborts on a
   // malformed file before we write any other artifacts (no partial install).
   await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath);
-  console.log("[ok] ~/.gemini/settings.json (SessionStart hook + MCP server)");
+  console.log("[ok] ~/.gemini/settings.json (SessionStart hook)");
 
   await writeGeminiBridge(geminiMdPath, aiosPath);
   console.log("[ok] ~/.gemini/GEMINI.md");
@@ -377,14 +379,13 @@ async function connectGemini(aiosPath, options) {
 
   await appendEvent(path.join(aiosPath, "memory", "events.jsonl"), {
     type: "connection",
-    summary: "Connected Gemini CLI via SessionStart hook and MCP",
+    summary: "Connected Gemini CLI via SessionStart hook",
     source: "dotaios connect gemini",
     connection: "gemini-cli"
   });
 
   console.log("\nGemini CLI connected.");
   console.log("Every session start will inject your DotAIOS working context automatically.");
-  console.log("MCP tools available: read_session_digest, read_context, list_skills, search_memory");
 }
 
 async function writeGeminiBridge(filePath, aiosPath) {
@@ -394,9 +395,7 @@ Your personal AI operating system is at \`${aiosPath}\`.
 
 - Full context guide: \`${aiosPath}/AGENTS.md\`
 - Skills index: \`${aiosPath}/skills/INDEX.md\`
-- Working memory: call \`read_session_digest\` MCP tool or run \`dotaios brief --compact\`
-
-MCP tools: \`read_session_digest\` · \`read_context\` · \`list_skills\` · \`search_memory\` · \`search_vault\` · \`log_event\`
+- Working memory: run \`dotaios brief --compact\`
 `;
   await fs.writeFile(filePath, content, "utf8");
 }
@@ -451,15 +450,17 @@ export async function mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath
     settings.hooks.SessionStart.push(hookEntry);
   }
 
-  // Merge MCP server entry
-  if (!settings.mcp) settings.mcp = {};
-  if (!settings.mcp.servers) settings.mcp.servers = {};
-  settings.mcp.servers["dotaios"] = {
-    command: "npx",
-    args: ["dotaios-mcp", "--path", aiosPath]
-  };
+  removeLegacyGeminiMcpEntry(settings);
 
   await fs.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+}
+
+function removeLegacyGeminiMcpEntry(settings) {
+  const entry = settings.mcp?.servers?.dotaios;
+  if (entry?.command !== "npx" || !Array.isArray(entry.args) || entry.args[0] !== "dotaios-mcp") return;
+  delete settings.mcp.servers.dotaios;
+  if (Object.keys(settings.mcp.servers).length === 0) delete settings.mcp.servers;
+  if (Object.keys(settings.mcp).length === 0) delete settings.mcp;
 }
 
 // --- OpenCode ---
@@ -501,7 +502,7 @@ async function connectOpenCode(aiosPath, options) {
   });
 
   console.log("\nOpenCode connected.");
-  console.log("MCP tools available: read_session_digest, read_context, list_skills, search_memory");
+  console.log("Read-only MCP tools available: read_working_context, search_aios, resolve_skill");
   console.log("Skills accessible via /skill <name> in OpenCode.");
 }
 
@@ -525,8 +526,8 @@ export async function mergeOpenCodeSettings(settingsPath, aiosPath) {
   if (!settings.mcp.servers) settings.mcp.servers = {};
   settings.mcp.servers["dotaios"] = {
     type: "local",
-    command: "npx",
-    args: ["dotaios-mcp", "--path", aiosPath]
+    command: process.execPath,
+    args: [mcpServerPath, "--path", aiosPath]
   };
 
   await fs.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");

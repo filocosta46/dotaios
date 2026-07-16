@@ -6,7 +6,7 @@ DotAIOS saves conversations from different AI tools. Each tool has a different l
 
 | Label | What it means |
 |---|---|
-| **auto-save** | Conversations save automatically when you close a session. Nothing extra to do after setup. |
+| **auto-save** | Once enabled, the conversation is saved incrementally after each completed supported response. |
 | **import only** | You can save past conversations by running an import command. No automatic saving. |
 | **paste/import only** | Copy-paste the conversation manually. DotAIOS has no automated way to read this tool's files. |
 | **not available** | The tool is not installed on your machine. |
@@ -30,7 +30,7 @@ dotaios connect gemini
 Installs three things in `~/.gemini/`:
 - a `GEMINI.md` bridge pointing Gemini at your `~/aios` folder,
 - a **SessionStart hook** that injects your working-memory digest (`dotaios brief --compact`) at the start of every session, and
-- an MCP server entry exposing `read_session_digest`, `read_context`, `list_skills`, and `search_memory`.
+- native workflow links shared with supported local agents.
 
 If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses to overwrite a file that is not valid JSON (no partial install).
 
@@ -44,9 +44,9 @@ Installs an MCP server entry in `~/.config/opencode/opencode.json` plus a skill 
 
 ### Claude Code, Cursor
 
-Use `dotaios activate` (and `dotaios mcp install`) to wire these, see the README.
+Use `dotaios activate` to wire these, see the README. The optional MCP adapter is an advanced integration, not part of first-time setup.
 
-### Skills: native in every tool
+### Workflows in supported local tools
 
 `dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into the client paths that are safe for the installed tools:
 
@@ -61,9 +61,8 @@ second client-native path when that would make a client discover duplicate
 skill names. A migration removes only old DotAIOS-owned links from retired
 duplicate paths; real entries and foreign links are preserved. DotAIOS verifies
 that it created the filesystem targets, but client-version discovery remains an
-acceptance check for each installed tool. Surfaces that do not read a local
-skills folder, such as the Claude desktop app and browser based chat, keep
-using the AGENTS.md context that `activate` and `connect` set up.
+acceptance check for each installed tool. Browser chats cannot open these local
+paths. Attach the relevant file or paste a bounded, reviewed brief instead.
 
 When you install or remove a skill through DotAIOS, propagation happens during
 that operation. If you create a skill folder manually, run `dotaios activate`

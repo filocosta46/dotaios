@@ -22,7 +22,7 @@ export async function fireSyncHook({
 } = {}) {
   try {
     // The detached hook is unsafe on feature checkouts: it can commit, rebase,
-    // push, or reset the caller's worktree. The dedicated scoped-sync writer
+    // or push the caller's worktree. The dedicated scoped-sync writer
     // remains the default. Opt in only from a deliberately controlled worktree.
     if (!allowAutoSync || command === "sync" || dryRun || readOnly || testContext) return;
     if (!(await isEnabledImpl())) return;

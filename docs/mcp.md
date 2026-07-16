@@ -1,40 +1,24 @@
-# MCP Server
+# Optional MCP Adapter
 
-DotAIOS includes a local MCP server package for agent tools that speak Model Context Protocol.
+DotAIOS includes an experimental local adapter for clients that support Model Context Protocol. It is not part of first-time setup. Supported local agents should use `AGENTS.md`, native workflow links, and `dotaios brief --compact` first.
 
-The server is intentionally separate from the root CLI dependency story. It uses stdio, reads local DotAIOS files, and does not start a background daemon.
+The adapter is useful only when a local MCP-capable client cannot use those simpler paths. It does not let an ordinary browser chat open files on your computer.
 
-## Local Run
+## Safety boundary
 
-```bash
-node packages/mcp/src/server.mjs --path ~/aios
-dotaios-mcp --path ~/aios
-```
-
-Future published package shape:
-
-```bash
-npx @dotaios/mcp --path ~/aios
-```
+- Local stdio transport only. No background daemon.
+- Read-only. It cannot append memory, edit files, or run Google Workspace commands.
+- Bounded output with explicit truncation metadata.
+- Machine-specific paths are removed from returned search results.
+- The selected AI provider may process any context returned to its client.
 
 ## Tools
 
-- `read_context`, read one or all files under `context/`
-- `read_session_digest`, a compact working-memory digest (today's focus, carry-overs, recent signals, recent sessions) so an agent can get up to speed at session start without loading everything. Marks the surfaced sessions as accessed.
-- `list_skills`, list the DotAIOS skills installed in `skills/`
-- `search_memory`, search memory events, archives, and signals
-- `search_vault`, search vault markdown files
-- `search_aios`, search local DotAIOS scopes: memory, vault, context, skills, references, plugins, and projects when using `all`
-- `google_status`, read Google Workspace connection and `gws` auth status
-- `google_gmail_search`, read-only Gmail search through the approved DotAIOS wrapper
-- `google_calendar_agenda`, read-only Calendar agenda through the approved DotAIOS wrapper
-- `google_drive_search`, read-only Drive search through the approved DotAIOS wrapper
-- `list_projects`, list local project folders
-- `log_event`, append an approved structured event
+- `read_working_context`: the same bounded, project-filtered projection as `dotaios brief --compact`
+- `search_aios`: bounded search across local DotAIOS scopes
+- `resolve_skill`: match a request to an installed workflow
 
-## Client Config
-
-Preview a config snippet:
+## Preview client configuration
 
 ```bash
 npx dotaios mcp status
@@ -42,13 +26,10 @@ npx dotaios mcp install --dry-run --agent claude
 npx dotaios mcp install --dry-run --agent cursor
 ```
 
-DotAIOS prints the stdio config and a suggested client path. It does not edit client config automatically yet.
+DotAIOS prints a local stdio configuration and a suggested client path. It does not edit the client configuration automatically. Restart the client after adding the configuration, then verify that the three tools are discoverable and invocable.
 
-## Safety
+The adapter source can also be started directly from a repository checkout:
 
-- The server is local stdio only.
-- It does not mutate MCP client config automatically.
-- It exposes `log_event` as an explicit tool; clients should ask before durable memory writes.
-- Google Workspace MCP tools are read-only and call fixed DotAIOS wrappers, never arbitrary `gws` commands.
-- The `gws` binary is resolved only from the server's environment (`DOTAIOS_GWS_BIN`) or `PATH`, never from a tool argument, an MCP client cannot make the server execute a binary it names.
-- Write actions in Google Workspace still require explicit user approval outside MCP.
+```bash
+node packages/mcp/src/server.mjs --path ~/aios
+```

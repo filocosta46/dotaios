@@ -19,9 +19,7 @@ function makeGit({ branch = "main", dirty = false, pullResult = "up-to-date", co
     async push(b) { calls.push(`push:${b}`); },
     async fetch() { calls.push("fetch"); },
     async pullRebase(b) { calls.push(`pullRebase:${b}`); return pullResult; },
-    async currentSha() { return "sha-current"; },
-    async branchFromSha(n, s) { calls.push(`branch:${n}:${s}`); },
-    async hardResetToOrigin(b) { calls.push(`reset:${b}`); }
+    async currentSha() { return "sha-current"; }
   };
 }
 
@@ -179,23 +177,49 @@ test("tick releases lock after a successful run", async () => {
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
-test("tick branches and resets only on a real rebase conflict", async () => {
+test("tick fails closed on a rebase conflict without changing local state", async () => {
   const { lockPath, dir } = await tmpLock();
   try {
     const calls = [];
     const events = [];
+    const written = [];
+    const now = Date.parse("2026-07-15T10:00:00.000Z");
+    const summary = "Sync stopped because local and remote changes overlap. Your pre-existing edits were preserved. DotAIOS recorded the conflict locally and did not create a recovery branch, reset files, or push. Ask your agent to resolve it safely, then run `dotaios sync now` again.";
     const result = await runTick({
       lockPath,
-      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
-      writeConfig: async () => {},
+      readConfig: async () => ({
+        access_token: "T",
+        last_tick_at: null,
+        last_pull_at: "2026-07-14T10:00:00.000Z",
+        last_push_sha: "previous-sha"
+      }),
+      writeConfig: async (patch) => written.push(patch),
       makeGit: () => makeGit({ dirty: true, pullResult: "conflict", commitSha: "newsha", calls }),
       appendEvent: async (e) => events.push(e),
-      now: () => Date.now()
+      now: () => now
     });
-    assert.ok(calls.some((c) => c.startsWith("branch:local-")), "conflicting local work parked on a branch");
-    assert.ok(calls.includes("reset:main"), "main hard-reset to origin");
-    assert.ok(events.some((e) => e.type === "sync-conflict"), "sync-conflict logged");
-    assert.equal(result.pushed, false, "no push after a conflict reset");
+    assert.deepEqual(calls, [
+      "branch-current:main",
+      "dirty",
+      "commit:sync: 2026-07-1",
+      "pullRebase:main"
+    ]);
+    assert.deepEqual(events, [{
+      type: "sync-conflict",
+      summary,
+      at: "2026-07-15T10:00:00.000Z"
+    }]);
+    assert.deepEqual(written, [{
+      last_tick_at: "2026-07-15T10:00:00.000Z",
+      last_error: summary
+    }], "conflict state must not overwrite the last successful pull or push receipt");
+    assert.deepEqual(result, {
+      conflict: true,
+      pulled: "conflict",
+      pushed: false,
+      sha: null,
+      error: summary
+    });
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
@@ -228,9 +252,7 @@ test("tick writes last_error on git failure and does not throw", async () => {
       push: async () => { throw new Error("network down"); },
       fetch: async () => {},
       pullRebase: async () => "up-to-date",
-      currentSha: async () => "sha",
-      branchFromSha: async () => {},
-      hardResetToOrigin: async () => {}
+      currentSha: async () => "sha"
     };
     const result = await runTick({
       lockPath,
@@ -277,9 +299,7 @@ test("tick does not throw when writeConfig/appendEvent reject in error path", as
       push: async () => { throw new Error("network down"); },
       fetch: async () => {},
       pullRebase: async () => "up-to-date",
-      currentSha: async () => "sha",
-      branchFromSha: async () => {},
-      hardResetToOrigin: async () => {}
+      currentSha: async () => "sha"
     };
     // both side-effect writers reject — runTick must still resolve, not throw
     const result = await runTick({

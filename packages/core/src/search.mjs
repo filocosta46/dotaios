@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-export const SEARCH_SCOPES = ["memory", "vault", "context", "skills", "references", "plugins", "sessions", "all"];
+export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "skills", "references", "plugins", "sessions", "all"];
 
 const DEFAULT_LIMIT = 20;
 const SKIP_DIR_NAMES = new Set([".git", "node_modules", ".obsidian", ".trash"]);

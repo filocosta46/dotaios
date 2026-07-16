@@ -16,6 +16,12 @@ DotAIOS is a local file convention.
 
 `context/` is loaded every session. It describes identity, active work, priorities, long-term direction, and domain-specific modes.
 
+## Projects
+
+`projects/` is the durable catalog of work the user owns. Each project keeps a small synced README with its stable ID, status, domain, repository URL, decisions, and next steps. The actual source repository stays outside `~/aios` and keeps its own Git history.
+
+Local checkout paths are machine-specific and must not be committed to the AIOS mirror. A new machine can read the project catalog before the repository is cloned, then reconnect the local checkout without changing the durable project record.
+
 ## Memory
 
 `memory/` is operational state. Agents should load only recent entries:
@@ -27,6 +33,14 @@ DotAIOS is a local file convention.
 **Daily notes** live in `memory/daily/YYYY-MM-DD.md`. `dotaios brief` writes the deterministic `## Brief` section. The `/today` skill writes today's plan (focus, plan, frog). The `/closeday` skill fills the close-out section (done, carry-over, reflection) and stages carry-overs into the next day's note. Daily notes are operational memory, not long-term knowledge, they belong in `memory/`, not `vault/`.
 
 **Session memory** lives in `memory/sessions/<date>/<timestamp>_<agent>_<id>.md`. Each file is agent-neutral Markdown with YAML frontmatter (`agent`, `session_id`, `captured_at`, `project`, `title`, `turns`). `memory/sessions/index.jsonl` is a lightweight catalog enabling fast search and deduplication. Sessions are captured via `dotaios capture enable <agent>` (auto-save) or `dotaios capture import` (manual/backfill). Agents should not load sessions in bulk, use `dotaios search` to surface relevant ones on demand.
+
+Captured text is evidence, not automatically durable knowledge. Promotion to `context/`, a project, `vault/`, or a skill is explicit, previewed, and recorded in `memory/events.jsonl`. Signals remain short-lived operational hints.
+
+`dotaios brief --compact` owns the default working-context selection policy.
+It uses a visible 6,000-character budget, applies the same project filter to
+sessions, signals, and events, and marks when the budget is reached. The optional
+MCP `read_working_context` tool calls the same core projection rather than selecting a
+different memory window.
 
 ## Vault
 
