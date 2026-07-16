@@ -156,7 +156,8 @@ export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skil
     lines.push(`Routing: to choose a skill for a request, match the user's intent against ${resolver} (trigger phrases -> skill), then open that SKILL.md before acting. If the user keeps repeating a workflow, offer to run the skillify skill to make it reusable (draft it, then ask before saving).`);
   }
 
-  lines.push("Working memory: run `dotaios brief --compact` at session start. For project work, add `--project <slug-or-id>`.");
+  lines.push("Working memory: route events, signals, and saved sessions only through the canonical bounded projection. Run `dotaios brief --compact` at session start; for project work, add `--project <slug-or-id>`. Do not load those memory stores directly or invent another recency window.");
+  lines.push("Optional MCP: `read_working_context` returns that same projection. The adapter exposes exactly `read_working_context`, `search_aios`, and `resolve_skill`; it has no compatibility aliases.");
   lines.push(MANAGED_END, "");
 
   return lines.join("\n");

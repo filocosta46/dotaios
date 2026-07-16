@@ -7,7 +7,12 @@ import { hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
-import { downloadLightpanda, lightpandaPlatformBinary } from "../../../core/src/lightpanda.mjs";
+import {
+  LIGHTPANDA_VERSION,
+  downloadLightpanda,
+  lightpandaPlatformBinary,
+  resolveLightpanda
+} from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
 import { activateCommand } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
@@ -24,6 +29,8 @@ Options:
   --vault-path <dir>  Use an external vault for long-term knowledge
   --yes, -y           Use placeholder answers for non-interactive setup
   --skip-reveal       Do not open the folder when finished
+  --install-lightpanda
+                      Install the optional verified browser helper
   --force             Add missing files, preserving existing files
   --overwrite         Replace generated files in the target folder
 `;
@@ -34,8 +41,9 @@ export async function setupCommand(args) {
     return;
   }
 
-  const passthrough = args.filter((arg) => arg !== "--skip-reveal");
+  const passthrough = args.filter((arg) => !["--skip-reveal", "--install-lightpanda"].includes(arg));
   const skipReveal = args.includes("--skip-reveal");
+  const installLightpandaRequested = args.includes("--install-lightpanda");
   const nonInteractive = args.includes("--yes") || args.includes("-y");
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
   const startedAt = Date.now();
@@ -155,22 +163,7 @@ export async function setupCommand(args) {
     }
   }
 
-  // Install Lightpanda for JS-rendered web ingest (best-effort, never blocks setup)
-  const platformBinary = lightpandaPlatformBinary();
-  if (platformBinary !== null) {
-    console.log("");
-    if (process.env.DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD === "1") {
-      console.log("   Web browsing engine: install skipped (DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD)");
-    } else {
-      const result = await downloadLightpanda({ silent: true, platformBinary });
-      if (result.ok) {
-        const verb = result.alreadyInstalled ? "already ready" : "ready";
-        console.log(`✓  Web browsing engine ${verb} (renders JavaScript pages)`);
-      } else {
-        console.log(`(Web browsing engine setup skipped. Pages will still load, but JavaScript-heavy sites may not render.)`);
-      }
-    }
-  }
+  await setupLightpanda({ nonInteractive, installRequested: installLightpandaRequested });
 
   // Skills summary
   const skills = await collectSkills(aiosPath);
@@ -209,6 +202,47 @@ export async function setupCommand(args) {
     run_id: runId,
     duration_ms: Date.now() - startedAt
   });
+}
+
+async function setupLightpanda({ nonInteractive, installRequested }) {
+  const existingBinary = await resolveLightpanda();
+  if (existingBinary) {
+    console.log("");
+    console.log("✓  Web browsing engine already ready (renders JavaScript pages)");
+    return;
+  }
+
+  const platformBinary = lightpandaPlatformBinary();
+  if (!platformBinary) return;
+
+  let approved = installRequested;
+  if (!approved && !nonInteractive && process.stdin.isTTY) {
+    const rl = readline.createInterface({ input, output });
+    try {
+      console.log("");
+      const answer = await rl.question(
+        `Install optional Lightpanda ${LIGHTPANDA_VERSION} for JavaScript-rendered pages? The download is SHA-256 verified. (y/N): `
+      );
+      approved = ["y", "yes"].includes(answer.trim().toLowerCase());
+    } finally {
+      rl.close();
+    }
+  }
+
+  if (!approved) {
+    console.log("");
+    console.log("   Web browsing engine: not installed (optional; plain fetch remains available)");
+    return;
+  }
+
+  console.log("");
+  const result = await downloadLightpanda({ platformBinary, confirmed: true });
+  if (result.ok) {
+    console.log("✓  Web browsing engine ready (renders JavaScript pages)");
+    return;
+  }
+
+  console.log(`   Web browsing engine install failed (${result.reason}). Plain fetch remains available.`);
 }
 
 async function promptSessionMemory(rl, aiosPath, nonInteractive) {

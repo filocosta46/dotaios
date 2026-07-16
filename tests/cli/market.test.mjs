@@ -45,6 +45,12 @@ test("market list labels draft outcome packs as coming soon", async () => {
   });
 });
 
+test("market help points at the deployed official registry", async () => {
+  const output = await captureLogs(() => marketCommand(["--help"]));
+  assert.match(output, /https:\/\/dotaios\.vercel\.app\/registry\.json/);
+  assert.doesNotMatch(output, /https:\/\/dotaios\.com\/registry\.json/);
+});
+
 test("market install refuses a draft before resolving any package source", async () => {
   await withRegistry([
     {

@@ -4,6 +4,7 @@ import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
 import { copyFileSafe, listFiles, pathExists, writeFileSafe } from "../../../core/src/files.mjs";
+import { previewMigration } from "../../../core/src/migrations.mjs";
 import { renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
 import { createAiosConfig } from "../../../core/src/schema.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
@@ -21,6 +22,19 @@ export async function initCommand(args) {
   const options = parseOptions(args);
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   const exists = await pathExists(target);
+
+  if (exists && await pathExists(path.join(target, "aios.json"))) {
+    const migration = await previewMigration({ aiosPath: target });
+    if (migration.status === "ready") {
+      throw new Error(
+        `Existing AIOS schema ${migration.plan.from_schema_version} needs a versioned migration.\n` +
+        `Run \`dotaios migrate --path ${target}\` to preview it. --force and --overwrite are not migration ownership proof.`
+      );
+    }
+    if (migration.status === "recovery_required") {
+      throw new Error("An interrupted migration must be recovered before init can inspect this folder. Run `dotaios migrate --recover`.");
+    }
+  }
 
   if (exists && !options.force) {
     const entries = await fs.readdir(target);

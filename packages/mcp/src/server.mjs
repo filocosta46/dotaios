@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
@@ -11,7 +12,9 @@ import { rankSkills } from "../../core/src/skill-resolver.mjs";
 import { collectSkills } from "../../core/src/skills.mjs";
 
 const PROTOCOL_VERSION = "2025-06-18";
-const SERVER_VERSION = "1.8.0";
+const SERVER_VERSION = JSON.parse(
+  readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
+).version;
 const DEFAULT_SEARCH_BUDGET = 6000;
 
 async function main(argv = process.argv.slice(2)) {
@@ -163,7 +166,7 @@ class DotaiosMcpServer {
     const config = await this.readConfig();
     const vaultPath = resolveVaultPath(config, this.aiosPath);
     const groups = await searchAios({ aiosPath: this.aiosPath, vaultPath, query, scope, limit });
-    return JSON.stringify(boundSearchResults({ query, scope, groups, limit: budget }), null, 2);
+    return serializeBoundedSearchResults({ query, scope, groups, limit: budget });
   }
 
   write(payload) {
@@ -224,23 +227,58 @@ function tools() {
   ];
 }
 
-function boundSearchResults({ query, scope, groups, limit }) {
+function serializeBoundedSearchResults({ query, scope, groups, limit }) {
   const selected = [];
   let truncated = false;
   outer: for (const group of groups) {
     for (const rawResult of group.results || []) {
       const result = sanitizeSearchValue(rawResult);
       const candidate = [...selected, { scope: group.scope, ...result }];
-      if (JSON.stringify({ query, scope, results: candidate }).length > limit) {
+      const candidateText = serializeSearchEnvelope({ query, scope, results: candidate, limit, truncated: false });
+      if (candidateText.length > limit) {
         truncated = true;
         break outer;
       }
       selected.push({ scope: group.scope, ...result });
     }
   }
-  const envelope = { query, scope, results: selected, budget: { limit, used: 0, truncated } };
-  envelope.budget.used = JSON.stringify(envelope).length;
-  return envelope;
+
+  let boundedQuery = query;
+  let serialized = serializeSearchEnvelope({ query: boundedQuery, scope, results: selected, limit, truncated });
+  while (serialized.length > limit && selected.length > 0) {
+    selected.pop();
+    truncated = true;
+    serialized = serializeSearchEnvelope({ query: boundedQuery, scope, results: selected, limit, truncated });
+  }
+
+  if (serialized.length > limit) {
+    const marker = "[query truncated]";
+    const overflow = serialized.length - limit;
+    const keep = Math.max(0, boundedQuery.length - overflow - marker.length);
+    boundedQuery = keep > 0 ? `${boundedQuery.slice(0, keep)}${marker}` : marker;
+    truncated = true;
+    serialized = serializeSearchEnvelope({ query: boundedQuery, scope, results: selected, limit, truncated });
+  }
+
+  if (serialized.length > limit) {
+    throw protocolError(-32602, `budget ${limit} is too small for the search response envelope`);
+  }
+  return serialized;
+}
+
+function serializeSearchEnvelope({ query, scope, results, limit, truncated }) {
+  let used = 0;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const serialized = JSON.stringify({
+      query,
+      scope,
+      results,
+      budget: { limit, used, truncated },
+    }, null, 2);
+    if (serialized.length === used) return serialized;
+    used = serialized.length;
+  }
+  throw new Error("Could not stabilize search response budget metadata");
 }
 
 function sanitizeSearchValue(value, key = "") {

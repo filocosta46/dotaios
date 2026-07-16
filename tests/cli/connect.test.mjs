@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  connectCommand,
   shSingleQuote,
   buildGeminiHookScript,
   mergeGeminiSettings,
@@ -103,4 +104,46 @@ test("mergeOpenCodeSettings uses the packaged server directly", async () => {
   assert.equal(entry.command, process.execPath);
   assert.match(entry.args[0], /packages[\\/]mcp[\\/]src[\\/]server\.mjs$/);
   assert.deepEqual(entry.args.slice(1), ["--path", "/home/u/aios"]);
+});
+
+test("Google connection records redact binary paths and untrusted version output", async () => {
+  const dir = tmp();
+  const aiosPath = path.join(dir, "aios");
+  const gwsBin = path.join(dir, "private-tools", "gws");
+  fs.mkdirSync(path.dirname(gwsBin), { recursive: true });
+  fs.mkdirSync(aiosPath, { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "aios.json"), "{}\n");
+  fs.writeFileSync(gwsBin, `#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "gws 9.8.7 binary=${gwsBin} refresh_token=TOPSECRET"
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "status" ]; then
+  echo '{"auth_method":"oauth"}'
+  exit 0
+fi
+exit 1
+`);
+  fs.chmodSync(gwsBin, 0o755);
+
+  const originalLog = console.log;
+  console.log = () => {};
+  try {
+    await connectCommand(["google", "--path", aiosPath, "--gws-bin", gwsBin]);
+  } finally {
+    console.log = originalLog;
+  }
+
+  const recordPaths = [
+    path.join(aiosPath, "connections", "apis", "google-workspace.md"),
+    path.join(aiosPath, "connections", "registry.md"),
+    path.join(aiosPath, "skills", "google-workspace", "SKILL.md"),
+    path.join(aiosPath, "memory", "events.jsonl")
+  ];
+  const records = recordPaths.map((recordPath) => fs.readFileSync(recordPath, "utf8")).join("\n");
+
+  assert.match(records, /Tool: gws/);
+  assert.match(records, /Version: 9\.8\.7/);
+  assert.doesNotMatch(records, new RegExp(gwsBin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.doesNotMatch(records, /TOPSECRET|refresh_token|Binary:/);
 });

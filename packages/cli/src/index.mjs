@@ -28,6 +28,7 @@ const commands = {
   license: "./commands/license.mjs",
   market: "./commands/market.mjs",
   memory: "./commands/memory.mjs",
+  migrate: "./commands/migrate.mjs",
   mcp: "./commands/mcp.mjs",
   plan: "./commands/plan.mjs",
   project: "./commands/project.mjs",
@@ -71,6 +72,7 @@ Commands:
   license <cmd>     Add, list, or remove license keys for paid packages
   market <cmd>      Browse outcome packages in the public catalog
   memory <cmd>      Audit recent memory or promote captured evidence explicitly
+  migrate           Preview, apply, or recover a versioned folder migration
   plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
   project <cmd>     Register and resolve project repositories across machines
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
@@ -126,7 +128,11 @@ async function main(argv) {
   // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
   // A health report is deliberately a read-only operation. It must not mutate
   // the sync queue while the caller is checking whether the system is healthy.
-  const readOnly = commandName === "skills" && ["doctor", "probe"].includes(args[0]);
+  const readOnly = (
+    commandName === "skills" && ["doctor", "probe"].includes(args[0])
+  ) || (
+    commandName === "migrate" && !args.includes("--apply") && !args.includes("--recover")
+  );
   await fireSyncHook({ command: commandName, dryRun: args.includes("--dry-run"), readOnly });
 }
 

@@ -2,18 +2,27 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { parseDocument } from "yaml";
-import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import {
+  defaultAiosPath,
+  ensureAiosFolder,
+  expandHome,
+  isPathWithin,
+  resolveVaultPath
+} from "../../../core/src/paths.mjs";
 import { pathExists, readJson, listFiles } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 // Knowledge layers only. NOT memory/ (operational JSONL) or skills/ (workflows).
 const SRC_ROOTS = ["context", "vault", "projects", "decisions", "connections"];
 const RESERVED = new Set(["index.md", "log.md"]);
-const FM_RE = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/;
+const FM_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/;
 const WIKILINK_RE = /\[\[([^\]]+)\]\]/g;
 
 function splitFrontmatter(text, source = "markdown") {
   const match = FM_RE.exec(text);
+  if (!match && /^---(?:\r?\n|$)/.test(text)) {
+    throw new Error(`Unclosed YAML frontmatter in ${source}: expected a closing --- delimiter`);
+  }
   if (!match) return { meta: {}, body: text, raw: null };
   const document = parseDocument(match[1], { strict: true, uniqueKeys: true });
   if (document.errors.length > 0) {
@@ -50,37 +59,15 @@ function renderFrontmatter(raw, hasType, type) {
   return `---\ntype: ${type}\n${raw}\n---\n`;
 }
 
-function isWithin(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
-}
-
-async function canonicalPath(candidate) {
-  const resolved = path.resolve(candidate);
-  const missing = [];
-  let existing = resolved;
-  while (!(await pathExists(existing))) {
-    const parent = path.dirname(existing);
-    if (parent === existing) break;
-    missing.unshift(path.basename(existing));
-    existing = parent;
-  }
-  const realExisting = await fs.realpath(existing);
-  return path.join(realExisting, ...missing);
-}
-
 async function assertSafeOutput(srcRoot, outDir, entries) {
-  const canonicalSourceRoot = await canonicalPath(srcRoot);
-  const canonicalOutput = await canonicalPath(outDir);
-  if (canonicalOutput === canonicalSourceRoot || isWithin(canonicalOutput, canonicalSourceRoot)) {
+  if (await isPathWithin(outDir, srcRoot)) {
     throw new Error("Unsafe OKF output: --out cannot equal or contain the AIOS folder");
   }
 
   for (const { dir } of entries) {
     if (!(await pathExists(dir))) continue;
-    const canonicalSource = await canonicalPath(dir);
-    if (isWithin(canonicalSource, canonicalOutput) || isWithin(canonicalOutput, canonicalSource)) {
-      throw new Error(`Unsafe OKF output: --out overlaps source folder ${canonicalSource}`);
+    if (await isPathWithin(dir, outDir) || await isPathWithin(outDir, dir)) {
+      throw new Error(`Unsafe OKF output: --out overlaps source folder ${path.resolve(dir)}`);
     }
   }
 }

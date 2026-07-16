@@ -2,8 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists, readJson } from "./files.mjs";
-import { appendEvent, formatJsonlEntry, readJsonl } from "./memory.mjs";
-import { expandHome, resolveVaultPath } from "./paths.mjs";
+import { formatJsonlEntry, isoDate, readJsonl } from "./memory.mjs";
+import { expandHome, isPathWithin, resolveVaultPath } from "./paths.mjs";
 
 export const PROMOTION_DESTINATIONS = [
   "signal",
@@ -13,6 +13,8 @@ export const PROMOTION_DESTINATIONS = [
   "skill",
   "session-only"
 ];
+
+export const PROMOTION_OPERATIONS = Object.freeze(["add", "replace", "remove", "supersede"]);
 
 const MARKDOWN_DESTINATIONS = new Set(["context", "project", "vault", "skill"]);
 const PROMOTION_PLAN_VERSION = 1;
@@ -67,7 +69,7 @@ export async function planPromotion(aiosPath, options = {}) {
       before,
       summary,
       sourcePath: source.relativePath,
-      date: now.toISOString().slice(0, 10)
+      date: isoDate(now)
     });
   }
 
@@ -79,7 +81,7 @@ export async function planPromotion(aiosPath, options = {}) {
     destinationAbsolutePath: destination.absolutePath,
     destinationRoot: destination.root,
     destinationRootIsExternal: destination.rootIsExternal,
-    operation: destinationType === "session-only" ? "retain" : "append",
+    operation: "add",
     project,
     summary,
     source: {
@@ -119,6 +121,7 @@ export async function applyPromotion(plan) {
     throw new Error("The captured session changed after the preview. Preview the promotion again.");
   }
 
+  let destinationChange = null;
   if (plan.destinationType !== "session-only") {
     await assertSafeDestinationFromPlan(plan);
     const destinationExists = await pathExists(plan.destinationAbsolutePath);
@@ -126,11 +129,14 @@ export async function applyPromotion(plan) {
     if (destinationExists !== plan.destinationExists || currentDestination !== plan.before) {
       throw new Error("The destination changed after the preview. Preview the promotion again.");
     }
-    await appendPlannedContent(
-      plan.destinationAbsolutePath,
-      plan.destinationExists,
-      plan.addition
-    );
+    destinationChange = {
+      target: plan.destinationAbsolutePath,
+      before: currentDestination,
+      existed: destinationExists,
+      after: destinationExists
+        ? `${currentDestination}${plan.addition}`
+        : plan.addition.replace(/^\n+/, "")
+    };
   }
 
   await assertSafeShelfPath(
@@ -139,7 +145,10 @@ export async function applyPromotion(plan) {
     plan.receiptPath,
     "promotion receipt"
   );
-  const receipt = await appendEvent(plan.receiptPath, {
+  const receiptBefore = await readTextIfPresent(plan.receiptPath);
+  const receiptExists = await pathExists(plan.receiptPath);
+  const receipt = {
+    ts: new Date().toISOString(),
     type: "memory-promotion",
     source: plan.source.relativePath,
     source_session_id: plan.source.sessionId,
@@ -151,7 +160,17 @@ export async function applyPromotion(plan) {
     source_hash: plan.source.hash,
     content_hash: plan.contentHash,
     actor: "dotaios-cli"
-  });
+  };
+  const receiptChange = {
+    target: plan.receiptPath,
+    before: receiptBefore,
+    existed: receiptExists,
+    after: `${receiptBefore}${formatJsonlEntry(receipt)}`
+  };
+  await replaceFilesAtomically([
+    receiptChange,
+    ...(destinationChange ? [destinationChange] : [])
+  ]);
 
   return {
     applied: true,
@@ -203,7 +222,7 @@ async function resolveSessionSource(aiosPath, sourceValue) {
 
   const relativePath = normalizeRelativePath(entry.path);
   const absolutePath = path.resolve(aiosPath, relativePath);
-  if (!isWithin(sessionsRoot, absolutePath)) {
+  if (!await isPathWithin(sessionsRoot, absolutePath)) {
     throw new Error(`Unsafe captured session path in index: ${entry.path}`);
   }
   await assertSafeShelfPath(aiosPath, sessionsRoot, absolutePath, "captured session");
@@ -234,7 +253,7 @@ async function resolveDestination(aiosPath, { destinationType, destinationPath, 
   if (destinationType === "signal") {
     if (destinationPath) throw new Error("Signals use today's memory/signals file; omit --destination.");
     const root = path.join(aiosPath, "memory", "signals");
-    const absolutePath = path.join(root, `${localIsoDate(now)}.jsonl`);
+    const absolutePath = path.join(root, `${isoDate(now)}.jsonl`);
     await assertSafeShelfPath(aiosPath, root, absolutePath, "signal destination");
     return {
       absolutePath,
@@ -255,7 +274,7 @@ async function resolveDestination(aiosPath, { destinationType, destinationPath, 
   };
   const prefixes = { context: "context", project: "projects", vault: "vault", skill: "skills" };
   const root = roots[destinationType];
-  const rootIsExternal = destinationType === "vault" && !isWithin(aiosPath, root);
+  const rootIsExternal = destinationType === "vault" && !await isPathWithin(aiosPath, root);
   let requestedPath = destinationPath;
 
   if (!requestedPath && destinationType === "project" && project) {
@@ -280,9 +299,6 @@ async function resolveDestination(aiosPath, { destinationType, destinationPath, 
   }
 
   const absolutePath = path.resolve(root, relativeToRoot);
-  if (!isWithin(root, absolutePath)) {
-    throw new Error(`Unsafe ${destinationType} destination: path traversal is not allowed.`);
-  }
   if (path.extname(absolutePath).toLowerCase() !== ".md") {
     throw new Error(`${destinationType} promotions need a Markdown (.md) destination.`);
   }
@@ -331,73 +347,119 @@ async function assertSafeShelfPath(aiosPath, shelfRoot, candidate, label) {
 
 async function assertSafeInternalPath(aiosPath, candidate, label) {
   const root = path.resolve(aiosPath);
-  if (!isWithin(root, path.resolve(candidate))) {
-    throw new Error(`Unsafe ${label}: path traversal is not allowed.`);
-  }
   await assertSafePath(root, candidate, label);
 }
 
 async function assertSafePath(allowedRoot, candidate, label) {
   const lexicalRoot = path.resolve(allowedRoot);
   const lexicalCandidate = path.resolve(candidate);
-  if (!isWithin(lexicalRoot, lexicalCandidate)) {
+  if (!isLexicallyWithin(lexicalRoot, lexicalCandidate)) {
     throw new Error(`Unsafe ${label}: path traversal is not allowed.`);
   }
-
-  const [realRoot, realCandidate] = await Promise.all([
-    canonicalPath(lexicalRoot),
-    canonicalPath(lexicalCandidate)
-  ]);
-  if (!isWithin(realRoot, realCandidate)) {
-    throw new Error(`Unsafe ${label}: a symlink points outside the allowed shelf.`);
-  }
-  await assertNoSymlinkComponents(lexicalRoot, lexicalCandidate, label);
-}
-
-async function assertNoSymlinkComponents(allowedRoot, candidate, label) {
-  const relative = path.relative(allowedRoot, candidate);
-  let current = allowedRoot;
-  for (const segment of relative.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
-    try {
-      const stat = await fs.lstat(current);
-      if (stat.isSymbolicLink()) {
-        throw new Error(`Unsafe ${label}: symlinks are not allowed in promotion paths.`);
-      }
-    } catch (error) {
-      if (error.code === "ENOENT") return;
-      throw error;
-    }
+  if (!await isPathWithin(lexicalRoot, lexicalCandidate)) {
+    throw new Error(`Unsafe ${label}: a symlink points outside the allowed shelf or cannot be resolved.`);
   }
 }
 
-async function canonicalPath(value) {
-  const resolved = path.resolve(value);
-  const missing = [];
-  let existing = resolved;
-  while (!await pathExists(existing)) {
-    const parent = path.dirname(existing);
-    if (parent === existing) return path.join(existing, ...missing);
-    missing.unshift(path.basename(existing));
-    existing = parent;
-  }
-  return path.join(await fs.realpath(existing), ...missing);
-}
-
-async function appendPlannedContent(destination, destinationExists, addition) {
-  await fs.mkdir(path.dirname(destination), { recursive: true });
-  if (destinationExists) {
-    await fs.appendFile(destination, addition, "utf8");
-    return;
-  }
-
+async function replaceFilesAtomically(changes) {
+  const prepared = [];
   try {
-    await fs.writeFile(destination, addition.replace(/^\n+/, ""), { encoding: "utf8", flag: "wx" });
+    for (const change of changes) {
+      await assertFileUnchanged(change);
+      await fs.mkdir(path.dirname(change.target), { recursive: true });
+      const token = crypto.randomUUID();
+      const tempPath = path.join(
+        path.dirname(change.target),
+        `.${path.basename(change.target)}.tmp-${token}`
+      );
+      const backupPath = path.join(
+        path.dirname(change.target),
+        `.${path.basename(change.target)}.backup-${token}`
+      );
+      const mode = change.existed
+        ? (await fs.stat(change.target)).mode & 0o777
+        : 0o666;
+      try {
+        await writeDurableFile(tempPath, change.after, mode);
+      } catch (error) {
+        await fs.rm(tempPath, { force: true }).catch(() => {});
+        throw error;
+      }
+      prepared.push({
+        ...change,
+        backupPath,
+        backedUp: false,
+        committed: false,
+        tempPath
+      });
+    }
+
+    for (const item of prepared) {
+      await assertFileUnchanged(item);
+      if (item.existed) {
+        await fs.rename(item.target, item.backupPath);
+        item.backedUp = true;
+      }
+      await fs.rename(item.tempPath, item.target);
+      item.committed = true;
+    }
+
+    await Promise.all([...new Set(prepared.map((item) => path.dirname(item.target)))].map(syncDirectory));
   } catch (error) {
-    if (error.code === "EEXIST") {
-      throw new Error("The destination appeared after the preview. Preview the promotion again.");
+    const rollbackErrors = [];
+    for (const item of [...prepared].reverse()) {
+      try {
+        if (item.committed) {
+          await fs.rm(item.target, { force: true });
+        }
+        if (item.backedUp) {
+          await fs.rename(item.backupPath, item.target);
+          item.backedUp = false;
+        }
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
+      }
+    }
+    await Promise.all(prepared.map((item) => fs.rm(item.tempPath, { force: true }).catch(() => {})));
+    if (rollbackErrors.length > 0) {
+      throw new AggregateError(
+        [error, ...rollbackErrors],
+        "Promotion failed and its atomic rollback could not be completed."
+      );
     }
     throw error;
+  }
+
+  await Promise.all(prepared.map(async (item) => {
+    if (item.backedUp) await fs.rm(item.backupPath, { force: true }).catch(() => {});
+  }));
+}
+
+async function assertFileUnchanged({ target, before, existed }) {
+  const currentExists = await pathExists(target);
+  const current = await readTextIfPresent(target);
+  if (currentExists !== existed || current !== before) {
+    throw new Error(`The file changed before the atomic promotion could be applied: ${target}`);
+  }
+}
+
+async function writeDurableFile(filePath, content, mode) {
+  const handle = await fs.open(filePath, "wx", mode);
+  try {
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function syncDirectory(directory) {
+  if (process.platform === "win32") return;
+  const handle = await fs.open(directory, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
@@ -423,7 +485,7 @@ function renderDiff(destinationPath, addition, destinationType, destinationExist
   return [
     `--- ${destinationExists ? destinationPath : "/dev/null"}`,
     `+++ ${destinationPath}`,
-    "@@ append @@",
+    "@@ add @@",
     ...addedLines.map((line) => `+${line}`)
   ].join("\n");
 }
@@ -459,20 +521,13 @@ function stripShelfPrefix(value, prefix) {
   return value.startsWith(`${prefix}/`) ? value.slice(prefix.length + 1) : value;
 }
 
-function isWithin(root, candidate) {
+function isLexicallyWithin(root, candidate) {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));
   return relative === "" || (
     relative !== ".." &&
     !relative.startsWith(`..${path.sep}`) &&
     !path.isAbsolute(relative)
   );
-}
-
-function localIsoDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function contentHash(content) {

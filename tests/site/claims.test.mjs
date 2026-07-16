@@ -42,3 +42,33 @@ test("the public registry contains only schema-valid non-purchasable drafts", as
   assert.ok(registry.entries.every((entry) => entry.status === "draft"));
   assert.ok(registry.entries.every((entry) => !entry.checkout_url && !entry.gumroad_url));
 });
+
+test("public context guidance documents only the current MCP tools and one memory projection", async () => {
+  const relativeFiles = [
+    "docs/mcp.md",
+    "docs/adapters.md",
+    "docs/sessions.md",
+    "docs/architecture.md",
+    "templates/AGENTS.md.hbs",
+    "packages/core/src/bridges.mjs"
+  ];
+  const contents = await Promise.all(
+    relativeFiles.map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8"))
+  );
+  const [mcpDocumentation, , , , agentsTemplate] = contents;
+  const toolsSection = mcpDocumentation.split("## Tools")[1].split(/\n## /)[0];
+  const documentedTools = [...toolsSection.matchAll(/^- `([a-z_]+)`:/gm)]
+    .map((match) => match[1]);
+  const corpus = contents.join("\n");
+  const retiredToolNames = [
+    ["read", "session", "digest"], ["read", "context"], ["list", "skills"],
+    ["search", "memory"], ["search", "vault"], ["list", "projects"],
+    ["log", "event"], ["google", "status"], ["google", "gmail", "search"],
+    ["google", "calendar", "agenda"], ["google", "drive", "search"]
+  ].map((parts) => parts.join("_"));
+
+  assert.deepEqual(documentedTools, ["read_working_context", "search_aios", "resolve_skill"]);
+  assert.equal(retiredToolNames.some((name) => corpus.includes(name)), false);
+  assert.match(agentsTemplate, /Route `memory\/events\.jsonl`, `memory\/signals\/`, and `memory\/sessions\/`/);
+  assert.doesNotMatch(agentsTemplate, /load the last 50|load the single most recent file/i);
+});

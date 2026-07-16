@@ -1,10 +1,10 @@
 import fs from "node:fs";
-import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { isoDate } from "../../packages/core/src/memory.mjs";
 import {
   buildWorkingContext,
   createWorkingContextProjection,
@@ -84,38 +84,47 @@ test("project filter scopes sessions, namespaced signals, and events with stable
   assert.deepEqual(context.sessions.map((session) => session.session_id), ["a-newer", "a-older"]);
   assert.deepEqual(context.signals.map((signal) => signal.summary), ["Newer A signal", "Older A signal"]);
   assert.deepEqual(context.events.map((event) => event.summary), ["Newer A event", "Older A event"]);
+  assert.deepEqual(context.signals.map(({ sourcePath, sourceLine }) => [sourcePath, sourceLine]), [
+    ["memory/signals/mini-2026-07-15.jsonl", 2],
+    ["memory/signals/mini-2026-07-15.jsonl", 3],
+  ]);
+  assert.deepEqual(context.events.map(({ sourcePath, sourceLine }) => [sourcePath, sourceLine]), [
+    ["memory/events.jsonl", 2],
+    ["memory/events.jsonl", 3],
+  ]);
+  assert.equal(context.today, isoDate(FIXED_NOW));
   assert.ok(context.sessions.every((item) => item.project === "project-a"));
   assert.ok(context.signals.every((item) => item.project === "project-a"));
   assert.ok(context.events.every((item) => item.project === "project-a"));
   assert.doesNotMatch(rendered, /Project B|Stale A/);
 });
 
-test("captured project catalog keeps README context and excludes runtime paths", async () => {
+test("projection reads durable project metadata from the local README", async () => {
   const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "projects", "project-a"), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "projects", "project-a", "README.md"), [
+    "---",
+    "id: project-id-a",
+    "project: project-a",
+    "status: active",
+    "domain: [build]",
+    "repo_url: https://example.com/project-a.git",
+    "runtime_path: /private/tmp/machine-only/project-a",
+    "---",
+    "# Project A",
+    "",
+    "Durable project context.",
+    "",
+  ].join("\n"));
   const readPaths = [];
   const filesystem = {
     async readFile(filePath, encoding) {
       readPaths.push(filePath);
-      return fsp.readFile(filePath, encoding);
+      return fs.promises.readFile(filePath, encoding);
     },
-    readdir: (...args) => fsp.readdir(...args),
+    readdir: (...args) => fs.promises.readdir(...args),
   };
-  const projectCatalog = [
-    {
-      id: "project-id-a",
-      slug: "project-a",
-      status: "active",
-      domain: ["build"],
-      repoUrl: "https://example.com/project-a.git",
-      path: "/private/tmp/machine-only/projects/project-a/README.md",
-      rootPath: "/private/tmp/machine-only/projects/project-a",
-      projectPath: "/private/tmp/machine-only/projects/project-a",
-      readmePath: "/private/tmp/machine-only/aios/projects/project-a/README.md",
-      pathAvailable: true,
-      readme: "---\nproject: project-a\nstatus: active\ndomain: [build]\n---\n# Project A\n\nDurable project context.\n",
-    },
-  ];
-  const projection = createWorkingContextProjection({ filesystem, clock: fixedClock, projectCatalog });
+  const projection = createWorkingContextProjection({ filesystem, clock: fixedClock });
 
   const { context, rendered } = await projection.build(aiosPath, { project: "project-a" });
 
@@ -123,18 +132,19 @@ test("captured project catalog keeps README context and excludes runtime paths",
   assert.equal(context.activeProject.id, "project-id-a");
   assert.equal(context.activeProject.repoUrl, "https://example.com/project-a.git");
   assert.equal(context.activeProject.readme.includes("Durable project context."), true);
-  assert.equal(Object.hasOwn(context.activeProject, "path"), false);
-  assert.equal(Object.hasOwn(context.activeProject, "rootPath"), false);
-  assert.equal(Object.hasOwn(context.activeProject, "projectPath"), false);
-  assert.equal(Object.hasOwn(context.activeProject, "readmePath"), false);
-  assert.equal(Object.hasOwn(context.activeProject, "pathAvailable"), false);
+  assert.equal(Object.hasOwn(context.activeProject, "runtime_path"), false);
   assert.doesNotMatch(rendered, /private\/tmp|machine-only/);
   assert.match(rendered, /Project A · active · build/);
-  assert.equal(readPaths.some((filePath) => filePath.includes(`${path.sep}projects${path.sep}`)), false);
+  assert.equal(readPaths.some((filePath) => filePath.includes(`${path.sep}projects${path.sep}`)), true);
 });
 
 test("stable project id resolves to the canonical slug before filtering", async () => {
   const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "projects", "project-a"), { recursive: true });
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "project-a", "README.md"),
+    "---\nid: stable-project-id\nproject: project-a\n---\n# Project A\n",
+  );
   writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
     {
       session_id: "matching-session",
@@ -152,10 +162,7 @@ test("stable project id resolves to the canonical slug before filtering", async 
 
   const context = await selectWorkingContext(
     aiosPath,
-    {
-      project: "stable-project-id",
-      projectCatalog: [{ id: "stable-project-id", slug: "project-a", name: "Project A" }],
-    },
+    { project: "stable-project-id" },
     { clock: fixedClock },
   );
 
@@ -166,6 +173,11 @@ test("stable project id resolves to the canonical slug before filtering", async 
 
 test("visible character budget bounds the canonical renderer and selected items", async () => {
   const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "projects", "project-a"), { recursive: true });
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "project-a", "README.md"),
+    "---\nproject: project-a\nstatus: active\n---\n# Project A\n",
+  );
   writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), [
     { ts: "2026-07-15T09:00:00.000Z", project: "project-a", summary: `First ${"x".repeat(80)}` },
     { ts: "2026-07-15T08:00:00.000Z", project: "project-a", summary: `Second ${"y".repeat(80)}` },
@@ -174,7 +186,6 @@ test("visible character budget bounds the canonical renderer and selected items"
   const options = {
     project: "project-a",
     visibleCharacterBudget: 170,
-    projectCatalog: [{ slug: "project-a", name: "Project A", status: "active" }],
   };
 
   const first = await buildWorkingContext(aiosPath, options, { clock: fixedClock });

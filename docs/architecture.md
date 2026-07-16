@@ -24,11 +24,10 @@ Local checkout paths are machine-specific and must not be committed to the AIOS 
 
 ## Memory
 
-`memory/` is operational state. Agents should load only recent entries:
-
-- last 50 `events.jsonl` entries
-- today and yesterday from `signals/`
-- `errors.jsonl` only when debugging
+`memory/` is operational state. Agents should not preload `events.jsonl`,
+`signals/`, or `sessions/` directly. Those stores enter startup context only
+through the canonical bounded projection. `errors.jsonl` remains opt-in when
+debugging.
 
 **Daily notes** live in `memory/daily/YYYY-MM-DD.md`. `dotaios brief` writes the deterministic `## Brief` section. The `/today` skill writes today's plan (focus, plan, frog). The `/closeday` skill fills the close-out section (done, carry-over, reflection) and stages carry-overs into the next day's note. Daily notes are operational memory, not long-term knowledge, they belong in `memory/`, not `vault/`.
 
@@ -36,11 +35,20 @@ Local checkout paths are machine-specific and must not be committed to the AIOS 
 
 Captured text is evidence, not automatically durable knowledge. Promotion to `context/`, a project, `vault/`, or a skill is explicit, previewed, and recorded in `memory/events.jsonl`. Signals remain short-lived operational hints.
 
-`dotaios brief --compact` owns the default working-context selection policy.
-It uses a visible 6,000-character budget, applies the same project filter to
-sessions, signals, and events, and marks when the budget is reached. The optional
-MCP `read_working_context` tool calls the same core projection rather than selecting a
-different memory window.
+`dotaios brief --compact` owns the default working-context selection policy. It
+selects up to three ranked session-index records plus at most eight signals and
+eight events from today and yesterday, combines them with bounded daily and
+project context, applies one project filter to all three memory sources, and
+fits the result into a visible 6,000-character budget. When the budget is
+reached, lower-priority items are omitted and the rendered projection says so.
+The standard daily brief, session-start hooks, managed bridges, and the default
+hot-memory audit consume this shared selection instead of defining parallel
+windows. Explicit all-history audit and search remain opt-in operations.
+
+The optional MCP adapter exposes exactly `read_working_context`, `search_aios`,
+and `resolve_skill`. `read_working_context` calls the same core projection;
+`search_aios` is the bounded on-demand search path, and `resolve_skill` routes
+workflow intent. There are no compatibility aliases.
 
 ## Vault
 

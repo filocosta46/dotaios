@@ -55,9 +55,11 @@ website/    # React and Vite marketing site with optional Sanity copy hydration;
 - **MCP is optional and read-only.** It exposes only `read_working_context`,
   `search_aios`, and `resolve_skill`. It does not write AIOS or client config,
   and it does not execute external commands.
-- **No Google command layer.** Do not add `dotaios google`, `connect google`,
-  `gws` wrappers, or Google tools to MCP. Third-party integrations belong in
-  separately permissioned plugins or client-native apps.
+- **Optional GWS adapter.** Google Workspace stays outside the beginner core
+  and MCP. The explicit `dotaios connect google` / `dotaios google` adapters
+  may expose only read-first Gmail, Calendar, and Drive workflows, keep auth in
+  the local `gws` CLI, and never accept custom scopes or expose Google tools to
+  MCP. Existing OAuth grant scopes are not inferred from `gws auth status`.
 
 ## Hard rules (never violate)
 
@@ -107,12 +109,10 @@ Notable CLI commands: `project.mjs` (portable catalog + local checkout mapping),
 
 ## Known gotchas
 
-### Date helper inconsistency (near-midnight edge)
-`memory.isoDate(date)` uses **local** time. `placement.todayStamp()` and
-`cleanup.isoDate()` still use **UTC** (`toISOString().slice(0,10)`). Near local
-midnight they disagree by a day. For anything that must match where signals/notes
-are actually written, use `memory.isoDate(new Date())` — never
-`new Date().toISOString().slice(0,10)`. (Unifying these is a known cleanup item.)
+### Date handling
+Date-based memory paths use `memory.isoDate(date)` and local time consistently.
+Do not reintroduce `new Date().toISOString().slice(0,10)` for signal, brief, or
+cleanup paths: UTC dates can disagree with the user's local day near midnight.
 
 ### Sessions index lock
 `withIndexLock()` (`sessions.mjs`) records the holder PID in the lock file. A

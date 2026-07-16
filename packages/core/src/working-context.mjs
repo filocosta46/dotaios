@@ -1,6 +1,7 @@
 import localFilesystem from "node:fs/promises";
 import path from "node:path";
 
+import { isoDate } from "./memory.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
@@ -20,9 +21,8 @@ const localClock = () => new Date();
 export function createWorkingContextProjection({
   filesystem = localFilesystem,
   clock = localClock,
-  projectCatalog,
 } = {}) {
-  const dependencies = { filesystem, clock, projectCatalog };
+  const dependencies = { filesystem, clock };
   return Object.freeze({
     select: (aiosPath, options = {}) => selectWorkingContext(aiosPath, options, dependencies),
     render: (context) => renderWorkingContext(context),
@@ -43,26 +43,25 @@ export async function buildWorkingContext(aiosPath, options = {}, dependencies =
  * state. The project filter is applied identically to every timeline source.
  */
 export async function selectWorkingContext(aiosPath, options = {}, dependencies = {}) {
-  const { filesystem, clock, projectCatalog } = resolveDependencies(dependencies);
+  const { filesystem, clock } = resolveDependencies(dependencies);
   const now = readClock(clock);
-  const today = localIsoDate(now);
-  const yesterday = localIsoDate(previousLocalDay(now));
+  const today = isoDate(now);
+  const yesterday = isoDate(previousLocalDay(now));
   const requestedProject = normalizeProject(options.project);
   const sessionLimit = normalizeLimit(options.limit, DEFAULT_SESSION_LIMIT);
   const visibleCharacterBudget = normalizeBudget(options);
 
   const dailyDir = path.join(aiosPath, "memory", "daily");
-  const catalogSource = options.projectCatalog ?? projectCatalog;
   const [todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
     await Promise.all([
       readText(filesystem, path.join(dailyDir, `${today}.md`)),
       readText(filesystem, path.join(dailyDir, `${yesterday}.md`)),
       readJsonl(filesystem, path.join(aiosPath, "memory", "sessions", "index.jsonl")),
       readSignals(filesystem, path.join(aiosPath, "memory", "signals"), { today, yesterday }),
-      readJsonl(filesystem, path.join(aiosPath, "memory", "events.jsonl")),
-      catalogSource === undefined
-        ? readProjects(filesystem, path.join(aiosPath, "projects"))
-        : resolveProjectCatalog(catalogSource),
+      readTimelineJsonl(filesystem, path.join(aiosPath, "memory", "events.jsonl"), {
+        sourcePath: "memory/events.jsonl",
+      }),
+      readProjects(filesystem, path.join(aiosPath, "projects")),
     ]);
 
   const projectFilter = resolveProjectFilter(requestedProject, projects);
@@ -72,9 +71,7 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     .filter((signal) => isOperationalDate(signal.date, today, yesterday))
     .filter((signal) => matchesProject(signal, projectFilter))
     .filter(hasTimelineSummary);
-  const events = stableTimelineOrder(
-    eventEntries.map((event) => normalizeTimelineEntry(event)),
-  )
+  const events = stableTimelineOrder(eventEntries)
     .filter((event) => isOperationalDate(event.date, today, yesterday))
     .filter((event) => matchesProject(event, projectFilter))
     .filter(hasTimelineSummary);
@@ -340,13 +337,17 @@ function stableKey(value) {
   return JSON.stringify(value);
 }
 
-function normalizeTimelineEntry(entry, fallbackDate = null, sourceFile = null) {
+function normalizeTimelineEntry(entry, {
+  fallbackDate = null,
+  sourcePath = null,
+  sourceLine = null,
+} = {}) {
   const timestamp = typeof entry?.ts === "string" ? entry.ts : "";
   return {
     ...(entry && typeof entry === "object" ? entry : {}),
     date: timestamp.slice(0, 10) || fallbackDate,
     timestamp: timestamp || `${fallbackDate || ""}T00:00:00`,
-    ...(sourceFile ? { sourceFile } : {}),
+    ...(sourcePath ? { sourcePath, sourceLine } : {}),
   };
 }
 
@@ -428,8 +429,10 @@ async function readSignals(filesystem, signalsDir, { today, yesterday }) {
     .sort((left, right) => left.name.localeCompare(right.name));
 
   const fileEntries = await Promise.all(files.map(async ({ name, date }) => {
-    const parsed = await readJsonl(filesystem, path.join(signalsDir, name));
-    return parsed.map((entry) => normalizeTimelineEntry(entry, date, name));
+    return readTimelineJsonl(filesystem, path.join(signalsDir, name), {
+      fallbackDate: date,
+      sourcePath: path.posix.join("memory", "signals", name),
+    });
   }));
   return fileEntries.flat();
 }
@@ -467,50 +470,6 @@ function parseProjectMetadata(slug, content) {
     description: stringValue(frontmatter.description) || firstDescription(content),
     contextExcerpt: projectExcerpt(content),
     readme: content,
-  };
-}
-
-async function resolveProjectCatalog(catalogSource) {
-  const resolved = typeof catalogSource === "function" ? await catalogSource() : await catalogSource;
-  return projectCatalogEntries(resolved)
-    .map(([slugHint, value]) => normalizeCatalogProject(slugHint, value))
-    .filter(Boolean)
-    .sort((left, right) => left.slug.localeCompare(right.slug));
-}
-
-function projectCatalogEntries(catalog) {
-  if (!catalog) return [];
-  if (catalog instanceof Map) return [...catalog.entries()];
-  if (Array.isArray(catalog)) {
-    return catalog.map((project, index) => [project?.slug || project?.project || String(index), project]);
-  }
-  if (Array.isArray(catalog.projects)) return projectCatalogEntries(catalog.projects);
-  if (typeof catalog === "object") return Object.entries(catalog);
-  throw new TypeError("Working-context project catalog must be an array, map, or object");
-}
-
-function normalizeCatalogProject(slugHint, value) {
-  const record = typeof value === "string" ? { readme: value } : value;
-  if (!record || typeof record !== "object") return null;
-  // Catalogs may be enriched with projectPath/readmePath for local resolution.
-  // Whitelist only durable README-derived fields into the shared projection.
-  const readme = stringValue(record.readme) || stringValue(record.content);
-  const fromReadme = readme
-    ? parseProjectMetadata(String(slugHint), readme)
-    : syntheticProject(String(slugHint));
-  const slug = stringValue(record.slug) || fromReadme.slug;
-  const project = stringValue(record.project) || fromReadme.project || slug;
-  return {
-    id: stringValue(record.id) || fromReadme.id,
-    slug,
-    project,
-    name: stringValue(record.name) || fromReadme.name || project,
-    status: stringValue(record.status) || fromReadme.status,
-    domains: arrayValue(record.domains ?? record.domain ?? fromReadme.domains),
-    repoUrl: stringValue(record.repoUrl) || stringValue(record.repo_url) || fromReadme.repoUrl,
-    description: stringValue(record.description) || fromReadme.description,
-    contextExcerpt: stringValue(record.contextExcerpt) || fromReadme.contextExcerpt,
-    readme: readme || fromReadme.readme,
   };
 }
 
@@ -587,6 +546,24 @@ async function readJsonl(filesystem, filePath) {
   });
 }
 
+async function readTimelineJsonl(filesystem, filePath, { fallbackDate = null, sourcePath } = {}) {
+  const content = await readText(filesystem, filePath);
+  return content.split(/\r?\n/).flatMap((line, index) => {
+    if (!line.trim()) return [];
+    try {
+      const parsed = JSON.parse(line);
+      if (!parsed || typeof parsed !== "object") return [];
+      return [normalizeTimelineEntry(parsed, {
+        fallbackDate,
+        sourcePath,
+        sourceLine: index + 1,
+      })];
+    } catch {
+      return [];
+    }
+  });
+}
+
 async function readText(filesystem, filePath) {
   try {
     return await filesystem.readFile(filePath, "utf8");
@@ -609,7 +586,6 @@ function resolveDependencies(dependencies) {
   return {
     filesystem: dependencies.filesystem || dependencies.fs || localFilesystem,
     clock: dependencies.clock || dependencies.now || localClock,
-    projectCatalog: dependencies.projectCatalog,
   };
 }
 
@@ -633,24 +609,12 @@ function normalizeLimit(limit, fallback) {
 }
 
 function normalizeBudget(options) {
-  const requested = options.visibleCharacterBudget
-    ?? options.characterBudget
-    ?? options.budgetChars
-    ?? options.maxChars
-    ?? options.budget
-    ?? DEFAULT_VISIBLE_CHARACTER_BUDGET;
+  const requested = options.visibleCharacterBudget ?? DEFAULT_VISIBLE_CHARACTER_BUDGET;
   const value = Number(requested);
   if (!Number.isFinite(value) || value < 0) {
     throw new TypeError("Working-context visible character budget must be non-negative");
   }
   return Math.floor(value);
-}
-
-function localIsoDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }
 
 function previousLocalDay(date) {

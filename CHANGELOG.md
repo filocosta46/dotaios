@@ -2,7 +2,7 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
-## Unreleased
+## [1.23.0] - 2026-07-16
 ### Added
 - Project catalog commands: `project add`, `list`, `resolve`, and `doctor`. Durable project metadata and repository URLs sync inside `projects/`, while checkout paths stay machine-local in `~/.dotaios/projects.json`.
 - One deterministic, project-filtered working-context projection shared by the compact brief and MCP digest, with a visible character budget.

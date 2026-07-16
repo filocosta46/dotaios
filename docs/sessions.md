@@ -66,6 +66,19 @@ Filter by tool or date:
 dotaios search "launch timing" --agent claude-code --since 7d
 ```
 
+## How saved conversations become working context
+
+At session start, use `dotaios brief --compact` rather than opening session
+files directly. The canonical projection selects up to three bounded records
+from `memory/sessions/index.jsonl` alongside the same events and signals used by
+other local clients, and applies one project filter to all three sources when a
+project is requested. It does not inject full saved transcripts. Use
+`dotaios search` when you need older or more detailed evidence.
+
+With the optional MCP adapter, `read_working_context` returns that same startup
+projection, `search_aios` performs the on-demand lookup, and `resolve_skill`
+routes a request to an installed workflow. Those are the adapter's only tools.
+
 ## Promote something that should last
 
 A saved session is evidence, not automatic truth. To turn one fact into durable

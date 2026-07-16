@@ -5,6 +5,8 @@ import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import { isoDate } from "../../packages/core/src/memory.mjs";
+
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
@@ -25,7 +27,7 @@ function setupAios() {
   fs.writeFileSync(path.join(aiosPath, "AGENTS.md"), "Read context first.\n");
   fs.writeFileSync(path.join(aiosPath, "skills", "closeday", "SKILL.md"), "# closeday\n\nClose the day.\n");
   fs.writeFileSync(path.join(aiosPath, "memory", "events.jsonl"), `${JSON.stringify({
-    ts: "2026-06-30T12:00:00.000Z",
+    ts: `${isoDate(new Date())}T12:00:00.000Z`,
     type: "lesson",
     skill: "closeday",
     memory_decision: "skill-patch",
@@ -90,7 +92,7 @@ test("memory audit --json prints the raw report", () => {
 test("memory audit --max-candidates reports truncation in JSON", () => {
   const { aiosPath } = setupAios();
   fs.appendFileSync(path.join(aiosPath, "memory", "events.jsonl"), `${JSON.stringify({
-    ts: "2026-06-30T12:01:00.000Z",
+    ts: `${isoDate(new Date())}T12:01:00.000Z`,
     type: "lesson",
     skill: "closeday",
     memory_decision: "skill-patch",

@@ -110,6 +110,24 @@ test("invalid YAML fails before replacing an existing export", async () => {
   assert.equal(await fs.readFile(path.join(out, "sentinel.txt"), "utf8"), "keep me");
 });
 
+test("unclosed YAML frontmatter fails before replacing an existing export", async () => {
+  const src = await fixture();
+  const out = path.join(src, "build", "okf");
+  await fs.mkdir(out, { recursive: true });
+  await fs.writeFile(path.join(out, "sentinel.txt"), "keep me");
+  await fs.writeFile(
+    path.join(src, "context", "unclosed.md"),
+    "---\ntype: Reference\ntags: [release, safety]\n\nBody without a closing delimiter.\n"
+  );
+
+  await assert.rejects(
+    () => exportBundle({ srcRoot: src, outDir: out }),
+    /Unclosed YAML frontmatter/
+  );
+
+  assert.equal(await fs.readFile(path.join(out, "sentinel.txt"), "utf8"), "keep me");
+});
+
 test("ambiguous bare wikilinks remain unresolved", async () => {
   const src = await fixture();
   await fs.mkdir(path.join(src, "vault", "wiki", "alpha"), { recursive: true });

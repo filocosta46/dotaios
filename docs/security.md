@@ -23,6 +23,12 @@ Generated AIOS folders include a `.gitignore` that ignores:
 
 Agents should never ask users to paste API keys, passwords, tokens, private keys, or OAuth client secrets into chat. They should name the required variable and ask the user to edit `.env` locally.
 
+## Optional Connections
+
+Google Workspace auth remains inside `gws`. DotAIOS requests the fixed read-only Gmail, Calendar, and Drive service set, and does not expose full, custom-scope, or custom-service login options. `gws auth status` does not verify the scopes of an existing grant, so broader grants must be revoked or re-authorized in `gws`. Google and `gws` process requested Workspace data. DotAIOS connection records contain neither OAuth material nor absolute binary paths. Google commands are not exposed through the read-only DotAIOS MCP adapter.
+
+Lightpanda is never downloaded as an unattended default. Interactive setup requires confirmation, and non-interactive setup requires `--install-lightpanda`. Downloads use a pinned release and per-platform SHA-256 digest, stay non-executable while being verified, and move atomically into place only after verification. A failed or declined install leaves plain web fetch available.
+
 ## Plugins
 
 Plugins can come from trusted local folders or trusted git URLs. The manifest declares permissions, and the CLI prints them before install, but DotAIOS does not sandbox plugin code.

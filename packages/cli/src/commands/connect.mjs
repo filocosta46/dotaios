@@ -5,7 +5,19 @@ import { fileURLToPath } from "node:url";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { assertAiosFolder, assessGwsAuth, firstLine, printCaptured, resolveAiosTarget, resolveGwsBinary, runGws } from "../lib/gws.mjs";
+import {
+  GWS_READ_ONLY_SCOPES,
+  GWS_READ_ONLY_SERVICES,
+  assertAiosFolder,
+  assessGwsAuth,
+  firstLine,
+  gwsReadOnlyLoginCommand,
+  printCaptured,
+  resolveAiosTarget,
+  resolveGwsBinary,
+  runGws,
+  safeGwsVersion
+} from "../lib/gws.mjs";
 
 const googleAliases = new Set(["google", "gmail", "gws"]);
 const geminiAliases = new Set(["gemini", "gemini-cli"]);
@@ -82,7 +94,7 @@ export async function connectCommand(args) {
     console.log(`      ${authState.summary}`);
     if (auth.status !== 0) printCaptured(auth);
     printAuthGuidance();
-    throw new Error("Google Workspace auth is not ready. Run `gws auth login`, then retry `dotaios connect google --status`.");
+    throw new Error(`Google Workspace auth is not ready. Run \`${gwsReadOnlyLoginCommand()}\`, then retry \`dotaios connect google --status\`.`);
   }
 
   console.log("[ok] gws auth status");
@@ -94,8 +106,8 @@ export async function connectCommand(args) {
     return;
   }
 
-  const versionText = firstLine(version.stdout) || "gws";
-  await writeGoogleConnection(target, { gwsBin, versionText });
+  const versionText = safeGwsVersion(firstLine(version.stdout));
+  await writeGoogleConnection(target, { versionText });
   await appendEvent(path.join(target, "memory", "events.jsonl"), {
     type: "connection",
     summary: "Connected Google Workspace via gws",
@@ -117,8 +129,8 @@ function printConnectHelp() {
   dotaios connect <service> [options]
 
 Services:
-  google      Connect Google Workspace (Gmail, Calendar, Drive) via gws
-  gemini      Connect Gemini CLI — installs GEMINI.md bridge, SessionStart hook, and MCP
+  google      Connect optional Google Workspace reads via gws
+  gemini      Connect Gemini CLI with GEMINI.md and a SessionStart hook
   opencode    Connect OpenCode — installs MCP and skill stubs
 
 Options:
@@ -163,12 +175,12 @@ function parseOptions(args = []) {
   return { service, options };
 }
 
-async function writeGoogleConnection(target, { gwsBin, versionText }) {
+async function writeGoogleConnection(target, { versionText }) {
   const connectionDir = path.join(target, "connections", "apis");
   await fs.mkdir(connectionDir, { recursive: true });
   await fs.writeFile(
     path.join(connectionDir, "google-workspace.md"),
-    googleConnectionDoc({ gwsBin, versionText })
+    googleConnectionDoc({ versionText })
   );
 
   await updateConnectionsRegistry(path.join(target, "connections", "registry.md"));
@@ -226,15 +238,18 @@ async function writeIfMissing(filePath, content) {
   }
 }
 
-function googleConnectionDoc({ gwsBin, versionText }) {
+function googleConnectionDoc({ versionText }) {
   return `# Google Workspace
 
 Status: Active
-Tool: ${versionText}
-Binary: \`${gwsBin}\`
+Connection: Optional; no paid DotAIOS package required
+Tool: gws
+Version: ${versionText || "unknown"}
 Auth: managed by \`gws\`, outside DotAIOS
+Services: ${GWS_READ_ONLY_SERVICES.join(", ")}
+Requested OAuth scopes: ${GWS_READ_ONLY_SCOPES.join(", ")}
 
-DotAIOS does not store Google OAuth credentials. Keep secrets out of chat, context, memory, and vault files.
+DotAIOS does not store Google OAuth credentials or record the resolved \`gws\` binary path. Google and \`gws\` process Workspace data; DotAIOS only invokes the local CLI for the explicit read commands below. The setup requests read-only scopes, but \`gws auth status\` does not prove the scopes of an existing grant. Re-authenticate with the fixed command if a broader grant must be removed. Keep secrets out of chat, context, memory, and vault files.
 
 ## Verify
 
@@ -259,8 +274,8 @@ dotaios google drive find "budget"
 
 ## Safety
 
-- Reading Gmail, Calendar, Drive, Docs, and Sheets is allowed when the user asks.
-- Sending email, replying, forwarding, labeling, moving mail, creating events, or editing docs/sheets requires explicit approval first.
+- Reading Gmail, Calendar, and Drive through the listed wrappers is allowed when the user asks.
+- Sending email, changing mail, creating events, or writing Drive content is outside this connection's scope.
 - Do not paste OAuth client secrets, refresh tokens, or credential files into agent chat.
 `;
 }
@@ -268,12 +283,12 @@ dotaios google drive find "budget"
 function googleWorkspaceSkill() {
   return `---
 name: google-workspace
-description: "Use the local gws CLI for read-first Gmail, Calendar, Drive, Docs, and Sheets workflows."
+description: "Use the local gws CLI for optional, read-first Gmail, Calendar, and Drive workflows."
 ---
 
 # Google Workspace
 
-Use \`gws\` for Google Workspace access. DotAIOS does not store Google credentials; auth is managed by \`gws\`.
+Use \`gws\` for Google Workspace access. DotAIOS does not store Google credentials; auth is managed by \`gws\`. This optional connection exposes only DotAIOS read-first Gmail, Calendar, and Drive workflows. The requested OAuth scopes are read-only, but an existing grant's scope is not verified by \`gws auth status\`.
 
 ## Before Use
 
@@ -284,7 +299,7 @@ gws auth status
 If auth is not ready, ask the user to run:
 
 \`\`\`bash
-gws auth login
+${gwsReadOnlyLoginCommand()}
 \`\`\`
 
 ## Safe Read-First Commands
@@ -300,7 +315,7 @@ dotaios google drive --page-size 10
 dotaios google drive find "budget"
 \`\`\`
 
-Use \`--json\` on safe read commands when another agent or MCP client needs structured output.
+Use \`--json\` on safe read commands when an agent or local automation needs structured output.
 
 ## Source Attribution
 
@@ -314,7 +329,7 @@ When using Google output in an answer, name the source service and command, such
 
 - Ask before sending, replying, forwarding, labeling, archiving, or deleting email.
 - Ask before creating, editing, moving, or deleting calendar events.
-- Ask before writing to Docs, Sheets, or Drive.
+- Do not use raw \`gws\` write commands through this DotAIOS connection. DotAIOS does not expose them, and an existing \`gws\` grant may have broader scopes than the requested setup.
 - Ask before saving Google-derived facts into \`context/\`, \`vault/wiki/\`, \`vault/org/\`, or CRM notes.
 - Never request or expose OAuth client secrets, refresh tokens, or credential files in chat.
 `;
@@ -322,21 +337,20 @@ When using Google output in an answer, name the source service and command, such
 
 function printReadFirstScope() {
   console.log("\nRead-first beta scope");
-  console.log("- Gmail triage/search and message reading");
-  console.log("- Calendar agenda and meeting prep");
-  console.log("- Drive/Docs/Sheets lookup when needed");
-  console.log("- Send/write actions require explicit approval");
+  console.log("- Fixed services: Gmail, Calendar, Drive");
+  console.log("- OAuth request: read-only (existing grant scopes are not verified by gws status)");
+  console.log("- No send, edit, delete, or custom-scope commands");
 }
 
 function printGwsGuidance() {
   console.log("\nInstall or expose the Google Workspace CLI (`gws`) first.");
   console.log("Reference: https://github.com/googleworkspace/cli");
-  console.log("Then authenticate with `gws auth login` and verify with `gws auth status`.");
+  console.log(`Then authenticate with \`${gwsReadOnlyLoginCommand()}\` and verify with \`gws auth status\`.`);
 }
 
 function printAuthGuidance() {
   console.log("\nNext steps:");
-  console.log("1. Run `gws auth login`.");
+  console.log(`1. Run \`${gwsReadOnlyLoginCommand()}\`.`);
   console.log("2. Complete the browser OAuth flow.");
   console.log("3. Run `gws auth status`.");
   console.log("4. Run `dotaios connect google` again.");

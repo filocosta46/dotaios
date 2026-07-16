@@ -5,6 +5,9 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { buildDailyBrief } from "../../packages/cli/src/commands/brief.mjs";
+import { isoDate } from "../../packages/core/src/memory.mjs";
+
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
@@ -27,20 +30,13 @@ function setupAios() {
 }
 
 function today() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return isoDate(new Date());
 }
 
 function yesterday() {
   const now = new Date();
   const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return isoDate(date);
 }
 
 test("brief writes a ## Brief section into today's daily note", () => {
@@ -70,6 +66,44 @@ test("brief writes a ## Brief section into today's daily note", () => {
   assert.match(note, /## Focus/);
   assert.match(note, /## Plan/);
   assert.match(note, /## Close/);
+});
+
+test("standard brief uses the canonical bounded timeline selection", async () => {
+  const { aiosPath } = setupAios();
+  const now = new Date(2026, 6, 15, 18, 0, 0);
+  const date = isoDate(now);
+  const staleDate = new Date(now.getTime());
+  staleDate.setDate(staleDate.getDate() - 2);
+  const events = [
+    {
+      ts: `${isoDate(staleDate)}T08:00:00.000Z`,
+      summary: "TODO stale event must not reach the standard brief"
+    },
+    {
+      ts: `${date}T09:00:00.000Z`,
+      summary: "TODO ninth event must stay outside the canonical cap"
+    },
+    ...Array.from({ length: 8 }, (_, index) => ({
+      ts: `${date}T${String(index + 10).padStart(2, "0")}:00:00.000Z`,
+      summary: `Routine observation ${index + 1}`
+    }))
+  ];
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    `${events.map((event) => JSON.stringify(event)).join("\n")}\n`
+  );
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "signals", `mini-${date}.jsonl`),
+    `${JSON.stringify({
+      ts: `${date}T18:00:00.000Z`,
+      summary: "Follow up from the selected signal"
+    })}\n`
+  );
+
+  const brief = await buildDailyBrief(aiosPath, date, now);
+
+  assert.match(brief, /Follow up from the selected signal/);
+  assert.doesNotMatch(brief, /ninth event|stale event/);
 });
 
 test("brief replaces only the ## Brief section in an existing daily note", () => {

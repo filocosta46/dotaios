@@ -5,7 +5,7 @@ import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { installCommand } from "./install.mjs";
 import { validateMarketRegistry } from "../../../core/src/market-registry.mjs";
 
-const DEFAULT_REGISTRY_URL = "https://dotaios.com/registry.json";
+const DEFAULT_REGISTRY_URL = "https://dotaios.vercel.app/registry.json";
 
 const HELP_TEXT = `Usage:
   dotaios market <subcommand> [options]

@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 const server = path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
+const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 
 test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   const { aiosPath } = setupAios();
@@ -63,6 +64,7 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   ]);
 
   assert.equal(responses[0].result.serverInfo.name, "dotaios-mcp");
+  assert.equal(responses[0].result.serverInfo.version, releaseVersion);
   assert.deepEqual(
     responses[1].result.tools.map((tool) => tool.name),
     ["read_working_context", "search_aios", "resolve_skill"],
@@ -77,7 +79,8 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.equal(search.scope, "projects");
   assert.match(JSON.stringify(search.results), /Gateway acceptance/);
   assert.doesNotMatch(JSON.stringify(search), /private\/machine/);
-  assert.ok(search.budget.used <= search.budget.limit);
+  assert.equal(search.budget.used, toolText(responses[3]).length);
+  assert.ok(toolText(responses[3]).length <= search.budget.limit);
 
   const resolved = JSON.parse(toolText(responses[4]));
   assert.equal(resolved.matches[0].name, "plan-today");
@@ -86,6 +89,28 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
 
   assert.equal(fs.readFileSync(sessionsPath, "utf8"), sessionsBefore);
   assert.equal(fs.readFileSync(eventsPath, "utf8"), eventsBefore);
+});
+
+test("mcp search budget bounds the exact serialized response", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(
+    path.join(aiosPath, "context", "work.md"),
+    `# Work\n\n${"bounded memory ".repeat(200)}\n`,
+  );
+  const query = `bounded ${"context ".repeat(55)}`.slice(0, 500);
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "search_aios", arguments: { query, budget: 256 } },
+  }]);
+
+  const text = toolText(response);
+  const payload = JSON.parse(text);
+  assert.ok(text.length <= 256);
+  assert.equal(payload.budget.used, text.length);
+  assert.equal(payload.budget.limit, 256);
+  assert.equal(payload.budget.truncated, true);
 });
 
 test("mcp enforces runtime bounds and rejects removed write tools", () => {

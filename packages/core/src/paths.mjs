@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "./files.mjs";
@@ -30,6 +31,30 @@ export function resolveVaultPath(config, aiosPath = defaultAiosPath()) {
   return config?.vault_path || path.join(aiosPath, "vault");
 }
 
+/**
+ * Return whether candidate resolves inside root, including through symlinks.
+ * Missing tail components are allowed, but dangling or looping symlinks are
+ * rejected because their eventual destination cannot be proven safe.
+ */
+export async function isPathWithin(root, candidate, options = {}) {
+  const fileSystem = options.fileSystem || fs;
+  try {
+    const [canonicalRoot, canonicalCandidate] = await Promise.all([
+      canonicalPath(fileSystem, root),
+      canonicalPath(fileSystem, candidate)
+    ]);
+    const relative = path.relative(canonicalRoot, canonicalCandidate);
+    return relative === "" || (
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative)
+    );
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ELOOP") return false;
+    throw error;
+  }
+}
+
 export async function ensureAiosFolder(target) {
   if (!(await pathExists(path.join(target, "aios.json")))) {
     throw new Error(`No AIOS folder found at ${target}. Run dotaios init first, or pass --path.`);
@@ -55,4 +80,22 @@ export function lightpandaHintFlagPath() {
 
 export function syncConfigPath() {
   return path.join(dotaiosDir(), "sync.json");
+}
+
+async function canonicalPath(fileSystem, value) {
+  const missing = [];
+  let existing = path.resolve(value);
+  while (true) {
+    try {
+      await fileSystem.lstat(existing);
+      break;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) throw error;
+      missing.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+  return path.join(await fileSystem.realpath(existing), ...missing);
 }

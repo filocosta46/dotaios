@@ -2,21 +2,30 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { parseDocument } from "yaml";
+import { isPathWithin } from "./paths.mjs";
 
 const execFileAsync = promisify(execFile);
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
+const PROJECT_PLAN_VERSION = 1;
 const PROJECT_STATE_VERSION = 1;
 const PROJECT_DOMAINS = new Set(["build", "make", "sell"]);
 
 /**
- * Register an external project repository without moving or copying it.
- * Synced metadata is written to projects/<slug>/README.md; the machine path is
- * written to user-local state outside the AIOS folder.
+ * Preview registration of an external project repository without moving or
+ * copying it. Synced metadata and machine-local path state are written only
+ * when apply or yes is explicitly true.
  */
 export async function registerProject(options = {}) {
+  const plan = await planProjectRegistration(options);
+  if (options.apply !== true && options.yes !== true) return plan;
+  return applyProjectRegistration(plan, { fs: options.fs });
+}
+
+/** Build a read-only project registration plan and durable README diff. */
+export async function planProjectRegistration(options = {}) {
   if (!options.projectPath) {
     throw new Error("projectPath is required");
   }
@@ -28,8 +37,7 @@ export async function registerProject(options = {}) {
   const requestedProjectPath = resolveUserPath(options.projectPath, context.homePath);
   await assertDirectory(context.fs, requestedProjectPath, "Project path");
   const realProjectPath = await context.fs.realpath(requestedProjectPath);
-  const realAiosPath = await context.fs.realpath(context.aiosPath);
-  if (isWithin(context.aiosPath, requestedProjectPath) || isWithin(realAiosPath, realProjectPath)) {
+  if (await isPathWithin(context.aiosPath, requestedProjectPath, { fileSystem: context.fs })) {
     throw new Error([
       `Cannot register ${requestedProjectPath} because it is inside the AIOS folder.`,
       "Keep the actual project repository outside AIOS so it retains its own Git history."
@@ -83,6 +91,7 @@ export async function registerProject(options = {}) {
     ?? null;
 
   const readmePath = path.join(context.aiosPath, "projects", slug, "README.md");
+  await assertProjectReadmePath(context, readmePath);
   const source = existing
     ? existing.source
     : await readMarkdownSource(context.fs, readmePath);
@@ -95,9 +104,6 @@ export async function registerProject(options = {}) {
     repo_url: repoUrl
   });
 
-  await context.fs.mkdir(path.dirname(readmePath), { recursive: true });
-  await context.fs.writeFile(readmePath, content, "utf8");
-
   const nextPaths = { ...state.paths };
   for (const [otherId, localPath] of Object.entries(nextPaths)) {
     if (otherId !== id && await pathsReferToSameDirectory(context, localPath, realProjectPath)) {
@@ -105,9 +111,30 @@ export async function registerProject(options = {}) {
     }
   }
   nextPaths[id] = requestedProjectPath;
-  await writeProjectState(context, { ...state, paths: nextPaths });
+  const nextState = { ...state, paths: nextPaths };
+  const relativeReadmePath = path.relative(context.aiosPath, readmePath);
+  const operation = source ? "replace" : "add";
+  const receipt = {
+    version: 1,
+    type: "project-registration",
+    operation,
+    project_id: id.trim(),
+    project: slug,
+    durable: {
+      path: relativeReadmePath,
+      before_hash: source ? contentHash(source.content) : null,
+      after_hash: contentHash(content)
+    },
+    machine_local: {
+      state_path: context.statePath,
+      project_path: requestedProjectPath
+    },
+    applied: false
+  };
 
   return {
+    version: PROJECT_PLAN_VERSION,
+    applied: false,
     id: id.trim(),
     slug,
     project: slug,
@@ -118,7 +145,52 @@ export async function registerProject(options = {}) {
     projectPath: requestedProjectPath,
     pathAvailable: true,
     readmePath,
-    readme: content
+    readme: content,
+    aiosPath: context.aiosPath,
+    homePath: context.homePath,
+    statePath: context.statePath,
+    readmeBefore: source?.content || "",
+    readmeExists: source !== null,
+    stateBefore: state,
+    stateAfter: nextState,
+    operation,
+    preview: renderProjectDiff(relativeReadmePath, source?.content || "", content, source !== null),
+    receipt
+  };
+}
+
+/** Apply a previously previewed registration plan. */
+export async function applyProjectRegistration(plan, options = {}) {
+  assertProjectPlan(plan);
+  const context = createContext({
+    aiosPath: plan.aiosPath,
+    homePath: plan.homePath,
+    statePath: plan.statePath,
+    fs: options.fs
+  });
+  await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
+  await assertStateOutsideAios(context);
+  await assertProjectReadmePath(context, plan.readmePath);
+
+  const currentSource = await readMarkdownSource(context.fs, plan.readmePath);
+  const currentReadmeExists = currentSource !== null;
+  const currentReadme = currentSource?.content || "";
+  if (currentReadmeExists !== plan.readmeExists || currentReadme !== plan.readmeBefore) {
+    throw new Error("The project README changed after the preview. Preview project add again.");
+  }
+  const currentState = await readProjectState(context);
+  if (JSON.stringify(currentState) !== JSON.stringify(plan.stateBefore)) {
+    throw new Error("The machine-local project path state changed after the preview. Preview project add again.");
+  }
+
+  await writeProjectState(context, plan.stateAfter);
+  await context.fs.mkdir(path.dirname(plan.readmePath), { recursive: true });
+  await context.fs.writeFile(plan.readmePath, plan.readme, "utf8");
+
+  return {
+    ...plan,
+    applied: true,
+    receipt: { ...plan.receipt, applied: true }
   };
 }
 
@@ -259,6 +331,9 @@ async function listProjectRecords(context) {
 
 async function readProjectRecords(context) {
   const projectsPath = path.join(context.aiosPath, "projects");
+  if (!await isPathWithin(context.aiosPath, projectsPath, { fileSystem: context.fs })) {
+    throw new Error(`Project shelf resolves outside the AIOS folder: ${projectsPath}`);
+  }
   let entries;
   try {
     entries = await context.fs.readdir(projectsPath, { withFileTypes: true });
@@ -410,11 +485,14 @@ function readMappedPath(value) {
 }
 
 async function assertStateOutsideAios(context) {
-  const [realAiosPath, realStatePath] = await Promise.all([
-    context.fs.realpath(context.aiosPath),
-    canonicalPath(context.fs, context.statePath)
-  ]);
-  if (isWithin(context.aiosPath, context.statePath) || isWithin(realAiosPath, realStatePath)) {
+  const containmentOptions = { fileSystem: context.fs };
+  if (!await isPathWithin(path.parse(context.statePath).root, context.statePath, containmentOptions)) {
+    throw new Error(`Project path state cannot safely resolve through a dangling symlink: ${context.statePath}`);
+  }
+  if (
+    isLexicallyWithin(context.aiosPath, context.statePath) ||
+    await isPathWithin(context.aiosPath, context.statePath, containmentOptions)
+  ) {
     throw new Error([
       `Project path state must live outside the synced AIOS folder: ${context.statePath}.`,
       "Pass a statePath under the user's local state directory instead."
@@ -422,20 +500,14 @@ async function assertStateOutsideAios(context) {
   }
 }
 
-async function canonicalPath(fileSystem, target) {
-  const missingParts = [];
-  let existingPath = target;
-  while (true) {
-    try {
-      const realPath = await fileSystem.realpath(existingPath);
-      return path.join(realPath, ...missingParts);
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-      const parent = path.dirname(existingPath);
-      if (parent === existingPath) throw error;
-      missingParts.unshift(path.basename(existingPath));
-      existingPath = parent;
-    }
+async function assertProjectReadmePath(context, readmePath) {
+  const projectsPath = path.join(context.aiosPath, "projects");
+  const options = { fileSystem: context.fs };
+  if (
+    !await isPathWithin(context.aiosPath, projectsPath, options) ||
+    !await isPathWithin(projectsPath, readmePath, options)
+  ) {
+    throw new Error(`Project README path resolves outside the AIOS project shelf: ${readmePath}`);
   }
 }
 
@@ -519,9 +591,36 @@ function resolveUserPath(value, homePath) {
   return path.resolve(value);
 }
 
-function isWithin(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+function isLexicallyWithin(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
+function renderProjectDiff(relativePath, before, after, existed) {
+  const lines = [
+    `--- ${existed ? relativePath : "/dev/null"}`,
+    `+++ ${relativePath}`,
+    `@@ ${existed ? "replace" : "add"} README @@`
+  ];
+  if (existed) {
+    lines.push(...before.replace(/\n$/, "").split("\n").map((line) => `-${line}`));
+  }
+  lines.push(...after.replace(/\n$/, "").split("\n").map((line) => `+${line}`));
+  return lines.join("\n");
+}
+
+function contentHash(content) {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+function assertProjectPlan(plan) {
+  if (!plan || plan.version !== PROJECT_PLAN_VERSION || !plan.aiosPath || !plan.readmePath) {
+    throw new Error("Invalid project registration plan. Preview project add again.");
+  }
 }
 
 async function assertDirectory(fileSystem, target, label) {

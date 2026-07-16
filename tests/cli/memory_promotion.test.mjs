@@ -4,7 +4,11 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { applyPromotion, planPromotion } from "../../packages/core/src/promotion.mjs";
+import {
+  applyPromotion,
+  planPromotion,
+  PROMOTION_OPERATIONS
+} from "../../packages/core/src/promotion.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -91,6 +95,10 @@ function readEvents(aiosPath) {
   return content.split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
+test("promotion receipts use the canonical operation vocabulary", () => {
+  assert.deepEqual(PROMOTION_OPERATIONS, ["add", "replace", "remove", "supersede"]);
+});
+
 test("memory promote previews destination and diff without writing by default", (t) => {
   const { aiosPath } = setupAios(t);
   const contextPath = path.join(aiosPath, "context", "work.md");
@@ -107,7 +115,7 @@ test("memory promote previews destination and diff without writing by default", 
   assert.match(result.stdout, /DotAIOS memory promotion preview/);
   assert.match(result.stdout, /Destination type: context/);
   assert.match(result.stdout, /Destination: context\/work\.md/);
-  assert.match(result.stdout, /@@ append @@/);
+  assert.match(result.stdout, /@@ add @@/);
   assert.match(result.stdout, /\+Prefers written handoffs\./);
   assert.match(result.stdout, /Preview only\. No files changed/);
   assert.equal(fs.readFileSync(contextPath, "utf8"), "Original context stays here.\n");
@@ -140,6 +148,7 @@ test("context promotion appends content and a structured receipt", (t) => {
   assert.equal(receipt.source, sessionRelativePath);
   assert.equal(receipt.destination_type, "context");
   assert.equal(receipt.destination_path, path.join("context", "work.md"));
+  assert.equal(receipt.operation, "add");
   assert.equal(receipt.summary, "Prefers written handoffs.");
 });
 
@@ -163,6 +172,55 @@ test("apply refuses to write when the destination changed after preview", async 
     "Original context.\nConcurrent user edit.\n"
   );
   assert.deepEqual(readEvents(aiosPath), []);
+});
+
+test("receipt failure leaves an existing promotion destination byte-identical", async (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "Original context bytes.\n");
+  const before = fs.readFileSync(contextPath);
+  const plan = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "This write must roll back."
+  });
+  fs.rmSync(eventsPath);
+  fs.mkdirSync(eventsPath);
+
+  await assert.rejects(applyPromotion(plan));
+
+  assert.deepEqual(fs.readFileSync(contextPath), before);
+});
+
+test("promotion uses the canonical local ISO date for signal and Markdown destinations", async (t) => {
+  const { aiosPath } = setupAios(t);
+  const previousTimezone = process.env.TZ;
+  process.env.TZ = "Pacific/Kiritimati";
+  try {
+    const now = new Date("2026-01-01T10:30:00.000Z");
+    const signalPlan = await planPromotion(aiosPath, {
+      source: SESSION_ID,
+      destinationType: "signal",
+      summary: "Local calendar date.",
+      now
+    });
+    const contextPlan = await planPromotion(aiosPath, {
+      source: SESSION_ID,
+      destinationType: "context",
+      destinationPath: "context/work.md",
+      summary: "Local calendar date.",
+      now
+    });
+
+    assert.equal(signalPlan.destinationPath, path.join("memory", "signals", "2026-01-02.jsonl"));
+    assert.match(contextPlan.addition, /Promoted evidence: 2026-01-02/);
+  } finally {
+    if (previousTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = previousTimezone;
+  }
 });
 
 test("signal promotion appends a working signal and keeps a separate receipt", (t) => {
@@ -267,7 +325,7 @@ test("session-only records the disposition without creating durable knowledge", 
   const [receipt] = readEvents(aiosPath);
   assert.equal(receipt.destination_type, "session-only");
   assert.equal(receipt.destination_path, null);
-  assert.equal(receipt.operation, "retain");
+  assert.equal(receipt.operation, "add");
 });
 
 test("promotion rejects destination path traversal", (t) => {
@@ -320,7 +378,7 @@ test("promotion rejects a dangling symlink before creating its target", (t) => {
     ["--destination", "context/escape/promoted.md", "--apply"]
   ), { succeeds: false });
 
-  assert.match(result.stderr, /symlinks are not allowed in promotion paths/i);
+  assert.match(result.stderr, /symlink points outside.*or cannot be resolved/i);
   assert.equal(fs.existsSync(outsideTarget), false);
   assert.deepEqual(readEvents(aiosPath), []);
 });

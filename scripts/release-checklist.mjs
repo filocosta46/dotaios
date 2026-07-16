@@ -7,6 +7,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { execSync } from "node:child_process";
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+const options = parseOptions(process.argv.slice(2));
 
 console.log(`\nDotAIOS release checklist — v${pkg.version}\n`);
 
@@ -16,12 +17,16 @@ function run(cmd) {
 }
 
 const items = [
+  {
+    label: `package version matches expected ${options.version}`,
+    check: () => pkg.version === options.version,
+  },
   { label: "Unit tests pass (npm test)", check: () => run("npm test") },
   { label: "Smoke test passes (npm run smoke)", check: () => run("npm run smoke") },
   { label: "CLI help loads (npm run check)", check: () => run("npm run check") },
   {
-    label: "CHANGELOG.md has an entry for this version",
-    check: () => existsSync("CHANGELOG.md") && readFileSync("CHANGELOG.md", "utf8").includes(`[${pkg.version}]`)
+    label: "newest CHANGELOG.md release matches this version",
+    check: () => existsSync("CHANGELOG.md") && newestChangelogVersion() === pkg.version,
   },
   {
     label: "npm pack includes the CLI entry point",
@@ -32,9 +37,12 @@ const items = [
     check: () => execSync("git status --porcelain", { encoding: "utf8" }).trim() === ""
   },
   {
-    label: "On main branch",
-    check: () => execSync("git branch --show-current", { encoding: "utf8" }).trim() === "main"
-  }
+    label: `On ${options.branch} branch`,
+    check: () => options.allowBranch
+      || execSync("git branch --show-current", { encoding: "utf8" }).trim() === options.branch,
+  },
+  { label: "Website production build passes", check: () => run("pnpm run site:build") },
+  { label: "Built website registry matches its validated source", check: () => run("pnpm run site:verify") },
 ];
 
 let allPass = true;
@@ -51,4 +59,27 @@ if (allPass) {
 } else {
   console.log("One or more checks failed — fix before publishing.\n");
   process.exitCode = 1;
+}
+
+function newestChangelogVersion() {
+  const changelog = readFileSync("CHANGELOG.md", "utf8");
+  return changelog.match(/^## \[([^\]]+)\] - \d{4}-\d{2}-\d{2}$/m)?.[1] || null;
+}
+
+function parseOptions(args) {
+  const parsed = { allowBranch: false, branch: "main", version: pkg.version };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--allow-branch") {
+      parsed.allowBranch = true;
+    } else if (arg === "--branch" || arg === "--version") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
+      parsed[arg.slice(2)] = value;
+      index += 1;
+    } else {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+  }
+  return parsed;
 }

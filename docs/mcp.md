@@ -14,9 +14,13 @@ The adapter is useful only when a local MCP-capable client cannot use those simp
 
 ## Tools
 
-- `read_working_context`: the same bounded, project-filtered projection as `dotaios brief --compact`
-- `search_aios`: bounded search across local DotAIOS scopes
-- `resolve_skill`: match a request to an installed workflow
+The adapter exposes exactly these three read-only tool names:
+
+- `read_working_context`: return the same bounded, project-filtered projection as `dotaios brief --compact`; accepts optional `project`, session `limit`, and character `budget`
+- `search_aios`: search bounded local results by `query`, with optional `scope`, result `limit`, and character `budget`
+- `resolve_skill`: match an `intent` to installed workflows, with an optional result `limit`
+
+There are no compatibility aliases or additional MCP tools.
 
 ## Preview client configuration
 

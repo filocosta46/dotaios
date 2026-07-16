@@ -152,6 +152,12 @@ Skills live in `~/aios/skills/<name>/SKILL.md`. Open any skill folder to see wha
 
 Store secrets in `~/aios/.env`, not in chat or memory files. The generated `.gitignore` ignores `.env`, token files, credentials, and private keys.
 
+## Optional Connections
+
+The core setup does not require external accounts. Google Workspace is a separate, optional connection powered by the free local `gws` CLI. It stays behind explicit `dotaios connect google` and read-only `dotaios google` commands. See [Google Workspace](google-workspace.md).
+
+Lightpanda is also optional. It renders JavaScript-heavy pages during web ingest, while ordinary pages continue to use plain fetch when it is absent or fails. Interactive `dotaios setup` asks before downloading it. Non-interactive setup does not download it by default; `--install-lightpanda` is the explicit opt-in. The installer uses a pinned release, verifies its SHA-256 digest, and only then atomically installs an executable file.
+
 ## Project skills
 
 Projects can carry their own skills without replacing your global library. Put

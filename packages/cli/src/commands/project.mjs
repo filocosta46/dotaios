@@ -16,6 +16,7 @@ const HELP_TEXT = `Usage:
 
 Keep real project repositories outside AIOS. DotAIOS stores portable metadata
 under projects/<slug>/README.md and a local path mapping only on this machine.
+Project add is a read-only preview unless you explicitly pass --apply or --yes.
 
 Add options:
   --slug <slug>       Override the slug derived from the repository folder
@@ -23,6 +24,9 @@ Add options:
   --status <status>   Set the project status (default: active)
   --domain <domain>   Set build, make, or sell; repeat for multiple domains
   --repo-url <url>    Override the Git origin URL discovered from the repository
+  --apply             Apply the exact plan computed and checked by this command
+  --yes               Explicit script-friendly alias for --apply
+  --json              Print the portable plan and receipt as JSON
 
 Common options:
   --path <dir>        Use an AIOS folder other than ~/aios
@@ -53,12 +57,15 @@ export async function projectCommand(args = [], dependencies = {}) {
       name: addOptions.name,
       status: addOptions.status,
       domain: addOptions.domains.length > 0 ? addOptions.domains : undefined,
-      repoUrl: addOptions.repoUrl
+      repoUrl: addOptions.repoUrl,
+      apply: addOptions.apply,
+      yes: addOptions.yes
     });
-    output.log(`Registered ${project.name} (${project.slug})`);
-    output.log(`  metadata: ${project.readmePath}`);
-    output.log(`  path:     ${project.projectPath}`);
-    output.log(`  repo:     ${project.repoUrl || "not found"}`);
+    if (addOptions.json) {
+      output.log(JSON.stringify(projectRegistrationJson(project), null, 2));
+    } else {
+      printProjectRegistration(output, project);
+    }
     return project;
   }
 
@@ -110,7 +117,16 @@ function createCoreOptions(options, dependencies) {
 
 function parseOptions(args) {
   const options = { path: null, home: null, statePath: null };
-  const addOptions = { slug: null, name: null, status: null, domains: [], repoUrl: null };
+  const addOptions = {
+    slug: null,
+    name: null,
+    status: null,
+    domains: [],
+    repoUrl: null,
+    apply: false,
+    yes: false,
+    json: false
+  };
   const positionals = [];
   let subcommand = null;
 
@@ -141,6 +157,12 @@ function parseOptions(args) {
     } else if (arg === "--repo-url") {
       addOptions.repoUrl = readOptionValue(args, index, "--repo-url");
       index += 1;
+    } else if (arg === "--apply") {
+      addOptions.apply = true;
+    } else if (arg === "--yes") {
+      addOptions.yes = true;
+    } else if (arg === "--json") {
+      addOptions.json = true;
     } else if (arg.startsWith("--")) {
       throw new Error(`Unknown option: ${arg}`);
     } else if (!subcommand) {
@@ -160,9 +182,76 @@ function assertPositionals(positionals, expected, usage) {
 }
 
 function assertNoAddOptions(options, subcommand) {
-  if (options.slug || options.name || options.status || options.domains.length > 0 || options.repoUrl) {
-    throw new Error(`Project metadata options can only be used with \`dotaios project add\`, not ${subcommand}.`);
+  if (
+    options.slug ||
+    options.name ||
+    options.status ||
+    options.domains.length > 0 ||
+    options.repoUrl ||
+    options.apply ||
+    options.yes ||
+    options.json
+  ) {
+    throw new Error(`Project add options can only be used with \`dotaios project add\`, not ${subcommand}.`);
   }
+}
+
+function printProjectRegistration(output, project) {
+  const durablePath = project.receipt.durable.path;
+  const machineLocal = project.receipt.machine_local;
+
+  if (!project.applied) {
+    output.log("Project registration preview (no files changed)");
+    output.log(`  project:        ${project.name} (${project.slug})`);
+    output.log(`  durable record: ${durablePath}`);
+    output.log(`  local checkout: ${machineLocal.project_path}`);
+    output.log(`  local path map: ${machineLocal.state_path}`);
+    output.log(`  repository:     ${project.repoUrl || "not found"}`);
+    output.log("");
+    output.log(project.preview);
+    output.log("");
+    output.log("Preview only. Re-run with --apply to save the durable record and this machine's path.");
+    output.log("For scripts, --yes is an explicit alias for --apply.");
+    return;
+  }
+
+  output.log(`Project registration applied: ${project.name} (${project.slug})`);
+  output.log(`  durable record: ${durablePath}`);
+  output.log(`  local checkout: ${machineLocal.project_path}`);
+  output.log(`  local path map: ${machineLocal.state_path}`);
+  output.log(`  repository:     ${project.repoUrl || "not found"}`);
+  output.log(`  receipt:        ${project.receipt.operation}, project id ${project.receipt.project_id}`);
+}
+
+function projectRegistrationJson(project) {
+  const durable = { ...project.receipt.durable };
+  return {
+    applied: project.applied,
+    plan: {
+      version: project.version,
+      operation: project.operation,
+      project: {
+        id: project.id,
+        slug: project.slug,
+        name: project.name,
+        status: project.status,
+        domain: [...project.domain],
+        repo_url: project.repoUrl
+      },
+      durable,
+      preview: project.preview
+    },
+    receipt: {
+      version: project.receipt.version,
+      type: project.receipt.type,
+      operation: project.receipt.operation,
+      project_id: project.receipt.project_id,
+      project: project.receipt.project,
+      durable,
+      applied: project.receipt.applied
+    },
+    machine_local: { ...project.receipt.machine_local }
+  };
 }
 
 function printProjects(output, projects) {

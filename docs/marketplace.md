@@ -4,7 +4,7 @@ DotAIOS core and its bundled starter workflows are free. Paid packages are a sep
 
 ## Current status
 
-The public catalog lives at `https://dotaios.com/registry.json`. Entries marked `draft` or `planned` can appear in `dotaios market list`, but the CLI refuses to purchase or install them. Draft entries cannot contain checkout URLs.
+The public catalog lives at `https://dotaios.vercel.app/registry.json`. Entries marked `draft` or `planned` can appear in `dotaios market list`, but the CLI refuses to purchase or install them. Draft entries cannot contain checkout URLs. The branded `dotaios.com` URL is not used until that domain serves the same verified registry.
 
 This is deliberate. A paid offer stays unavailable until its package can be installed, updated, removed, and recovered safely.
 

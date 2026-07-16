@@ -1,6 +1,20 @@
 import { expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { assertAiosFolder, assessGwsAuth, firstLine, hasGoogleConnection, printCaptured, resolveAiosTarget, resolveBinary, resolveGwsBinary, runGws } from "../lib/gws.mjs";
+import {
+  GWS_READ_ONLY_SCOPES,
+  GWS_READ_ONLY_SERVICES,
+  assertAiosFolder,
+  assessGwsAuth,
+  firstLine,
+  gwsReadOnlyLoginArgs,
+  gwsReadOnlyLoginCommand,
+  hasGoogleConnection,
+  printCaptured,
+  resolveAiosTarget,
+  resolveBinary,
+  resolveGwsBinary,
+  runGws
+} from "../lib/gws.mjs";
 
 export async function googleCommand(args) {
   if (hasHelpFlag(args)) {
@@ -86,7 +100,7 @@ function printGoogleHelp() {
   dotaios google drive [options]
   dotaios google drive find <query> [options]
 
-Read-first Google Workspace workflows powered by the local gws CLI.
+Optional, read-only Google Workspace workflows powered by the local gws CLI.
 
 Options:
   --path <dir>       Use a non-default AIOS folder
@@ -100,11 +114,8 @@ Options:
   --page-size <n>    Drive: number of files to list (default: 10)
   --query <q>        Gmail/Drive search query
   --message-id <id>  Gmail message ID to read
-  --json            Print a JSON envelope for agent/MCP callers
+  --json             Print a JSON envelope for agents or local automation
   --project <id>     Setup: use a specific Google Cloud project
-  --services <csv>   Setup: login services (default: gmail,calendar,drive)
-  --scopes <csv>     Setup: custom OAuth scopes
-  --full             Setup: request all gws scopes instead of read-only
   --run              Setup: run gws auth setup/login when ready
 
 Examples:
@@ -132,8 +143,6 @@ function parseOptions(args = []) {
     project: null,
     query: null,
     messageId: null,
-    scopes: null,
-    services: "gmail,calendar,drive",
     timezone: null,
     today: false,
     tomorrow: false,
@@ -180,14 +189,8 @@ function parseOptions(args = []) {
     } else if (arg === "--project") {
       options.project = readOptionValue(args, index, "--project");
       index += 1;
-    } else if (arg === "--services") {
-      options.services = readOptionValue(args, index, "--services");
-      index += 1;
-    } else if (arg === "--scopes") {
-      options.scopes = readOptionValue(args, index, "--scopes");
-      index += 1;
-    } else if (arg === "--full") {
-      options.full = true;
+    } else if (arg === "--services" || arg === "--scopes" || arg === "--full") {
+      throw new Error(`${arg} is not supported. DotAIOS Google uses fixed Gmail, Calendar, and Drive read-only access.`);
     } else if (arg === "--run") {
       options.run = true;
     } else if (arg.startsWith("--")) {
@@ -313,7 +316,7 @@ async function printStatus({ target, gwsBin, json = false }) {
     console.log("[missing] gws auth status");
     console.log(`      ${authState.summary}`);
     if (auth.status !== 0) printCaptured(auth);
-    console.log("[action] Run `gws auth login`, then `dotaios connect google`.");
+    console.log(`[action] Run \`${gwsReadOnlyLoginCommand()}\`, then \`dotaios connect google\`.`);
   }
 }
 
@@ -383,7 +386,9 @@ async function printSetup({ target, gwsBin, options }) {
   console.log("1. Google requires an OAuth client for Gmail, Calendar, and Drive access.");
   console.log("2. The easiest path is `gws auth setup`, but it requires the Google Cloud CLI (`gcloud`).");
   console.log("3. DotAIOS stores no OAuth credentials; `gws` owns the credentials.");
-  console.log(`4. For beta, use ${options.full ? "full" : "read-only"} scopes for: ${options.services}.`);
+  console.log(`4. Services are fixed to: ${GWS_READ_ONLY_SERVICES.join(", ")}.`);
+  console.log("5. DotAIOS requests these read-only OAuth scopes (existing grant scopes are not verified by gws auth status):");
+  for (const scope of GWS_READ_ONLY_SCOPES) console.log(`   - ${scope}`);
 
   const auth = runGws(gwsBin, ["auth", "status"]);
   const authState = assessGwsAuth(auth);
@@ -402,7 +407,7 @@ async function printSetup({ target, gwsBin, options }) {
     console.log("");
     console.log("Recommended setup path:");
     console.log(`1. \`${formatShellCommand(["gws", "auth", "setup", ...setupArgs(options)])}\``);
-    console.log(`2. \`${formatShellCommand(["gws", "auth", "login", ...loginArgs(options)])}\``);
+    console.log(`2. \`${formatShellCommand(["gws", "auth", "login", ...loginArgs()])}\``);
     console.log("3. `dotaios connect google`");
     console.log("4. `dotaios google status`");
 
@@ -417,7 +422,7 @@ async function printSetup({ target, gwsBin, options }) {
 
       console.log("");
       console.log("Running Google Workspace login.");
-      const login = runGws(gwsBin, ["auth", "login", ...loginArgs(options)]);
+      const login = runGws(gwsBin, ["auth", "login", ...loginArgs()]);
       printCaptured(login);
       if (login.status !== 0) {
         throw new Error(`gws auth login failed with status ${login.status}`);
@@ -433,7 +438,7 @@ async function printSetup({ target, gwsBin, options }) {
     console.log("1. Install and authenticate the Google Cloud CLI, then rerun this command.");
     console.log("2. Or create a Google Cloud project + Desktop OAuth client manually.");
     console.log("3. Place the OAuth client at `~/.config/gws/client_secret.json`.");
-    console.log(`4. Run \`${formatShellCommand(["gws", "auth", "login", ...loginArgs(options)])}\`.`);
+    console.log(`4. Run \`${formatShellCommand(["gws", "auth", "login", ...loginArgs()])}\`.`);
     console.log("");
     console.log("Product note: this is still too technical for casual friends. Treat Google as an assisted beta feature until DotAIOS has a hosted/verified OAuth app or a better setup wrapper.");
   }
@@ -445,16 +450,13 @@ function setupArgs(options) {
 
 function nextGoogleDoctorAction({ connected, authReady, gcloudReady }) {
   if (!authReady && gcloudReady) return "Run dotaios google setup, then dotaios connect google.";
-  if (!authReady) return "Install/authenticate gcloud or create a Desktop OAuth client, then run gws auth login.";
+  if (!authReady) return `Install/authenticate gcloud or create a Desktop OAuth client, then run ${gwsReadOnlyLoginCommand()}.`;
   if (!connected) return "Run dotaios connect google.";
   return "Try dotaios google inbox or dotaios google agenda --today.";
 }
 
-function loginArgs(options) {
-  if (options.scopes) return ["--scopes", options.scopes];
-  const args = options.full ? ["--full"] : ["--readonly"];
-  if (options.services) args.push("--services", options.services);
-  return args;
+function loginArgs() {
+  return gwsReadOnlyLoginArgs();
 }
 
 function formatShellCommand(args) {
@@ -473,7 +475,7 @@ async function assertAuthenticated(gwsBin) {
 
   console.log(authState.summary);
   if (auth.status !== 0) printCaptured(auth);
-  throw new Error("Google Workspace auth is not ready. Run `gws auth login`, then retry.");
+  throw new Error(`Google Workspace auth is not ready. Run \`${gwsReadOnlyLoginCommand()}\`, then retry.`);
 }
 
 function buildGwsArgs(action, options) {

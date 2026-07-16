@@ -132,7 +132,7 @@ export async function runSkillInvocationProbe({
     await fs.writeFile(skillPath, probeSkillBody(marker), "utf8");
     await fs.writeFile(
       path.join(projectPath, "AGENTS.md"),
-      "# Disposable DotAIOS invocation probe\n\nRead the project-owned skill at `.agents/skills/dotaios-probe/SKILL.md` before answering the probe prompt. Do not edit files.\n",
+      "# Disposable DotAIOS invocation probe\n\nUse the matching project-owned skill when its trigger matches the probe request. Do not edit files.\n",
       "utf8"
     );
 
@@ -144,7 +144,7 @@ export async function runSkillInvocationProbe({
     const configured = target.configured ? "yes" : "no";
     const discoverable = target.discoverable ? "path-ready" : "no";
     const digest = await sha256File(skillPath);
-    const prompt = "Read the project-owned skill at .agents/skills/dotaios-probe/SKILL.md. Do not infer or guess its marker from this prompt. Follow the skill's instructions exactly. Do not edit files.";
+    const prompt = "Please verify project skill invocation. Do not infer or guess the marker from this request. Follow the matching project-owned skill exactly. Do not edit files.";
     const version = readClientVersion(definition.binary);
 
     if (!definition.runnable) {

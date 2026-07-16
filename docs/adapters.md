@@ -21,6 +21,12 @@ The capability levels above are about *saving conversations out of* a tool. The
 `connect` commands do the opposite: they wire a tool so it *reads your DotAIOS
 context in* automatically.
 
+When connected tools request startup continuity, events, signals, and saved
+sessions come through the same bounded projection produced by
+`dotaios brief --compact`; adapters do not define their own raw-memory window.
+Where the optional MCP adapter is used, it exposes exactly
+`read_working_context`, `search_aios`, and `resolve_skill`.
+
 ### Gemini CLI
 
 ```
@@ -40,7 +46,7 @@ If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses 
 dotaios connect opencode
 ```
 
-Installs an MCP server entry in `~/.config/opencode/opencode.json` plus a skill stub per installed skill, so your skills appear as `/skill <name>` in OpenCode.
+Installs an MCP server entry in `~/.config/opencode/opencode.json` plus a skill stub per installed skill, so your skills appear as `/skill <name>` in OpenCode. Use `read_working_context` for startup continuity; use `search_aios` only for an explicit lookup and `resolve_skill` to route a workflow.
 
 ### Claude Code, Cursor
 
