@@ -15,7 +15,7 @@ function run(args) {
   });
 }
 
-test("doctor shows pilot metrics/backend health lines", () => {
+test("doctor keeps pilot telemetry out of the normal health check", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-doctor-pilot-"));
   const aiosPath = path.join(tempRoot, "aios");
   const setupResult = run(["init", "--path", aiosPath, "--yes"]);
@@ -23,9 +23,7 @@ test("doctor shows pilot metrics/backend health lines", () => {
 
   const doctor = run(["doctor", "--path", aiosPath, "--home", tempRoot]);
   assert.equal(doctor.status, 0, doctor.stderr);
-  assert.match(doctor.stdout, /Pilot metrics/);
-  assert.match(doctor.stdout, /Pilot memory backend/);
-  assert.match(doctor.stdout, /adapter detected but not live|fallback \(local\) path available/i);
+  assert.doesNotMatch(doctor.stdout, /Pilot metrics|Pilot memory backend/);
 });
 
 test("status shows pilot metrics/backend block", () => {
