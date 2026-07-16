@@ -114,19 +114,23 @@ describe("enableSchedule — fallback when entry missing", () => {
   });
 });
 
-test("setupCommand prints web browsing engine step (download skipped via env)", () => {
+test("non-interactive setup does not download the optional web browsing engine by default", () => {
   const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-lp-"));
   const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
   const result = spawnSync(process.execPath, [
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--path", aiosPath,
+    "--home", homePath,
     "--yes",
     "--skip-reveal"
   ], {
     encoding: "utf8",
-    env: { ...process.env, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
+    env: { ...process.env, HOME: homePath }
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Web browsing engine.*skipped/);
+  assert.match(result.stdout, /Web browsing engine: not installed.*plain fetch remains available/);
+  assert.equal(fsSync.existsSync(path.join(homePath, ".dotaios", "bin", "lightpanda")), false);
+  assert.doesNotMatch(result.stdout, /All set\./);
 });

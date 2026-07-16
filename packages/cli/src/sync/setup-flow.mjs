@@ -80,7 +80,7 @@ export async function orchestrateSetup({
   const createUrl = buildCreateRepoUrl(username);
   log(`  -> Opening ${createUrl} in your browser...`);
   log(`  -> Click "Create repository" on GitHub's page (we don't create it for you).`);
-  log(`  -> Leave every "Initialize this repository" option OFF — no README, no .gitignore, no license.`);
+  log(`  -> Leave every "Initialize this repository" option OFF: no README, no .gitignore, no license.`);
   await openInBrowser(createUrl);
   await pollForRepoExistsImpl({ accessToken, fullName });
   await writeConfig({
@@ -95,12 +95,15 @@ export async function orchestrateSetup({
   log("  Files pushed");
 
   log("");
-  log("Step 4/4 - Keep it in sync");
+  log("Step 4/4 - Verify sync setup");
   await runFirstTick();
-  log("  Sync runs after every dotaios command and at the start/end of every agent session.");
+  log("  Setup verified. Sync is manual by default.");
 
   log("");
-  log("Your memory now syncs automatically. To read it from your phone:");
+  log("Your private memory repo is ready. Sync is optional and manual by default.");
+  log("A legacy automatic hook exists only through an explicit opt-in in a controlled main worktree.");
+  log("Run `dotaios sync now` whenever you want to pull and push changes.");
+  log("To read the repo from your phone:");
   log("");
   log("  Recommended (free): claude.ai -> Projects -> New -> link your repo. Tap \"Sync now\" before asking.");
   log("  Also free, when your computer is awake: ChatGPT mobile linked to Codex.");

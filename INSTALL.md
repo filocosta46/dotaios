@@ -1,6 +1,6 @@
 # DotAIOS: Agent Setup Guide
 
-> This document is written for AI agents (Claude Code, Codex, Cursor, Antigravity, and others).
+> This document is written for local AI agents such as Claude Code, Codex, Gemini CLI, and Cursor.
 > A human has asked you to set up DotAIOS for them.
 > Follow each step in order. Do not skip steps. The human should never need to type
 > a terminal command, you run them.
@@ -86,10 +86,10 @@ Run:
 npx -y dotaios activate
 ```
 
-This writes small bridge files so Claude Code, Codex, Antigravity, and other tools
-find the user's context. It also propagates the canonical skills to the
-documented local targets and auto-detects which tools are installed, so you do
-not need to ask the user which tools they use.
+This writes small bridge files for detected clients with a documented global
+context path, including Claude Code, Codex, and Gemini CLI. Cursor context is
+connected per project with `dotaios attach`. DotAIOS also links skills to the
+documented local targets. A link proves configuration, not runtime invocation.
 
 After activation, verify the filesystem contract with:
 ```
@@ -100,12 +100,16 @@ Treat any foreign aliases or collisions as visible review items. Do not delete
 them automatically; they may belong to another tool.
 
 If the repository you are opening owns a project-local `skills/` directory,
-attach that checkout too:
+register and attach that checkout too:
 ```
+npx -y dotaios project add /path/to/project --path ~/aios
 npx -y dotaios attach /path/to/project --path ~/aios
 ```
-This keeps project skills separate from the global AIOS library and preserves
-foreign project entries. Use `--dry-run` first when attaching an existing repo.
+The project record and repository URL can sync, while the checkout path stays
+local to this machine. The real repository remains outside AIOS with its own
+Git history. Project skills stay separate from the global AIOS library and
+foreign project entries are preserved. Use `--dry-run` first when attaching an
+existing repo.
 
 ---
 
@@ -175,11 +179,12 @@ Then show them what they now have (adapt it to what they told you):
 
 > "Here's what DotAIOS gives you now:
 >
-> **Every connected AI tool has the same context entrypoint.** Claude Code,
-> Cursor, Codex, and Antigravity can read the managed bridge; browser-only tools
-> can use the `AGENTS.md` paste fallback. Native skill discovery remains
-> client-specific and is reported by `skills doctor` as filesystem/configuration
-> coverage, not as a guarantee about an app's runtime behavior.
+> **Your supported local agents now point to the same folder.** Claude Code,
+> Codex, and Gemini CLI receive their documented global bridge when detected.
+> Cursor receives project context after `dotaios attach`. Browser chats cannot
+> open local paths; attach the relevant files or paste a small privacy-safe
+> brief. Native skill discovery remains client-specific and `skills doctor`
+> reports configuration coverage, not guaranteed invocation.
 >
 > **Skills you can use right now**, just ask me, or type `/` in Claude Code:
 >

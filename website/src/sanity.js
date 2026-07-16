@@ -135,18 +135,8 @@ function merge(base, patch) {
   return patch
 }
 
-async function enableStudioOverlays() {
-  try {
-    const {enableVisualEditing} = await import('@sanity/visual-editing')
-    enableVisualEditing()
-  } catch {
-    /* overlays are a Studio nicety; hydration works without them */
-  }
-}
-
 export async function loadRemoteDictionary(bundled) {
   const doc = await getClient().fetch(QUERY)
-  if (isPreview) enableStudioOverlays()
   if (!doc || !releaseMatches(doc)) return null
 
   const remote = fromI18nBlob(doc) || fromLegacyFields(doc)

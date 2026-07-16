@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
+import { previewMigration } from "../../../core/src/migrations.mjs";
 import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 import { pilotMetricsSummary } from "../lib/pilot-metrics.mjs";
@@ -50,8 +51,9 @@ export async function doctorCommand(args) {
   }
 
   console.log("");
-  console.log("Using an AI tool DotAIOS does not know yet? Paste this line into it:");
+  console.log("Using another local AI tool that can read files? Paste this line into it:");
   console.log(`  Read ${path.join(target, "AGENTS.md")} first and follow it.`);
+  console.log("  Browser chats need an attached file or a pasted, reviewed brief.");
   console.log("");
 
   const failed = checks.filter((c) => c.status === "fail");
@@ -126,6 +128,33 @@ async function checkAiosConfig(target) {
     };
   }
   const tools = (config.ai_tools || []).join(", ") || "none";
+  let migration;
+  try {
+    migration = await previewMigration({ aiosPath: target });
+  } catch (error) {
+    return {
+      name: "aios.json schema compatibility",
+      status: "fail",
+      detail: error.message,
+      fix: "Install a DotAIOS release that supports this folder schema. This build will not write it."
+    };
+  }
+  if (migration.status === "recovery_required") {
+    return {
+      name: "aios.json migration transaction",
+      status: "fail",
+      detail: `Interrupted plan: ${migration.transaction_ids.join(", ")}`,
+      fix: `Run \`npx dotaios migrate --recover${pathOptionFor(target)}\`.`
+    };
+  }
+  if (migration.status === "ready") {
+    return {
+      name: "aios.json schema update",
+      status: "warn",
+      detail: `schema ${migration.plan.from_schema_version} → ${migration.plan.to_schema_version}, plan ${migration.plan.plan_id}`,
+      fix: `Run \`npx dotaios migrate${pathOptionFor(target)}\` to preview it.`
+    };
+  }
   return {
     name: "aios.json present",
     status: "ok",

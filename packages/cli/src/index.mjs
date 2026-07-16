@@ -28,8 +28,10 @@ const commands = {
   license: "./commands/license.mjs",
   market: "./commands/market.mjs",
   memory: "./commands/memory.mjs",
+  migrate: "./commands/migrate.mjs",
   mcp: "./commands/mcp.mjs",
   plan: "./commands/plan.mjs",
+  project: "./commands/project.mjs",
   "pilot-report": "./commands/pilot-report.mjs",
   "pilot-score": "./commands/pilot-score.mjs",
   reveal: "./commands/reveal.mjs",
@@ -67,11 +69,12 @@ Commands:
   ingest <input>    Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
   interview         Update your context by answering a few short questions
-  license <cmd>     Add, list, or remove license keys for paid skills
-  market <cmd>      Browse and install skills from the public registry
-  memory audit      Audit hot memory and queue skill-tied lessons for skill patches
-  mcp <cmd>         Print local MCP server status and client config
+  license <cmd>     Add, list, or remove license keys for paid packages
+  market <cmd>      Browse outcome packages in the public catalog
+  memory <cmd>      Audit recent memory or promote captured evidence explicitly
+  migrate           Preview, apply, or recover a versioned folder migration
   plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
+  project <cmd>     Register and resolve project repositories across machines
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins
@@ -125,7 +128,11 @@ async function main(argv) {
   // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
   // A health report is deliberately a read-only operation. It must not mutate
   // the sync queue while the caller is checking whether the system is healthy.
-  const readOnly = commandName === "skills" && ["doctor", "probe"].includes(args[0]);
+  const readOnly = (
+    commandName === "skills" && ["doctor", "probe"].includes(args[0])
+  ) || (
+    commandName === "migrate" && !args.includes("--apply") && !args.includes("--recover")
+  );
   await fireSyncHook({ command: commandName, dryRun: args.includes("--dry-run"), readOnly });
 }
 

@@ -11,7 +11,7 @@ the GitHub repo `dotaios sync setup` already created.
 `dotaios sync` commits and pushes your AIOS folder as plain Markdown and JSONL.
 A phone git client clones that repo, so you can read your context, daily notes,
 projects, and vault from anywhere, and capture a quick note by editing a file
-and pushing it back. The next `dotaios sync tick` on your laptop pulls your
+and pushing it back. The next `dotaios sync now` on your laptop pulls your
 phone edits down with a rebase, so the two stay in sync without a second
 service.
 
@@ -43,7 +43,7 @@ service.
   in the app), commit with a short message, and push. At the start of your next
   laptop session the `process-inbox` skill files the note into the right place
   and deletes the inbox file. This is the intended capture path from a phone.
-- **Let the laptop reconcile:** run `dotaios sync tick` on the laptop, or use a
+- **Let the laptop reconcile:** run `dotaios sync now` on the laptop, or use a
   dedicated scheduled sync worktree. The tick pulls your phone commit by
   rebasing the local state on top of it, then pushes the combined history back.
   Your phone receives the result on GitSync's next scheduled or manual sync. In
@@ -54,7 +54,7 @@ service.
 DotAIOS does not detach a sync tick from ordinary commands by default. A
 feature checkout must never be able to commit, rebase, push, or reset itself
 because an unrelated command ran. Use the dedicated scoped sync wrapper or
-run `dotaios sync tick` explicitly from the intended sync worktree.
+run `dotaios sync now` explicitly from the intended sync worktree.
 
 The legacy detached hook is available only with the explicit
 `DOTAIOS_ALLOW_AUTO_SYNC_HOOK=1` opt-in. Set that variable only in a controlled
@@ -67,11 +67,11 @@ main sync worktree. Do not set it in a normal project checkout.
   append-only and written by the laptop on a schedule.
 - Commit and push immediately after a small edit. Do not batch several edits
   across files and push them all at once.
-- The laptop tick already commits local changes before pulling, so a rebase
-  conflict only happens when the phone and laptop edit the same file at the
-  same time. If that happens, the tick parks your local commit on a
-  `local-<timestamp>` branch and aligns `main` with the remote, so nothing is
-  lost. Resolve the conflict on the laptop, then push.
+- The laptop sync commits local changes before pulling. If the phone and laptop
+  changed the same lines, sync stops without creating branches, resetting
+  files, or pushing. Your pre-existing edits are preserved, and DotAIOS records
+  the conflict locally. Ask your agent to resolve it safely, then run
+  `dotaios sync now` again.
 
 ## If the app reports a conflict
 

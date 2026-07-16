@@ -7,7 +7,8 @@ Cross-device sync of your ~/aios/ folder to a private GitHub repo.
 
 Subcommands:
   setup       One-time: connect GitHub, create your repo, push the first mirror
-  tick        Run one commit+pull+push cycle (runs automatically; safe to run manually)
+  now         Sync once: commit, rebase, and push if it is safe
+  tick        Advanced alias for now
   status      Show last tick time, repo URL, errors
   logout      Sign out of GitHub (keeps your repo on GitHub)
   repo        Print the URL of your DotAIOS repo
@@ -36,7 +37,7 @@ export async function syncCommand(args = []) {
     }
     return;
   }
-  if (sub === "tick") {
+  if (sub === "now" || sub === "tick") {
     const { runTickCommand } = await import("../sync/tick-cmd.mjs");
     return runTickCommand(rest);
   }

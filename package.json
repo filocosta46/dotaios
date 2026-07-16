@@ -1,8 +1,9 @@
 {
   "name": "dotaios",
-  "version": "1.22.0",
-  "description": "One folder every AI reads. Local-first context for Claude Code, Cursor, Codex, Antigravity, and other assistants.",
+  "version": "1.23.0",
+  "description": "One local folder for durable context across Claude Code, Codex, Gemini, Cursor projects, and other assistants.",
   "type": "module",
+  "packageManager": "pnpm@10.33.4",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/filocosta46/dotaios.git"
@@ -26,6 +27,7 @@
     "docs/advanced-memory.md",
     "docs/architecture.md",
     "docs/beta-testing.md",
+    "docs/client-support.md",
     "docs/context-import.md",
     "docs/friend-setup.md",
     "docs/getting-started.md",
@@ -33,7 +35,9 @@
     "docs/google-workspace.md",
     "docs/marketplace.md",
     "docs/mcp.md",
+    "docs/okf.md",
     "docs/plugin-development.md",
+    "docs/projects.md",
     "docs/adapters.md",
     "docs/schedules.md",
     "docs/security.md",
@@ -48,6 +52,8 @@
     "check": "node packages/cli/src/index.mjs --help",
     "smoke": "node scripts/smoke.mjs",
     "test": "node --test tests/**/*.test.mjs",
+    "site:build": "pnpm --dir website build",
+    "site:verify": "node scripts/verify-website.mjs",
     "pack:check": "npm pack --dry-run",
     "changelog": "git log --oneline $(git describe --tags --abbrev=0)..HEAD",
     "release:check": "node scripts/release-checklist.mjs"
@@ -77,6 +83,7 @@
     "@mozilla/readability": "^0.6.0",
     "linkedom": "^0.18.12",
     "turndown": "^7.2.4",
-    "unpdf": "^1.6.2"
+    "unpdf": "^1.6.2",
+    "yaml": "^2.9.0"
   }
 }

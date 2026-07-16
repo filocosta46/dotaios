@@ -139,19 +139,6 @@ test("parsePorcelainZ stages rename destinations and skips the source field", ()
   assert.deepEqual(paths, ["new.md", "other.md"]);
 });
 
-test("branchFromSha() creates named branch pointing at given sha", async () => {
-  const calls = [];
-  const git = createGit({
-    cwd: "/x",
-    spawnImpl: (cmd, args) => {
-      calls.push([cmd, ...args].join(" "));
-      return Promise.resolve({ stdout: "", stderr: "", code: 0 });
-    }
-  });
-  await git.branchFromSha("local-2026", "abc123");
-  assert.ok(calls.some((c) => c.includes("branch local-2026 abc123")));
-});
-
 test("push() redacts embedded token from error message", async () => {
   const git = createGit({
     cwd: "/x",

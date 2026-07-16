@@ -46,9 +46,23 @@ export async function runTickCommand(args = []) {
     now: () => Date.now()
   });
 
-  // Quiet by default (this runs from the CLI hook + agent sessions constantly).
-  // Verbose only with --verbose, for manual `dotaios sync tick --verbose`.
-  if (args.includes("--verbose")) {
+  if (args.includes("--json") || args.includes("--verbose")) {
     console.log(JSON.stringify(result));
+    return result;
   }
+
+  if (result.pushed) {
+    console.log("DotAIOS is synced.");
+  } else if (result.conflict || result.error) {
+    console.log("Sync stopped safely. Your pre-existing edits were preserved.");
+    console.log(`Reason: ${result.error || "local and remote changes overlap"}`);
+    console.log("Resolve the Git conflict, then run `dotaios sync now` again.");
+  } else if (result.skipped === "no-token") {
+    console.log("Sync is not set up. Run `dotaios sync setup` when you want it.");
+  } else if (result.skipped === "not-main-branch") {
+    console.log("Sync did not run because this AIOS checkout is not on main.");
+  } else {
+    console.log("DotAIOS is already up to date.");
+  }
+  return result;
 }

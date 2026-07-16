@@ -86,7 +86,7 @@ export async function activateCommand(args) {
 
   printResults("DotAIOS activated", results);
   const refreshAction = options.dryRun ? "would refresh" : "refreshed";
-  console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} skill(s) any agent can run)`);
+  console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} workflow(s) indexed)`);
   if (skillsFirst) {
     const verb = options.dryRun ? "would inline" : "inline";
     console.log(`[skills-first] bridge files ${verb} the current skill catalog.`);
@@ -98,12 +98,19 @@ export async function activateCommand(args) {
     console.log("To connect every known tool anyway, run `dotaios activate --all`.");
   }
 
-  console.log("\nUsing an AI tool DotAIOS does not know yet? Paste this line into it:");
+  console.log("\nUsing another local AI tool that can read files? Paste this line into it:");
   console.log(`  Read ${path.join(aiosPath, "AGENTS.md")} first and follow it.`);
+  console.log("Browser chats cannot open that path. Attach AGENTS.md or paste a reviewed `dotaios brief --compact` instead.");
 
   if (!options.project) {
     console.log("\nFor Cursor project rules, run `dotaios attach <project-dir>` inside a project.");
   }
+
+  return {
+    detectedClientCount: global.installedCount,
+    configuredContextCount: global.configuredContextCount,
+    results
+  };
 }
 
 export async function attachCommand(args) {
@@ -207,6 +214,7 @@ async function createGlobalBridges(
   const registry = await loadAgentRegistry(aiosPath);
   const results = [];
   let installedCount = 0;
+  let configuredContextCount = 0;
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
@@ -233,10 +241,13 @@ async function createGlobalBridges(
       options
     );
     results.push(result);
+    if (["created", "updated", "would create", "would update"].includes(result.action)) {
+      configuredContextCount += 1;
+    }
   }
 
   const skills = await installAllSkills(aiosPath, homePath, options, registry);
-  return { results: [...results, ...skills], installedCount };
+  return { results: [...results, ...skills], installedCount, configuredContextCount };
 }
 
 async function previewSkillsIndex(aiosPath) {

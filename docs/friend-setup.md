@@ -197,9 +197,9 @@ Common issues:
 - **Agent doesn't seem to know your context**, Restart the agent app after running `npx dotaios activate`. Most tools only re-read their config on launch.
 - **You want to change something you typed in Step 1**, Run `npx dotaios interview --review`. It asks the important questions again and shows the file updates before saving. If you prefer editing by hand, open `~/aios/context/work.md` or another file in `context/`, save it, then run `npx dotaios context --refresh --review`.
 
-## Optional: experimental MCP server
+## Optional: advanced local adapter
 
-DotAIOS ships an experimental MCP server (`dotaios-mcp`) for tools that support the Model Context Protocol. This is **not** recommended for first-time setup, wire up the basic flow above first, then come back. See [mcp.md](mcp.md) when you're ready.
+DotAIOS ships an experimental, read-only MCP adapter for local clients that need it. It is not recommended for first-time setup and does not give browser chats access to local files. Wire up the basic flow above first, then see [mcp.md](mcp.md) if your local client specifically supports MCP.
 
 ## Asking for help
 

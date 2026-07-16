@@ -5,7 +5,7 @@ const HELP_TEXT = `Usage:
   dotaios license <subcommand>
 
 Subcommands:
-  add <product-id> <key>   Verify and store a license key for a paid skill or plugin.
+  add <product-id> <key>   Verify and store a license key for a paid package or plugin.
   list                     Show every license stored on this machine.
   remove <product-id>      Remove a previously added license.
 

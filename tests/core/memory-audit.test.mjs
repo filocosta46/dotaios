@@ -4,6 +4,18 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { applySkillPatchCandidates, auditMemory, renderMemoryAudit, renderSkillPatchQueue } from "../../packages/core/src/memory-audit.mjs";
+import { isoDate } from "../../packages/core/src/memory.mjs";
+import { selectWorkingContext } from "../../packages/core/src/working-context.mjs";
+
+const FIXED_NOW = new Date("2026-06-30T18:00:00.000Z");
+
+function fixedClock() {
+  return new Date(FIXED_NOW.getTime());
+}
+
+function auditHot(aiosPath, options = {}) {
+  return auditMemory(aiosPath, { clock: fixedClock, ...options });
+}
 
 async function tmpAios() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-memory-audit-"));
@@ -20,7 +32,7 @@ test("auditMemory flags hot files over the line budget", async () => {
   const content = Array.from({ length: 205 }, (_, index) => `line ${index + 1}`).join("\n");
   await fs.writeFile(path.join(aios, "AGENTS.md"), content);
 
-  const report = await auditMemory(aios, { lineBudget: 200 });
+  const report = await auditHot(aios, { lineBudget: 200 });
 
   assert.equal(report.summary.hotFileCount, 1);
   assert.equal(report.hotFiles[0].path, "AGENTS.md");
@@ -39,7 +51,7 @@ test("auditMemory queues skill-tied memory entries as skill patch candidates", a
   };
   await fs.writeFile(path.join(aios, "memory", "events.jsonl"), `${JSON.stringify(entry)}\n`);
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
 
   assert.equal(report.skillPatchCandidates.length, 1);
   assert.equal(report.skillPatchCandidates[0].skill, "ingest");
@@ -56,7 +68,7 @@ test("renderSkillPatchQueue makes a reviewable queue and preserves existing sour
     disposition: "skill patch"
   })}\n`);
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
   const queue = renderSkillPatchQueue(report, { generatedAt: new Date("2026-07-06T12:00:00.000Z") });
   const preserved = renderSkillPatchQueue(report, { generatedAt: new Date("2026-07-06T12:00:00.000Z"), previousContent: queue });
 
@@ -76,11 +88,11 @@ test("renderSkillPatchQueue dedupes by stable candidate id when JSONL line numbe
   };
   await fs.writeFile(path.join(aios, "memory", "events.jsonl"), `${JSON.stringify(entry)}\n`);
 
-  const firstReport = await auditMemory(aios);
+  const firstReport = await auditHot(aios);
   const queue = renderSkillPatchQueue(firstReport, { generatedAt: new Date("2026-07-06T12:00:00.000Z") });
   await fs.writeFile(path.join(aios, "memory", "events.jsonl"), `${JSON.stringify({ ts: "2026-06-29T12:00:00.000Z", type: "note", summary: "Older note" })}\n${JSON.stringify(entry)}\n`);
 
-  const shiftedReport = await auditMemory(aios);
+  const shiftedReport = await auditHot(aios);
   const preserved = renderSkillPatchQueue(shiftedReport, { generatedAt: new Date("2026-07-06T12:00:00.000Z"), previousContent: queue });
 
   assert.equal(preserved, queue);
@@ -88,7 +100,7 @@ test("renderSkillPatchQueue dedupes by stable candidate id when JSONL line numbe
 
 test("renderSkillPatchQueue removes empty marker when later candidates appear", async () => {
   const aios = await tmpAios();
-  const emptyReport = await auditMemory(aios);
+  const emptyReport = await auditHot(aios);
   const emptyQueue = renderSkillPatchQueue(emptyReport, { generatedAt: new Date("2026-07-06T12:00:00.000Z") });
   await fs.writeFile(path.join(aios, "memory", "events.jsonl"), `${JSON.stringify({
     ts: "2026-06-30T12:00:00.000Z",
@@ -97,15 +109,18 @@ test("renderSkillPatchQueue removes empty marker when later candidates appear", 
     disposition: "skill patch"
   })}\n`);
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
   const queue = renderSkillPatchQueue(report, { generatedAt: new Date("2026-07-06T12:00:00.000Z"), previousContent: emptyQueue });
 
   assert.doesNotMatch(queue, /No new skill-tied memory entries/);
   assert.match(queue, /research/);
 });
 
-test("auditMemory defaults to routed hot memory", async () => {
+test("auditMemory hot scope consumes the canonical bounded timeline selection", async () => {
   const aios = await tmpAios();
+  const today = isoDate(FIXED_NOW);
+  const staleDate = new Date(FIXED_NOW.getTime());
+  staleDate.setDate(staleDate.getDate() - 2);
   const oldSkillEntry = {
     ts: "2026-01-01T12:00:00.000Z",
     type: "lesson",
@@ -115,33 +130,44 @@ test("auditMemory defaults to routed hot memory", async () => {
   };
   const events = [
     oldSkillEntry,
-    ...Array.from({ length: 49 }, (_, index) => ({
-      ts: `2026-06-${String(index + 1).padStart(2, "0")}T12:00:00.000Z`,
-      type: "note",
-      summary: `Filler ${index + 1}`
-    })),
     {
-      ts: "2026-06-30T12:00:00.000Z",
+      ts: `${today}T09:00:00.000Z`,
       type: "lesson",
-      skill: "research",
+      skill: "outside-bound",
       memory_decision: "skill-patch",
-      summary: "The research skill should require citations before writing the final report."
-    }
+      summary: "This ninth event should stay outside the canonical event cap."
+    },
+    ...Array.from({ length: 8 }, (_, index) => ({
+      ts: `${today}T${String(index + 10).padStart(2, "0")}:00:00.000Z`,
+      type: "lesson",
+      skill: `selected-event-${index + 1}`,
+      memory_decision: "skill-patch",
+      summary: `Selected event lesson ${index + 1}.`
+    }))
   ];
   await fs.writeFile(path.join(aios, "memory", "events.jsonl"), events.map((event) => JSON.stringify(event)).join("\n"));
-  await fs.writeFile(path.join(aios, "memory", "signals", `${localIsoDate(new Date(Date.now() - 2 * 86400000))}.jsonl`), `${JSON.stringify(oldSkillEntry)}\n`);
-  await fs.writeFile(path.join(aios, "memory", "signals", `${localIsoDate(new Date())}.jsonl`), `${JSON.stringify({
-    ts: new Date().toISOString(),
+  await fs.writeFile(path.join(aios, "memory", "signals", `${isoDate(staleDate)}.jsonl`), `${JSON.stringify(oldSkillEntry)}\n`);
+  await fs.writeFile(path.join(aios, "memory", "signals", `mini-${today}.jsonl`), `${JSON.stringify({
+    ts: `${today}T18:00:00.000Z`,
     type: "lesson",
     skill: "closeday",
     memory_decision: "skill-patch",
     summary: "The closeday skill should ask for carry-over before writing the final note."
   })}\n`);
 
-  const report = await auditMemory(aios);
+  const context = await selectWorkingContext(aios, {}, { clock: fixedClock });
+  const report = await auditHot(aios);
 
-  assert.equal(report.summary.memoryEntriesScanned, 51);
-  assert.deepEqual(report.skillPatchCandidates.map((candidate) => candidate.skill).sort(), ["closeday", "research"]);
+  assert.equal(report.summary.memoryEntriesScanned, context.events.length + context.signals.length);
+  assert.equal(report.summary.memoryEntriesScanned, 9);
+  assert.deepEqual(
+    report.skillPatchCandidates.map((candidate) => candidate.skill).sort(),
+    ["closeday", ...Array.from({ length: 8 }, (_, index) => `selected-event-${index + 1}`)].sort()
+  );
+  assert.ok(report.skillPatchCandidates.some((candidate) => candidate.source === "memory/events.jsonl#10"));
+  assert.ok(report.skillPatchCandidates.some((candidate) => candidate.source === `memory/signals/mini-${today}.jsonl#1`));
+  assert.ok(report.skillPatchCandidates.every((candidate) => candidate.skill !== "old"));
+  assert.ok(report.skillPatchCandidates.every((candidate) => candidate.skill !== "outside-bound"));
 });
 
 test("auditMemory can scan all memory when requested", async () => {
@@ -161,7 +187,7 @@ test("auditMemory can scan all memory when requested", async () => {
     summary: "The archive skill should appear in all-memory scans."
   })}\n`);
 
-  const report = await auditMemory(aios, { memoryScope: "all" });
+  const report = await auditHot(aios, { memoryScope: "all" });
 
   assert.equal(report.summary.memoryEntriesScanned, 2);
   assert.deepEqual(report.skillPatchCandidates.map((candidate) => candidate.skill).sort(), ["archive", "old"]);
@@ -178,7 +204,7 @@ test("auditMemory reports candidate truncation without hiding the total", async 
   }));
   await fs.writeFile(path.join(aios, "memory", "events.jsonl"), events.map((event) => JSON.stringify(event)).join("\n"));
 
-  const report = await auditMemory(aios, { maxQueueCandidates: 2 });
+  const report = await auditHot(aios, { maxQueueCandidates: 2 });
 
   assert.equal(report.summary.skillPatchCandidates, 5);
   assert.equal(report.summary.skillPatchCandidatesShown, 2);
@@ -196,7 +222,7 @@ test("auditMemory does not infer a skill name from generic skill-patch wording",
     disposition: "skill patch"
   })}\n`);
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
 
   assert.equal(report.skillPatchCandidates.length, 1);
   assert.equal(report.skillPatchCandidates[0].skill, "needs-routing");
@@ -211,7 +237,7 @@ test("renderSkillPatchQueue routes unclear skill candidates instead of naming a 
     disposition: "skill patch"
   })}\n`);
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
   const queue = renderSkillPatchQueue(report, { generatedAt: new Date("2026-07-06T12:00:00.000Z") });
 
   assert.match(queue, /Route this to an existing skill/);
@@ -231,7 +257,7 @@ test("applySkillPatchCandidates appends explicit lessons to existing skills idem
     summary: "The research skill should require citations before writing the final report."
   })}\n`);
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
   const first = await applySkillPatchCandidates(aios, report);
   const second = await applySkillPatchCandidates(aios, report);
   const content = await fs.readFile(skillPath, "utf8");
@@ -261,7 +287,7 @@ test("applySkillPatchCandidates skips uncertain or missing skills", async () => 
     })
   ].join("\n"));
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
   const result = await applySkillPatchCandidates(aios, report);
 
   assert.equal(result.applied, 0);
@@ -280,7 +306,7 @@ test("applySkillPatchCandidates skips text-only skill path matches as review-onl
     summary: "Saved at skills/research/SKILL.md after a cleanup pass."
   })}\n`);
 
-  const report = await auditMemory(aios);
+  const report = await auditHot(aios);
   const result = await applySkillPatchCandidates(aios, report);
   const content = await fs.readFile(skillPath, "utf8");
 
@@ -292,10 +318,3 @@ test("applySkillPatchCandidates skips text-only skill path matches as review-onl
   assert.equal(result.results[0].reason, "review-only");
   assert.equal(content, "# research\n\nUse citations.\n");
 });
-
-function localIsoDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}

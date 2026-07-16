@@ -6,6 +6,7 @@ import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "
 import { detectMarker } from "../ingest/pdf.mjs";
 import { parsePathHomeOptions } from "../lib/args.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
+import { previewMigration } from "../../../core/src/migrations.mjs";
 import { pilotMetricsSummary } from "../lib/pilot-metrics.mjs";
 
 export async function statusCommand(args) {
@@ -43,9 +44,27 @@ Options:
   const pathOption = pathOptionFor(target);
   const activateCommand = `npx dotaios activate${pathOption}`;
   const initCommand = `npx dotaios init --force${pathOption}`;
+  const migrateCommand = `npx dotaios migrate${pathOption}`;
+  let migration = null;
+  let migrationError = null;
+  if (config) {
+    try {
+      migration = await previewMigration({ aiosPath: target });
+    } catch (error) {
+      migrationError = error;
+    }
+  }
   console.log("\nConfiguration");
   if (!config) {
     console.log("[missing] aios.json could not be read");
+  } else if (migrationError) {
+    console.log(`[incompatible] schema_version: ${config.schema_version || "unknown"}`);
+    console.log(`[action] ${migrationError.message}`);
+  } else if (migration.status === "ready") {
+    console.log(`[update] schema_version: ${migration.plan.from_schema_version} → ${migration.plan.to_schema_version}`);
+    console.log(`[info] migration plan: ${migration.plan.plan_id}`);
+  } else if (migration.status === "recovery_required") {
+    console.log(`[blocked] interrupted migration: ${migration.transaction_ids.join(", ")}`);
   } else {
     console.log(`[ok] schema_version: ${config.schema_version || "unknown"}`);
     console.log(`[ok] ai_tools: ${(config.ai_tools || []).join(", ") || "none"}`);
@@ -112,7 +131,13 @@ Options:
   const hasMissingBridge = bridgeResults.some((result) => result.status === "[missing]");
   const hasCheckBridge = bridgeResults.some((result) => result.status === "[check]");
   console.log("\nNext step");
-  if (missingCount > 0 || !config) {
+  if (migrationError) {
+    console.log("[action] Install a DotAIOS release that supports this folder schema; this build will not write it.");
+  } else if (migration?.status === "recovery_required") {
+    console.log(`[action] Run \`${migrateCommand} --recover\` before making more schema changes.`);
+  } else if (migration?.status === "ready") {
+    console.log(`[action] Run \`${migrateCommand}\` to preview the safe folder upgrade.`);
+  } else if (missingCount > 0 || !config) {
     console.log(`[action] Run \`${initCommand}\` to add missing base files, or inspect the missing files above.`);
   } else if (hasMissingBridge || hasCheckBridge) {
     console.log(`[action] Run \`${activateCommand}\` so Claude Code, Codex, and Gemini can find this AIOS.`);
@@ -123,7 +148,7 @@ Options:
     console.log("[ok] AIOS folder and global agent bridges look ready for beta testing.");
   }
 
-  if (missingCount > 0 || !config) {
+  if (missingCount > 0 || !config || migrationError || migration?.status === "recovery_required") {
     process.exitCode = 1;
   }
 }

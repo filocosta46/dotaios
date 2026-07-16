@@ -131,8 +131,8 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
     // committed before calling this — rebase refuses to run on a dirty tree.
     // Returns "up-to-date" (origin had nothing new), "rebased" (local commits
     // replayed cleanly on top of origin), or "conflict" (a real same-file
-    // clash — the failed rebase is aborted so the tree is left untouched and
-    // the caller falls back to the branch-and-reset escape hatch).
+    // clash. The failed rebase is aborted so the tree is left untouched and
+    // the caller can stop safely).
     async pullRebase(branch = "main") {
       await this.fetch();
       const behind = parseInt(
@@ -152,16 +152,6 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
 
     async currentSha() {
       return (await run(["rev-parse", "HEAD"])).stdout.trim();
-    },
-
-    async branchFromSha(branchName, sha) {
-      const { code, stderr } = await run(["branch", branchName, sha]);
-      if (code !== 0) throw new Error(`git branch failed: ${redactToken(stderr.trim())}`);
-    },
-
-    async hardResetToOrigin(branch = "main") {
-      const { code, stderr } = await run(["reset", "--hard", `origin/${branch}`]);
-      if (code !== 0) throw new Error(`git reset failed: ${redactToken(stderr.trim())}`);
     },
 
     async init() {

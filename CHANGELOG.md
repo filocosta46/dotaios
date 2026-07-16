@@ -2,13 +2,30 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
-## Unreleased
+## [1.23.0] - 2026-07-16
 ### Added
-- New default skill: **`update-skills`** - ask "update my skills" (or "is everything connected") and the agent checks skill health, looks for upstream changes to installed packs and plugins, reinstalls updated ones through the guarded install path, refreshes catalogs and native links, and records a `skills-update` event. New AIOS folders also include a disabled `weekly-skills-update` schedule (`dotaios skills doctor`, weekly cadence). Agents are encouraged to offer the check when the last recorded run is older than 7 days. Documented in `docs/schedules.md`.
-- README rewritten for non-developer readers: mirrors the dotaios.vercel.app landing copy (plain-words asks, packs, one-prompt install); terminal content and the project-skills `attach` guide now live in `docs/getting-started.md`.
+- Project catalog commands: `project add`, `list`, `resolve`, and `doctor`. Durable project metadata and repository URLs sync inside `projects/`, while checkout paths stay machine-local in `~/.dotaios/projects.json`.
+- One deterministic, project-filtered working-context projection shared by the compact brief and MCP digest, with a visible character budget.
+- Preview-first `memory promote` workflow for signal, context, project, vault, skill, and session-only dispositions, with structured receipts.
+- Strict public catalog validation that keeps draft outcome packs visible but non-purchasable and non-installable.
+
+### Changed
+- Cross-device sync is manual by default through `dotaios sync now`. The legacy automatic hook requires an explicit opt-in in a controlled main worktree. Rebase conflicts stop safely without creating recovery branches, resetting files, or pushing.
+- Setup distinguishes a ready folder from an actually configured local client and defaults optional GitHub sync to off.
+- Public copy now distinguishes local storage, provider processing, supported session capture, and browser-chat limitations.
+- The website registry is emitted at `/registry.json`; draft offers contain no checkout links or automatic-update claims.
+- The free starter keeps planning, saving, ingest, import, review, and continuity workflows. Paid packages are described by the outcomes they are intended to support, not by a count of skills.
+- MCP is now an optional advanced adapter with three bounded read-only tools. Gemini uses its simpler SessionStart hook without duplicate MCP configuration.
 
 ### Fixed
+- OKF export rejects every source/output overlap, parses YAML strictly, resolves links deterministically, stages atomically, and preserves an existing export on failure.
+- Removed the visual-editing dependency that produced nine moderate website audit findings and an unnecessary 541 kB chunk.
+- Stable project IDs now resolve to canonical slugs before working-context filtering.
 - `dotaios skills probe --path <dir>` now actually probes the given AIOS folder. The CLI passed the option as `path` while the probe library expected `aiosPath`, so probes silently fell back to `~/aios`; on machines without a populated home folder (CI runners) every probe failed with "No readable skills found". This is why the merge-ref CI run went red on 2026-07-14.
+
+### Removed
+- Removed the bundled `update-skills` workflow and weekly update claim until package ownership, update, and rollback are implemented and tested.
+- Removed direct MCP memory writes, Google command wrappers, and MCP from beginner help and Gemini setup.
 
 
 ## [1.22.0] - 2026-07-14

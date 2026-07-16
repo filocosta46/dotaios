@@ -5,6 +5,26 @@ import { delimiter } from "node:path";
 import { spawnSync } from "node:child_process";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 
+export const GWS_READ_ONLY_SERVICES = Object.freeze(["gmail", "calendar", "drive"]);
+export const GWS_READ_ONLY_SCOPES = Object.freeze([
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/calendar.readonly",
+  "https://www.googleapis.com/auth/drive.readonly"
+]);
+
+export function gwsReadOnlyLoginArgs() {
+  return ["--readonly", "--services", GWS_READ_ONLY_SERVICES.join(",")];
+}
+
+export function gwsReadOnlyLoginCommand() {
+  return ["gws", "auth", "login", ...gwsReadOnlyLoginArgs()].join(" ");
+}
+
+export function safeGwsVersion(value = "") {
+  const match = String(value).match(/\bv?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)\b/);
+  return match?.[1] || null;
+}
+
 export function resolveAiosTarget(value) {
   return path.resolve(expandHome(value || defaultAiosPath()));
 }

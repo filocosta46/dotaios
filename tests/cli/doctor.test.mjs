@@ -129,7 +129,7 @@ describe("doctorCommand", () => {
     );
   });
 
-  it("prints [ok] for AIOS folder when valid folder and config present", async () => {
+  it("prints [ok] for the folder and warns when its schema can be migrated", async () => {
     const aiosPath = await makeMinimalAios(tmpBase);
     const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-home3-"));
     const { doctorCommand } = await import(
@@ -152,8 +152,8 @@ describe("doctorCommand", () => {
       `expected [ok] AIOS folder line, got: ${lines.join("\n").slice(0, 400)}`
     );
     assert.ok(
-      lines.some((l) => l.includes("[ok]") && l.includes("aios.json")),
-      `expected [ok] aios.json line, got: ${lines.join("\n").slice(0, 400)}`
+      lines.some((l) => l.includes("[warn]") && l.includes("aios.json schema update")),
+      `expected migration warning, got: ${lines.join("\n").slice(0, 400)}`
     );
   });
 });

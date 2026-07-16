@@ -1,8 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { appendEvent, readRecentEvents, readRecentSignals } from "../../../core/src/memory.mjs";
+import { appendEvent, isoDate } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { readSection, readSubsection, replaceSection } from "../../../core/src/sections.mjs";
+import { readSection, replaceSection } from "../../../core/src/sections.mjs";
+import { selectWorkingContext } from "../../../core/src/working-context.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { buildSessionDigest } from "../../../core/src/digest.mjs";
 
@@ -17,6 +18,8 @@ Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Print the brief without writing the daily note
   --compact     Print a compact working-memory digest to stdout (no file write)
+  --project <slug-or-id>  With --compact: include only continuity for this project
+  --budget <n>    With --compact: visible character budget (default 6000)
   --lean        Print a small high-signal surface to stdout: identity, priorities,
                 north-star, today's daily note, and the first active project
                 README. The rest of memory/ stays opt-in. No file write.
@@ -36,9 +39,15 @@ export async function briefCommand(args) {
   await ensureAiosFolder(target);
 
   if (options.compact) {
-    const { digest } = await buildSessionDigest(target);
+    const { digest, budget } = await buildSessionDigest(target, {
+      project: options.project,
+      visibleCharacterBudget: options.budget
+    });
     if (options.json) {
-      process.stdout.write(JSON.stringify({ hookSpecificOutput: { additionalContext: digest } }) + "\n");
+      process.stdout.write(JSON.stringify({
+        hookSpecificOutput: { additionalContext: digest },
+        contextBudget: budget
+      }) + "\n");
     } else {
       process.stdout.write(digest + "\n");
     }
@@ -52,7 +61,7 @@ export async function briefCommand(args) {
   }
 
   const now = new Date();
-  const date = localDate(now);
+  const date = isoDate(now);
   const dailyPath = path.join(target, "memory", "daily", `${date}.md`);
   const brief = await buildDailyBrief(target, date, now);
 
@@ -77,7 +86,15 @@ export async function briefCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { dryRun: false, compact: false, lean: false, json: false, path: null };
+  const options = {
+    dryRun: false,
+    compact: false,
+    lean: false,
+    json: false,
+    path: null,
+    project: null,
+    budget: undefined
+  };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -94,6 +111,14 @@ function parseOptions(args = []) {
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
       index += 1;
+    } else if (arg === "--project") {
+      options.project = readOptionValue(args, index, "--project");
+      index += 1;
+    } else if (arg === "--budget") {
+      const value = readOptionValue(args, index, "--budget");
+      if (!/^\d+$/.test(value)) throw new Error("--budget must be a non-negative whole number.");
+      options.budget = Number(value);
+      index += 1;
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
@@ -107,7 +132,7 @@ function parseOptions(args = []) {
 // stays opt-in (loaded on demand or summarized explicitly). This is the lean
 // default load the Matt Van Horn push-memory thesis asks for: pay for signal,
 // not square footage.
-export async function buildLeanBrief(aiosPath, date = localDate(new Date())) {
+export async function buildLeanBrief(aiosPath, date = isoDate(new Date())) {
   const [identity, priorities, northStar, dailyNote, projectReadme] = await Promise.all([
     readOrEmpty(path.join(aiosPath, "context", "identity.md")),
     readOrEmpty(path.join(aiosPath, "context", "priorities.md")),
@@ -160,21 +185,22 @@ async function readFirstProjectReadme(aiosPath) {
   return "";
 }
 
-export async function buildDailyBrief(aiosPath, date = localDate(new Date()), now = new Date()) {
-  const [priorities, events, signals, carryOver] = await Promise.all([
+export async function buildDailyBrief(aiosPath, date = isoDate(new Date()), now = new Date()) {
+  const [priorities, workingContext] = await Promise.all([
     readPriorities(aiosPath),
-    readRecentEvents(path.join(aiosPath, "memory", "events.jsonl")),
-    readRecentSignals(path.join(aiosPath, "memory", "signals")),
-    readCarryOver(aiosPath, date, now)
+    selectWorkingContext(aiosPath, {}, { clock: () => new Date(now.getTime()) })
   ]);
 
-  const openLoops = extractOpenLoops([...signals, ...events]);
+  const openLoops = extractOpenLoops([
+    ...workingContext.signals,
+    ...workingContext.events
+  ]);
 
   return renderBrief({
     date,
     priorities,
     openLoops,
-    carryOver
+    carryOver: workingContext.carryOver
   });
 }
 
@@ -184,37 +210,14 @@ async function readPriorities(aiosPath) {
   return compactLines(currentBets || stripFrontmatter(content)).slice(0, 5);
 }
 
-async function readCarryOver(aiosPath, date, now) {
-  const dailyDir = path.join(aiosPath, "memory", "daily");
-  const yesterday = localDate(new Date(now.getTime() - 86400000));
-
-  const [todayNote, yesterdayNote] = await Promise.all([
-    readOrEmpty(path.join(dailyDir, `${date}.md`)),
-    readOrEmpty(path.join(dailyDir, `${yesterday}.md`))
-  ]);
-
-  const todayCarry = compactLines(extractCarriedOverPlan(todayNote));
-  const close = readSection(yesterdayNote, "Close");
-  const yesterdayCarry = compactLines(readSubsection(close, "Carry-over"));
-
-  return dedupe([...todayCarry, ...yesterdayCarry]).slice(0, 5);
-}
-
 function extractOpenLoops(entries) {
   const candidates = [];
-  for (const entry of entries.slice().reverse()) {
+  for (const entry of entries) {
     const summary = String(entry.summary || entry.note || "").trim();
     if (!summary || !OPEN_LOOP_RE.test(summary)) continue;
     candidates.push(summary);
   }
   return dedupe(candidates).slice(0, 5);
-}
-
-function extractCarriedOverPlan(content) {
-  const plan = readSection(content, "Plan");
-  const marker = "Carried over from ";
-  const index = plan.indexOf(marker);
-  return index === -1 ? "" : plan.slice(index);
 }
 
 
@@ -327,11 +330,4 @@ async function readOrEmpty(filePath) {
 
 function ensureTrailingNewline(content) {
   return content.endsWith("\n") ? content : `${content}\n`;
-}
-
-function localDate(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
 }

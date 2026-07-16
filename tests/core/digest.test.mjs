@@ -98,6 +98,44 @@ test("buildSessionDigest project filter scopes sessions", async () => {
   assert.ok(!sessionIds.includes(sessionB.session_id));
 });
 
+test("buildSessionDigest project filter also scopes signals and events", async () => {
+  const aiosPath = tmpAios();
+  const date = today();
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "signals", `${date}.jsonl`),
+    [
+      JSON.stringify({ ts: `${date}T09:00:00.000Z`, project: "project-a", summary: "Signal for A" }),
+      JSON.stringify({ ts: `${date}T10:00:00.000Z`, project: "project-b", summary: "Signal for B" }),
+    ].join("\n") + "\n",
+  );
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    [
+      JSON.stringify({ ts: `${date}T09:30:00.000Z`, project: "project-a", summary: "Event for A" }),
+      JSON.stringify({ ts: `${date}T10:30:00.000Z`, project: "project-b", summary: "Event for B" }),
+    ].join("\n") + "\n",
+  );
+
+  const { digest } = await buildSessionDigest(aiosPath, { project: "project-a" });
+
+  assert.match(digest, /Signal for A/);
+  assert.match(digest, /Event for A/);
+  assert.doesNotMatch(digest, /Signal for B|Event for B/);
+});
+
+test("buildSessionDigest honors a visible character budget", async () => {
+  const aiosPath = tmpAios();
+  const date = today();
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "daily", `${date}.md`),
+    `## Focus\n${"Long focus ".repeat(30)}\n`,
+  );
+
+  const { digest } = await buildSessionDigest(aiosPath, { visibleCharacterBudget: 120 });
+
+  assert.ok(digest.length <= 120);
+});
+
 test("buildSessionDigest carry-over from yesterday note", async () => {
   const aiosPath = tmpAios();
   const d = new Date();

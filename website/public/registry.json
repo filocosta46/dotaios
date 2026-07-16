@@ -1,0 +1,27 @@
+{
+  "version": "1.2",
+  "generated_at": "2026-07-15",
+  "registry_notes": "The free DotAIOS workflows ship with the CLI. Paid outcome packs remain unavailable until delivery, updates, and recovery are verified.",
+  "entries": [
+    {
+      "id": "guided-work",
+      "name": "Guided Work",
+      "type": "outcome-pack",
+      "paid": true,
+      "price_eur": "12.99",
+      "problem": "You want better work from your agent without researching prompts, plugins, or setup.",
+      "description": "Planned guided workflows for writing, research, applications, CRM work, and design.",
+      "status": "draft"
+    },
+    {
+      "id": "done-for-you-systems",
+      "name": "Done For You Systems",
+      "type": "outcome-pack",
+      "paid": true,
+      "price_eur": "35.00",
+      "problem": "You want to hand recurring work to your agent with a setup you can trust.",
+      "description": "Planned verified systems with guided installation, operation, and recovery.",
+      "status": "draft"
+    }
+  ]
+}

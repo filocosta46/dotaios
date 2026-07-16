@@ -8,7 +8,9 @@ any agent (Claude Code, Codex, Gemini, Cursor, and ones not listed here).
 
 This folder is {{#if user_name}}{{user_name}}'s{{else}}your{{/if}} local AIOS: durable, local-first context that
 helps AI agents understand who the user is, their active work, priorities, and
-communication preferences. It is plain text the user owns. No servers, no cloud.
+communication preferences. It is local-first plain text the user owns. Optional
+private Git sync may copy it to the user's own repository. The selected AI
+provider still processes context sent to that provider.
 
 {{#if vault_path}}
 Long-term knowledge is configured at `{{vault_path}}`.
@@ -40,11 +42,19 @@ Long-term knowledge is configured at `vault/`.
 
 ## Memory Routing
 
-- `memory/events.jsonl`: load the last 50 entries only.
-- `memory/signals/`: load today and yesterday only.
+At session start, run `dotaios brief --compact`. For project work, add
+`--project <slug-or-id>`. This command is the canonical bounded working-context
+projection used by local clients.
+
+- Route `memory/events.jsonl`, `memory/signals/`, and `memory/sessions/` into
+  working context only through that projection. Do not preload those stores
+  directly or recreate a different recency window. Use `dotaios search` for an
+  explicit on-demand lookup.
+- If the optional MCP adapter is available, `read_working_context` returns the
+  same projection. The adapter exposes exactly `read_working_context`,
+  `search_aios`, and `resolve_skill`; it has no compatibility aliases.
 - `memory/errors.jsonl`: load only when debugging failed operations.
 - `vault/`: load on demand when the task references knowledge, companies, people, writing style, or raw sources.
-- `memory/sessions/`: at the start of a work session, load the single most recent file from `memory/sessions/` if one exists. This gives you continuity from the last session without loading the full history.
 
 ## Project Convention
 
@@ -52,11 +62,19 @@ Each project should have `projects/<slug>/README.md` with frontmatter:
 
 ```yaml
 ---
+id: stable-project-id
 project: example-project
+name: Example Project
 domain: [build]
 status: active
+repo_url: https://github.com/example/example-project.git
 ---
 ```
+
+The README is the synced project record. Actual repositories stay outside this
+AIOS folder and keep independent Git histories. Resolve the current machine's
+checkout with `dotaios project resolve <slug-or-id>`; never store machine-local
+paths in the project README.
 
 Available domains:
 
@@ -105,5 +123,5 @@ If the user gives you a repository URL and asks you to install a skill or plugin
 - Ask before writing durable identity, CRM, or wiki knowledge.
 - Suggest a new skill when a workflow repeats: offer to run the `skillify` skill, which drafts a new skill (with trigger phrases) and asks for approval before saving it. Never save a generated skill without the user's OK.
 - At the start of a work session, if `memory/inbox/` contains files, read them before anything else and use the `process-inbox` skill to file each one into the right place, then delete the inbox file. These are notes captured on another device.
-- At the start of a work session and again before finishing, run `dotaios sync tick` to keep this folder mirrored to its GitHub repo across devices. It does nothing if cross-device sync is not set up.
+- Cross-device sync is optional. Do not run a mutating sync command unless the user has enabled sync and asked for it. Use `dotaios sync status` for a read-only check.
 - When a work session is wrapping up, offer to save it: "Want me to save this session to your AIOS memory?" Use the `save-session` skill.

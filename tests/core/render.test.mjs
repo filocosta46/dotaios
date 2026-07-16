@@ -72,14 +72,14 @@ test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", asy
   assert.ok(tpl.indexOf("dotaios ingest", rulesIdx) > rulesIdx, "rule must appear under Rules");
 });
 
-test("AGENTS.md.hbs Rules section includes the sync-tick and inbox-routing rules", async () => {
+test("AGENTS.md.hbs Rules section includes safe sync and inbox-routing rules", async () => {
   const tpl = await fs.readFile(
     path.resolve("templates/AGENTS.md.hbs"),
     "utf8"
   );
   const rulesIdx = tpl.indexOf("## Rules");
   assert.ok(rulesIdx !== -1, "Rules section exists");
-  assert.ok(tpl.indexOf("dotaios sync tick", rulesIdx) > rulesIdx, "sync-tick rule under Rules");
+  assert.ok(tpl.indexOf("dotaios sync status", rulesIdx) > rulesIdx, "read-only sync rule under Rules");
   assert.ok(tpl.indexOf("process-inbox", rulesIdx) > rulesIdx, "inbox-routing rule under Rules");
 });
 

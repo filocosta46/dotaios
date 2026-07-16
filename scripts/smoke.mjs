@@ -48,7 +48,7 @@ run(["cleanup", "--path", aiosPath, "--dry-run"]);
 run(["doctor", "--path", aiosPath, "--home", homePath]);
 run(["skill", "list", "--path", aiosPath]);
 
-const liveRegistryUrl = `file://${path.join(repoRoot, "website", "registry.json")}`;
+const liveRegistryUrl = `file://${path.join(repoRoot, "website", "public", "registry.json")}`;
 run(["market", "list"], { ...process.env, DOTAIOS_REGISTRY_URL: liveRegistryUrl });
 
 const fixtureRegistryUrl = `file://${path.join(repoRoot, "tests", "fixtures", "registry-sample.json")}`;

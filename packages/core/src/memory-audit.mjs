@@ -2,9 +2,11 @@ import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import path from "node:path";
 import { readJsonl, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "./memory.mjs";
+import { selectWorkingContext } from "./working-context.mjs";
 
 const DEFAULT_LINE_BUDGET = 200;
 const MAX_QUEUE_CANDIDATES = 25;
+const localClock = () => new Date();
 
 const HOT_MEMORY_FILES = [
   "AGENTS.md",
@@ -30,18 +32,20 @@ const FIELD_NOTE_ID_PREFIX = "dotaios-memory-audit:id=";
 export async function auditMemory(aiosPath, {
   lineBudget = DEFAULT_LINE_BUDGET,
   maxQueueCandidates = MAX_QUEUE_CANDIDATES,
-  memoryScope = "hot"
+  memoryScope = "hot",
+  clock = localClock
 } = {}) {
+  const now = readClockDate(clock);
   const [hotFiles, memoryEntries] = await Promise.all([
     auditHotFiles(aiosPath, lineBudget),
-    readMemoryEntries(aiosPath, { scope: memoryScope })
+    readMemoryEntries(aiosPath, { scope: memoryScope, now })
   ]);
 
   const entryAudit = classifyMemoryEntries(memoryEntries, maxQueueCandidates);
   const findings = [
     ...hotFiles.findings,
     ...entryAudit.findings,
-    ...await auditSignalFiles(aiosPath)
+    ...await auditSignalFiles(aiosPath, now)
   ];
 
   return {
@@ -229,14 +233,22 @@ async function auditHotFiles(aiosPath, lineBudget) {
   return { files, findings };
 }
 
-async function readMemoryEntries(aiosPath, { scope = "hot" } = {}) {
+async function readMemoryEntries(aiosPath, { scope = "hot", now } = {}) {
+  if (scope !== "all") {
+    const context = await selectWorkingContext(aiosPath, {}, {
+      clock: () => new Date(now.getTime())
+    });
+    return [...context.events, ...context.signals].map((entry) => ({
+      source: projectedMemorySource(entry),
+      entry
+    }));
+  }
+
   const entries = [];
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
   const allEvents = await readJsonl(eventsPath);
-  const events = scope === "all" ? allEvents : allEvents.slice(-RECENT_EVENT_LIMIT);
-  const eventOffset = scope === "all" ? 0 : allEvents.length - events.length;
-  events.forEach((entry, index) => entries.push({
-    source: `memory/events.jsonl#${eventOffset + index + 1}`,
+  allEvents.forEach((entry, index) => entries.push({
+    source: `memory/events.jsonl#${index + 1}`,
     entry
   }));
 
@@ -248,15 +260,6 @@ async function readMemoryEntries(aiosPath, { scope = "hot" } = {}) {
     signalFiles = [];
   }
 
-  if (scope !== "all") {
-    const today = isoDate(new Date());
-    const yesterday = isoDate(new Date(Date.now() - 86400000));
-    signalFiles = signalFiles.filter((file) => {
-      const date = signalDate(file);
-      return date === today || date === yesterday;
-    });
-  }
-
   for (const file of signalFiles) {
     const fileEntries = await readJsonl(path.join(signalsDir, file));
     fileEntries.forEach((entry, index) => entries.push({
@@ -266,6 +269,15 @@ async function readMemoryEntries(aiosPath, { scope = "hot" } = {}) {
   }
 
   return entries;
+}
+
+function projectedMemorySource(entry) {
+  const sourcePath = typeof entry.sourcePath === "string" && entry.sourcePath
+    ? entry.sourcePath
+    : "memory";
+  return Number.isInteger(entry.sourceLine)
+    ? `${sourcePath}#${entry.sourceLine}`
+    : sourcePath;
 }
 
 function classifyMemoryEntries(memoryEntries, maxQueueCandidates) {
@@ -351,7 +363,7 @@ function classifyMemoryEntries(memoryEntries, maxQueueCandidates) {
   };
 }
 
-async function auditSignalFiles(aiosPath) {
+async function auditSignalFiles(aiosPath, now) {
   const signalsDir = path.join(aiosPath, "memory", "signals");
   let signalFiles;
   try {
@@ -360,7 +372,9 @@ async function auditSignalFiles(aiosPath) {
     return [];
   }
 
-  const cutoff = isoDate(new Date(Date.now() - SIGNAL_RETENTION_DAYS * 86400000));
+  const cutoffDate = new Date(now.getTime());
+  cutoffDate.setDate(cutoffDate.getDate() - SIGNAL_RETENTION_DAYS);
+  const cutoff = isoDate(cutoffDate);
   const stale = signalFiles.filter((file) => signalDate(file) < cutoff);
   if (stale.length === 0) return [];
 
@@ -457,6 +471,17 @@ function countLines(content) {
 
 function countWords(content) {
   return content.trim() ? content.trim().split(/\s+/).length : 0;
+}
+
+function readClockDate(clock) {
+  const value = typeof clock === "function"
+    ? clock()
+    : typeof clock?.now === "function"
+      ? clock.now()
+      : clock;
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new TypeError("Memory-audit clock returned an invalid date");
+  return date;
 }
 
 function signalDate(file) {
