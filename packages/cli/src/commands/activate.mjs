@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "../../../core/src/files.mjs";
-import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
   MANAGED_END,
   MANAGED_START,
@@ -542,7 +542,7 @@ async function isTemporaryAiosPath(aiosPath) {
   // while the realpath check catches a permanent-looking alias that points into
   // a temporary activation directory. We intentionally reject any path inside
   // the OS temp root, not only names matching one historical temp prefix.
-  return isWithin(lexicalTempRoot, lexicalPath) || isWithin(realTempRoot, realPath);
+  return isPathWithinLexically(lexicalTempRoot, lexicalPath) || isPathWithinLexically(realTempRoot, realPath);
 }
 
 async function realpathThroughExistingAncestor(value) {
@@ -557,11 +557,6 @@ async function realpathThroughExistingAncestor(value) {
       current = parent;
     }
   }
-}
-
-function isWithin(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function printResults(title, results) {

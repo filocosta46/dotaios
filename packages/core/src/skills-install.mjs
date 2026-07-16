@@ -2,11 +2,12 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { collectSkills } from "./skills.mjs";
+import { isPathWithinLexically } from "./paths.mjs";
 
 async function isStaleDotaiosTempPath(value) {
   const resolved = path.resolve(value);
   const tempRoot = path.resolve(os.tmpdir());
-  const isDotaiosPath = isWithin(tempRoot, resolved)
+  const isDotaiosPath = isPathWithinLexically(tempRoot, resolved)
     && /(?:^|[\\/])dotaios-[^\\/]+[\\/]aios[\\/]skills(?:[\\/]|$)/.test(resolved);
   if (!isDotaiosPath) return false;
 
@@ -135,7 +136,7 @@ export async function cleanupStaleLinks({ aiosPath, sourceDir = null, targetDir,
     const target = resolveSymlinkTarget(dest, info.target);
     if (path.basename(target) !== entry.name) continue;      // alias ownership is unprovable
     const root = path.resolve(skillsRoot);
-    const ownsIt = isWithin(root, target) || await isStaleDotaiosTempPath(target);
+    const ownsIt = isPathWithinLexically(root, target) || await isStaleDotaiosTempPath(target);
     if (!ownsIt) continue;                                  // foreign symlink — leave it
     try {
       await fs.access(target);                               // source still exists?
@@ -172,7 +173,7 @@ export async function removeManagedSkillLinks({ aiosPath, sourceDir = null, targ
     const canonicalSource = canonicalSources.get(entry.name);
     if (!canonicalSource) continue;
     const target = resolveSymlinkTarget(dest, info.target);
-    if (!isWithin(root, target) || !(await samePath(target, canonicalSource))) continue;
+    if (!isPathWithinLexically(root, target) || !(await samePath(target, canonicalSource))) continue;
     if (!dryRun) await fs.rm(dest, { recursive: true, force: true });
     removed.push({ action: dryRun ? "would-remove" : "removed", path: dest });
   }
@@ -252,7 +253,7 @@ function resolveSkillsRoot(aiosPath, sourceDir) {
 export async function validateProjectPath({ projectRoot, targetPath }) {
   const root = path.resolve(projectRoot);
   const target = path.resolve(targetPath);
-  if (!isWithin(root, target)) {
+  if (!isPathWithinLexically(root, target)) {
     return { safe: false, reason: "target escapes project root" };
   }
 
@@ -279,7 +280,7 @@ export async function validateProjectPath({ projectRoot, targetPath }) {
 export async function validateProjectSourcePath({ projectRoot, sourcePath }) {
   const root = path.resolve(projectRoot);
   const source = path.resolve(sourcePath);
-  if (!isWithin(root, source)) {
+  if (!isPathWithinLexically(root, source)) {
     return { safe: false, reason: "source path escapes project root" };
   }
   try {
@@ -324,21 +325,16 @@ async function samePath(left, right) {
   }
 }
 
-function isWithin(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-}
-
 async function pathsOverlap(left, right) {
   const leftPath = path.resolve(left);
   const rightPath = path.resolve(right);
-  if (isWithin(leftPath, rightPath) || isWithin(rightPath, leftPath)) return true;
+  if (isPathWithinLexically(leftPath, rightPath) || isPathWithinLexically(rightPath, leftPath)) return true;
 
   const [leftReal, rightReal] = await Promise.all([
     realpathThroughExistingAncestor(leftPath),
     realpathThroughExistingAncestor(rightPath)
   ]);
-  return isWithin(leftReal, rightReal) || isWithin(rightReal, leftReal);
+  return isPathWithinLexically(leftReal, rightReal) || isPathWithinLexically(rightReal, leftReal);
 }
 
 async function realpathThroughExistingAncestor(value) {

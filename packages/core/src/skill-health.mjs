@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isPathWithinLexically } from "./paths.mjs";
 import { MANAGED_END, MANAGED_START, isAgentInstalled, loadAgentRegistry } from "./bridges.mjs";
 import { renderResolver, renderSkillsIndex, collectSkills } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
@@ -279,7 +280,7 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
       if (aliasPaths.has(destination)) continue;
       const rawTarget = await fs.readlink(destination);
       const resolvedTarget = path.resolve(path.dirname(destination), rawTarget);
-      const owned = isWithin(sourceRoot, resolvedTarget);
+      const owned = isPathWithinLexically(sourceRoot, resolvedTarget);
       let targetExists = true;
       try {
         await fs.access(resolvedTarget);
@@ -436,9 +437,4 @@ function normalizePath(value, homePath) {
 
 function unquoteScalar(value) {
   return String(value || "").trim().replace(/^(['"])(.*)\1$/, "$2");
-}
-
-function isWithin(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
