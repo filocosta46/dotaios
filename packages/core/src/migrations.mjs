@@ -59,7 +59,8 @@ export async function previewMigration({ aiosPath }) {
     };
   }
 
-  return publicPreview(buildPreview(configState));
+  const preservedPaths = await inventoryPreservedPaths(root);
+  return publicPreview(buildPreview(configState, preservedPaths));
 }
 
 export async function applyMigration({ aiosPath, planId, releaseVersion, signal = null }) {
@@ -96,7 +97,8 @@ export async function applyMigration({ aiosPath, planId, releaseVersion, signal 
     throw recoveryRequired(activeTransactions);
   }
 
-  const computed = buildPreview(configState);
+  const preservedPaths = await inventoryPreservedPaths(root);
+  const computed = buildPreview(configState, preservedPaths);
   if (computed.status === "current") {
     throw new MigrationError(
       "NO_MIGRATION_NEEDED",
@@ -214,7 +216,7 @@ export async function recoverMigration({ aiosPath, planId = null }) {
   return { status: "rolled_back", plan_id: selectedPlanId, schema_version: restoredConfig.version };
 }
 
-function buildPreview(configState) {
+function buildPreview(configState, preservedPaths = []) {
   if (configState.version === schemaVersion) {
     return {
       status: "current",
@@ -268,6 +270,7 @@ function buildPreview(configState) {
     to_schema_version: schemaVersion,
     migrations: chain.map(({ id, from, to, summary }) => ({ id, from, to, summary })),
     operations: changes.map(publicOperation),
+    preserved_paths: preservedPaths,
     protected_shelves: [...PROTECTED_SHELVES]
   };
   const planId = `migrate-${versionToken(configState.version)}-to-${versionToken(schemaVersion)}-${sha256(canonicalJson(planBody)).slice(0, 16)}`;
@@ -490,6 +493,7 @@ async function restoreOperation(root, transactionRoot, operation) {
 }
 
 function createReceipt(plan, releaseVersion) {
+  const transactionPath = path.posix.join(".dotaios", "migrations", "transactions", plan.plan_id);
   return {
     schema: RECEIPT_SCHEMA,
     plan_id: plan.plan_id,
@@ -501,6 +505,20 @@ function createReceipt(plan, releaseVersion) {
       before_sha256,
       after_sha256
     })),
+    preserved_paths: plan.preserved_paths || [],
+    recovery: {
+      strategy: "journaled-backup",
+      journal_schema: JOURNAL_SCHEMA,
+      transaction_path: transactionPath,
+      rollback_command: `dotaios migrate --recover ${plan.plan_id}`,
+      backups: plan.operations.map((operation) => ({
+        path: operation.path,
+        backup_path: operation.before_sha256
+          ? path.posix.join(transactionPath, "backups", operation.path)
+          : null,
+        before_sha256: operation.before_sha256,
+      })),
+    },
     release_version: releaseVersion,
     applied_at: new Date().toISOString()
   };
@@ -599,6 +617,54 @@ async function listFilesRecursively(root) {
     return entry.isDirectory() ? listFilesRecursively(resolved) : [resolved];
   }));
   return nested.flat();
+}
+
+async function inventoryPreservedPaths(root) {
+  const inventory = [];
+  for (const shelf of PROTECTED_SHELVES) {
+    const relativeRoot = shelf.replace(/\/$/, "");
+    await inventoryPath(path.join(root, relativeRoot), relativeRoot, inventory);
+  }
+  return inventory.sort((left, right) => left.path.localeCompare(right.path));
+}
+
+async function inventoryPath(absolutePath, relativePath, inventory) {
+  let stats;
+  try {
+    stats = await fs.lstat(absolutePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return;
+    throw error;
+  }
+
+  if (stats.isSymbolicLink()) {
+    inventory.push({ path: relativePath, kind: "symlink", bytes: 0, sha256: null });
+    return;
+  }
+  if (stats.isDirectory()) {
+    inventory.push({ path: relativePath, kind: "directory", bytes: 0, sha256: null });
+    const entries = await fs.readdir(absolutePath, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      await inventoryPath(
+        path.join(absolutePath, entry.name),
+        path.posix.join(relativePath, entry.name),
+        inventory,
+      );
+    }
+    return;
+  }
+  if (!stats.isFile()) {
+    inventory.push({ path: relativePath, kind: "other", bytes: 0, sha256: null });
+    return;
+  }
+
+  const bytes = await fs.readFile(absolutePath);
+  inventory.push({
+    path: relativePath,
+    kind: "file",
+    bytes: bytes.length,
+    sha256: sha256(bytes),
+  });
 }
 
 async function ensureOwnedMetadata(root) {

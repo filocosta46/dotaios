@@ -27,6 +27,7 @@ test("preview is deterministic and writes zero files", async (t) => {
   assert.equal(first.plan.from_schema_version, "1.0.0");
   assert.equal(first.plan.to_schema_version, "1.1.0");
   assert.deepEqual(first.plan.operations.map((operation) => operation.path), ["aios.json"]);
+  assert.ok(first.plan.preserved_paths.some((entry) => entry.path === "context/identity.md"));
   assert.equal("created_at" in first.plan, false);
   assert.equal("release_version" in first.plan, false);
   assert.deepEqual(await snapshotTree(aiosPath), before);
@@ -55,6 +56,10 @@ test("apply changes only compatibility metadata and preserves user and edited sc
   assert.equal(receipt.from_schema_version, "1.0.0");
   assert.equal(receipt.to_schema_version, "1.1.0");
   assert.deepEqual(receipt.operations.map((operation) => operation.path), ["aios.json"]);
+  assert.ok(receipt.preserved_paths.some((entry) => entry.path === "projects/atlas/README.md"));
+  assert.equal(receipt.recovery.strategy, "journaled-backup");
+  assert.match(receipt.recovery.rollback_command, /migrate --recover/);
+  assert.equal(receipt.recovery.backups[0].backup_path, ".dotaios/migrations/transactions/" + preview.plan.plan_id + "/backups/aios.json");
 });
 
 test("an existing receipt makes apply byte-for-byte idempotent", async (t) => {
