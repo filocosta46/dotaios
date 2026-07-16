@@ -1,7 +1,16 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { applySkillPatchCandidates, auditMemory, renderMemoryAudit, writeSkillPatchQueue } from "../../../core/src/memory-audit.mjs";
-import { applyPromotion, planPromotion, renderPromotionPreview } from "../../../core/src/promotion.mjs";
+import {
+  applyPromotion,
+  consumePromotionPlan,
+  loadPromotionPlan,
+  persistPromotionPlan,
+  planPromotion,
+  promotionPlanPathFor,
+  renderPromotionPreview
+} from "../../../core/src/promotion.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const HELP_TEXT = `Usage:
@@ -31,6 +40,9 @@ Promotion options:
   --destination <path>  Relative Markdown path for context/project/vault/skill
   --project <name>      Add project provenance; defaults project to README.md
   --summary <text>      Exact fact, state, or procedure to append
+  --operation <op>      add | replace | remove | supersede (default: add)
+  --match <hash|text>   Existing promoted block to replace, remove, or supersede
+  --plan <path>         Apply this saved preview plan explicitly
   --apply               Write after showing the preview (default: preview only)
 
 Examples:
@@ -102,13 +114,28 @@ async function runPromotion(args) {
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
 
-  const plan = await planPromotion(target, {
+  const planOptions = {
     source: options.source,
     destinationType: options.destinationType,
     destinationPath: options.destinationPath,
     project: options.project,
-    summary: options.summary
-  });
+    summary: options.summary,
+    operation: options.operation,
+    match: options.match
+  };
+  let plan = null;
+  let loadedPlan = false;
+  if (options.apply) {
+    const savedPath = options.plan
+      ? path.resolve(expandHome(options.plan))
+      : promotionPlanPathFor(target, planOptions);
+    plan = await loadPromotionPlan(savedPath);
+    if (!plan && !options.plan) plan = await findMatchingSavedPlan(target, planOptions);
+    loadedPlan = Boolean(plan);
+  }
+  if (!plan) plan = await planPromotion(target, planOptions);
+
+  await persistPromotionPlan(plan);
 
   console.log(renderPromotionPreview(plan));
   if (!options.apply) {
@@ -117,12 +144,46 @@ async function runPromotion(args) {
   }
 
   const result = await applyPromotion(plan);
+  await consumePromotionPlan(plan);
   if (result.destinationType === "session-only") {
     console.log("\nRecorded as session-only evidence. No durable knowledge file was created.");
+  } else if (result.noop) {
+    console.log("\nNo-op: identical promoted content was already present at the destination.");
   } else {
     console.log(`\nApplied promotion to ${result.destinationPath}.`);
   }
   console.log(`Receipt appended to ${result.receiptPath}.`);
+  if (loadedPlan) console.log("Applied the persisted preview plan after rechecking its source and destination hashes.");
+}
+
+async function findMatchingSavedPlan(aiosPath, options) {
+  const directory = path.join(aiosPath, ".dotaios", "promotion-plans");
+  let names;
+  try {
+    names = await fs.readdir(directory);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  for (const name of names.filter((entry) => entry.endsWith(".json")).sort()) {
+    const plan = await loadPromotionPlan(path.join(directory, name));
+    if (!plan) continue;
+    const sourceMatches = options.source === plan.source.sessionId
+      || String(plan.source.sessionId || "").startsWith(String(options.source || ""));
+    const destinationMatches = !options.destinationPath
+      || plan.destinationPath === options.destinationPath
+      || plan.destinationPath === String(options.destinationPath).replaceAll("\\", "/");
+    if (sourceMatches
+      && destinationMatches
+      && plan.destinationType === options.destinationType
+      && (plan.project || null) === (options.project || null)
+      && plan.summary === String(options.summary || "").trim()
+      && plan.operation === options.operation
+      && (plan.match || null) === (options.match || null)) {
+      return plan;
+    }
+  }
+  return null;
 }
 
 function parseAuditOptions(args = []) {
@@ -168,7 +229,10 @@ function parsePromotionOptions(args = []) {
     positionals: [],
     project: null,
     source: null,
-    summary: null
+    summary: null,
+    operation: "add",
+    match: null,
+    plan: null
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -191,6 +255,15 @@ function parsePromotionOptions(args = []) {
       index += 1;
     } else if (arg === "--summary") {
       options.summary = readOptionValue(args, index, "--summary");
+      index += 1;
+    } else if (arg === "--operation") {
+      options.operation = readOptionValue(args, index, "--operation");
+      index += 1;
+    } else if (arg === "--match") {
+      options.match = readOptionValue(args, index, "--match");
+      index += 1;
+    } else if (arg === "--plan") {
+      options.plan = readOptionValue(args, index, "--plan");
       index += 1;
     } else if (arg === "--apply") {
       options.apply = true;
