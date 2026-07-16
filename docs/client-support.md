@@ -13,8 +13,10 @@ A successful file write proves only configured. It does not prove that a particu
 | Claude Code | Global `~/.claude/CLAUDE.md` bridge | Global and project `skills/` links | Configured locally; verify invocation in the client |
 | Codex | Global `~/.codex/AGENTS.md` bridge | Native shared Agent Skills links | Configured locally; verify invocation in the client |
 | Gemini CLI | Global `~/.gemini/GEMINI.md` bridge | Native shared Agent Skills links | Configured locally; optional session hook has separate setup |
-| Cursor | Project `AGENTS.md` and `.cursor/rules/dotaios.mdc` from `dotaios attach` | Project Agent Skills links | Project-scoped configuration only |
+| Cursor | Project `AGENTS.md` and `.cursor/rules/dotaios.mdc` from `dotaios attach` | Project Agent Skills links | Configured locally; project-scoped invocation is not proven by the bounded probe |
 | Browser chats | No local filesystem access | No native local skill path | Attach files or paste a bounded brief explicitly |
 | Other runtimes | Runtime-specific | Runtime-specific | Optional and experimental until proven |
 
 Run `dotaios activate --dry-run` to preview global changes, `dotaios attach <project> --dry-run` for a project, and `dotaios skills doctor` for filesystem-level diagnostics. These checks remain honest about the difference between a configured path and an invoked workflow.
+
+The 2026-07-16 bounded invocation receipts are committed under `docs/probes/`. Codex produced the probe marker. Claude Code and Gemini CLI were invoked but could not produce it in this environment because their clients rejected authentication/support-tier access; those receipts are evidence of the limitation, not a stronger claim.
