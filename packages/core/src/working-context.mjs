@@ -94,7 +94,7 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     .filter((event) => matchesProject(event, projectFilter))
     .filter(hasTimelineSummary)
     .map((event) => markUnscoped(event, projectFilter));
-  const deduped = dedupeUpdateChannels(signals, events, projectFilter);
+  const deduped = dedupeUpdateChannels(signals, events);
 
   const candidates = {
     identity: compactHeader(identity),
@@ -400,8 +400,7 @@ function markUnscoped(entry, projectFilter) {
   return projectFilter && !entry.project ? { ...entry, unscoped: true } : entry;
 }
 
-function dedupeUpdateChannels(signals, events, projectFilter) {
-  if (projectFilter) return { signals, events };
+function dedupeUpdateChannels(signals, events) {
   const updateKeys = new Set(
     events
       .filter((event) => event.type === "update" && event.source === "dotaios update")

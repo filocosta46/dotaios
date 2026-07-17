@@ -130,6 +130,20 @@ test("scoped views retain unattributed evidence without leaking another project"
   assert.equal((unscoped.rendered.match(/Unscoped update/g) || []).length, 1);
 });
 
+test("scoped views dedupe update channels like unscoped views", async () => {
+  const aiosPath = tmpAios();
+  writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", type: "update", source: "dotaios update", project: "project-a", summary: "A update" },
+  ]);
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", type: "update", source: "dotaios update", project: "project-a", summary: "A update" },
+  ]);
+
+  const scopedA = await buildWorkingContext(aiosPath, { project: "project-a" }, { clock: fixedClock });
+
+  assert.equal((scopedA.rendered.match(/A update/g) || []).length, 1);
+});
+
 test("compact projection answers identity and priorities within the same budget", async () => {
   const aiosPath = tmpAios();
   fs.mkdirSync(path.join(aiosPath, "context"), { recursive: true });
