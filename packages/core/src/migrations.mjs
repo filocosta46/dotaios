@@ -59,8 +59,10 @@ export async function previewMigration({ aiosPath }) {
     };
   }
 
+  const preview = buildPreview(configState);
+  if (preview.status !== "ready") return publicPreview(preview);
   const preservedPaths = await inventoryPreservedPaths(root);
-  return publicPreview(buildPreview(configState, preservedPaths));
+  return publicPreview({ ...preview, plan: { ...preview.plan, preserved_paths: preservedPaths } });
 }
 
 export async function applyMigration({ aiosPath, planId, releaseVersion, signal = null }) {
@@ -97,21 +99,22 @@ export async function applyMigration({ aiosPath, planId, releaseVersion, signal 
     throw recoveryRequired(activeTransactions);
   }
 
-  const preservedPaths = await inventoryPreservedPaths(root);
-  const computed = buildPreview(configState, preservedPaths);
-  if (computed.status === "current") {
+  const identityCheck = buildPreview(configState);
+  if (identityCheck.status === "current") {
     throw new MigrationError(
       "NO_MIGRATION_NEEDED",
       `Schema ${schemaVersion} is already current and there is no receipt for plan ${planId}.`
     );
   }
-  if (computed.plan.plan_id !== planId) {
+  if (identityCheck.plan.plan_id !== planId) {
     throw new MigrationError(
       "PLAN_CHANGED",
       `Plan ${planId} no longer matches the folder. Preview again; no migration files were changed.`,
-      { expected_plan_id: computed.plan.plan_id }
+      { expected_plan_id: identityCheck.plan.plan_id }
     );
   }
+  const preservedPaths = await inventoryPreservedPaths(root);
+  const computed = { ...identityCheck, plan: { ...identityCheck.plan, preserved_paths: preservedPaths } };
 
   throwIfAborted(signal, false);
   const metadata = await ensureOwnedMetadata(root);
@@ -270,11 +273,13 @@ function buildPreview(configState, preservedPaths = []) {
     to_schema_version: schemaVersion,
     migrations: chain.map(({ id, from, to, summary }) => ({ id, from, to, summary })),
     operations: changes.map(publicOperation),
-    preserved_paths: preservedPaths,
     protected_shelves: [...PROTECTED_SHELVES]
   };
+  // Plan identity pins the planned operations only. The preserved-paths
+  // inventory is receipt material and may legitimately grow between preview
+  // and apply (memory appends, new signals); hashing it would strand valid plans.
   const planId = `migrate-${versionToken(configState.version)}-to-${versionToken(schemaVersion)}-${sha256(canonicalJson(planBody)).slice(0, 16)}`;
-  const plan = { ...planBody, plan_id: planId };
+  const plan = { ...planBody, preserved_paths: preservedPaths, plan_id: planId };
 
   return { status: "ready", plan, changes };
 }

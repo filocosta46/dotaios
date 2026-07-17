@@ -95,6 +95,26 @@ test("apply rejects a config edit made after preview before writing transaction 
   assert.equal(fsSync.existsSync(path.join(aiosPath, ".dotaios")), false);
 });
 
+test("apply accepts the previewed plan after preserved memory grows", async (t) => {
+  const aiosPath = await copyHistoricalFixture(t);
+  const preview = await previewMigration({ aiosPath });
+  await fs.appendFile(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    `${JSON.stringify({ ts: "2026-07-16T00:00:00.000Z", type: "update", source: "dotaios update", summary: "post-preview note" })}\n`
+  );
+
+  const result = await applyMigration({
+    aiosPath,
+    planId: preview.plan.plan_id,
+    releaseVersion: "1.23.0"
+  });
+
+  assert.equal(result.status, "applied");
+  const receipt = JSON.parse(await fs.readFile(path.join(aiosPath, result.receipt_path), "utf8"));
+  assert.equal(receipt.plan_id, preview.plan.plan_id);
+  assert.ok(receipt.preserved_paths.some((entry) => entry.path === "memory/events.jsonl"));
+});
+
 test("interrupted apply leaves a journal and backup that recovery can roll back", async (t) => {
   const aiosPath = await copyHistoricalFixture(t);
   const originalConfig = await fs.readFile(path.join(aiosPath, "aios.json"));
