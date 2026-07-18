@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1200px; height: 630px; overflow: hidden;
+    background: #f5f5f7;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+    color: #1d1d1f;
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 84px 92px 64px;
+  }
+  .mark { display: flex; align-items: center; gap: 18px; }
+  .folder {
+    width: 54px; height: 42px; border-radius: 9px; background: #1d1d1f; position: relative;
+  }
+  .folder::before {
+    content: ""; position: absolute; top: -9px; left: 0;
+    width: 24px; height: 12px; border-radius: 6px 6px 0 0; background: #1d1d1f;
+  }
+  .brand { font-size: 34px; font-weight: 650; letter-spacing: -0.02em; }
+  h1 { font-size: 92px; font-weight: 640; letter-spacing: -0.045em; line-height: 1.02; max-width: 980px; }
+  .sub { margin-top: 26px; font-size: 34px; font-weight: 450; color: #6e6e73; letter-spacing: -0.01em; }
+  .foot { display: flex; justify-content: space-between; align-items: baseline; }
+  .url { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 24px; color: #0071e3; letter-spacing: 0.01em; }
+  .free { font-size: 24px; color: #6e6e73; }
+</style>
+</head>
+<body>
+  <div class="mark">
+    <div class="folder"></div>
+    <div class="brand">DotAIOS</div>
+  </div>
+  <div>
+    <h1>One private folder your AI tools actually remember.</h1>
+    <div class="sub">Projects, documents, memory, and workflows. Local files, yours.</div>
+  </div>
+  <div class="foot">
+    <div class="url">dotaios.vercel.app</div>
+    <div class="free">Free and open source</div>
+  </div>
+</body>
+</html>
