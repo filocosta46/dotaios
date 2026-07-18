@@ -688,3 +688,65 @@ test("projectCommand rejects invalid metadata options before writing", async (t)
   );
   await assert.rejects(fs.access(statePath), { code: "ENOENT" });
 });
+
+async function writeTimeline(aiosPath, entries) {
+  await fs.mkdir(path.join(aiosPath, "memory"), { recursive: true });
+  await fs.writeFile(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`
+  );
+}
+
+test("project context emits the scoped continuity payload for a registered project", async (t) => {
+  const { aiosPath, homePath, statePath } = await fixture(t);
+  await writeProjectReadme(aiosPath, "alpha", ["project_id: ctx-alpha-id", "project: alpha", "status: active"].join("\n"));
+  await writeProjectReadme(aiosPath, "beta", ["project_id: ctx-beta-id", "project: beta", "status: active"].join("\n"));
+  const now = new Date().toISOString();
+  await writeTimeline(aiosPath, [
+    { ts: now, type: "update", source: "dotaios update", project: "alpha", summary: "Alpha decided to use Postgres" },
+    { ts: now, type: "update", source: "dotaios update", project: "beta", summary: "Beta decided to use SQLite" }
+  ]);
+
+  const { lines, output } = outputCapture();
+  const result = await projectCommand([
+    "context", "alpha", "--tool", "codex",
+    "--path", aiosPath, "--home", homePath, "--state-path", statePath
+  ], { output });
+
+  const text = lines.join("\n");
+  assert.match(text, /Project continuity: alpha/);
+  assert.match(text, /tool: codex/);
+  assert.match(text, /Alpha decided to use Postgres/);
+  assert.doesNotMatch(text, /Beta decided to use SQLite/);
+  assert.equal(result.project, "alpha");
+});
+
+test("project context fails closed on an unregistered reference", async (t) => {
+  const { aiosPath, homePath, statePath } = await fixture(t);
+  await writeProjectReadme(aiosPath, "alpha", ["project_id: ctx-alpha-2", "project: alpha", "status: active"].join("\n"));
+  const { output } = outputCapture();
+  await assert.rejects(
+    projectCommand(["context", "ghost", "--path", aiosPath, "--home", homePath, "--state-path", statePath], { output }),
+    /not registered/
+  );
+});
+
+test("project context --json wraps the payload for tool bridges", async (t) => {
+  const { aiosPath, homePath, statePath } = await fixture(t);
+  await writeProjectReadme(aiosPath, "alpha", ["project_id: ctx-alpha-3", "project: alpha", "status: active"].join("\n"));
+  await writeTimeline(aiosPath, [
+    { ts: new Date().toISOString(), type: "update", source: "dotaios update", project: "alpha", summary: "Alpha decided to use Postgres" }
+  ]);
+
+  const { lines, output } = outputCapture();
+  await projectCommand([
+    "context", "alpha", "--tool", "claude-code", "--json",
+    "--path", aiosPath, "--home", homePath, "--state-path", statePath
+  ], { output });
+
+  const parsed = JSON.parse(lines.join("\n"));
+  assert.equal(parsed.project, "alpha");
+  assert.equal(parsed.tool, "claude-code");
+  assert.match(parsed.context, /Alpha decided to use Postgres/);
+  assert.ok(parsed.context_budget && typeof parsed.context_budget === "object");
+});

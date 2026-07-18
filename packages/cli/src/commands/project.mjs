@@ -6,6 +6,7 @@ import {
   registerProject,
   resolveProject
 } from "../../../core/src/projects.mjs";
+import { buildSessionDigest } from "../../../core/src/digest.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const HELP_TEXT = `Usage:
@@ -13,6 +14,7 @@ const HELP_TEXT = `Usage:
   dotaios project list [options]
   dotaios project resolve <slug-or-id> [options]
   dotaios project doctor [options]
+  dotaios project context <slug-or-id> [options]
 
 Keep real project repositories outside AIOS. DotAIOS stores portable metadata
 under projects/<slug>/README.md and a local path mapping only on this machine.
@@ -26,7 +28,11 @@ Add options:
   --repo-url <url>    Override the Git origin URL discovered from the repository
   --apply             Apply the exact plan computed and checked by this command
   --yes               Explicit script-friendly alias for --apply
-  --json              Print the portable plan and receipt as JSON
+
+Context options:
+  --tool <name>       Record which client the payload is for (default: any)
+  --budget <n>        Visible character budget for the payload
+  --json              Print the portable plan and receipt (or context payload) as JSON
 
 Common options:
   --path <dir>        Use an AIOS folder other than ~/aios
@@ -61,7 +67,7 @@ export async function projectCommand(args = [], dependencies = {}) {
       apply: addOptions.apply,
       yes: addOptions.yes
     });
-    if (addOptions.json) {
+    if (options.json) {
       output.log(JSON.stringify(projectRegistrationJson(project), null, 2));
     } else {
       printProjectRegistration(output, project);
@@ -85,6 +91,42 @@ export async function projectCommand(args = [], dependencies = {}) {
     });
     output.log(projectPath);
     return projectPath;
+  }
+
+  if (subcommand === "context") {
+    assertPositionals(positionals, 1, "dotaios project context <slug-or-id>");
+    const reference = positionals[0];
+    const projects = await listProjects(coreOptions);
+    const matches = projects.filter((project) =>
+      project.id === reference || project.slug === reference || project.project === reference);
+    if (matches.length === 0) {
+      throw new Error(`Project "${reference}" is not registered. Run \`dotaios project list\`.`);
+    }
+    if (matches.length > 1) {
+      throw new Error(`Project reference "${reference}" is ambiguous. Use its stable id.`);
+    }
+    const slug = matches[0].slug || matches[0].project;
+    const { digest, budget } = await buildSessionDigest(coreOptions.aiosPath, {
+      project: slug,
+      visibleCharacterBudget: options.budget
+    });
+    const tool = options.tool || "any";
+    const generatedAt = new Date().toISOString();
+    if (options.json) {
+      output.log(JSON.stringify({
+        project: slug,
+        tool,
+        generated_at: generatedAt,
+        context_budget: budget,
+        context: digest
+      }, null, 2));
+    } else {
+      output.log(`# Project continuity: ${slug}`);
+      output.log(`# generated: ${generatedAt}  tool: ${tool}`);
+      output.log("");
+      output.log(digest);
+    }
+    return { project: slug, tool, digest, budget };
   }
 
   if (subcommand === "doctor") {
@@ -116,7 +158,7 @@ function createCoreOptions(options, dependencies) {
 }
 
 function parseOptions(args) {
-  const options = { path: null, home: null, statePath: null };
+  const options = { path: null, home: null, statePath: null, tool: null, budget: undefined, json: false };
   const addOptions = {
     slug: null,
     name: null,
@@ -124,8 +166,7 @@ function parseOptions(args) {
     domains: [],
     repoUrl: null,
     apply: false,
-    yes: false,
-    json: false
+    yes: false
   };
   const positionals = [];
   let subcommand = null;
@@ -162,7 +203,17 @@ function parseOptions(args) {
     } else if (arg === "--yes") {
       addOptions.yes = true;
     } else if (arg === "--json") {
-      addOptions.json = true;
+      options.json = true;
+    } else if (arg === "--tool") {
+      options.tool = readOptionValue(args, index, "--tool");
+      index += 1;
+    } else if (arg === "--budget") {
+      const value = Number.parseInt(readOptionValue(args, index, "--budget"), 10);
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new Error("--budget requires a positive integer.");
+      }
+      options.budget = value;
+      index += 1;
     } else if (arg.startsWith("--")) {
       throw new Error(`Unknown option: ${arg}`);
     } else if (!subcommand) {
@@ -189,8 +240,7 @@ function assertNoAddOptions(options, subcommand) {
     options.domains.length > 0 ||
     options.repoUrl ||
     options.apply ||
-    options.yes ||
-    options.json
+    options.yes
   ) {
     throw new Error(`Project add options can only be used with \`dotaios project add\`, not ${subcommand}.`);
   }
