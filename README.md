@@ -19,9 +19,11 @@ You will not type a single command. Your AI does the whole setup for you.
 First, make sure you have one AI app on your computer. If you are not sure which to pick, start with Claude Code, the friendliest one.
 
 - [Claude Code](https://claude.com/download), recommended
-- [Cursor](https://www.cursor.com), an editor with AI built in
+- [Cursor](https://www.cursor.com), an editor with AI built in. Cursor support is project scoped today: DotAIOS attaches rules per project folder, not to every window.
 - [Codex](https://github.com/openai/codex) by OpenAI
 - [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
+
+Support depth varies by client and version. The honest matrix is in [docs/client-support.md](docs/client-support.md).
 
 Then open that app, paste this one sentence into the chat, and press Enter:
 
@@ -61,14 +63,14 @@ Your folder lives at `~/aios` in your home directory. You can open it any time, 
 
 If you ever want to read your memory on your phone, DotAIOS can mirror the folder to a private space that only you can see. That part is optional.
 
-## The folder is free. Outcome packs are coming next.
+## The folder is free. The first pack is for consultants.
 
-The planned packs are for people who want better results without researching prompts, plugins, or agent setup. They will be sold by the work they help you finish, not by the number of files inside.
+The free folder is the whole product. Paid packs add reviewed workflows for one specific kind of work, sold by the outcome they help you finish, not by the number of files inside.
 
-- **Guided work, planned at €12.99.** Better writing, research, applications, CRM work, and design guidance, tested as complete agent workflows.
-- **Done-for-you systems, planned at €35.** Hand repeatable work to your agent with guided setups, verification, and clear operating instructions.
+- **Independent Consultant Pack, €35 once.** Six reviewed client workflows: starting a client project, call notes, bounded research memos, proposal drafts, the weekly client review, and follow-up. This is the first offer.
+- **Guided work pack, planned at €12.99.** Lighter guided workflows for writing, research, and applications. Planned after the consultant pack ships.
 
-Both packs are still in preparation. There is no checkout or delivery claim until the packages and update path are ready.
+There is no checkout yet. It stays closed until install, removal, update, rollback, recovery, entitlement, authenticated delivery, and permission checks all pass end to end.
 
 ## Pillars
 
