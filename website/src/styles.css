@@ -307,13 +307,11 @@ code, pre { font-family: var(--mono); }
   .site-header--menu-open .nav-toggle-icon::after { top: 0; transform: rotate(-45deg); }
   .nav { position: absolute; z-index: 2; top: calc(100% + 9px); right: 0; left: 0; display: grid; gap: 2px; padding: 10px; border: 1px solid rgba(255, 255, 255, 0.75); border-radius: 16px; background: rgba(255, 255, 255, 0.88); box-shadow: 0 20px 44px rgba(29, 29, 31, 0.14); opacity: 0; pointer-events: none; transform: translateY(-7px) scale(0.98); transform-origin: top right; transition: opacity 200ms var(--ease), transform 240ms var(--ease); -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px); }
   .nav--open { opacity: 1; pointer-events: auto; transform: translateY(0) scale(1); }
-  .language-switch { gap: 4px; padding: 4px; }
-  .language-switch button { min-width: 44px; min-height: 44px; font-size: 0.78rem; }
   .nav a { min-height: 44px; padding: 10px 12px; border-radius: 9px; }
   .nav a:hover { background: rgba(29, 29, 31, 0.05); }
   .nav-cta { justify-content: center; margin-top: 5px; }
-  .language-switch { justify-self: start; margin: 6px 2px; }
-  .language-switch button { min-height: 36px; }
+  .language-switch { justify-self: start; margin: 6px 2px; gap: 4px; padding: 4px; }
+  .language-switch button { min-width: 44px; min-height: 44px; font-size: 0.78rem; }
   .nav-backdrop { position: fixed; z-index: 1; inset: 0; display: block; width: 100vw; height: 100vh; border: 0; background: rgba(29, 29, 31, 0.07); opacity: 1; }
   .hero-title { font-size: clamp(3rem, 11vw, 5.5rem); }
   .continuity { grid-template-columns: 1fr; gap: 55px; }
