@@ -9,6 +9,7 @@ import {
   planPromotion,
   PROMOTION_OPERATIONS
 } from "../../packages/core/src/promotion.mjs";
+import { auditMemory } from "../../packages/core/src/memory-audit.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -150,6 +151,97 @@ test("context promotion appends content and a structured receipt", (t) => {
   assert.equal(receipt.destination_path, path.join("context", "work.md"));
   assert.equal(receipt.operation, "add");
   assert.equal(receipt.summary, "Prefers written handoffs.");
+});
+
+test("repeating an identical promotion is a durable no-op receipt", (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "# Work\n");
+  const args = promoteArgs(aiosPath, "context", "One canonical fact.", ["--destination", "context/work.md", "--apply"]);
+
+  run(args);
+  run(args);
+
+  const context = fs.readFileSync(contextPath, "utf8");
+  assert.equal((context.match(/One canonical fact\./g) || []).length, 1);
+  const receipts = readEvents(aiosPath);
+  assert.equal(receipts.length, 2);
+  assert.equal(receipts[1].no_op, true);
+  assert.match(receipts[1].reason, /identical promoted content/i);
+});
+
+test("apply consumes the persisted preview and refuses a stale destination", (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "# Work\n");
+  const args = promoteArgs(aiosPath, "context", "Preview this fact.", ["--destination", "context/work.md"]);
+  run(args);
+  fs.appendFileSync(contextPath, "Concurrent edit.\n");
+
+  const result = run([...args, "--apply"], { succeeds: false });
+  assert.match(result.stderr, /destination changed after the preview/i);
+  assert.deepEqual(readEvents(aiosPath), []);
+  assert.match(fs.readFileSync(contextPath, "utf8"), /Concurrent edit\./);
+});
+
+test("replace and supersede update the matched promoted block lifecycle", async (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "# Work\n");
+
+  const first = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "Old truth."
+  });
+  await applyPromotion(first);
+  const replacement = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "New truth.",
+    operation: "replace",
+    match: first.contentHash
+  });
+  await applyPromotion(replacement);
+  let context = fs.readFileSync(contextPath, "utf8");
+  assert.doesNotMatch(context, /Old truth\./);
+  assert.match(context, /New truth\./);
+
+  const superseding = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "Newest truth.",
+    operation: "supersede",
+    match: replacement.contentHash
+  });
+  await applyPromotion(superseding);
+  context = fs.readFileSync(contextPath, "utf8");
+  assert.match(context, /Newest truth\./);
+  assert.match(context, /superseded-by=/);
+});
+
+test("memory audit surfaces conflicting promoted blocks", async (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "# Work\n");
+  for (const summary of ["Truth A.", "Truth B."]) {
+    const plan = await planPromotion(aiosPath, {
+      source: SESSION_ID,
+      destinationType: "context",
+      destinationPath: "context/work.md",
+      summary
+    });
+    await applyPromotion(plan);
+  }
+  const report = await auditMemory(aiosPath, { memoryScope: "all" });
+  assert.ok(report.findings.some((finding) => /Conflicting promoted blocks/.test(finding.message)));
 });
 
 test("apply refuses to write when the destination changed after preview", async (t) => {

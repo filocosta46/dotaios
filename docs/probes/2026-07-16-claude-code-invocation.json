@@ -1,0 +1,35 @@
+{
+  "schema": "dotaios.skill-invocation.v1",
+  "client": "Claude Code",
+  "clientVersion": "2.1.107 (Claude Code)",
+  "targetPath": "<temporary-project>/.claude/skills",
+  "skill": {
+    "name": "dotaios-probe",
+    "path": "<temporary-project>/skills/dotaios-probe/SKILL.md",
+    "sha256": "8e7ebcf53261e2b3ce66fba4e96b73f0784f691646549ec6a9223e11e67d6b30"
+  },
+  "evidence": {
+    "configured": "yes",
+    "discoverable": "path-ready",
+    "invoked": "yes",
+    "produced": "no"
+  },
+  "command": [
+    "claude",
+    "--print",
+    "--no-session-persistence",
+    "--permission-mode",
+    "plan",
+    "--tools",
+    "Read",
+    "--setting-sources",
+    "project",
+    "<probe-prompt>"
+  ],
+  "marker": "DOTAIOS_PROBE_OK_01c133528635fb13",
+  "exitCode": 1,
+  "limitation": "Live invocation failed authentication before marker production.",
+  "error": "authentication_error",
+  "startedAt": "2026-07-16T19:58:32.831Z",
+  "finishedAt": "2026-07-16T19:58:38.101Z"
+}

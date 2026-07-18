@@ -45,6 +45,7 @@ export async function auditMemory(aiosPath, {
   const findings = [
     ...hotFiles.findings,
     ...entryAudit.findings,
+    ...auditPromotionReceipts(memoryEntries),
     ...await auditSignalFiles(aiosPath, now)
   ];
 
@@ -69,6 +70,53 @@ export async function auditMemory(aiosPath, {
     crossCuttingCandidates: entryAudit.crossCuttingCandidates,
     findings
   };
+}
+
+function auditPromotionReceipts(entries) {
+  const promotions = entries.map((item) => item.entry || item).filter((entry) => (
+    entry?.type === "memory-promotion" && !entry.no_op && entry.destination_path
+  ));
+  const byDestination = new Map();
+  for (const promotion of promotions) {
+    const key = [promotion.destination_path, promotion.project || ""].join("\n");
+    const group = byDestination.get(key) || [];
+    byDestination.set(key, [...group, promotion]);
+  }
+
+  const findings = [];
+  for (const group of byDestination.values()) {
+    const destination = group[0].destination_path;
+    const hashes = new Map();
+    for (const promotion of group) {
+      const hash = promotion.content_hash || String(promotion.summary || "").trim();
+      if (["replace", "remove", "supersede"].includes(promotion.operation) && promotion.matched_content_hash) {
+        hashes.delete(promotion.matched_content_hash);
+      }
+      const matches = hashes.get(hash) || [];
+      hashes.set(hash, [...matches, promotion]);
+    }
+    for (const [hash, matches] of hashes) {
+      if (matches.length > 1) {
+        findings.push({
+          severity: "warn",
+          path: destination,
+          source: "memory/events.jsonl",
+          message: `Duplicate promoted block recorded ${matches.length} times at ${destination}.`,
+          recommendation: "Use the promotion dedupe receipt, or remove the duplicate block before promoting again."
+        });
+      }
+    }
+    if (hashes.size > 1 && group.some((promotion) => ["add", "supersede"].includes(promotion.operation))) {
+      findings.push({
+        severity: "warn",
+        path: destination,
+        source: "memory/events.jsonl",
+        message: `Conflicting promoted blocks coexist at ${destination} (${hashes.size} distinct content hashes).`,
+        recommendation: "Review the destination, then use --operation replace or supersede to make the truth lifecycle explicit."
+      });
+    }
+  }
+  return findings;
 }
 
 export function renderMemoryAudit(report) {

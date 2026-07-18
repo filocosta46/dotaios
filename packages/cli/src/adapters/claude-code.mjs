@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
 import { writeSession, readSessionIndex } from "../../../core/src/sessions.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
 export const name = "claude-code";
 export const level = ADAPTER_LEVELS.FULL_AUTO;
@@ -14,7 +15,7 @@ const HOOK_COMMAND = `dotaios capture hook claude-code`;
 
 // ---------- backfill ----------
 
-export async function importClaudeCode(aiosPath, { all = false, project = null } = {}) {
+export async function importClaudeCode(aiosPath, { all = false, project = null, projectId = null } = {}) {
   const projectDirs = await listProjectDirs();
   if (projectDirs.length === 0) {
     console.log("No Claude Code sessions found in ~/.claude/projects/");
@@ -30,7 +31,9 @@ export async function importClaudeCode(aiosPath, { all = false, project = null }
   let errors = 0;
 
   for (const dirEntry of projectDirs) {
-    const inferredProject = project || inferProjectName(dirEntry.name);
+    // Claude's encoded transcript directory is not a project catalog entry;
+    // leave it unscoped unless the caller supplied a resolved project.
+    const inferredProject = project || null;
     const jsonlFiles = await listJsonlFiles(dirEntry.fullPath);
 
     for (const filePath of jsonlFiles) {
@@ -61,6 +64,7 @@ export async function importClaudeCode(aiosPath, { all = false, project = null }
 
       const session = parseTranscript(lines, {
         project: inferredProject,
+        projectId,
         sourcePath: filePath,
       });
 
@@ -98,7 +102,7 @@ export async function importClaudeCode(aiosPath, { all = false, project = null }
 
 // ---------- live hook ----------
 
-export async function handleHookPayload(aiosPath) {
+export async function handleHookPayload(aiosPath, { cwd = process.cwd() } = {}) {
   let input = "";
   process.stdin.setEncoding("utf8");
   for await (const chunk of process.stdin) {
@@ -134,11 +138,14 @@ export async function handleHookPayload(aiosPath) {
     return;
   }
 
-  const projectDir = path.basename(path.dirname(transcriptPath));
-  const inferredProject = inferProjectName(projectDir);
+  const project = await resolveProjectContext({
+    aiosPath,
+    cwd: payload.cwd || cwd
+  });
 
   const session = parseTranscript(lines, {
-    project: inferredProject,
+    project: project?.slug || null,
+    projectId: project?.id || null,
     sourcePath: transcriptPath,
   });
 
@@ -235,7 +242,7 @@ export async function isEnabled() {
 
 // ---------- transcript parser ----------
 
-export function parseTranscript(lines, { project = null, sourcePath = null } = {}) {
+export function parseTranscript(lines, { project = null, projectId = null, sourcePath = null } = {}) {
   const messages = lines.filter((e) => e.type === "user" || e.type === "assistant");
   if (messages.length === 0) return null;
 
@@ -269,6 +276,7 @@ export function parseTranscript(lines, { project = null, sourcePath = null } = {
     source_type: "import",
     source_path: sourcePath,
     project,
+    ...(projectId && { project_id: projectId }),
     title,
     turns,
   };
@@ -329,12 +337,6 @@ function extractSessionId(sourcePath) {
     return base.replace(/-/g, "").slice(0, 8);
   }
   return null;
-}
-
-function inferProjectName(encodedDirName) {
-  // "-Users-filo-Brain" → "Brain", "-Users-filo-Brain-AIOS" → "AIOS"
-  const parts = encodedDirName.replace(/^-/, "").split("-");
-  return parts[parts.length - 1] || "unknown";
 }
 
 function extractTextContent(contentBlocks) {

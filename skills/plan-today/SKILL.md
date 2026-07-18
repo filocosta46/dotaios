@@ -34,11 +34,8 @@ Try saying:
 ### Read
 
 1. `prompt.md` in this skill directory if present, compiled by `dotaios interview`. Prefer it over reading individual context files.
-2. If `prompt.md` is missing, fall back to:
-   - `context/priorities.md`
-   - `context/work.md`
-3. `memory/events.jsonl` last 50 entries, if present
-4. Today and yesterday in `memory/signals/`, if present
+2. Run `dotaios brief --compact` to receive the bounded identity, priorities, work, and recent-memory projection. If the work is project-scoped, add `--project <slug-or-id>`.
+3. If `prompt.md` is missing, use the identity, priorities, and active-work sections from that projection as the fallback context.
 
 ### Process
 

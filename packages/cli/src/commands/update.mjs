@@ -4,6 +4,8 @@ import path from "node:path";
 import { hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { appendEvent, appendSignal } from "../../../core/src/memory.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
+import { readOptionValue } from "../lib/args.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios update [text]
@@ -20,6 +22,7 @@ Examples:
 
 Options:
   --path <dir>  Use a non-default AIOS folder
+  --project <slug-or-id>  Attribute the update to a registered project
 `;
 
 export async function updateCommand(args) {
@@ -28,10 +31,16 @@ export async function updateCommand(args) {
     return;
   }
 
-  const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
+  const options = parseOptions(args);
+  const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(aiosPath);
 
-  const text = extractText(args);
+  const project = await resolveProjectContext({
+    aiosPath,
+    project: options.project,
+    cwd: process.cwd()
+  });
+  const text = options.text;
   const note = text || await promptText();
 
   if (!note.trim()) {
@@ -42,8 +51,11 @@ export async function updateCommand(args) {
   const signalsDir = path.join(aiosPath, "memory", "signals");
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
 
-  await appendSignal(signalsDir, { type: "update", summary: note.trim(), source: "dotaios update" });
-  await appendEvent(eventsPath, { type: "update", summary: note.trim(), source: "dotaios update" });
+  const attribution = project
+    ? { project: project.slug, ...(project.id ? { project_id: project.id } : {}) }
+    : {};
+  await appendSignal(signalsDir, { type: "update", summary: note.trim(), source: "dotaios update", ...attribution });
+  await appendEvent(eventsPath, { type: "update", summary: note.trim(), source: "dotaios update", ...attribution });
 
   console.log("Saved.");
 }
@@ -60,21 +72,22 @@ async function promptText() {
   }
 }
 
-function extractText(args) {
+function parseOptions(args) {
+  const options = { path: null, project: null, text: [] };
   const result = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--path") {
+      options.path = readOptionValue(args, i, "--path");
       i++;
+    } else if (args[i] === "--project") {
+      options.project = readOptionValue(args, i, "--project");
+      i++;
+    } else if (args[i].startsWith("--")) {
+      throw new Error(`Unknown option: ${args[i]}`);
     } else if (!args[i].startsWith("--")) {
       result.push(args[i]);
     }
   }
-  return result.join(" ").trim();
-}
-
-function extractPath(args) {
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--path" && i + 1 < args.length) return args[i + 1];
-  }
-  return null;
+  options.text = result.join(" ").trim();
+  return options;
 }

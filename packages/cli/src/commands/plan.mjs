@@ -3,6 +3,7 @@ import path from "node:path";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios plan "<title>" [options]
@@ -29,6 +30,11 @@ export async function planCommand(args) {
   const options = parseOptions(args);
   const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(aiosPath);
+  const project = await resolveProjectContext({
+    aiosPath,
+    project: options.project,
+    cwd: process.cwd()
+  });
 
   if (!options.title) {
     console.error(`Pass a plan title, e.g. dotaios plan "ship the resolver" --steps "write tests,implement,ship".`);
@@ -42,7 +48,13 @@ export async function planCommand(args) {
   const fileName = `${date}-${slug}.md`;
   const plansDir = path.join(aiosPath, "memory", "plans");
   const filePath = path.join(plansDir, fileName);
-  const body = renderPlan({ title: options.title, steps: options.steps, project: options.project, date, now });
+  const body = renderPlan({
+    title: options.title,
+    steps: options.steps,
+    project,
+    date,
+    now
+  });
 
   if (options.print || options.dryRun) {
     if (options.dryRun) console.log(`(dry run — would write ${filePath})\n`);
@@ -56,7 +68,8 @@ export async function planCommand(args) {
   await appendEvent(path.join(aiosPath, "memory", "events.jsonl"), {
     type: "plan",
     summary: `Plan written: ${options.title}`,
-    project: options.project || undefined,
+    ...(project?.slug ? { project: project.slug } : {}),
+    ...(project?.id ? { project_id: project.id } : {}),
     source: "dotaios plan"
   });
 
@@ -98,7 +111,8 @@ function renderPlan({ title, steps, project, date, now }) {
     `date: ${date}`,
     `created_at: ${now.toISOString()}`,
     `source: dotaios plan`,
-    project ? `project: ${project}` : "project: ",
+    project?.slug ? `project: ${project.slug}` : "project: ",
+    ...(project?.id ? [`project_id: ${project.id}`] : []),
     "---",
     "",
     `# ${title}`,

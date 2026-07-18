@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { isPathWithinLexically } from "./paths.mjs";
 
 export async function discoverHermesConfigPaths(homePath, registry = []) {
   const root = path.join(homePath, ".hermes");
@@ -16,7 +17,7 @@ export async function discoverHermesConfigPaths(homePath, registry = []) {
   for (const agent of Array.isArray(registry) ? registry : []) {
     if (agent.skills?.mode !== "config-external-dir" || typeof agent.skills.configFile !== "string") continue;
     const customPath = path.resolve(homePath, agent.skills.configFile);
-    if (!isWithin(path.resolve(homePath), customPath) || configPaths.includes(customPath)) continue;
+    if (!isPathWithinLexically(homePath, customPath) || configPaths.includes(customPath)) continue;
     configPaths.push(customPath);
   }
   return configPaths;
@@ -129,7 +130,7 @@ function escapeRegExp(value) {
 async function isStaleDotaiosTempPath(value) {
   const resolved = path.resolve(unquoteScalar(value));
   const tempRoot = path.resolve(os.tmpdir());
-  if (!isWithin(tempRoot, resolved)) return false;
+  if (!isPathWithinLexically(tempRoot, resolved)) return false;
   if (!/(?:^|[\\/])dotaios-[^\\/]+[\\/]aios[\\/]skills$/.test(resolved)) return false;
   try {
     await fs.access(resolved);
@@ -162,9 +163,4 @@ function detectListItemIndent(lines, startIndex) {
 
 function isListItem(line, indent) {
   return new RegExp(`^\\s{${indent}}-\\s+`).test(String(line || ""));
-}
-
-function isWithin(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }

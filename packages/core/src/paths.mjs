@@ -31,6 +31,16 @@ export function resolveVaultPath(config, aiosPath = defaultAiosPath()) {
   return config?.vault_path || path.join(aiosPath, "vault");
 }
 
+/** Return whether a lexical candidate path is contained by a lexical root. */
+export function isPathWithinLexically(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === "" || (
+    relative !== ".." &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
+}
+
 /**
  * Return whether candidate resolves inside root, including through symlinks.
  * Missing tail components are allowed, but dangling or looping symlinks are

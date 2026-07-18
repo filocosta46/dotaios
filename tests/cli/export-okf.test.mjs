@@ -21,7 +21,7 @@ async function fixture() {
 test("root index.md declares okf_version", async () => {
   const src = await fixture();
   const out = path.join(src, "build", "okf");
-  await exportBundle({ srcRoot: src, outDir: out });
+  await exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true });
   const idx = await fs.readFile(path.join(out, "index.md"), "utf8");
   assert.match(idx, /okf_version: "0\.1"/);
 });
@@ -29,7 +29,7 @@ test("root index.md declares okf_version", async () => {
 test("every concept has a non-empty type", async () => {
   const src = await fixture();
   const out = path.join(src, "build", "okf");
-  const stats = await exportBundle({ srcRoot: src, outDir: out });
+  const stats = await exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true });
   const concepts = (await listFiles(out)).filter((f) => f.endsWith(".md") && path.basename(f) !== "index.md");
   assert.ok(concepts.length >= 2, "expected concept files");
   for (const f of concepts) {
@@ -43,14 +43,14 @@ test("source files are never mutated", async () => {
   const src = await fixture();
   const orders = path.join(src, "vault", "raw", "orders.md");
   const before = await fs.readFile(orders, "utf8");
-  await exportBundle({ srcRoot: src, outDir: path.join(src, "build", "okf") });
+  await exportBundle({ srcRoot: src, outDir: path.join(src, "build", "okf"), allowInternalOutput: true });
   assert.equal(await fs.readFile(orders, "utf8"), before);
 });
 
 test("resolvable [[wikilink]] becomes an absolute /path.md link", async () => {
   const src = await fixture();
   const out = path.join(src, "build", "okf");
-  await exportBundle({ srcRoot: src, outDir: out });
+  await exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true });
   const identity = await fs.readFile(path.join(out, "context", "identity.md"), "utf8");
   assert.match(identity, /\[orders\]\(\/vault\/raw\/orders\.md\)/);
 });
@@ -63,7 +63,7 @@ test("preserves custom frontmatter keys (OKF: keep unknown keys)", async () => {
     "---\ntitle: X\nadopt: YES\nconfidence: high\n---\n\nbody\n"
   );
   const out = path.join(dir, "out");
-  await exportBundle({ srcRoot: dir, outDir: out });
+  await exportBundle({ srcRoot: dir, outDir: out, allowInternalOutput: true });
   const t = await fs.readFile(path.join(out, "vault", "research", "scout", "x.md"), "utf8");
   assert.match(t, /type:/, "required type injected");
   assert.match(t, /adopt: YES/, "custom key preserved");
@@ -88,11 +88,19 @@ test("rejects output paths that overlap a source shelf", async () => {
   const out = path.join(src, "vault", "okf-export");
 
   await assert.rejects(
-    () => exportBundle({ srcRoot: src, outDir: out }),
+    () => exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true }),
     /overlaps source folder/
   );
 
   assert.equal(await fs.readFile(path.join(src, "vault", "raw", "orders.md"), "utf8"), "# Orders\nno frontmatter here\n");
+});
+
+test("rejects an output path anywhere inside the AIOS root", async () => {
+  const src = await fixture();
+  await assert.rejects(
+    () => exportBundle({ srcRoot: src, outDir: path.join(src, "export") }),
+    /cannot be inside the AIOS folder/
+  );
 });
 
 test("invalid YAML fails before replacing an existing export", async () => {
@@ -103,7 +111,7 @@ test("invalid YAML fails before replacing an existing export", async () => {
   await fs.writeFile(path.join(src, "context", "broken.md"), "---\ntype: Reference\ntags: [broken\n---\nbody\n");
 
   await assert.rejects(
-    () => exportBundle({ srcRoot: src, outDir: out }),
+    () => exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true }),
     /Invalid YAML frontmatter/
   );
 
@@ -121,7 +129,7 @@ test("unclosed YAML frontmatter fails before replacing an existing export", asyn
   );
 
   await assert.rejects(
-    () => exportBundle({ srcRoot: src, outDir: out }),
+    () => exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true }),
     /Unclosed YAML frontmatter/
   );
 
@@ -137,7 +145,7 @@ test("ambiguous bare wikilinks remain unresolved", async () => {
   await fs.writeFile(path.join(src, "context", "identity.md"), "# Identity\n\nSee [[note]].\n");
   const out = path.join(src, "build", "okf");
 
-  const stats = await exportBundle({ srcRoot: src, outDir: out });
+  const stats = await exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true });
   const identity = await fs.readFile(path.join(out, "context", "identity.md"), "utf8");
 
   assert.match(identity, /\[\[note\]\]/);
@@ -153,7 +161,7 @@ test("qualified wikilinks resolve when stems are duplicated", async () => {
   await fs.writeFile(path.join(src, "context", "identity.md"), "# Identity\n\nSee [[vault/wiki/alpha/note]].\n");
   const out = path.join(src, "build", "okf");
 
-  await exportBundle({ srcRoot: src, outDir: out });
+  await exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true });
   const identity = await fs.readFile(path.join(out, "context", "identity.md"), "utf8");
 
   assert.match(identity, /\[vault\/wiki\/alpha\/note\]\(\/vault\/wiki\/alpha\/note\.md\)/);
@@ -165,7 +173,7 @@ test("writes ancestor indexes for nested concepts", async () => {
   await fs.writeFile(path.join(src, "vault", "wiki", "topic", "note.md"), "# Note\n");
   const out = path.join(src, "build", "okf");
 
-  await exportBundle({ srcRoot: src, outDir: out });
+  await exportBundle({ srcRoot: src, outDir: out, allowInternalOutput: true });
 
   await fs.access(path.join(out, "vault", "index.md"));
   await fs.access(path.join(out, "vault", "wiki", "index.md"));

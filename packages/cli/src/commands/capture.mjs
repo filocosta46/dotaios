@@ -7,6 +7,7 @@ import { writeSession, filterSessions, deleteSession } from "../../../core/src/s
 import { parseRawText } from "../adapters/manual.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { emitPilotMetric } from "../lib/pilot-metrics.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios capture <subcommand> [options]
@@ -100,8 +101,16 @@ async function runImportFile(args) {
     throw new Error(`Cannot read file: ${resolved} (${err.message})`);
   }
 
-  const project = options.project || inferProject();
-  const session = parseRawText(text, { project, sourceType: "import" });
+  const project = await resolveProjectContext({
+    aiosPath,
+    project: options.project,
+    cwd: process.cwd()
+  });
+  const session = parseRawText(text, {
+    project: project?.slug,
+    projectId: project?.id,
+    sourceType: "import"
+  });
   session.source_path = resolved;
   const result = await writeSession(aiosPath, session);
 
@@ -135,8 +144,16 @@ async function runImportPaste(args) {
     return;
   }
 
-  const project = options.project || inferProject();
-  const session = parseRawText(text, { project, sourceType: "manual" });
+  const project = await resolveProjectContext({
+    aiosPath,
+    project: options.project,
+    cwd: process.cwd()
+  });
+  const session = parseRawText(text, {
+    project: project?.slug,
+    projectId: project?.id,
+    sourceType: "manual"
+  });
   const result = await writeSession(aiosPath, session);
 
   if (result.skipped) {
@@ -157,11 +174,17 @@ async function runImportClaudeCode(args) {
   const options = parseCommonOptions(args);
   const aiosPath = resolveAiosPath(options);
   await ensureAiosFolder(aiosPath);
+  const project = await resolveProjectContext({
+    aiosPath,
+    project: options.project,
+    cwd: process.cwd()
+  });
 
   try {
     await importClaudeCode(aiosPath, {
       all: options.all,
-      project: options.project,
+      project: project?.slug,
+      projectId: project?.id,
     });
     await emitPilotMetric(aiosPath, { type: "capture_saved", source: "claude-code", outcome: "ok" });
   } catch (error) {
@@ -189,9 +212,15 @@ async function runList(args) {
   const aiosPath = resolveAiosPath(options);
   await ensureAiosFolder(aiosPath);
 
+  const project = await resolveProjectContext({
+    aiosPath,
+    project: options.project,
+    cwd: process.cwd()
+  });
+
   const entries = await filterSessions(aiosPath, {
     agent: options.agent,
-    project: options.project,
+    project: project?.slug,
     since: options.since,
   });
 
@@ -328,10 +357,6 @@ function parseCommonOptions(args = []) {
 
 function resolveAiosPath(options) {
   return path.resolve(expandHome(options.path || defaultAiosPath()));
-}
-
-function inferProject() {
-  return path.basename(process.cwd());
 }
 
 async function openEditorForInput(header) {

@@ -1,7 +1,8 @@
 import localFilesystem from "node:fs/promises";
 import path from "node:path";
 
-import { isoDate } from "./memory.mjs";
+import { isoDate, readSignals as readMemorySignals } from "./memory.mjs";
+import { readProjectCatalog } from "./projects.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
@@ -11,6 +12,7 @@ const MAX_PLAN_ITEMS = 4;
 const MAX_CARRY_OVER_ITEMS = 5;
 const MAX_SIGNAL_ITEMS = 8;
 const MAX_EVENT_ITEMS = 8;
+const MAX_HEADER_CHARS = 800;
 
 const localClock = () => new Date();
 
@@ -52,31 +54,51 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const visibleCharacterBudget = normalizeBudget(options);
 
   const dailyDir = path.join(aiosPath, "memory", "daily");
-  const [todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
+  const [identity, priorities, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
     await Promise.all([
+      readText(filesystem, path.join(aiosPath, "context", "identity.md")),
+      readText(filesystem, path.join(aiosPath, "context", "priorities.md")),
       readText(filesystem, path.join(dailyDir, `${today}.md`)),
       readText(filesystem, path.join(dailyDir, `${yesterday}.md`)),
       readJsonl(filesystem, path.join(aiosPath, "memory", "sessions", "index.jsonl")),
-      readSignals(filesystem, path.join(aiosPath, "memory", "signals"), { today, yesterday }),
+      readMemorySignals(
+        path.join(aiosPath, "memory", "signals"),
+        yesterday,
+        today,
+        {
+          filesystem,
+          transform: (entry, { file, date, sourceLine }) => normalizeTimelineEntry(entry, {
+            fallbackDate: date,
+            sourcePath: path.posix.join("memory", "signals", file),
+            sourceLine,
+          }),
+        },
+      ),
       readTimelineJsonl(filesystem, path.join(aiosPath, "memory", "events.jsonl"), {
         sourcePath: "memory/events.jsonl",
       }),
-      readProjects(filesystem, path.join(aiosPath, "projects")),
+      readProjectCatalog({ aiosPath, fs: filesystem }),
     ]);
 
   const projectFilter = resolveProjectFilter(requestedProject, projects);
   const sessions = stableSessionOrder(sessionEntries)
-    .filter((session) => matchesProject(session, projectFilter));
+    .filter((session) => matchesProject(session, projectFilter))
+    .map((session) => markUnscoped(session, projectFilter));
   const signals = stableTimelineOrder(signalEntries)
     .filter((signal) => isOperationalDate(signal.date, today, yesterday))
     .filter((signal) => matchesProject(signal, projectFilter))
-    .filter(hasTimelineSummary);
+    .filter(hasTimelineSummary)
+    .map((signal) => markUnscoped(signal, projectFilter));
   const events = stableTimelineOrder(eventEntries)
     .filter((event) => isOperationalDate(event.date, today, yesterday))
     .filter((event) => matchesProject(event, projectFilter))
-    .filter(hasTimelineSummary);
+    .filter(hasTimelineSummary)
+    .map((event) => markUnscoped(event, projectFilter));
+  const deduped = dedupeUpdateChannels(signals, events);
 
   const candidates = {
+    identity: compactHeader(identity),
+    priorities: compactHeader(priorities),
     today: {
       focus: firstLine(readSection(todayNote, "Focus")),
       plan: compactLines(readSection(todayNote, "Plan")).slice(0, MAX_PLAN_ITEMS),
@@ -84,8 +106,8 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     carryOver: extractCarryOver(todayNote, yesterdayNote),
     activeProject: selectActiveProject(projectFilter, sessions, projects),
     sessions: sessions.slice(0, sessionLimit),
-    signals: signals.slice(0, MAX_SIGNAL_ITEMS),
-    events: events.slice(0, MAX_EVENT_ITEMS),
+    signals: deduped.signals.slice(0, MAX_SIGNAL_ITEMS),
+    events: deduped.events.slice(0, MAX_EVENT_ITEMS),
   };
 
   return applyVisibleCharacterBudget(
@@ -118,6 +140,8 @@ export function renderWorkingContext(context) {
 function applyVisibleCharacterBudget(base, candidates, limit) {
   let selected = {
     ...base,
+    identity: "",
+    priorities: "",
     todayContext: { focus: "", plan: [] },
     carryOver: [],
     activeProject: null,
@@ -135,6 +159,9 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
     selected = candidate;
     return true;
   };
+
+  if (candidates.identity) consider({ ...selected, identity: candidates.identity });
+  if (candidates.priorities) consider({ ...selected, priorities: candidates.priorities });
 
   if (base.projectFilter && candidates.activeProject) {
     consider({ ...selected, activeProject: candidates.activeProject });
@@ -209,6 +236,9 @@ function renderUnbounded(context) {
   const events = context?.events || [];
   const lines = [`## Active Context · ${today}`, ""];
 
+  if (context?.identity) lines.push("### Identity", context.identity, "");
+  if (context?.priorities) lines.push("### Priorities", context.priorities, "");
+
   const todayLines = [];
   if (todayContext.focus) todayLines.push(`**Focus:** ${todayContext.focus}`);
   for (const item of todayContext.plan || []) todayLines.push(`- ${item}`);
@@ -228,22 +258,27 @@ function renderUnbounded(context) {
       const date = String(session.captured_at || "").slice(0, 10);
       const agent = session.agent || "unknown";
       const project = session.project ? ` · ${session.project}` : "";
+      const scope = session.unscoped ? " (unscoped)" : "";
       const title = session.title || "(untitled)";
       const turns = Number.isInteger(session.turns) ? session.turns : 0;
-      lines.push(`- ${date} · ${agent}${project} · "${title}" (${turns} turns)`);
+      lines.push(`- ${date} · ${agent}${project}${scope} · "${title}" (${turns} turns)`);
     }
     lines.push("");
   }
 
   if (signals.length > 0) {
     lines.push("### Recent Signals");
-    for (const signal of signals) lines.push(`- [${signal.date || today}] ${timelineSummary(signal)}`);
+    for (const signal of signals) {
+      lines.push(`- [${signal.date || today}]${signal.unscoped ? " (unscoped)" : ""} ${timelineSummary(signal)}`);
+    }
     lines.push("");
   }
 
   if (events.length > 0) {
     lines.push("### Recent Events");
-    for (const event of events) lines.push(`- [${event.date || today}] ${timelineSummary(event)}`);
+    for (const event of events) {
+      lines.push(`- [${event.date || today}]${event.unscoped ? " (unscoped)" : ""} ${timelineSummary(event)}`);
+    }
     lines.push("");
   }
 
@@ -290,6 +325,14 @@ function compactLines(content) {
     .filter(Boolean);
 }
 
+function compactHeader(content) {
+  const visible = String(content || "").trim();
+  if (!visible) return "";
+  return visible.length > MAX_HEADER_CHARS
+    ? `${visible.slice(0, MAX_HEADER_CHARS - 1).trimEnd()}…`
+    : visible;
+}
+
 function firstLine(content) {
   return String(content || "").split(/\r?\n/).map((line) => line.trim()).find(Boolean) || "";
 }
@@ -316,9 +359,7 @@ function stableSessionOrder(sessions) {
 
 function sessionScore(session) {
   const capturedAt = Date.parse(session.captured_at || "");
-  const recency = Number.isFinite(capturedAt) ? capturedAt : 0;
-  const accessCount = Number.isFinite(Number(session.access_count)) ? Number(session.access_count) : 0;
-  return recency + accessCount * 3_600_000;
+  return Number.isFinite(capturedAt) ? capturedAt : 0;
 }
 
 function stableTimelineOrder(entries) {
@@ -352,7 +393,31 @@ function normalizeTimelineEntry(entry, {
 }
 
 function matchesProject(entry, projectFilter) {
-  return !projectFilter || entry.project === projectFilter;
+  return !projectFilter || !entry.project || entry.project === projectFilter;
+}
+
+function markUnscoped(entry, projectFilter) {
+  return projectFilter && !entry.project ? { ...entry, unscoped: true } : entry;
+}
+
+function dedupeUpdateChannels(signals, events) {
+  const updateKeys = new Set(
+    events
+      .filter((event) => event.type === "update" && event.source === "dotaios update")
+      .map(timelineKey)
+  );
+  return {
+    signals: signals.filter((signal) => !(
+      signal.type === "update" &&
+      signal.source === "dotaios update" &&
+      updateKeys.has(timelineKey(signal))
+    )),
+    events
+  };
+}
+
+function timelineKey(entry) {
+  return [entry.type, entry.source, entry.project || "", entry.project_id || "", timelineSummary(entry)].join("\n");
 }
 
 function resolveProjectFilter(reference, projects) {
@@ -419,120 +484,6 @@ function syntheticProject(project) {
   };
 }
 
-async function readSignals(filesystem, signalsDir, { today, yesterday }) {
-  const entries = await readDirectory(filesystem, signalsDir);
-  const files = entries
-    .map((entry) => typeof entry === "string" ? entry : entry.name)
-    .filter((name) => name?.endsWith(".jsonl"))
-    .map((name) => ({ name, date: signalFileDate(name) }))
-    .filter(({ date }) => isOperationalDate(date, today, yesterday))
-    .sort((left, right) => left.name.localeCompare(right.name));
-
-  const fileEntries = await Promise.all(files.map(async ({ name, date }) => {
-    return readTimelineJsonl(filesystem, path.join(signalsDir, name), {
-      fallbackDate: date,
-      sourcePath: path.posix.join("memory", "signals", name),
-    });
-  }));
-  return fileEntries.flat();
-}
-
-function signalFileDate(filename) {
-  return filename.match(/(?:^|-)(\d{4}-\d{2}-\d{2})\.jsonl$/)?.[1] || null;
-}
-
-async function readProjects(filesystem, projectsDir) {
-  const entries = await readDirectory(filesystem, projectsDir, { withFileTypes: true });
-  const names = entries
-    .filter((entry) => typeof entry === "string" || entry.isDirectory())
-    .map((entry) => typeof entry === "string" ? entry : entry.name)
-    .sort((left, right) => left.localeCompare(right));
-  const projects = await Promise.all(names.map(async (slug) => {
-    const readmePath = path.join(projectsDir, slug, "README.md");
-    const content = await readText(filesystem, readmePath);
-    return content ? parseProjectMetadata(slug, content) : null;
-  }));
-  return projects.filter(Boolean).sort((left, right) => left.slug.localeCompare(right.slug));
-}
-
-function parseProjectMetadata(slug, content) {
-  const frontmatter = parseFrontmatter(content);
-  const title = content.match(/^#\s+(.+)$/m)?.[1]?.trim() || "";
-  const project = stringValue(frontmatter.project) || slug;
-  return {
-    id: stringValue(frontmatter.id) || stringValue(frontmatter.project_id) || null,
-    slug,
-    project,
-    name: stringValue(frontmatter.name) || title || project,
-    status: stringValue(frontmatter.status) || null,
-    domains: arrayValue(frontmatter.domain),
-    repoUrl: stringValue(frontmatter.repo_url) || stringValue(frontmatter.repo) || null,
-    description: stringValue(frontmatter.description) || firstDescription(content),
-    contextExcerpt: projectExcerpt(content),
-    readme: content,
-  };
-}
-
-function parseFrontmatter(content) {
-  const match = String(content).match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  if (!match) return {};
-  const result = {};
-  let listKey = null;
-  for (const line of match[1].split(/\r?\n/)) {
-    const listItem = line.match(/^\s+-\s+(.+)$/);
-    if (listItem && listKey) {
-      result[listKey] = [...arrayValue(result[listKey]), parseScalar(listItem[1])];
-      continue;
-    }
-    const field = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!field) continue;
-    listKey = field[1];
-    result[listKey] = parseScalar(field[2]);
-  }
-  return result;
-}
-
-function parseScalar(value) {
-  const trimmed = String(value).trim();
-  if (!trimmed) return [];
-  if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-    return trimmed.slice(1, -1).split(",").map((item) => unquote(item.trim())).filter(Boolean);
-  }
-  return unquote(trimmed);
-}
-
-function unquote(value) {
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-    return value.slice(1, -1);
-  }
-  return value;
-}
-
-function stringValue(value) {
-  return typeof value === "string" ? value : "";
-}
-
-function arrayValue(value) {
-  if (Array.isArray(value)) return value.map(String).filter(Boolean);
-  return value ? [String(value)] : [];
-}
-
-function firstDescription(content) {
-  const body = String(content).replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "");
-  return body.split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith("#") && !line.startsWith("<!--") && !/^[-*]\s/.test(line)) || "";
-}
-
-function projectExcerpt(content, limit = 1200) {
-  const body = String(content)
-    .replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
-    .replace(/^#\s+.+(?:\r?\n|$)/, "")
-    .trim();
-  if (body.length <= limit) return body;
-  return `${body.slice(0, limit - 1).trimEnd()}…`;
-}
-
 async function readJsonl(filesystem, filePath) {
   const content = await readText(filesystem, filePath);
   return content.split(/\r?\n/).flatMap((line) => {
@@ -569,15 +520,6 @@ async function readText(filesystem, filePath) {
     return await filesystem.readFile(filePath, "utf8");
   } catch (error) {
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return "";
-    throw error;
-  }
-}
-
-async function readDirectory(filesystem, directoryPath, options) {
-  try {
-    return await filesystem.readdir(directoryPath, options);
-  } catch (error) {
-    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return [];
     throw error;
   }
 }

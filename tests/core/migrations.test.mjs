@@ -27,6 +27,7 @@ test("preview is deterministic and writes zero files", async (t) => {
   assert.equal(first.plan.from_schema_version, "1.0.0");
   assert.equal(first.plan.to_schema_version, "1.1.0");
   assert.deepEqual(first.plan.operations.map((operation) => operation.path), ["aios.json"]);
+  assert.ok(first.plan.preserved_paths.some((entry) => entry.path === "context/identity.md"));
   assert.equal("created_at" in first.plan, false);
   assert.equal("release_version" in first.plan, false);
   assert.deepEqual(await snapshotTree(aiosPath), before);
@@ -55,6 +56,10 @@ test("apply changes only compatibility metadata and preserves user and edited sc
   assert.equal(receipt.from_schema_version, "1.0.0");
   assert.equal(receipt.to_schema_version, "1.1.0");
   assert.deepEqual(receipt.operations.map((operation) => operation.path), ["aios.json"]);
+  assert.ok(receipt.preserved_paths.some((entry) => entry.path === "projects/atlas/README.md"));
+  assert.equal(receipt.recovery.strategy, "journaled-backup");
+  assert.match(receipt.recovery.rollback_command, /migrate --recover/);
+  assert.equal(receipt.recovery.backups[0].backup_path, ".dotaios/migrations/transactions/" + preview.plan.plan_id + "/backups/aios.json");
 });
 
 test("an existing receipt makes apply byte-for-byte idempotent", async (t) => {
@@ -88,6 +93,26 @@ test("apply rejects a config edit made after preview before writing transaction 
   );
   assert.deepEqual(await snapshotTree(aiosPath), edited);
   assert.equal(fsSync.existsSync(path.join(aiosPath, ".dotaios")), false);
+});
+
+test("apply accepts the previewed plan after preserved memory grows", async (t) => {
+  const aiosPath = await copyHistoricalFixture(t);
+  const preview = await previewMigration({ aiosPath });
+  await fs.appendFile(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    `${JSON.stringify({ ts: "2026-07-16T00:00:00.000Z", type: "update", source: "dotaios update", summary: "post-preview note" })}\n`
+  );
+
+  const result = await applyMigration({
+    aiosPath,
+    planId: preview.plan.plan_id,
+    releaseVersion: "1.23.0"
+  });
+
+  assert.equal(result.status, "applied");
+  const receipt = JSON.parse(await fs.readFile(path.join(aiosPath, result.receipt_path), "utf8"));
+  assert.equal(receipt.plan_id, preview.plan.plan_id);
+  assert.ok(receipt.preserved_paths.some((entry) => entry.path === "memory/events.jsonl"));
 });
 
 test("interrupted apply leaves a journal and backup that recovery can roll back", async (t) => {

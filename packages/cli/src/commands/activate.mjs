@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { pathExists } from "../../../core/src/files.mjs";
-import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
   MANAGED_END,
   MANAGED_START,
@@ -18,6 +18,7 @@ import {
   writeSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
+import { registerProject, resolveProjectContext } from "../../../core/src/projects.mjs";
 import {
   symlinkTargets,
   retiredSymlinkTargets,
@@ -304,13 +305,33 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
 }
 
 async function createProjectBridges(aiosPath, projectPath, options) {
+  let project = await resolveProjectContext({
+    aiosPath,
+    homePath: resolvePath(options.home || os.homedir()),
+    cwd: projectPath
+  });
+  if (!project) {
+    const registration = await registerProject({
+      aiosPath,
+      homePath: resolvePath(options.home || os.homedir()),
+      projectPath,
+      apply: !options.dryRun
+    });
+    project = {
+      id: registration.id,
+      slug: registration.slug,
+      project: registration.slug,
+      projectPath,
+      registered: registration.applied
+    };
+  }
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = await Promise.all([
-    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath), {
+    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
       ...options,
       projectRoot: projectPath
     }),
-    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath), {
+    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath, project), {
       ...options,
       projectRoot: projectPath
     })
@@ -463,9 +484,11 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
   return { action: dryRun ? "would update" : "updated", path: destination };
 }
 
-function projectAgentsBridge(aiosPath) {
+function projectAgentsBridge(aiosPath, project) {
   return bridgeFile("DotAIOS Project Bridge", [
-    "This project is attached to the user's DotAIOS memory.",
+    `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
+    `At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
+    ...(project.registered ? [] : ["This checkout is not in the project catalog yet; run `dotaios project add <repo-path>` to enable automatic writer attribution."]),
     "",
     `Before personal recommendations or cross-project planning, read: ${path.join(aiosPath, "AGENTS.md")}`,
     "",
@@ -473,7 +496,7 @@ function projectAgentsBridge(aiosPath) {
   ]);
 }
 
-function cursorRule(aiosPath) {
+function cursorRule(aiosPath, project) {
   return [
     "---",
     "description: DotAIOS personal context",
@@ -483,6 +506,8 @@ function cursorRule(aiosPath) {
     "",
     managedStart,
     "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
+    "",
+    `This checkout is project \`${project.slug}\` (id \`${project.id}\`). At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
     "",
     `@${path.join(aiosPath, "AGENTS.md")}`,
     managedEnd,
@@ -517,7 +542,7 @@ async function isTemporaryAiosPath(aiosPath) {
   // while the realpath check catches a permanent-looking alias that points into
   // a temporary activation directory. We intentionally reject any path inside
   // the OS temp root, not only names matching one historical temp prefix.
-  return isWithin(lexicalTempRoot, lexicalPath) || isWithin(realTempRoot, realPath);
+  return isPathWithinLexically(lexicalTempRoot, lexicalPath) || isPathWithinLexically(realTempRoot, realPath);
 }
 
 async function realpathThroughExistingAncestor(value) {
@@ -532,11 +557,6 @@ async function realpathThroughExistingAncestor(value) {
       current = parent;
     }
   }
-}
-
-function isWithin(root, candidate) {
-  const relative = path.relative(root, candidate);
-  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
 function printResults(title, results) {
