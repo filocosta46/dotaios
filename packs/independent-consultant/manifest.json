@@ -1,0 +1,38 @@
+{
+  "name": "independent-consultant",
+  "version": "0.1.0-draft.1",
+  "description": "Six review-gated workflows for independent consultants to organize client work with AI.",
+  "license": "SEE LICENSE.md",
+  "aios_version": ">=1.24.0",
+  "paid": true,
+  "vendor": "dotaios",
+  "product_id": "independent-consultant",
+  "requires": {
+    "connections": [],
+    "context": []
+  },
+  "provides": {
+    "skills": [
+      "consultant-start-client-project",
+      "consultant-prepare-client-call",
+      "consultant-notes-to-follow-up-draft",
+      "consultant-bounded-research-memo",
+      "consultant-proposal-scope-draft",
+      "consultant-weekly-client-review"
+    ],
+    "memory_writers": [],
+    "scheduled_tasks": []
+  },
+  "permissions": {
+    "read": [
+      "projects/*",
+      "vault/raw/*",
+      "vault/research/*"
+    ],
+    "write": [],
+    "write_with_approval": [
+      "projects/*"
+    ],
+    "connections": []
+  }
+}

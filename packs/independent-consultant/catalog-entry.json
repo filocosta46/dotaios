@@ -1,0 +1,17 @@
+{
+  "id": "independent-consultant",
+  "name": "Independent Consultant Work System",
+  "vendor": "dotaios",
+  "type": "outcome-pack",
+  "status": "draft",
+  "visibility": "private",
+  "paid": true,
+  "price_eur": "35.00",
+  "product_id": "independent-consultant",
+  "description": "A private candidate with six human-reviewed workflows for running client work with clearer context.",
+  "tags": [
+    "consulting",
+    "client-work",
+    "local-first"
+  ]
+}

@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dictionary } from "../../website/src/content.js";
+import { dictionary, folderViews } from "../../website/src/content.js";
 import { validateMarketRegistry } from "../../packages/core/src/market-registry.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
@@ -41,6 +41,25 @@ test("the public registry contains only schema-valid non-purchasable drafts", as
   assert.ok(registry.entries.length > 0);
   assert.ok(registry.entries.every((entry) => entry.status === "draft"));
   assert.ok(registry.entries.every((entry) => !entry.checkout_url && !entry.gumroad_url));
+});
+
+test("homepage tells the local context-folder story without hiding client or provider limits", () => {
+  assert.deepEqual(
+    folderViews.map((view) => view.id),
+    ["context", "projects", "sources", "memory", "skills"]
+  );
+
+  for (const language of Object.values(dictionary)) {
+    const copy = JSON.stringify(language);
+    assert.match(copy, /provider/i);
+    assert.match(copy, /browser/i);
+    assert.match(copy, /local|locale/i);
+    assert.match(copy, /€35/);
+    assert.equal(language.packs.items.length, 6);
+    assert.match(language.packs.gate, /checkout/i);
+    assert.doesNotMatch(copy, /every session|in ogni sessione/i);
+    assert.doesNotMatch(copy, /[—–]/);
+  }
 });
 
 test("public context guidance documents only the current MCP tools and one memory projection", async () => {

@@ -179,8 +179,11 @@ function Header({lang, setLang, t}) {
         <a href="#folder" onClick={closeMenu}>
           {t.nav.folder}
         </a>
-        <a href="#ask" onClick={closeMenu}>
-          {t.nav.ask}
+        <a href="#how" onClick={closeMenu}>
+          {t.nav.how}
+        </a>
+        <a href="#packs" onClick={closeMenu}>
+          {t.nav.packs}
         </a>
         <a href="https://github.com/filocosta46/dotaios" target="_blank" rel="noreferrer" onClick={closeMenu}>
           {t.nav.github}
@@ -384,6 +387,34 @@ function FolderSection({t}) {
   )
 }
 
+function HowSection({t}) {
+  return (
+    <section className="how-section section-shell" id="how">
+      <div className="how-heading">
+        <p className="section-eyebrow">{t.how.eyebrow}</p>
+        <h2>{t.how.title}</h2>
+        <p>{t.how.desc}</p>
+      </div>
+      <div className="how-grid" role="list">
+        {t.how.steps.map(([number, title, detail]) => (
+          <article className="how-step" key={number} role="listitem">
+            <span className="how-step-number">{number}</span>
+            <h3>{title}</h3>
+            <p>{detail}</p>
+          </article>
+        ))}
+      </div>
+      <div className="activation-proof" data-scale-fade>
+        <div>
+          <span className="activation-proof-label">{t.how.proofLabel}</span>
+          <p className="activation-proof-prompt">“{t.how.proofPrompt}”</p>
+        </div>
+        <p>{t.how.proofResult}</p>
+      </div>
+    </section>
+  )
+}
+
 function AskSection({t}) {
   return (
     <section className="ask-section section-shell" id="ask">
@@ -409,14 +440,57 @@ function AskSection({t}) {
   )
 }
 
+function CompatibilitySection({t}) {
+  return (
+    <section className="compatibility-section section-shell" id="compatibility">
+      <div className="compatibility-heading">
+        <p className="section-eyebrow">{t.compatibility.eyebrow}</p>
+        <h2>{t.compatibility.title}</h2>
+        <p>{t.compatibility.desc}</p>
+      </div>
+      <div className="compatibility-grid" role="list">
+        {t.compatibility.cards.map(([title, detail], index) => (
+          <article className="compatibility-card" key={title} role="listitem">
+            <span>{String(index + 1).padStart(2, '0')}</span>
+            <h3>{title}</h3>
+            <p>{detail}</p>
+          </article>
+        ))}
+      </div>
+      <a
+        className="compatibility-link"
+        href="https://github.com/filocosta46/dotaios/blob/main/docs/client-support.md"
+        target="_blank"
+        rel="noreferrer"
+      >
+        {t.compatibility.matrixCta} <span aria-hidden="true">↗</span>
+      </a>
+    </section>
+  )
+}
+
 function PacksSection({t}) {
   return (
     <section className="offer-section section-shell" id="packs">
-      <div className="offer-heading">
-        <p className="section-eyebrow">{t.packs.eyebrow}</p>
-        <h2>{t.packs.title}</h2>
-        <p>{t.packs.desc}</p>
+      <div className="offer-intro">
+        <div className="offer-heading">
+          <p className="section-eyebrow">{t.packs.eyebrow}</p>
+          <h2>{t.packs.title}</h2>
+          <p>{t.packs.desc}</p>
+        </div>
+        <aside className="offer-summary" aria-label={t.packs.name}>
+          <span className="offer-status">{t.packs.status}</span>
+          <strong>{t.packs.name}</strong>
+          <span className="offer-price">{t.packs.price}</span>
+          <p>{t.packs.priceNote}</p>
+          <a className="button button-offer" href="#setup">
+            <span>{t.packs.cta}</span>
+            <span className="button-arrow" aria-hidden="true">↑</span>
+          </a>
+          <small>{t.packs.gate}</small>
+        </aside>
       </div>
+      <p className="shortcut-label">{t.packs.includedLabel}</p>
       <div className="shortcut-list">
         {t.packs.items.map((item) => (
           <article className="shortcut-row" key={item.name}>
@@ -444,6 +518,8 @@ function Footer({t}) {
       <nav aria-label="Footer">
         <a href="https://github.com/filocosta46/dotaios">GitHub</a>
         <a href="https://github.com/filocosta46/dotaios/blob/main/docs/getting-started.md">{t.footer.docs}</a>
+        <a href="https://github.com/filocosta46/dotaios/blob/main/docs/client-support.md">{t.footer.support}</a>
+        <a href="https://github.com/filocosta46/dotaios/blob/main/SECURITY.md">{t.footer.security}</a>
       </nav>
     </footer>
   )
@@ -493,7 +569,9 @@ export default function App() {
       <main className="site-main">
         <Hero t={t} prompt={COPY.installPrompt[lang]} />
         <FolderSection t={t} />
+        <HowSection t={t} />
         <AskSection t={t} />
+        <CompatibilitySection t={t} />
         <PacksSection t={t} />
       </main>
       <Footer t={t} />
