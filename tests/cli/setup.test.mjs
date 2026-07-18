@@ -127,7 +127,10 @@ test("non-interactive setup does not download the optional web browsing engine b
     "--skip-reveal"
   ], {
     encoding: "utf8",
-    env: { ...process.env, HOME: homePath }
+    // HOME isolation only covers the ~/.dotaios/bin probe; resolveLightpanda
+    // also falls back to `which lightpanda`, so PATH must not reach a real
+    // engine installed on this machine (e.g. ~/.local/bin on the fleet Mini).
+    env: { ...process.env, HOME: homePath, PATH: "/usr/bin:/bin" }
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Web browsing engine: not installed.*plain fetch remains available/);
