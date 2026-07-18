@@ -520,6 +520,7 @@ function Footer({t}) {
         <a href="https://github.com/filocosta46/dotaios/blob/main/docs/getting-started.md">{t.footer.docs}</a>
         <a href="https://github.com/filocosta46/dotaios/blob/main/docs/client-support.md">{t.footer.support}</a>
         <a href="https://github.com/filocosta46/dotaios/blob/main/SECURITY.md">{t.footer.security}</a>
+        <a href="https://github.com/filocosta46/dotaios/blob/main/docs/privacy.md">{t.footer.privacy}</a>
       </nav>
     </footer>
   )

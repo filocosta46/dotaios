@@ -143,7 +143,7 @@ export const dictionary = {
       title: 'Local files, honest limits.',
       desc: 'DotAIOS configures files and bridges for supported desktop clients. The client version and its runtime decide what is actually read in a session.',
       cards: [
-        ['Best fit today', 'People already using Codex, Claude Code, Cursor, Gemini CLI, or another supported local agent on a desktop.'],
+        ['Best fit today', 'People already using Codex, Claude Code, Cursor, Gemini CLI, or another supported local agent on a desktop. Cursor is project scoped today: rules load per attached project.'],
         ['Browser chats', 'A browser chat cannot open your local folder directly. Attach a reviewed brief or selected files when you use one.'],
         ['What stays local', 'The DotAIOS folder stays on your computer unless you enable an optional sync or connection.'],
         ['What leaves the folder', 'Your chosen AI provider processes the context you send to it. DotAIOS does not hide that relationship.'],
@@ -158,7 +158,7 @@ export const dictionary = {
       price: '€35 once',
       priceNote: 'Your AI app and subscription are separate.',
       status: 'In final review',
-      gate: 'Checkout stays closed until install, removal, update, rollback, and recovery tests pass.',
+      gate: 'Checkout stays closed until install, removal, update, rollback, recovery, entitlement, authenticated delivery, and permission checks all pass.',
       cta: 'Start with free DotAIOS',
       includedLabel: 'Six client workflows',
       items: [
@@ -211,6 +211,7 @@ export const dictionary = {
       docs: 'Docs',
       support: 'Client support',
       security: 'Security',
+      privacy: 'Privacy',
     },
     copy: 'Copy',
   },
@@ -316,7 +317,7 @@ export const dictionary = {
       title: 'File locali, limiti chiari.',
       desc: 'DotAIOS configura file e collegamenti per i client desktop supportati. La versione del client e il suo runtime decidono cosa viene letto davvero in una sessione.',
       cards: [
-        ['Per chi funziona meglio oggi', 'Persone che usano già Codex, Claude Code, Cursor, Gemini CLI o un altro agente locale supportato su desktop.'],
+        ['Per chi funziona meglio oggi', 'Persone che usano già Codex, Claude Code, Cursor, Gemini CLI o un altro agente locale supportato su desktop. Cursor oggi è limitato al progetto: le regole si caricano per progetto collegato.'],
         ['Chat nel browser', 'Una chat nel browser non può aprire direttamente la cartella locale. Puoi allegare un riepilogo verificato o i file selezionati.'],
         ['Cosa resta in locale', 'La cartella DotAIOS resta sul tuo computer, a meno che tu non abiliti una sincronizzazione o una connessione opzionale.'],
         ['Cosa lascia la cartella', 'Il provider AI che scegli elabora il contesto che gli invii. DotAIOS non nasconde questo rapporto.'],
@@ -331,7 +332,7 @@ export const dictionary = {
       price: '€35 una volta',
       priceNote: 'L’app AI e il relativo abbonamento sono separati.',
       status: 'In verifica finale',
-      gate: 'Il checkout resta chiuso finché i test di installazione, rimozione, aggiornamento, rollback e recupero non saranno superati.',
+      gate: 'Il checkout resta chiuso finché installazione, rimozione, aggiornamento, rollback, recupero, verifica della licenza, consegna autenticata e permessi non superano tutti i controlli.',
       cta: 'Inizia con DotAIOS gratis',
       includedLabel: 'Sei workflow per i clienti',
       items: [
@@ -384,6 +385,7 @@ export const dictionary = {
       docs: 'Documentazione',
       support: 'Supporto client',
       security: 'Sicurezza',
+      privacy: 'Privacy',
     },
     copy: 'Copia',
   },
