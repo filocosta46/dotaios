@@ -14,6 +14,72 @@ const SECRET_FILE_PATTERNS = [
   /\.key$/i
 ];
 
+// --- Ranking ---
+//
+// The ONE ranking function for every reader (CLI search, MCP search_aios, the
+// session digest all funnel through searchAios/searchMemoryDir/searchMarkdownDir).
+// Scores are deterministic and composed as:
+//
+//   rank = tier(kind) * 1e6  +  (Σ idf(matched term) + structuralBoost) * decay(age)
+//
+//   tier:  phrase 3, all-terms 2, partial 1. An exact substring hit sits in a
+//          tier no amount of recency or rarity can cross — a literal error
+//          string always beats a paraphrase.
+//   idf:   BM25-style log(1 + (N − df + ½)/(df + ½)) over the scanned corpus.
+//          A term present in every document weighs ~0 ("thanks!"), a rare
+//          token (an error string, a flag name) dominates.
+//   decay: 2^(−age / RECENCY_HALF_LIFE_DAYS), from the entry ts (memory) or
+//          the file mtime (markdown). Missing age means no penalty. Newer wins
+//          when lexical relevance is otherwise close.
+//
+// TODO(L1-5): buildCorpusStats tokenizes the scanned candidate set per query.
+// The persistent incremental term-frequency cache replaces buildCorpusStats
+// call sites (rebuild on changed files only) without touching rankSearchHit.
+
+export const RECENCY_HALF_LIFE_DAYS = 30;
+const RANK_TIER_WEIGHT = 1_000_000;
+const RANK_TIERS = { phrase: 3, terms: 2, partial: 1 };
+const TOKEN_SPLIT_RE = /[^a-z0-9_-]+/;
+
+export function tokenizeForCorpus(text) {
+  return String(text || "").toLowerCase().split(TOKEN_SPLIT_RE).filter(Boolean);
+}
+
+export function buildCorpusStats(docs) {
+  const docFrequency = new Map();
+  let docCount = 0;
+  for (const doc of docs) {
+    docCount += 1;
+    for (const token of new Set(tokenizeForCorpus(doc))) {
+      docFrequency.set(token, (docFrequency.get(token) || 0) + 1);
+    }
+  }
+  return { docCount, docFrequency };
+}
+
+export function idfWeight(term, corpus) {
+  if (!corpus || !corpus.docCount) return 1;
+  const df = corpus.docFrequency.get(String(term).toLowerCase()) || 0;
+  return Math.log(1 + (corpus.docCount - df + 0.5) / (df + 0.5));
+}
+
+export function recencyDecay(ageMs) {
+  if (!Number.isFinite(ageMs) || ageMs <= 0) return 1;
+  // Whole-day buckets: entries from the same day decay identically, so
+  // sub-second mtime jitter can never reorder otherwise-equal results —
+  // "newer wins" only when the age difference is a real one.
+  const ageDays = Math.floor(ageMs / 86_400_000);
+  return Math.pow(2, -ageDays / RECENCY_HALF_LIFE_DAYS);
+}
+
+export function rankSearchHit({ kind, matchedTerms = [], corpus = null, ageMs = null, structuralBoost = 0 }) {
+  const tier = RANK_TIERS[kind] || 0;
+  if (tier === 0) return 0;
+  const idfSum = matchedTerms.reduce((sum, term) => sum + idfWeight(term, corpus), 0);
+  const within = Math.min((idfSum + structuralBoost) * recencyDecay(ageMs), RANK_TIER_WEIGHT - 1);
+  return tier * RANK_TIER_WEIGHT + within;
+}
+
 export async function searchAios({
   aiosPath,
   vaultPath,
@@ -97,26 +163,66 @@ export function matchQuery(text, query) {
   }
 
   const terms = queryTerms(query);
-  if (terms.length > 1 && terms.every((term) => haystack.includes(term))) {
-    const freq = terms.reduce((sum, term) => sum + countOccurrences(haystack, term), 0);
-    return { matched: true, kind: "terms", score: 5 + Math.min(freq - terms.length, 5) };
+  if (terms.length > 1) {
+    const present = terms.filter((term) => haystack.includes(term));
+    if (present.length === terms.length) {
+      const freq = terms.reduce((sum, term) => sum + countOccurrences(haystack, term), 0);
+      return { matched: true, kind: "terms", score: 5 + Math.min(freq - terms.length, 5) };
+    }
+    // Partial matches are rankable (IDF decides their weight) instead of
+    // being dropped — a rare token alone must be findable.
+    if (present.length > 0) {
+      return { matched: true, kind: "partial", score: present.length };
+    }
   }
 
   return { matched: false, kind: null, score: 0 };
 }
 
 export async function searchMemoryDir(memoryDir, query, { limit = DEFAULT_LIMIT } = {}) {
-  const events = await searchJsonlEntries(path.join(memoryDir, "events.jsonl"), query, {
-    source: "memory/events.jsonl"
-  });
-  const archived = await searchJsonlEntries(path.join(memoryDir, "events-archive.jsonl"), query, {
-    source: "memory/events-archive.jsonl"
-  });
-  const signals = await searchSignalEntries(path.join(memoryDir, "signals"), query);
+  const sources = [
+    { filePath: path.join(memoryDir, "events.jsonl"), source: "memory/events.jsonl" },
+    { filePath: path.join(memoryDir, "events-archive.jsonl"), source: "memory/events-archive.jsonl" },
+    ...await listSignalSources(path.join(memoryDir, "signals"))
+  ];
 
-  return [...events, ...archived, ...signals]
-    .sort(compareMemoryResults)
-    .slice(0, limit);
+  // Every scanned entry (matched or not) feeds the corpus so IDF reflects how
+  // common a term actually is in this folder, not just among the hits.
+  const docs = [];
+  const candidates = [];
+  for (const { filePath, source } of sources) {
+    const entries = await readJsonl(filePath);
+    for (const entry of entries) {
+      const text = JSON.stringify(entry);
+      docs.push(text);
+      const match = matchJsonEntry(entry, query);
+      if (!match) continue;
+      candidates.push({
+        text,
+        result: {
+          source,
+          match,
+          matchedField: match.field === "summary" ? null : match.field,
+          matchedSnippet: match.field === "summary" ? null : match.value,
+          ...entry
+        }
+      });
+    }
+  }
+
+  const corpus = buildCorpusStats(docs);
+  const now = Date.now();
+  const terms = queryTerms(query);
+  return candidates
+    .map(({ text, result }) => {
+      const haystack = text.toLowerCase();
+      const matchedTerms = terms.filter((term) => haystack.includes(term));
+      const ageMs = result.ts ? now - Date.parse(result.ts) : null;
+      return { result, rank: rankSearchHit({ kind: result.match.kind, matchedTerms, corpus, ageMs }) };
+    })
+    .sort((a, b) => (b.rank - a.rank) || compareTimestampsDesc(a.result.ts, b.result.ts))
+    .slice(0, limit)
+    .map(({ result }) => result);
 }
 
 export async function searchJsonlEntries(filePath, query, { source }) {
@@ -143,28 +249,57 @@ export async function searchMarkdownDir(dir, query, {
   includeFile = null
 } = {}) {
   const files = await listSearchFiles(dir, { extensions, includeFile });
-  const results = [];
+  const docs = [];
+  const candidates = [];
 
-  // Read and score files concurrently in bounded batches — I/O is the bottleneck,
-  // and a cap keeps us well under the open-file limit on large vaults. The final
-  // sort below makes the result order independent of read order.
+  // Read files concurrently in bounded batches — I/O is the bottleneck, and a
+  // cap keeps us well under the open-file limit on large vaults. Every read
+  // file feeds the IDF corpus; only files with snippets become candidates.
   const CONCURRENCY = 32;
   for (let i = 0; i < files.length; i += CONCURRENCY) {
     const batch = await Promise.all(
-      files.slice(i, i + CONCURRENCY).map((filePath) => scoreSearchFile(filePath, dir, query, sourcePrefix))
+      files.slice(i, i + CONCURRENCY).map((filePath) => collectSearchFile(filePath, dir, query, sourcePrefix))
     );
-    for (const result of batch) {
-      if (result) results.push(result);
+    for (const item of batch) {
+      if (!item) continue;
+      docs.push(item.content);
+      if (item.candidate) candidates.push(item.candidate);
     }
   }
 
-  return results
-    .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
+  const corpus = buildCorpusStats(docs);
+  const now = Date.now();
+  const terms = queryTerms(query);
+  const ranked = [];
+  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+    const batch = await Promise.all(candidates.slice(i, i + CONCURRENCY).map(async (candidate) => {
+      let ageMs = null;
+      try {
+        ageMs = now - (await fs.stat(candidate.filePath)).mtimeMs;
+      } catch {
+        // Unreadable mtime: rank without a recency penalty.
+      }
+      const haystack = candidate.content.toLowerCase();
+      const matchedTerms = terms.filter((term) => haystack.includes(term));
+      const rank = rankSearchHit({
+        kind: candidate.kind,
+        matchedTerms,
+        corpus,
+        ageMs,
+        structuralBoost: candidate.structuralBoost
+      });
+      return { result: candidate.result, rank };
+    }));
+    ranked.push(...batch);
+  }
+
+  return ranked
+    .sort((a, b) => (b.rank - a.rank) || a.result.file.localeCompare(b.result.file))
     .slice(0, limit)
-    .map(({ score, ...result }) => result);
+    .map(({ result }) => result);
 }
 
-async function scoreSearchFile(filePath, dir, query, sourcePrefix) {
+async function collectSearchFile(filePath, dir, query, sourcePrefix) {
   let content;
   try {
     content = await fs.readFile(filePath, "utf8");
@@ -174,20 +309,30 @@ async function scoreSearchFile(filePath, dir, query, sourcePrefix) {
   }
 
   const snippets = buildMarkdownSnippets(content, query);
-  if (snippets.length === 0) return null;
+  if (snippets.length === 0) return { content, candidate: null };
 
   const relative = path.relative(dir, filePath);
   const title = readTitle(content) || relative;
   const pathMatch = matchQuery(relative, query);
   const titleMatch = matchQuery(title, query);
-  const score = scoreMarkdownResult({ snippets, pathMatch, titleMatch });
 
   return {
-    source: `${sourcePrefix}/${relative}`,
-    file: relative,
-    title,
-    matches: snippets.slice(0, 5),
-    score
+    content,
+    candidate: {
+      filePath,
+      content,
+      // The file's tier comes from a whole-file match: a doc containing every
+      // query term across separate lines is a terms-tier hit even though each
+      // individual snippet line is only a partial one.
+      kind: matchQuery(content, query).kind || "partial",
+      structuralBoost: markdownStructuralBoost({ snippets, pathMatch, titleMatch }),
+      result: {
+        source: `${sourcePrefix}/${relative}`,
+        file: relative,
+        title,
+        matches: snippets.slice(0, 5)
+      }
+    }
   };
 }
 
@@ -285,21 +430,17 @@ export function markMatches(value, query) {
   return output;
 }
 
-async function searchSignalEntries(signalsDir, query) {
+async function listSignalSources(signalsDir) {
   let files;
   try {
     files = (await fs.readdir(signalsDir)).filter((file) => file.endsWith(".jsonl")).sort().reverse();
   } catch {
     return [];
   }
-
-  const results = [];
-  for (const file of files) {
-    results.push(...await searchJsonlEntries(path.join(signalsDir, file), query, {
-      source: `memory/signals/${file}`
-    }));
-  }
-  return results;
+  return files.map((file) => ({
+    filePath: path.join(signalsDir, file),
+    source: `memory/signals/${file}`
+  }));
 }
 
 function matchJsonEntry(entry, query) {
@@ -346,28 +487,22 @@ function flattenEntry(value, prefix = "") {
   return [{ name: prefix || "value", value: String(value) }];
 }
 
-function compareMemoryResults(a, b) {
-  const scoreA = a.match?.score ?? 0;
-  const scoreB = b.match?.score ?? 0;
-  if (scoreA !== scoreB) return scoreB - scoreA;
-  return compareTimestampsDesc(a.ts, b.ts);
-}
-
 function compareSnippetCandidates(a, b) {
   const areaScore = { description: 3, heading: 2, body: 1 };
-  const matchScore = { phrase: 2, terms: 1 };
+  const matchScore = { phrase: 3, terms: 2, partial: 1 };
   return (matchScore[b.match.kind] - matchScore[a.match.kind])
     || (areaScore[b.area] - areaScore[a.area])
     || (a.line - b.line);
 }
 
-function scoreMarkdownResult({ snippets, pathMatch, titleMatch }) {
+// Structural boosts sit alongside the IDF sum inside a tier: same order of
+// magnitude, so placement helps but cannot fake rarity or freshness.
+function markdownStructuralBoost({ snippets, pathMatch, titleMatch }) {
   const bestSnippet = snippets[0];
-  const matchScore = bestSnippet?.match === "phrase" ? 100 : 60;
-  const areaBoost = bestSnippet?.area === "description" ? 30 : bestSnippet?.area === "heading" ? 20 : 0;
-  const titleBoost = titleMatch.matched ? 25 : 0;
-  const pathBoost = pathMatch.matched ? 10 : 0;
-  return matchScore + areaBoost + titleBoost + pathBoost;
+  const areaBoost = bestSnippet?.area === "description" ? 3 : bestSnippet?.area === "heading" ? 2 : 0;
+  const titleBoost = titleMatch.matched ? 2.5 : 0;
+  const pathBoost = pathMatch.matched ? 1 : 0;
+  return areaBoost + titleBoost + pathBoost;
 }
 
 async function listSearchFiles(dir, { extensions, includeFile }) {
