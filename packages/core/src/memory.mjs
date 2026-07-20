@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatJsonlEntry, parseJsonlLine, readJsonl } from "./jsonl.mjs";
+import { refreshLiveOkf, writeProjectLog } from "./okf-live.mjs";
 import { searchMarkdownDir, searchMemoryDir } from "./search.mjs";
 
 export { formatJsonlEntry, parseJsonlLine, readJsonl };
@@ -88,7 +89,15 @@ export async function appendEvent(eventsPath, { type, project, domain, summary, 
   };
   await fs.mkdir(path.dirname(eventsPath), { recursive: true });
   await fs.appendFile(eventsPath, formatJsonlEntry(entry));
-  await maybeMaintain(aiosPathFromEvents(eventsPath));
+  const aiosPath = aiosPathFromEvents(eventsPath);
+  await maybeMaintain(aiosPath);
+  if (aiosPath && entry.project) {
+    try {
+      await writeProjectLog(aiosPath, entry.project);
+    } catch {
+      // Live log projection is best-effort — never break an append.
+    }
+  }
   return entry;
 }
 
@@ -426,6 +435,11 @@ export async function maintainMemory(aiosPath, options = {}) {
 
     const compacted = await compactEvents(eventsPath);
     const trimmed = await trimSignals(signalsDir);
+    try {
+      await refreshLiveOkf(aiosPath);
+    } catch {
+      // Index/log refresh is best-effort; compaction results still stand.
+    }
     await fs.mkdir(memoryDir, { recursive: true });
     await fs.writeFile(statePath, JSON.stringify({ lastRun: nowMs }));
     if (compacted.skipped !== "locked") {

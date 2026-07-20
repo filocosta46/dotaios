@@ -37,6 +37,29 @@ disposable and re-runnable.
 | `--out <dir>` | `<aios>/build/okf-export` | Where to write the bundle.           |
 | `--path <dir>`| `~/aios`                  | Use a non-default AIOS folder.       |
 
+## The live folder is OKF-native too
+
+The export is no longer the only OKF surface. The live folder maintains itself:
+
+- **Per-shelf and per-project `index.md`** — `memory/`, `projects/`, and every
+  `projects/<slug>/` keep a generated `index.md` listing each doc with its
+  `type` and `description`. Regeneration is deterministic and write-if-changed:
+  a no-op run produces zero diff. The renderer is the same one the export uses,
+  so the live tree and the bundle can never drift in format.
+- **Per-project `log.md`** — the reserved changelog, projected from
+  `memory/events.jsonl` (promotion/decision lifecycle entries for that project,
+  newest first). An agent answers "what changed in project X" by reading it
+  instead of re-scanning the event log. It refreshes on project-tagged event
+  writes and during daily memory maintenance.
+- **Frontmatter convention** — memory-folder documents carry OKF-style
+  frontmatter: `type` (required at export, recommended live) plus `title`,
+  `description`, `tags`, and a timestamp. The `description` field is the same
+  one search and the index generators read — write it once, every surface uses it.
+- **Decisions are searchable** — `decisions/` is a first-class search scope
+  (`dotaios search --scope decisions`, included in `all`), and the working-context
+  projection carries the most recent decision titles so agents returning days
+  later still see them.
+
 ## Local only
 
 The bundle is produced on your machine and nothing is published, committed, or
