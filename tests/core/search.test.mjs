@@ -15,10 +15,11 @@ function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-search-test-"));
 }
 
-test("matchQuery prefers exact phrase and falls back to all terms", () => {
+test("matchQuery prefers exact phrase, then all terms, then partial terms", () => {
   assert.deepEqual(matchQuery("alpha beta", "alpha beta"), { matched: true, kind: "phrase", score: 10 });
   assert.deepEqual(matchQuery("alpha then beta", "alpha beta"), { matched: true, kind: "terms", score: 5 });
-  assert.deepEqual(matchQuery("alpha only", "alpha beta"), { matched: false, kind: null, score: 0 });
+  assert.deepEqual(matchQuery("alpha only", "alpha beta"), { matched: true, kind: "partial", score: 1 });
+  assert.deepEqual(matchQuery("gamma delta", "alpha beta"), { matched: false, kind: null, score: 0 });
 });
 
 test("searchMarkdownDir orders phrase matches before all-term matches", async () => {
@@ -51,10 +52,12 @@ test("buildMarkdownSnippets returns line windows around matches", () => {
   assert.match(snippets[0].content, /After line/);
 });
 
-test("buildMarkdownSnippets falls back to all terms across a file", () => {
+test("buildMarkdownSnippets surfaces per-line partial hits when terms span a file", () => {
   const snippets = buildMarkdownSnippets("# Alpha Notes\n\nMiddle text\nBeta ending\n", "alpha beta");
   assert.equal(snippets.length, 2);
-  assert.equal(snippets[0].match, "terms");
+  // Each line holds only one of the terms, so the line-level truth is
+  // "partial"; the whole-file terms tier is applied at ranking time.
+  assert.equal(snippets[0].match, "partial");
   assert.match(snippets[0].content, /Alpha/);
   assert.match(snippets[1].content, /Beta/);
 });
