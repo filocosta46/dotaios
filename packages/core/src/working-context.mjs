@@ -392,6 +392,14 @@ function normalizeTimelineEntry(entry, {
   };
 }
 
+/**
+ * Project filter for operational timeline rows.
+ * Untagged (no `project`) entries are shared into every scoped projection and
+ * later marked `unscoped` — intentional global carry, not a leak. Rows tagged
+ * with a different project are excluded. Durable continuity beyond the
+ * today+yesterday operational window requires promotion into durable surfaces
+ * (project README, decisions, vault), not widening this filter.
+ */
 function matchesProject(entry, projectFilter) {
   return !projectFilter || !entry.project || entry.project === projectFilter;
 }

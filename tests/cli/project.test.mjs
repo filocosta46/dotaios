@@ -709,16 +709,17 @@ test("project context emits the scoped continuity payload for a registered proje
 
   const { lines, output } = outputCapture();
   const result = await projectCommand([
-    "context", "alpha", "--tool", "codex",
+    "context", "alpha",
     "--path", aiosPath, "--home", homePath, "--state-path", statePath
   ], { output });
 
   const text = lines.join("\n");
   assert.match(text, /Project continuity: alpha/);
-  assert.match(text, /tool: codex/);
+  assert.match(text, /continuity: today\+yesterday/);
   assert.match(text, /Alpha decided to use Postgres/);
   assert.doesNotMatch(text, /Beta decided to use SQLite/);
   assert.equal(result.project, "alpha");
+  assert.match(result.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
 });
 
 test("project context fails closed on an unregistered reference", async (t) => {
@@ -740,13 +741,14 @@ test("project context --json wraps the payload for tool bridges", async (t) => {
 
   const { lines, output } = outputCapture();
   await projectCommand([
-    "context", "alpha", "--tool", "claude-code", "--json",
+    "context", "alpha", "--json",
     "--path", aiosPath, "--home", homePath, "--state-path", statePath
   ], { output });
 
   const parsed = JSON.parse(lines.join("\n"));
   assert.equal(parsed.project, "alpha");
-  assert.equal(parsed.tool, "claude-code");
+  assert.ok(!("tool" in parsed));
+  assert.match(parsed.generated_at, /^\d{4}-\d{2}-\d{2}T/);
   assert.match(parsed.context, /Alpha decided to use Postgres/);
   assert.ok(parsed.context_budget && typeof parsed.context_budget === "object");
 });

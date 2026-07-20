@@ -3,6 +3,7 @@ import path from "node:path";
 import {
   doctorProjects,
   listProjects,
+  matchProjectRecord,
   registerProject,
   resolveProject
 } from "../../../core/src/projects.mjs";
@@ -30,9 +31,14 @@ Add options:
   --yes               Explicit script-friendly alias for --apply
 
 Context options:
-  --tool <name>       Record which client the payload is for (default: any)
-  --budget <n>        Visible character budget for the payload
+  --budget <n>        Visible character limit (positive int). Payload field
+                      context_budget is the resulting budget-state object.
   --json              Print the portable plan and receipt (or context payload) as JSON
+
+Context continuity:
+  Raw events/signals older than today+yesterday are omitted. Promote durable
+  decisions so they survive the operational window. Untagged (global) entries
+  in that window are shared into every project payload and marked unscoped.
 
 Common options:
   --path <dir>        Use an AIOS folder other than ~/aios
@@ -95,38 +101,30 @@ export async function projectCommand(args = [], dependencies = {}) {
 
   if (subcommand === "context") {
     assertPositionals(positionals, 1, "dotaios project context <slug-or-id>");
-    const reference = positionals[0];
-    const projects = await listProjects(coreOptions);
-    const matches = projects.filter((project) =>
-      project.id === reference || project.slug === reference || project.project === reference);
-    if (matches.length === 0) {
-      throw new Error(`Project "${reference}" is not registered. Run \`dotaios project list\`.`);
-    }
-    if (matches.length > 1) {
-      throw new Error(`Project reference "${reference}" is ambiguous. Use its stable id.`);
-    }
-    const slug = matches[0].slug || matches[0].project;
-    const { digest, budget } = await buildSessionDigest(coreOptions.aiosPath, {
+    const matched = await matchProjectRecord({
+      ...coreOptions,
+      project: positionals[0]
+    });
+    const slug = matched.slug || matched.project;
+    const { digest, budget, generatedAt } = await buildSessionDigest(coreOptions.aiosPath, {
       project: slug,
       visibleCharacterBudget: options.budget
     });
-    const tool = options.tool || "any";
-    const generatedAt = new Date().toISOString();
     if (options.json) {
       output.log(JSON.stringify({
         project: slug,
-        tool,
         generated_at: generatedAt,
         context_budget: budget,
         context: digest
       }, null, 2));
     } else {
       output.log(`# Project continuity: ${slug}`);
-      output.log(`# generated: ${generatedAt}  tool: ${tool}`);
+      output.log(`# generated: ${generatedAt}`);
+      output.log("# continuity: today+yesterday raw timeline; promote for durable carry");
       output.log("");
       output.log(digest);
     }
-    return { project: slug, tool, digest, budget };
+    return { project: slug, digest, budget, generatedAt };
   }
 
   if (subcommand === "doctor") {
@@ -158,7 +156,7 @@ function createCoreOptions(options, dependencies) {
 }
 
 function parseOptions(args) {
-  const options = { path: null, home: null, statePath: null, tool: null, budget: undefined, json: false };
+  const options = { path: null, home: null, statePath: null, budget: undefined, json: false };
   const addOptions = {
     slug: null,
     name: null,
@@ -204,9 +202,6 @@ function parseOptions(args) {
       addOptions.yes = true;
     } else if (arg === "--json") {
       options.json = true;
-    } else if (arg === "--tool") {
-      options.tool = readOptionValue(args, index, "--tool");
-      index += 1;
     } else if (arg === "--budget") {
       const value = Number.parseInt(readOptionValue(args, index, "--budget"), 10);
       if (!Number.isInteger(value) || value <= 0) {
