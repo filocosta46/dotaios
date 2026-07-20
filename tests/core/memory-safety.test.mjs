@@ -1,0 +1,266 @@
+import fs from "node:fs";
+import fsp from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  appendEvent,
+  compactEvents,
+  trimSignals,
+  readJsonl,
+  isoDate
+} from "../../packages/core/src/memory.mjs";
+import { searchMemoryDir } from "../../packages/core/src/search.mjs";
+
+function tmpDir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-memsafe-test-"));
+}
+
+function seedEvents(filePath, count) {
+  const lines = [];
+  for (let i = 0; i < count; i++) {
+    lines.push(JSON.stringify({ ts: `2026-01-01T00:00:${String(i % 60).padStart(2, "0")}.${String(i).padStart(4, "0")}Z`, type: "seed", n: i }));
+  }
+  fs.writeFileSync(filePath, lines.join("\n") + "\n");
+  return lines;
+}
+
+function readLines(filePath) {
+  if (!fs.existsSync(filePath)) return [];
+  return fs.readFileSync(filePath, "utf8").split("\n").filter((l) => l.trim());
+}
+
+// Injectable fs double: throws once at the Nth call of a method, otherwise
+// delegates to the real promises fs. Simulates a crash at an exact step.
+function faultFs(failures) {
+  const counts = {};
+  const wrap = (name) => async (...args) => {
+    counts[name] = (counts[name] || 0) + 1;
+    counts.total = (counts.total || 0) + 1;
+    if (failures[name] && counts[name] === failures[name]) {
+      throw new Error(`injected-crash:${name}:${counts[name]}`);
+    }
+    return fsp[name](...args);
+  };
+  const filesystem = {
+    readFile: wrap("readFile"),
+    writeFile: wrap("writeFile"),
+    appendFile: wrap("appendFile"),
+    rename: wrap("rename"),
+    unlink: wrap("unlink"),
+    readdir: wrap("readdir"),
+    stat: wrap("stat"),
+    mkdir: wrap("mkdir")
+  };
+  return { filesystem, counts };
+}
+
+// --- Defect 1: crash-safe compaction ---
+
+test("compaction survives a crash at any single step: no event lost, none duplicated", async () => {
+  const scenarios = [
+    { writeFile: 1 },
+    { writeFile: 2 },
+    { appendFile: 1 },
+    { rename: 1 },
+    { unlink: 1 }
+  ];
+  for (const failure of scenarios) {
+    const dir = tmpDir();
+    const eventsPath = path.join(dir, "events.jsonl");
+    const archivePath = path.join(dir, "events-archive.jsonl");
+    const original = seedEvents(eventsPath, 30);
+
+    // Crashed run: allowed to reject, must never lose data.
+    const fault = faultFs(failure);
+    try {
+      await compactEvents(eventsPath, 10, { filesystem: fault.filesystem });
+    } catch (error) {
+      assert.match(String(error.message), /injected-crash/, `unexpected error for ${JSON.stringify(failure)}: ${error.message}`);
+    }
+    assert.ok((fault.counts.total || 0) > 0, "compactEvents must honor the injectable filesystem so crashes are testable");
+
+    // Mid-crash, every event must survive in SOME durable file: the events
+    // log, the archive, or the staged pending batch.
+    const midState = [
+      ...readLines(eventsPath),
+      ...readLines(archivePath),
+      ...readLines(`${archivePath}.pending`)
+    ];
+    for (const line of original) {
+      assert.ok(midState.includes(line), `event lost after crash ${JSON.stringify(failure)}: ${line}`);
+    }
+
+    // Clean re-run must converge with zero loss and zero duplicates.
+    const result = await compactEvents(eventsPath, 10);
+    assert.equal(result.skipped, undefined, `re-run refused after crash ${JSON.stringify(failure)}`);
+    const kept = readLines(eventsPath);
+    const archived = readLines(archivePath);
+    const all = [...archived, ...kept];
+    assert.equal(kept.length, 10, `kept count wrong after ${JSON.stringify(failure)}`);
+    assert.equal(all.length, 30, `loss or duplication after ${JSON.stringify(failure)}: events=${kept.length} archive=${archived.length}`);
+    assert.equal(new Set(all).size, 30, `duplicate lines after ${JSON.stringify(failure)}`);
+    for (const line of original) {
+      assert.ok(all.includes(line), `event missing after re-run ${JSON.stringify(failure)}`);
+    }
+  }
+});
+
+test("compaction re-run on an already-compacted file is a no-op", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  seedEvents(eventsPath, 30);
+  const first = await compactEvents(eventsPath, 10);
+  assert.equal(first.archived, 20);
+  const second = await compactEvents(eventsPath, 10);
+  assert.equal(second.archived, 0);
+  assert.equal(readLines(path.join(dir, "events-archive.jsonl")).length, 20);
+});
+
+test("compaction skips gracefully when another process holds the lock", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  seedEvents(eventsPath, 30);
+  fs.writeFileSync(`${eventsPath}.lock`, JSON.stringify({ pid: 99999, ts: Date.now() }));
+  const result = await compactEvents(eventsPath, 10);
+  assert.equal(result.skipped, "locked");
+  assert.equal(readLines(eventsPath).length, 30, "locked run must not touch the file");
+});
+
+test("compaction takes over a stale lock", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  seedEvents(eventsPath, 30);
+  fs.writeFileSync(`${eventsPath}.lock`, JSON.stringify({ pid: 99999, ts: Date.now() - 10 * 60_000 }));
+  const result = await compactEvents(eventsPath, 10);
+  assert.equal(result.archived, 20);
+});
+
+// --- Defect 2: corrupt lines are preserved and visible, never silently dropped ---
+
+test("readJsonl quarantines a corrupt line verbatim and never returns it as data", async () => {
+  const dir = tmpDir();
+  const filePath = path.join(dir, "events.jsonl");
+  const badLine = '{"ts":"2026-01-01","type":"trunc';
+  fs.writeFileSync(filePath, `{"a":1}\n${badLine}\n{"a":2}\n`);
+
+  const entries = await readJsonl(filePath);
+  assert.deepEqual(entries, [{ a: 1 }, { a: 2 }]);
+
+  const badPath = `${filePath}.bad.jsonl`;
+  assert.ok(fs.existsSync(badPath), "expected quarantine file next to the source");
+  assert.deepEqual(readLines(badPath), [badLine], "bad line must be preserved verbatim");
+
+  // Second read must not duplicate the quarantined line.
+  await readJsonl(filePath);
+  assert.deepEqual(readLines(badPath), [badLine], "quarantine must be idempotent across reads");
+});
+
+test("search over a memory dir with a corrupt line still works and quarantines it", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  const eventsPath = path.join(memoryDir, "events.jsonl");
+  fs.writeFileSync(eventsPath, `{"ts":"2026-01-01T00:00:00Z","type":"note","summary":"zebra sighting"}\nnot-json-at-all{\n`);
+
+  const results = await searchMemoryDir(memoryDir, "zebra", { limit: 5 });
+  assert.equal(results.length, 1, "good line must still be searchable");
+  assert.ok(fs.existsSync(`${eventsPath}.bad.jsonl`), "search path must use the unified quarantining reader");
+});
+
+test("memory audit reports preserved corrupt lines", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), '{"ts":"2026-01-01T00:00:00Z","type":"note","summary":"ok"}\nbroken{\n');
+  await readJsonl(path.join(memoryDir, "events.jsonl"));
+
+  const { auditMemory } = await import("../../packages/core/src/memory-audit.mjs");
+  const report = await auditMemory(dir, {});
+  const finding = report.findings.find((f) => f.code === "corrupt-lines");
+  assert.ok(finding, "audit must surface corrupt-line quarantine alongside its other detectors");
+  assert.match(finding.message, /1 corrupt line/);
+});
+
+test("doctor memory-health check reports bad lines, last compaction, archive size", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), '{"a":1}\nbroken{\n');
+  await readJsonl(path.join(memoryDir, "events.jsonl"));
+  fs.writeFileSync(path.join(memoryDir, "events-archive.jsonl"), '{"a":0}\n');
+
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+  assert.equal(typeof doctor.checkMemoryHealth, "function", "doctor must expose a memory-health check");
+  const check = await doctor.checkMemoryHealth(dir);
+  assert.equal(check.status, "warn", "bad lines must warn, not hide");
+  assert.match(check.detail, /1 bad line/);
+  assert.match(check.detail, /archive/i);
+});
+
+// --- Defect 3: one signalFileDate used by read AND trim ---
+
+test("signalFileDate is shared and prefix-aware", async () => {
+  const memory = await import("../../packages/core/src/memory.mjs");
+  assert.equal(typeof memory.signalFileDate, "function", "signalFileDate must be exported for all callers");
+  assert.equal(memory.signalFileDate("laptop-2026-06-12.jsonl"), "2026-06-12");
+  assert.equal(memory.signalFileDate("2026-06-12.jsonl"), "2026-06-12");
+  assert.equal(memory.signalFileDate("notes.jsonl"), "");
+});
+
+test("trimSignals removes old machine-namespaced files and keeps undated files", async () => {
+  const dir = tmpDir();
+  const old = isoDate(new Date(Date.now() - 45 * 86400000));
+  const today = isoDate(new Date());
+  for (const name of [`laptop-${old}.jsonl`, `${old}.jsonl`, `laptop-${today}.jsonl`, "notes.jsonl"]) {
+    fs.writeFileSync(path.join(dir, name), '{"x":1}\n');
+  }
+
+  const result = await trimSignals(dir, 30);
+  assert.equal(result.removed, 2, "both dated old files (plain and machine-prefixed) must be trimmed");
+  const remaining = fs.readdirSync(dir).sort();
+  assert.deepEqual(remaining, [`laptop-${today}.jsonl`, "notes.jsonl"].sort(), "within-window and undated files must survive");
+});
+
+// --- Defect 4: opportunistic maintenance ---
+
+test("a bloated events log auto-compacts on the next appendEvent without manual cleanup", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  const eventsPath = path.join(memoryDir, "events.jsonl");
+  seedEvents(eventsPath, 150); // > 2× RECENT_EVENT_LIMIT (50)
+
+  await appendEvent(eventsPath, { type: "probe", summary: "trigger" });
+
+  const lines = readLines(eventsPath);
+  assert.ok(lines.length <= 60, `expected auto-compaction, events.jsonl still has ${lines.length} lines`);
+  assert.ok(fs.existsSync(path.join(memoryDir, "events-archive.jsonl")), "archive must exist after auto-compaction");
+  const receipt = lines.map((l) => JSON.parse(l)).find((e) => e.type === "memory.maintenance");
+  assert.ok(receipt, "maintenance must write a receipt event to events.jsonl");
+});
+
+test("maintenance runs at most once per day unless the log overflows", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  const eventsPath = path.join(memoryDir, "events.jsonl");
+  seedEvents(eventsPath, 5);
+
+  const memory = await import("../../packages/core/src/memory.mjs");
+  assert.equal(typeof memory.maintainMemory, "function", "maintainMemory must be the one maintenance seam");
+
+  const t0 = Date.parse("2026-02-01T10:00:00Z");
+  const first = await memory.maintainMemory(dir, { now: () => t0 });
+  assert.equal(first.ran, false, "fresh folder initializes the daily clock without churning");
+
+  const second = await memory.maintainMemory(dir, { now: () => t0 + 3600_000 });
+  assert.equal(second.ran, false, "same-day re-check must not run again");
+
+  const third = await memory.maintainMemory(dir, { now: () => t0 + 25 * 3600_000 });
+  assert.equal(third.ran, true, "next day must run maintenance");
+
+  const receipts = readLines(eventsPath).map((l) => JSON.parse(l)).filter((e) => e.type === "memory.maintenance");
+  assert.equal(receipts.length, 1, "exactly one maintenance receipt after one real run");
+});

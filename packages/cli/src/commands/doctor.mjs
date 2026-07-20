@@ -37,6 +37,7 @@ export async function doctorCommand(args) {
   checks.push(checkTerminal());
   checks.push(await checkAiosFolder(target));
   checks.push(await checkAiosConfig(target));
+  checks.push(await checkMemoryHealth(target));
   checks.push(...await checkAgentBridges(target, homePath));
 
   console.log("DotAIOS doctor");
@@ -157,6 +158,71 @@ async function checkAiosConfig(target) {
     status: "ok",
     detail: `schema ${config.schema_version || "?"}, ai_tools: ${tools}`
   };
+}
+
+/**
+ * Memory health: corrupt-line quarantine counts, last compaction time, and
+ * archive size. Exported so the safety tests can drive it directly.
+ */
+export async function checkMemoryHealth(target) {
+  const memoryDir = path.join(target, "memory");
+  const eventsPath = path.join(memoryDir, "events.jsonl");
+  if (!await pathExists(eventsPath)) {
+    return { name: "Memory health", status: "ok", detail: "No events log yet — nothing to check." };
+  }
+
+  const quarantineFiles = [
+    `${eventsPath}.bad.jsonl`,
+    `${path.join(memoryDir, "events-archive.jsonl")}.bad.jsonl`
+  ];
+  try {
+    const signalsDir = path.join(memoryDir, "signals");
+    for (const name of await fs.readdir(signalsDir)) {
+      if (name.endsWith(".bad.jsonl")) quarantineFiles.push(path.join(signalsDir, name));
+    }
+  } catch {
+    // No signals dir yet.
+  }
+
+  let badTotal = 0;
+  const badDetails = [];
+  for (const file of quarantineFiles) {
+    try {
+      const lines = (await fs.readFile(file, "utf8")).split("\n").filter((line) => line.trim()).length;
+      if (lines > 0) {
+        badTotal += lines;
+        badDetails.push(`${path.basename(file)}: ${lines}`);
+      }
+    } catch {
+      // Missing quarantine file — clean.
+    }
+  }
+
+  let lastCompaction = "never";
+  try {
+    const state = JSON.parse(await fs.readFile(path.join(memoryDir, ".maintenance.json"), "utf8"));
+    if (state.lastRun) lastCompaction = new Date(state.lastRun).toISOString();
+  } catch {
+    // No maintenance state yet.
+  }
+
+  let archiveBytes = 0;
+  try {
+    archiveBytes = (await fs.stat(path.join(memoryDir, "events-archive.jsonl"))).size;
+  } catch {
+    // No archive yet.
+  }
+
+  const detail = `${badTotal} bad line(s)${badDetails.length > 0 ? ` (${badDetails.join(", ")})` : ""}, last compaction: ${lastCompaction}, archive: ${(archiveBytes / 1024).toFixed(1)} KB`;
+  if (badTotal > 0) {
+    return {
+      name: "Memory health",
+      status: "warn",
+      detail,
+      fix: "Corrupt lines are preserved in the .bad.jsonl file(s) next to their source — review and clean them up."
+    };
+  }
+  return { name: "Memory health", status: "ok", detail };
 }
 
 async function checkAgentBridges(target, homePath) {
