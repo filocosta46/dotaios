@@ -71,7 +71,7 @@ export const dictionary = {
       language: 'Language',
     },
     hero: {
-      eyebrow: 'Your work, ready for AI.',
+      eyebrow: 'The model is rented. Your context is the asset.',
       titleLine1: 'Stop starting from scratch',
       titleLine2: 'with every AI.',
       intro: 'DotAIOS keeps your projects, notes, sources, decisions, and reusable workflows in one private folder. Supported desktop AI tools can use the same files.',
@@ -105,12 +105,12 @@ export const dictionary = {
         memory: {
           ...sharedViews.memory,
           lead: 'Keep the outcomes you choose to remember.',
-          body: 'Save useful sessions and decisions explicitly. Raw chats are not mirrored by default.',
+          body: 'Save useful sessions and decisions explicitly. Raw chats are not copied in by default.',
         },
         skills: {
           ...sharedViews.skills,
           lead: 'Turn repeated work into a reusable method.',
-          body: 'Skills tell a supported AI tool how to carry out a workflow with clear review gates.',
+          body: 'Skills tell a supported AI tool how to carry out a workflow with clear review steps.',
         },
       },
     },
@@ -141,7 +141,7 @@ export const dictionary = {
     compatibility: {
       eyebrow: 'Compatibility and privacy',
       title: 'Local files, honest limits.',
-      desc: 'DotAIOS configures files and bridges for supported desktop clients. The client version and its runtime decide what is actually read in a session.',
+      desc: 'DotAIOS configures files and connections for supported desktop clients. Each client version decides what is actually read in a session.',
       cards: [
         ['Best fit today', 'People already using Codex, Claude Code, Cursor, Gemini CLI, or another supported local agent on a desktop. Cursor is project scoped today: rules load per attached project.'],
         ['Browser chats', 'A browser chat cannot open your local folder directly. Attach a reviewed brief or selected files when you use one.'],
@@ -158,7 +158,7 @@ export const dictionary = {
       price: '€35 once',
       priceNote: 'Your AI app and subscription are separate.',
       status: 'In final review',
-      gate: 'Checkout stays closed until install, removal, update, rollback, recovery, entitlement, authenticated delivery, and permission checks all pass.',
+      gate: 'Checkout stays closed until install, removal, update, rollback, recovery, license, authenticated delivery, and permission checks all pass.',
       cta: 'Start with free DotAIOS',
       includedLabel: 'Six client workflows',
       items: [
@@ -230,7 +230,7 @@ export const dictionary = {
       language: 'Lingua',
     },
     hero: {
-      eyebrow: 'Il tuo lavoro, pronto per l’AI.',
+      eyebrow: 'Il modello è a noleggio. Il contesto è il tuo asset.',
       titleLine1: 'Smetti di ripartire da zero',
       titleLine2: 'con ogni AI.',
       intro: 'DotAIOS tiene progetti, note, fonti, decisioni e workflow riutilizzabili in una cartella privata. Gli strumenti AI desktop supportati possono usare gli stessi file.',
@@ -315,7 +315,7 @@ export const dictionary = {
     compatibility: {
       eyebrow: 'Compatibilità e privacy',
       title: 'File locali, limiti chiari.',
-      desc: 'DotAIOS configura file e collegamenti per i client desktop supportati. La versione del client e il suo runtime decidono cosa viene letto davvero in una sessione.',
+      desc: 'DotAIOS configura file e collegamenti per i client desktop supportati. Ogni versione del client decide cosa viene letto davvero in una sessione.',
       cards: [
         ['Per chi funziona meglio oggi', 'Persone che usano già Codex, Claude Code, Cursor, Gemini CLI o un altro agente locale supportato su desktop. Cursor oggi è limitato al progetto: le regole si caricano per progetto collegato.'],
         ['Chat nel browser', 'Una chat nel browser non può aprire direttamente la cartella locale. Puoi allegare un riepilogo verificato o i file selezionati.'],
