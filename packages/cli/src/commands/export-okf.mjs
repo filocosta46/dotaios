@@ -10,6 +10,7 @@ import {
   resolveVaultPath
 } from "../../../core/src/paths.mjs";
 import { pathExists, readJson, listFiles } from "../../../core/src/files.mjs";
+import { renderDirectoryIndex } from "../../../core/src/okf-live.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 // Knowledge layers only. NOT memory/ (operational JSONL) or skills/ (workflows).
@@ -223,18 +224,26 @@ export async function exportBundle({ srcRoot, outDir, roots = SRC_ROOTS, vaultPa
       });
     }
 
+    // Same renderer as the live folder's index maintenance (core/okf-live.mjs):
+    // the export and the live tree can never drift in format.
     const directories = buildDirectoryMap(concepts);
     for (const [dir, node] of directories) {
-      const lines = [`# ${dir.split(path.sep).join("/")}`, ""];
-      for (const child of [...node.children].sort()) {
-        lines.push(`* [${path.basename(child)}](/${child.split(path.sep).join("/")}/)`);
-      }
-      for (const concept of node.concepts.sort((a, b) => a.rel.localeCompare(b.rel))) {
-        const link = "/" + concept.rel.split(path.sep).join("/");
-        const desc = concept.description ? ` - ${concept.description}` : "";
-        lines.push(`* [${path.basename(concept.rel, ".md")}](${link}) (${concept.type})${desc}`);
-      }
-      await fs.writeFile(path.join(stagingDir, dir, "index.md"), lines.join("\n") + "\n");
+      const childLinks = [...node.children].sort().map((child) => ({
+        label: path.basename(child),
+        href: `/${child.split(path.sep).join("/")}/`
+      }));
+      const docLinks = node.concepts
+        .sort((a, b) => a.rel.localeCompare(b.rel))
+        .map((concept) => ({
+          label: path.basename(concept.rel, ".md"),
+          href: "/" + concept.rel.split(path.sep).join("/"),
+          type: concept.type,
+          description: concept.description || ""
+        }));
+      await fs.writeFile(
+        path.join(stagingDir, dir, "index.md"),
+        renderDirectoryIndex({ heading: dir.split(path.sep).join("/"), childLinks, docLinks })
+      );
     }
 
     const groups = new Map();

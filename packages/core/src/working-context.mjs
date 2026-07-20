@@ -8,6 +8,7 @@ import { readSection, readSubsection } from "./sections.mjs";
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
 
 const DEFAULT_SESSION_LIMIT = 3;
+const MAX_DECISION_ITEMS = 3;
 const MAX_PLAN_ITEMS = 4;
 const MAX_CARRY_OVER_ITEMS = 5;
 const MAX_SIGNAL_ITEMS = 8;
@@ -54,10 +55,11 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const visibleCharacterBudget = normalizeBudget(options);
 
   const dailyDir = path.join(aiosPath, "memory", "daily");
-  const [identity, priorities, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
+  const [identity, priorities, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
     await Promise.all([
       readText(filesystem, path.join(aiosPath, "context", "identity.md")),
       readText(filesystem, path.join(aiosPath, "context", "priorities.md")),
+      readText(filesystem, path.join(aiosPath, "decisions", "log.md")),
       readText(filesystem, path.join(dailyDir, `${today}.md`)),
       readText(filesystem, path.join(dailyDir, `${yesterday}.md`)),
       readJsonl(filesystem, path.join(aiosPath, "memory", "sessions", "index.jsonl")),
@@ -99,6 +101,7 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const candidates = {
     identity: compactHeader(identity),
     priorities: compactHeader(priorities),
+    decisions: recentDecisions(decisionsLog, MAX_DECISION_ITEMS),
     today: {
       focus: firstLine(readSection(todayNote, "Focus")),
       plan: compactLines(readSection(todayNote, "Plan")).slice(0, MAX_PLAN_ITEMS),
@@ -142,6 +145,7 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
     ...base,
     identity: "",
     priorities: "",
+    decisions: [],
     todayContext: { focus: "", plan: [] },
     carryOver: [],
     activeProject: null,
@@ -162,6 +166,7 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
 
   if (candidates.identity) consider({ ...selected, identity: candidates.identity });
   if (candidates.priorities) consider({ ...selected, priorities: candidates.priorities });
+  if (candidates.decisions.length > 0) consider({ ...selected, decisions: candidates.decisions });
 
   if (base.projectFilter && candidates.activeProject) {
     consider({ ...selected, activeProject: candidates.activeProject });
@@ -227,6 +232,18 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
   };
 }
 
+// decisions/log.md is append-only ("## <date> <title>" blocks), so the last
+// blocks are the newest. Titles only — the projection is a pointer, not the log.
+function recentDecisions(text, limit) {
+  if (!text) return [];
+  const blocks = String(text).split(/^## +/m).slice(1);
+  return blocks
+    .slice(-limit)
+    .reverse()
+    .map((block) => block.split("\n")[0].trim())
+    .filter(Boolean);
+}
+
 function renderUnbounded(context) {
   const today = context?.today || "";
   const todayContext = context?.todayContext || { focus: "", plan: [] };
@@ -238,6 +255,9 @@ function renderUnbounded(context) {
 
   if (context?.identity) lines.push("### Identity", context.identity, "");
   if (context?.priorities) lines.push("### Priorities", context.priorities, "");
+  if (context?.decisions?.length > 0) {
+    lines.push("### Decisions", ...context.decisions.map((decision) => `- ${decision}`), "");
+  }
 
   const todayLines = [];
   if (todayContext.focus) todayLines.push(`**Focus:** ${todayContext.focus}`);

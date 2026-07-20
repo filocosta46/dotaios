@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { readJsonl } from "./jsonl.mjs";
 
-export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "skills", "references", "plugins", "sessions", "all"];
+export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "decisions", "skills", "references", "plugins", "sessions", "all"];
 
 const DEFAULT_LIMIT = 20;
 const SKIP_DIR_NAMES = new Set([".git", "node_modules", ".obsidian", ".trash"]);
@@ -89,7 +89,7 @@ export async function searchAios({
   sessionFilters = {}
 }) {
   const scopes = scope === "all"
-    ? ["sessions", "context", "memory", "vault", "projects", "skills", "references", "plugins"]
+    ? ["sessions", "context", "memory", "vault", "projects", "decisions", "skills", "references", "plugins"]
     : [scope];
 
   // Scopes are independent; run them concurrently. Promise.all preserves input
@@ -125,6 +125,12 @@ async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_
     return searchMarkdownDir(path.join(aiosPath, "projects"), query, {
       limit,
       sourcePrefix: "projects"
+    });
+  }
+  if (scope === "decisions") {
+    return searchMarkdownDir(path.join(aiosPath, "decisions"), query, {
+      limit,
+      sourcePrefix: "decisions"
     });
   }
   if (scope === "skills") {
@@ -541,16 +547,26 @@ function readTitle(content) {
   return heading?.replace(/^#\s+/, "").trim() || null;
 }
 
-function readFrontmatterDescription(content) {
+/**
+ * Read one scalar frontmatter field. This is THE parser behind both search
+ * descriptions and the live OKF index generator — one field convention,
+ * one implementation.
+ */
+export function readFrontmatterField(content, field) {
   if (!content.startsWith("---\n")) return null;
   const end = content.indexOf("\n---", 4);
   if (end === -1) return null;
   const block = content.slice(4, end);
+  const pattern = new RegExp(`^${field}\\s*:\\s*(.+)$`);
   for (const line of block.split("\n")) {
-    const match = line.match(/^description\s*:\s*(.+)$/);
+    const match = line.match(pattern);
     if (match) return stripQuotes(match[1].trim());
   }
   return null;
+}
+
+function readFrontmatterDescription(content) {
+  return readFrontmatterField(content, "description");
 }
 
 function stripFrontmatter(content) {
