@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildCreateRepoUrl,
-  remoteUrlWithToken,
+  plainRemoteUrl,
   pollForRepoExists,
   initialMirrorPush
 } from "../../packages/cli/src/sync/repo.mjs";
@@ -18,9 +18,10 @@ test("buildCreateRepoUrl returns a pre-filled github.com/new URL", () => {
   assert.ok(url.includes("description="));
 });
 
-test("remoteUrlWithToken embeds x-access-token", () => {
-  const url = remoteUrlWithToken("ghu_T", "filocosta46/filocosta46-aios");
-  assert.equal(url, "https://x-access-token:ghu_T@github.com/filocosta46/filocosta46-aios.git");
+test("plainRemoteUrl carries no credential", () => {
+  const url = plainRemoteUrl("filocosta46/filocosta46-aios");
+  assert.equal(url, "https://github.com/filocosta46/filocosta46-aios.git");
+  assert.ok(!url.includes("x-access-token"), "the stored remote must never embed a token");
 });
 
 test("pollForRepoExists resolves once the repo exists and is empty", async () => {
@@ -82,7 +83,7 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
     });
     assert.deepEqual(calls, [
       "init",
-      "remote:https://x-access-token:T@github.com/u/u-aios.git",
+      "remote:https://github.com/u/u-aios.git",
       "commit:Initial DotAIOS mirror",
       "push:main"
     ]);

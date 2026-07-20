@@ -36,12 +36,15 @@ export async function runTickCommand(args = []) {
   );
   // Lock file lives alongside sync.json in ~/.dotaios/
   const lockPath = path.join(path.dirname(syncConfigPath()), LOCK_FILENAME);
+  // Read the token once so the git helper can authenticate without a
+  // credential-embedded remote URL.
+  const accessToken = (await readSyncConfig())?.access_token || null;
 
   const result = await runTick({
     lockPath,
     readConfig: () => readSyncConfig(),
     writeConfig: (patch) => writeSyncConfig(patch),
-    makeGit: () => createGit({ cwd: aiosPath }),
+    makeGit: () => createGit({ cwd: aiosPath, accessToken }),
     appendEvent: (evt) => appendEvent(aiosPath, evt),
     now: () => Date.now()
   });

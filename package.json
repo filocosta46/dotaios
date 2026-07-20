@@ -50,6 +50,8 @@
   "scripts": {
     "cli": "node packages/cli/src/index.mjs",
     "check": "node packages/cli/src/index.mjs --help",
+    "syntax-check": "node scripts/syntax-check.mjs",
+    "verify:npm": "node scripts/verify-npm-freshness.mjs",
     "smoke": "node scripts/smoke.mjs",
     "test": "node --test tests/**/*.test.mjs",
     "site:build": "pnpm --dir website build",

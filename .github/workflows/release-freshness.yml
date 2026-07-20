@@ -1,0 +1,32 @@
+name: Release freshness
+
+# Guards against the "stale-npm release" regression: the repo/site announcing a
+# version that `npx dotaios@latest` does not actually serve. Runs after a
+# release tag is pushed, on a daily schedule as a safety net, and on demand.
+# Deliberately NOT on every PR — a pre-publish version bump is expected to be
+# ahead of npm and must not fail CI.
+
+on:
+  push:
+    tags: ['v*']
+  schedule:
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+jobs:
+  freshness:
+    name: npm serves the released version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Verify npm latest is not behind the released tag
+        run: node scripts/verify-npm-freshness.mjs
