@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import crypto from "node:crypto";
 import path from "node:path";
-import { readJsonl, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "./memory.mjs";
+import { readJsonl, signalFileDate, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "./memory.mjs";
 import { selectWorkingContext } from "./working-context.mjs";
 
 const DEFAULT_LINE_BUDGET = 200;
@@ -46,7 +46,8 @@ export async function auditMemory(aiosPath, {
     ...hotFiles.findings,
     ...entryAudit.findings,
     ...auditPromotionReceipts(memoryEntries),
-    ...await auditSignalFiles(aiosPath, now)
+    ...await auditSignalFiles(aiosPath, now),
+    ...await auditCorruptLines(aiosPath)
   ];
 
   return {
@@ -411,6 +412,44 @@ function classifyMemoryEntries(memoryEntries, maxQueueCandidates) {
   };
 }
 
+// Corrupt-line quarantine files are written by the shared JSONL reader
+// (jsonl.mjs). Surface them next to the duplicate-block and stale-signal
+// detectors so one audit shows all memory-integrity issues.
+async function auditCorruptLines(aiosPath) {
+  const memoryDir = path.join(aiosPath, "memory");
+  const quarantines = [];
+  const scanDir = async (dir) => {
+    let names;
+    try {
+      names = await fs.readdir(dir);
+    } catch {
+      return;
+    }
+    for (const name of names) {
+      if (!name.endsWith(".bad.jsonl")) continue;
+      try {
+        const content = await fs.readFile(path.join(dir, name), "utf8");
+        const count = content.split("\n").filter((line) => line.trim()).length;
+        if (count > 0) quarantines.push({ name, count });
+      } catch {
+        // Unreadable quarantine — skip rather than fail the audit.
+      }
+    }
+  };
+  await scanDir(memoryDir);
+  await scanDir(path.join(memoryDir, "signals"));
+  if (quarantines.length === 0) return [];
+
+  const total = quarantines.reduce((sum, entry) => sum + entry.count, 0);
+  return [{
+    severity: "warn",
+    code: "corrupt-lines",
+    source: "memory",
+    message: `${total} corrupt line(s) preserved in ${quarantines.length} quarantine file(s) (${quarantines.map((q) => q.name).join(", ")}).`,
+    recommendation: "Review the .bad.jsonl file(s); restore repaired lines or delete them once inspected."
+  }];
+}
+
 async function auditSignalFiles(aiosPath, now) {
   const signalsDir = path.join(aiosPath, "memory", "signals");
   let signalFiles;
@@ -423,7 +462,10 @@ async function auditSignalFiles(aiosPath, now) {
   const cutoffDate = new Date(now.getTime());
   cutoffDate.setDate(cutoffDate.getDate() - SIGNAL_RETENTION_DAYS);
   const cutoff = isoDate(cutoffDate);
-  const stale = signalFiles.filter((file) => signalDate(file) < cutoff);
+  const stale = signalFiles.filter((file) => {
+    const date = signalFileDate(file);
+    return date && date < cutoff;
+  });
   if (stale.length === 0) return [];
 
   return [{
@@ -532,10 +574,6 @@ function readClockDate(clock) {
   return date;
 }
 
-function signalDate(file) {
-  const match = file.match(/(\d{4}-\d{2}-\d{2})\.jsonl$/);
-  return match ? match[1] : file.replace(".jsonl", "");
-}
 
 function readExistingQueueItems(content) {
   const ids = new Set();

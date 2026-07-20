@@ -1,6 +1,6 @@
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { compactEvents, trimSignals, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "../../../core/src/memory.mjs";
+import { compactEvents, trimSignals, signalFileDate, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 export async function cleanupCommand(args) {
@@ -50,7 +50,10 @@ export async function cleanupCommand(args) {
       signalFiles = [];
     }
     const cutoff = isoDate(new Date(Date.now() - SIGNAL_RETENTION_DAYS * 86400000));
-    const stale = signalFiles.filter((f) => f.replace(".jsonl", "") < cutoff);
+    const stale = signalFiles.filter((f) => {
+      const date = signalFileDate(f);
+      return date && date < cutoff;
+    });
     if (stale.length > 0) {
       console.log(`[signals] Would remove ${stale.length} signal file(s) older than ${SIGNAL_RETENTION_DAYS} days`);
     } else {

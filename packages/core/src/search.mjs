@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { readJsonl } from "./jsonl.mjs";
 
 export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "skills", "references", "plugins", "sessions", "all"];
 
@@ -398,26 +399,6 @@ function shouldSkipEntry(name) {
   return SECRET_FILE_PATTERNS.some((pattern) => pattern.test(name));
 }
 
-async function readJsonl(filePath) {
-  let content;
-  try {
-    content = await fs.readFile(filePath, "utf8");
-  } catch {
-    return [];
-  }
-  return content
-    .split("\n")
-    .filter((line) => line.trim())
-    .flatMap((line) => {
-      // Skip a corrupt line rather than crashing the whole search — this reader
-      // backs search_memory, the session digest, and the agent SessionStart hook.
-      try {
-        return [JSON.parse(line)];
-      } catch {
-        return [];
-      }
-    });
-}
 
 function readTitle(content) {
   const stripped = stripFrontmatter(content);
