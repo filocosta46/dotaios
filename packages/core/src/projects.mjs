@@ -251,8 +251,12 @@ export async function resolveProject(referenceOrOptions, additionalOptions = {})
   return project.projectPath;
 }
 
-/** Resolve a project reference to its catalog record, including its stable id. */
-export async function resolveProjectRecord(referenceOrOptions, additionalOptions = {}) {
+/**
+ * Match a project reference to its catalog record without requiring a
+ * machine-local checkout path. Use this for emitters and readers that only
+ * need catalog identity; use resolveProjectRecord when a local path is required.
+ */
+export async function matchProjectRecord(referenceOrOptions, additionalOptions = {}) {
   const options = typeof referenceOrOptions === "string"
     ? { ...additionalOptions, project: referenceOrOptions }
     : { ...(referenceOrOptions || {}) };
@@ -262,15 +266,21 @@ export async function resolveProjectRecord(referenceOrOptions, additionalOptions
   }
 
   const projects = await listProjects(options);
-  const matches = projects.filter((project) => project.id === reference || project.slug === reference);
+  const matches = projects.filter((project) =>
+    project.id === reference || project.slug === reference || project.project === reference
+  );
   if (matches.length === 0) {
-    throw new Error(`Project "${reference}" is not registered. Run \`dotaios project list\` to see available projects.`);
+    throw new Error(`Project "${reference}" is not registered. Run \`dotaios project list\`.`);
   }
   if (matches.length > 1) {
-    throw new Error(`Project reference "${reference}" is ambiguous. Resolve it by its stable id.`);
+    throw new Error(`Project reference "${reference}" is ambiguous. Use its stable id.`);
   }
+  return matches[0];
+}
 
-  const [project] = matches;
+/** Resolve a project reference to its catalog record, requiring a local path. */
+export async function resolveProjectRecord(referenceOrOptions, additionalOptions = {}) {
+  const project = await matchProjectRecord(referenceOrOptions, additionalOptions);
   if (!project.projectPath) {
     throw new Error([
       `Project "${project.slug}" has no path on this machine.`,
