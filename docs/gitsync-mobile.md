@@ -87,3 +87,25 @@ affecting laptop sync. MGit does not provide equivalent OAuth sign-in, so
 review and revoke the HTTPS credential or SSH key you configured for it
 separately. Laptop sync uses its own token stored in
 `~/.dotaios/sync.json`.
+
+## How the laptop token is stored and how to rotate it
+
+`~/.dotaios/sync.json` is written with owner-only permissions (`0600`) inside a
+`0700` directory, so no other account on the machine can read it. The token is
+**never** written into your repository's `.git/config`: the git remote stays a
+plain `https://github.com/<you>-aios.git` URL, and DotAIOS authenticates each
+push/fetch through a per-invocation git credential helper that reads the token
+from the environment for that one command. Older installs that embedded the
+token in the remote URL are healed to the plain URL automatically on the next
+sync.
+
+To rotate the token:
+
+1. Create a new fine-grained GitHub token (repo contents: read/write on the
+   `<you>-aios` repo only), the same scope `dotaios sync setup` requested.
+2. Run `dotaios sync setup` again and paste the new token — it overwrites
+   `sync.json` in place at `0600`.
+3. Revoke the old token from GitHub > Settings > Developer settings > Tokens.
+
+To stop syncing entirely, run `dotaios sync logout`, which removes the stored
+token, and then revoke it on GitHub.

@@ -7,6 +7,18 @@ function redactToken(text) {
   return String(text).replace(/x-access-token:[^@\s]+@/g, "x-access-token:***@");
 }
 
+// Remove any embedded credential from a remote URL, leaving the plain https URL.
+export function stripEmbeddedCredential(url) {
+  return String(url).replace(/\/\/[^@/]+@/, "//");
+}
+
+// Per-invocation credential helper: git calls it with the operation ("get")
+// and we answer from an env var. Passed via `-c` so it NEVER persists in
+// .git/config, and the token travels in the environment, never in argv or on
+// disk. An empty helper first clears any inherited global helper.
+const CREDENTIAL_HELPER =
+  '!f() { test "$1" = get && printf "username=x-access-token\\npassword=%s\\n" "$DOTAIOS_SYNC_TOKEN"; }; f';
+
 function defaultSpawn(cmd, args, opts) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { ...opts, stdio: ["ignore", "pipe", "pipe"] });
@@ -52,10 +64,32 @@ export function parsePorcelainZ(stdout) {
   return paths;
 }
 
-export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } = {}) {
-  const gitEnv = { ...env, ...SYNC_GIT_IDENTITY };
+export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, accessToken = null } = {}) {
+  const gitEnv = accessToken
+    ? { ...env, ...SYNC_GIT_IDENTITY, DOTAIOS_SYNC_TOKEN: accessToken }
+    : { ...env, ...SYNC_GIT_IDENTITY };
+  // Authenticate network ops via the inline helper instead of a token-in-URL
+  // remote. Empty-then-set clears any inherited global helper first.
+  const credArgs = accessToken
+    ? ["-c", "credential.helper=", "-c", `credential.helper=${CREDENTIAL_HELPER}`]
+    : [];
+
   function run(args) {
     return spawnImpl("git", args, { cwd, env: gitEnv });
+  }
+
+  // Heal a legacy token-embedded remote (older installs stored the credential
+  // in the URL) down to the plain URL before any network op, so the token
+  // stops living in .git/config. Local, cheap, idempotent.
+  async function ensurePlainRemote() {
+    if (!accessToken) return;
+    const { code, stdout } = await run(["remote", "get-url", "origin"]);
+    if (code !== 0) return;
+    const current = stdout.trim();
+    const plain = stripEmbeddedCredential(current);
+    if (plain !== current) {
+      await run(["remote", "set-url", "origin", plain]);
+    }
   }
 
   return {
@@ -99,12 +133,14 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
       // Push the checked-out commit, not a possibly unrelated local branch.
       // The tick guard ensures this is the exact local main checkout, so the
       // checked-out HEAD is the one mirrored by this push.
-      const { code, stderr } = await run(["push", "origin", `HEAD:${branch}`]);
+      await ensurePlainRemote();
+      const { code, stderr } = await run([...credArgs, "push", "origin", `HEAD:${branch}`]);
       if (code !== 0) throw new Error(`git push failed: ${redactToken(stderr.trim())}`);
     },
 
     async fetch() {
-      const { code, stderr } = await run(["fetch", "origin"]);
+      await ensurePlainRemote();
+      const { code, stderr } = await run([...credArgs, "fetch", "origin"]);
       if (code !== 0) throw new Error(`git fetch failed: ${redactToken(stderr.trim())}`);
     },
 
@@ -116,7 +152,8 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
         throw new Error("invalid sync branch");
       }
       const ref = `refs/heads/${branch}`;
-      const { code, stdout, stderr } = await run(["ls-remote", "origin", ref]);
+      await ensurePlainRemote();
+      const { code, stdout, stderr } = await run([...credArgs, "ls-remote", "origin", ref]);
       if (code !== 0) {
         throw new Error(`git ls-remote failed: ${redactToken(stderr.trim())}`);
       }
@@ -160,9 +197,12 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env } =
     },
 
     async addRemote(url) {
+      // Never persist a credential in .git/config — store the plain URL and let
+      // the inline credential helper authenticate network ops.
+      const plain = stripEmbeddedCredential(url);
       // idempotent: remove first if exists
       await run(["remote", "remove", "origin"]); // ignore exit code
-      const { code, stderr } = await run(["remote", "add", "origin", url]);
+      const { code, stderr } = await run(["remote", "add", "origin", plain]);
       if (code !== 0) throw new Error(`git remote add failed: ${redactToken(stderr.trim())}`);
     },
 

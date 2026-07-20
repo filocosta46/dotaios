@@ -12,8 +12,11 @@ export function buildCreateRepoUrl(username) {
   return `https://github.com/new?${params.toString()}`;
 }
 
-export function remoteUrlWithToken(accessToken, fullName) {
-  return `https://x-access-token:${accessToken}@github.com/${fullName}.git`;
+// The remote URL stored in .git/config: plain, credential-free. Authentication
+// is handled by the inline credential helper in git.mjs (token via env), so no
+// PAT is ever written to disk in the git config.
+export function plainRemoteUrl(fullName) {
+  return `https://github.com/${fullName}.git`;
 }
 
 export async function pollForRepoExists({
@@ -62,16 +65,18 @@ export async function initialMirrorPush({
   accessToken,
   fullName,
   gitignoreContent,
-  git
+  git,
+  filesystem = fs
 }) {
   // 1. Write the .gitignore (overwriting if exists).
-  await fs.writeFile(path.join(aiosPath, ".gitignore"), gitignoreContent);
+  await filesystem.writeFile(path.join(aiosPath, ".gitignore"), gitignoreContent);
 
   // 2. Init git repo on default branch "main" if not already.
   await git.init();
 
-  // 3. Set remote with token-embedded URL.
-  await git.addRemote(remoteUrlWithToken(accessToken, fullName));
+  // 3. Set the plain remote — the token authenticates via git's credential
+  //    helper (git was constructed with accessToken), never via the URL.
+  await git.addRemote(plainRemoteUrl(fullName));
 
   // 4. Add + commit everything.
   const sha = await git.commitAll("Initial DotAIOS mirror");

@@ -41,13 +41,18 @@ export function renderStatus(cfg, remote = null) {
   return lines.join("\n");
 }
 
-export async function runStatus(args = []) {
-  const cfg = await readSyncConfig();
+export async function runStatus(args = [], dependencies = {}) {
+  const readConfig = dependencies.readSyncConfig || readSyncConfig;
+  const gitFactory = dependencies.createGit || createGit;
+  const cfg = await readConfig();
   let remote = null;
   if (cfg?.access_token) {
     const aiosPath = path.resolve(expandHome(readPathOption(args) || defaultAiosPath()));
     try {
-      remote = { sha: await createGit({ cwd: aiosPath }).remoteHead("main") };
+      // Plain remotes (no token in URL) need the credential helper — same as
+      // tick/setup. Passing the token here is what keeps `sync status` parity
+      // checks working after credential-hygiene removed embedded PATs.
+      remote = { sha: await gitFactory({ cwd: aiosPath, accessToken: cfg.access_token }).remoteHead("main") };
     } catch (error) {
       remote = { error: error.message };
     }
