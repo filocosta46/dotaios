@@ -1,6 +1,6 @@
 # DotAIOS
 
-**One folder every AI reads. Models are rented. Context is owned.**
+**One local folder your agents share. Models are rented. Context is owned.**
 
 DotAIOS is a local `~/aios` folder plus a small CLI that bridges that folder into the agents you already use. Same identity, priorities, projects, and notes across Claude Code, Codex, Cursor, Gemini CLI, and friends. No DotAIOS account. No hosted memory.
 
@@ -59,7 +59,7 @@ Durable continuity comes from **promotion** into context / projects / vault, not
 ## Pillars
 
 - **Local first.** No DotAIOS server. Your provider still processes whatever context you send it.
-- **Just files.** No vector DB. No cloud memory product.
+- **Just files.** No vector DB. Not a hosted memory service.
 - **Agent-native.** Built for multi-agent builders, not mainstream consumer onboarding theater.
 
 ## Docs
