@@ -27,7 +27,7 @@ Or let a local agent drive setup: open Claude Code / Codex / Cursor, paste:
 
 > Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.
 
-Once `1.25.0` is on npm, `npx dotaios@latest` picks it up. Until publish, clone this repo or stay on the prior npm release.
+`npx dotaios@latest` always resolves to the current release (1.25.0 today).
 
 Check the wire:
 
