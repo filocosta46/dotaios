@@ -2,6 +2,22 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.25.0] - 2026-07-20
+### Added
+- Crash-safe memory compaction with corrupt-line quarantine, shared signal date parsing, and opportunistic daily auto-maintenance.
+- Shared search ranking with BM25-style in-memory IDF and day-bucketed recency decay (exact phrase tier stays above decay).
+- Live OKF `index.md` / project `log.md` projection with searchable decisions scope.
+- Release-freshness CI gate (`npx dotaios@latest --version` vs tagged release) and syntax-check over all source files.
+
+### Changed
+- Sync GitHub PAT no longer lands in `.git/config`; network ops authenticate via a per-invocation credential helper (status parity included).
+- Website CSP staged as Content-Security-Policy-Report-Only (enforcing flip deferred).
+- Project context emitter: catalog-only match helper, one projection timestamp, inert `--tool` removed; operational window documented as today + yesterday.
+
+### Notes
+- npm publish left to the maintainer. Install with `npx dotaios@latest` after publish.
+- Outcome packs / checkout remain closed. Free core only.
+
 ## [1.24.0] - 2026-07-16
 ### Added
 - End-to-end project identity binding: registered slugs and stable IDs now flow through bridges, writers, Claude live hooks, and scoped briefs.

@@ -1,84 +1,72 @@
 # DotAIOS
 
-**Stop re-explaining yourself to every AI.**
+**One folder every AI reads. Models are rented. Context is owned.**
 
-One folder on your computer. Who you are, what you are working on, what you saved. Supported local agents can be configured to read the same files. No DotAIOS account or hosted memory service.
+DotAIOS is a local `~/aios` folder plus a small CLI that bridges that folder into the agents you already use. Same identity, priorities, projects, and notes across Claude Code, Codex, Cursor, Gemini CLI, and friends. No DotAIOS account. No hosted memory.
 
-## What it is
+## Who it is for
 
-DotAIOS makes one folder on your computer, called `~/aios`. It holds the things your agents should know about you: your work, priorities, projects, and saved knowledge. DotAIOS connects that folder to supported local agents. The files stay readable, portable, and yours.
+People who already live in local agents and feel the fragmentation:
 
-Here is the simplest way to think about it. Your phone keeps your contacts in one place so connected apps can use them. DotAIOS keeps your context in one place so supported agents can use it.
+- You bounce between Claude Code, Codex, Cursor, Gemini, or other terminal / IDE agents
+- You are tired of re-explaining who you are and what you are working on
+- You are comfortable with Node and `npx` (or with asking your agent to run those commands)
 
-You can stay in plain language. Once connected, your local agent can match a request to an installed workflow. The connection check tells you what is actually available in that client.
+This is **not** a no-terminal consumer app. Free core expects a developer-shaped setup. Outcome packs and checkout stay closed for now.
 
-## Get started
+## Install
 
-You will not type a single command. Your AI does the whole setup for you.
+Requires **Node.js 20+**.
 
-First, make sure you have one AI app on your computer. If you are not sure which to pick, start with Claude Code, the friendliest one.
+```bash
+npx dotaios@latest init
+npx dotaios@latest activate
+```
 
-- [Claude Code](https://claude.com/download), recommended
-- [Cursor](https://www.cursor.com), an editor with AI built in
-- [Codex](https://github.com/openai/codex) by OpenAI
-- [Gemini CLI](https://github.com/google-gemini/gemini-cli) by Google
-
-Then open that app, paste this one sentence into the chat, and press Enter:
+Or let a local agent drive setup: open Claude Code / Codex / Cursor, paste:
 
 > Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.
 
-That is the whole install. The AI sets everything up, connects your tools, and asks you a few friendly questions (your name, what you are working on, what matters this week). About a minute later you are done.
+Once `1.25.0` is on npm, `npx dotaios@latest` picks it up. Until publish, clone this repo or stay on the prior npm release.
 
-Want to check it worked? Ask your AI: **"What am I working on?"** It will answer from your folder.
+Check the wire:
 
-If anything ever looks off, just ask: **"Is everything connected?"** Your AI runs a quick connection check and tells you what needs attention.
+```bash
+npx dotaios@latest status
+```
 
-**Already use ChatGPT, Claude, or Grok in your browser?** A browser chat cannot open a folder on your computer by itself. Paste the relevant context or attach the files you want it to use. DotAIOS can help you prepare a small privacy-safe brief for that.
-
-## What you can ask
-
-Once it is set up, ask any connected AI things like:
-
-- "Plan my day." It builds a plan from your priorities and your recent work.
-- "Save this article for me." It tucks a web page or PDF into your notes as clean, readable text.
-- "What did I decide about the trip?" It searches everything you have saved.
-- "Is everything connected?" It checks the local setup and explains anything that needs attention.
-
-Ask in your own words. Connected agents use the installed workflows when they match your request. Saving is explicit by default. Supported local adapters can also save sessions after you enable them.
-
-## It is just your files
-
-Your folder lives at `~/aios` in your home directory. You can open it any time, read it, edit it, or move things around. Nothing is hidden and nothing is locked away.
+## What you get
 
 ```
 ~/aios/
-  context/   who you are (your name, work, priorities)
-  projects/  one durable record for every project you own
-  memory/    what happened recently, and saved conversations
-  vault/     articles, PDFs, and notes you have saved
-  skills/    things you can ask your AI to do
+  context/   who you are, priorities, active work
+  projects/  durable project records (paths stay machine-local)
+  memory/    recent events and signals (today + yesterday operational window)
+  vault/     lasting notes and ingested sources
+  skills/    workflows agents can run
 ```
 
-If you ever want to read your memory on your phone, DotAIOS can mirror the folder to a private space that only you can see. That part is optional.
+Plain Markdown and JSONL. Readable, portable, yours. Optional private GitHub sync for phone / second machine. Search is lexical (TF + IDF + recency), not embeddings.
 
-## The folder is free. Outcome packs are coming next.
+Durable continuity comes from **promotion** into context / projects / vault, not from keeping an infinite raw window.
 
-The planned packs are for people who want better results without researching prompts, plugins, or agent setup. They will be sold by the work they help you finish, not by the number of files inside.
+## Honest limits
 
-- **Guided work, planned at €12.99.** Better writing, research, applications, CRM work, and design guidance, tested as complete agent workflows.
-- **Done-for-you systems, planned at €35.** Hand repeatable work to your agent with guided setups, verification, and clear operating instructions.
-
-Both packs are still in preparation. There is no checkout or delivery claim until the packages and update path are ready.
+- Needs Node / `npx`. Browser-only chats cannot open your folder by themselves.
+- Client bridges report configuration coverage. Invocation still depends on each client.
+- Packs and paid checkout are **not** open. Catalog drafts may appear as coming soon; nothing is purchasable yet.
 
 ## Pillars
 
-- **Local first.** No DotAIOS account or server. Optional phone sync uses your own private GitHub repository. Your chosen AI provider still processes any context you send to it.
-- **Just files.** Plain Markdown and text, never a database. You can read everything yourself.
-- **Out of the way.** Supported local agents can read the folder directly after configuration. DotAIOS stays invisible.
+- **Local first.** No DotAIOS server. Your provider still processes whatever context you send it.
+- **Just files.** No vector DB. No cloud memory product.
+- **Agent-native.** Built for multi-agent builders, not mainstream consumer onboarding theater.
 
-## Want to go deeper?
+## Docs
 
-Comfortable with a terminal, or curious how it works inside? Start with the [getting started guide](docs/getting-started.md). More: [projects across machines](docs/projects.md) · [client support](docs/client-support.md) · [saving conversations](docs/sessions.md) · [phone sync](docs/advanced-memory.md) · [security](docs/security.md) · [all guides](docs/).
+- [INSTALL.md](INSTALL.md) — agent-led setup
+- [Getting started](docs/getting-started.md) — terminal path
+- [Architecture](docs/architecture.md) · [Projects](docs/projects.md) · [Client support](docs/client-support.md) · [Security](docs/security.md) · [all guides](docs/)
 
 ## License
 

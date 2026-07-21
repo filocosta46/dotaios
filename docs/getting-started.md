@@ -2,7 +2,7 @@
 
 DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of it as the shared notebook for your AI companion: context, memory, and skills stay on your machine as plain files.
 
-> **Not comfortable in a terminal? You don't need to be.** The recommended way to install is to let an AI agent do it for you, you paste one sentence and answer a few questions. See [INSTALL.md](../INSTALL.md) or the "Install in 60 seconds" section of the [README](../README.md). The terminal commands below are for people who prefer to run setup themselves.
+> **Audience.** DotAIOS free core is for people already using local agents and comfortable with Node / `npx`. A local agent can still run setup for you via [INSTALL.md](../INSTALL.md). The commands below are the direct terminal path. See the [README](../README.md) for the product promise and honest limits.
 
 ```bash
 npx dotaios init
