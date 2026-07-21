@@ -2,8 +2,9 @@
 
 > This document is written for local AI agents such as Claude Code, Codex, Gemini CLI, and Cursor.
 > A human has asked you to set up DotAIOS for them.
-> Follow each step in order. Do not skip steps. The human should never need to type
-> a terminal command, you run them.
+> Follow each step in order. Do not skip steps. Prefer running commands yourself
+> so the human stays in chat. They are expected to already use a local agent and
+> have (or can get) Node / `npx` on this machine.
 
 ---
 
@@ -18,8 +19,8 @@ depend on each client and version.
 Your job: install it, connect it, learn a few things about the user through
 friendly conversation, then explain what they now have.
 
-Run every command yourself. Do not ask the user to open a terminal or paste
-commands.
+Run every command yourself when you can. Only hand off to the user for
+Node install if every automated path fails.
 
 **Prerequisite:** you need file-editing tools (Claude Code, Cursor, Codex, and
 Antigravity all qualify), Step 4 edits the user's context files for them.

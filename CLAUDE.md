@@ -11,8 +11,11 @@ files of AI agents (Claude Code, Codex, Cursor, Gemini, OpenCode). Plain text,
 no hosted server, no cloud DB. Optional manual private GitHub sync. Search is
 term-frequency text match (not semantic).
 
-**ICP:** Non-technical users, agent-led onboarding, minimal/zero terminal. Keep
-language and UX simple. No jargon, no cloud requirements, no heavy dependencies.
+**ICP:** Terminal-comfortable multi-agent builders (Claude Code, Codex, Cursor,
+Gemini, local agents) who feel fragmentation across tools. Free core via
+`npx`; Node required. Not mainstream consumer / zero-terminal. Checkout and
+packs stay closed. Keep language direct. No cloud requirements, no heavy deps,
+no vector DB.
 
 ## Monorepo layout
 
@@ -69,7 +72,7 @@ website/    # React and Vite marketing site with optional Sanity copy hydration;
 4. **KISS.** No new heavy dependencies (linters, formatters, bundlers, ORMs,
    cloud SDKs, vector DBs). Four runtime dependencies serve ingest; `yaml`
    validates portable project frontmatter.
-5. **No semantic/vector search.** Search is intentionally TF term-frequency. Do not add embeddings.
+5. **No semantic/vector search.** Search is lexical TF/IDF + recency decay. Do not add embeddings or a disk IDF cache unless measured.
 6. **Local-first.** Core logic makes no external network calls. Network belongs in ingest/adapters/plugins, never in `packages/core`.
 7. **Conventional commits**, single concern each: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `release`.
 8. **Keep tests green.** Run `npm test` + `npm run smoke` before every commit. Never leave the branch red.
