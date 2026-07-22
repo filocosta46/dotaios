@@ -67,14 +67,14 @@ higher before continuing.
 
 Run:
 ```
-npx -y dotaios init --yes
+npx -y dotaios@latest init --yes
 ```
 
 (The `-y` answers npx's first-run "Ok to proceed?" prompt for you, so it never
 stalls waiting on you.) This scaffolds `~/aios/` with placeholder context files. It takes about 30
 seconds. Wait for it to finish. Say nothing to the user while it runs.
 
-Do **not** run `npx dotaios setup`. That command is the interactive path for a
+Do **not** run `npx dotaios@latest setup`. That command is the interactive path for a
 human sitting at a terminal. You are on the agent path: `init` then `activate`,
 with the interview done by you in Step 4.
 
@@ -84,7 +84,7 @@ with the interview done by you in Step 4.
 
 Run:
 ```
-npx -y dotaios activate
+npx -y dotaios@latest activate
 ```
 
 This writes small bridge files for detected clients with a documented global
@@ -94,7 +94,7 @@ documented local targets. A link proves configuration, not runtime invocation.
 
 After activation, verify the filesystem contract with:
 ```
-npx -y dotaios skills doctor --json
+npx -y dotaios@latest skills doctor --json
 ```
 
 Treat any foreign aliases or collisions as visible review items. Do not delete
@@ -103,8 +103,8 @@ them automatically; they may belong to another tool.
 If the repository you are opening owns a project-local `skills/` directory,
 register and attach that checkout too:
 ```
-npx -y dotaios project add /path/to/project --path ~/aios
-npx -y dotaios attach /path/to/project --path ~/aios
+npx -y dotaios@latest project add /path/to/project --path ~/aios
+npx -y dotaios@latest attach /path/to/project --path ~/aios
 ```
 The project record and repository URL can sync, while the checkout path stays
 local to this machine. The real repository remains outside AIOS with its own
@@ -145,15 +145,15 @@ with what they said. Keep it in their words.
 
 After all three answers, say:
 > "Perfect. You can change any of this later, just tell me, or run
-> `npx dotaios interview --review` when things shift."
+> `npx dotaios@latest interview --review` when things shift."
 
 **Optional, do not push this:**
 > "Anything else you'd like me to remember, a CV, a bio, a doc about your
 > project? Drag it here or give me a link."
 
 If they give you something:
-- A file or local path → run `npx dotaios ingest <path>`
-- A URL → run `npx dotaios ingest <url>`
+- A file or local path → run `npx dotaios@latest ingest <path>`
+- A URL → run `npx dotaios@latest ingest <url>`
 - They say no or skip → move on immediately, do not mention it again.
 
 ---
@@ -196,7 +196,7 @@ Then show them what they now have (adapt it to what they told you):
 > - `/weekly-review`, review the week and update your context
 > - `/audit`, check that your setup is healthy
 >
-> **A brief any time:** `npx dotaios brief` writes today's local brief into your
+> **A brief any time:** `npx dotaios@latest brief` writes today's local brief into your
 > daily note.
 >
 > **It grows with you.** When your work or priorities change, tell me and I'll
@@ -205,11 +205,11 @@ Then show them what they now have (adapt it to what they told you):
 **Optional extras, mention them, but do not set them up now.** Tell the user
 these exist and that they can turn them on whenever they want:
 
-- **Cross-device sync**, read your memory on your phone: `npx dotaios sync setup`
+- **Cross-device sync**, read your memory on your phone: `npx dotaios@latest sync setup`
 - **Save conversations**, keep AI sessions as local memory:
-  `npx dotaios capture enable claude-code`
+  `npx dotaios@latest capture enable claude-code`
 - **Daily brief on a schedule**, `~/aios/` ships a pre-wired daily brief
-  schedule; run `npx dotaios schedule install --dry-run` to see how to enable it
+  schedule; run `npx dotaios@latest schedule install --dry-run` to see how to enable it
   with the computer's own scheduler.
 
 Do not run these during first-time setup. Keep the first run minimal.
@@ -223,8 +223,8 @@ Do not run these during first-time setup. Keep the first run minimal.
 - `EACCES` permission error → npm permissions need fixing. See:
   https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally
 - `Target already exists` → `~/aios/` already exists from a previous install. Run
-  `npx dotaios init --force --yes` instead.
-- Anything else → run `npx dotaios status` and read the output.
+  `npx dotaios@latest init --force --yes` instead.
+- Anything else → run `npx dotaios@latest status` and read the output.
 
 ---
 
@@ -237,7 +237,7 @@ set up DotAIOS, this is the file to follow. Start at Step 1 above.
 If the user already has DotAIOS set up and gives you a link to a different
 repository to install a skill or plugin:
 1. `git clone <url> /tmp/dotaios-plugin`
-2. `npx dotaios install /tmp/dotaios-plugin`
+2. `npx dotaios@latest install /tmp/dotaios-plugin`
 3. `rm -rf /tmp/dotaios-plugin`
 
 The full documentation is in the `docs/` folder. The skills are in `skills/`.

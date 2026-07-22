@@ -1,13 +1,30 @@
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
+import { checkForUpdate } from "../../../core/src/version-check.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
 const MIN_NODE_MAJOR = 20;
+const UPGRADE_COMMAND = "npx dotaios@latest";
+// Read defensively at load: a health check must never be the thing that
+// crashes. An unreadable package.json degrades to an unknown version, which
+// the update check then skips rather than failing on.
+function readInstalledVersion() {
+  try {
+    return JSON.parse(
+      readFileSync(new URL("../../../../package.json", import.meta.url), "utf8")
+    ).version || null;
+  } catch {
+    return null;
+  }
+}
+
+const INSTALLED_VERSION = readInstalledVersion();
 
 const HELP_TEXT = `Usage:
   dotaios doctor [options]
@@ -38,6 +55,7 @@ export async function doctorCommand(args) {
   checks.push(await checkAiosFolder(target));
   checks.push(await checkAiosConfig(target));
   checks.push(await checkMemoryHealth(target));
+  checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
   checks.push(...await checkAgentBridges(target, homePath));
 
   console.log("DotAIOS doctor");
@@ -223,6 +241,46 @@ export async function checkMemoryHealth(target) {
     };
   }
   return { name: "Memory health", status: "ok", detail };
+}
+
+/**
+ * Is a newer DotAIOS published? Foreground-only, runs solely because the user
+ * asked for a health check. Never fails the check when the network is down or
+ * the user opted out — an offline machine is not an unhealthy one.
+ * Exported so tests can drive it with an injected fetch.
+ */
+export async function checkLatestVersion({ currentVersion, fetchImpl, timeoutMs, env } = {}) {
+  const result = await checkForUpdate({ currentVersion, fetchImpl, timeoutMs, env });
+
+  if (result.updateAvailable) {
+    return {
+      name: "DotAIOS version",
+      status: "warn",
+      detail: `${result.current} installed, ${result.latest} available.`,
+      fix: `Run \`${UPGRADE_COMMAND} <command>\` — it always fetches the newest release.`
+    };
+  }
+
+  const installed = result.current ? `${result.current} installed` : "installed version unknown";
+
+  if (result.skipped) {
+    return {
+      name: "DotAIOS version",
+      status: "ok",
+      detail: `${installed}, ${skipReason(result.skipped)}.`
+    };
+  }
+
+  return { name: "DotAIOS version", status: "ok", detail: `${installed}, up to date.` };
+}
+
+// Say what actually happened — an unreadable version is not a network problem.
+function skipReason(skipped) {
+  if (skipped === "disabled") return "update check disabled (DOTAIOS_NO_UPDATE_CHECK)";
+  if (skipped === "timeout" || skipped === "unreachable" || String(skipped).startsWith("status-")) {
+    return "could not reach the npm registry — skipped, working offline is fine";
+  }
+  return "update check unavailable";
 }
 
 async function checkAgentBridges(target, homePath) {
