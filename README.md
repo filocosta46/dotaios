@@ -27,7 +27,7 @@ Or let a local agent drive setup: open Claude Code / Codex / Cursor, paste:
 
 > Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.
 
-`npx dotaios@latest` always resolves to the current release (1.25.0 today).
+`npx dotaios@latest` always resolves to the current release — nothing to pin, nothing to reinstall.
 
 Check the wire:
 

@@ -2,6 +2,14 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.26.0] - 2026-07-22
+### Added
+- Opt-in update check surfaced by `dotaios doctor`: tells you when a newer release is published. Foreground only — it runs because you asked for a health check. One plain GET to the npm registry, no request body, no identifiers, no background updater, no telemetry. Fail-open by design: offline, timeout, bad status, malformed payload, or an unreadable local version all degrade to a quiet skip, and an available update is a warning that never sets a non-zero exit code. Disable with `DOTAIOS_NO_UPDATE_CHECK=1`.
+
+### Changed
+- Install and upgrade documentation standardizes on `npx dotaios@latest` (INSTALL.md, docs/getting-started.md) so re-running always fetches the newest release instead of a cached older copy.
+- README gains an **Updating** section covering how to upgrade, how you find out a new version exists, and versioned folder migration across releases.
+
 ## [1.25.0] - 2026-07-20
 ### Added
 - Crash-safe memory compaction with corrupt-line quarantine, shared signal date parsing, and opportunistic daily auto-maintenance.
