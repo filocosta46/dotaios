@@ -5,13 +5,16 @@ DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of i
 > **Audience.** DotAIOS free core is for people already using local agents and comfortable with Node / `npx`. A local agent can still run setup for you via [INSTALL.md](../INSTALL.md). The commands below are the direct terminal path. See the [README](../README.md) for the product promise and honest limits.
 
 ```bash
-npx dotaios init
-npx dotaios activate
+npx dotaios@latest init
+npx dotaios@latest activate
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
 
-In this guide, commands use `npx dotaios ...` so they work even if DotAIOS is not globally installed yet.
+Setup and upgrade commands use `npx dotaios@latest ...`: no global install is
+needed, and `@latest` always fetches the newest published release rather than a
+cached older copy. Later examples in this guide drop `@latest` for brevity —
+add it whenever you want to be sure you are on the current version.
 
 The init flow asks five questions, then creates starter context and memory files. `activate` creates small bridge files in the global memory locations used by Claude Code, Codex, and Gemini.
 

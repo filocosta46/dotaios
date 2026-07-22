@@ -50,6 +50,22 @@ Plain Markdown and JSONL. Readable, portable, yours. Optional private GitHub syn
 
 Durable continuity comes from **promotion** into context / projects / vault, not from keeping an infinite raw window.
 
+## Updating
+
+```bash
+npx dotaios@latest doctor   # tells you if a newer version is out
+```
+
+- **To upgrade:** just run `npx dotaios@latest <command>`. It always fetches the
+  newest published release — there is nothing to uninstall or reinstall.
+- **To find out a new version exists:** `dotaios doctor` checks the npm registry
+  **when you run it** and prints the new version if there is one. There is no
+  background updater and no telemetry; set `DOTAIOS_NO_UPDATE_CHECK=1` to turn
+  the check off entirely, and it stays silent when you are offline.
+- **Your folder is safe across versions:** a newer CLI meeting an older `~/aios`
+  runs a versioned migration (`dotaios migrate`, with preview and recovery), and
+  `doctor` warns you when one is pending.
+
 ## Honest limits
 
 - Needs Node / `npx`. Browser-only chats cannot open your folder by themselves.
