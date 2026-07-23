@@ -11,11 +11,12 @@ files of AI agents (Claude Code, Codex, Cursor, Gemini, OpenCode). Plain text,
 no hosted server, no cloud DB. Optional manual private GitHub sync. Search is
 term-frequency text match (not semantic).
 
-**ICP:** Terminal-comfortable multi-agent builders (Claude Code, Codex, Cursor,
-Gemini, local agents) who feel fragmentation across tools. Free core via
-`npx`; Node required. Not mainstream consumer / zero-terminal. Checkout and
-packs stay closed. Keep language direct. No cloud requirements, no heavy deps,
-no vector DB.
+**ICP and message:** People who want one simple personal context layer across
+Claude Code, Codex, Cursor, Gemini, and other assistants. Lead public copy with
+the user outcome, not developer terminology. The current setup still needs
+Node/`npx` or a local assistant that can run it, so do not claim zero-setup
+consumer onboarding until a simpler installer exists. Checkout and packs stay
+closed. Keep language direct. No cloud requirements, no heavy deps, no vector DB.
 
 ## Monorepo layout
 

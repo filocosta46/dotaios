@@ -1,82 +1,56 @@
 # DotAIOS
 
-**One local folder your agents share. Models are rented. Context is owned.**
+**Give your AI one place to remember what matters.**
 
-DotAIOS is a local `~/aios` folder plus a small CLI that bridges that folder into the agents you already use. Same identity, priorities, projects, and notes across Claude Code, Codex, Cursor, Gemini CLI, and friends. No DotAIOS account. No hosted memory.
+DotAIOS gives the AI assistants you already use the same sense of you: your identity, priorities, projects, notes, and trusted workflows. Set it up once and keep your context in one private place. No DotAIOS account. No hosted memory.
 
-## Who it is for
+## Why people use it
 
-People who already live in local agents and feel the fragmentation:
+If you use more than one AI assistant, DotAIOS helps you:
 
-- You bounce between Claude Code, Codex, Cursor, Gemini, or other terminal / IDE agents
-- You are tired of re-explaining who you are and what you are working on
-- You are comfortable with Node and `npx` (or with asking your agent to run those commands)
+- stop repeating who you are and what you are working on;
+- keep projects, priorities, and important notes together;
+- carry the same context between Claude Code, Codex, Cursor, Gemini CLI, and other supported assistants.
 
-This is **not** a no-terminal consumer app. Free core expects a developer-shaped setup. Outcome packs and checkout stay closed for now.
+The free core is available now. Paid packs and checkout are not open.
 
-## Install
+## Get started
 
-Requires **Node.js 20+**.
+You do not need a GitHub account.
 
-```bash
-npx dotaios@latest init
-npx dotaios@latest activate
-```
+The simplest path is to ask a local AI assistant to set it up for you. Open Claude Code, Codex, or Cursor and paste:
 
-Or let a local agent drive setup: open Claude Code / Codex / Cursor, paste:
+> Please set up DotAIOS for me. Read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step. Explain anything you need from me in plain language, and do not overwrite existing files without asking.
 
-> Set up DotAIOS for me: read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step.
+If you prefer to set it up yourself, the technical instructions are in [INSTALL.md](INSTALL.md). The current setup needs Node.js or a local assistant that can run it.
 
-`npx dotaios@latest` always resolves to the current release — nothing to pin, nothing to reinstall.
+## What you have afterward
 
-Check the wire:
+- One place for your identity and priorities
+- A clear home for projects and next steps
+- Recent notes and saved conversations
+- Long-term knowledge and sources
+- Trusted workflows your assistants can follow
 
-```bash
-npx dotaios@latest status
-```
+Everything stays in a local `~/aios` folder: readable, portable, and yours. You can optionally sync it privately between your own devices.
 
-## What you get
-
-```
-~/aios/
-  context/   who you are, priorities, active work
-  projects/  durable project records (paths stay machine-local)
-  memory/    recent events and signals (today + yesterday operational window)
-  vault/     lasting notes and ingested sources
-  skills/    workflows agents can run
-```
-
-Plain Markdown and JSONL. Readable, portable, yours. Optional private GitHub sync for phone / second machine. Search is lexical (TF + IDF + recency), not embeddings.
-
-Durable continuity comes from **promotion** into context / projects / vault, not from keeping an infinite raw window.
+DotAIOS does not keep an endless transcript. Important information is deliberately saved into the right place so it remains useful later.
 
 ## Updating
 
-```bash
-npx dotaios@latest doctor   # tells you if a newer version is out
-```
+When a new version is published, the normal setup path picks it up automatically. Your existing `~/aios` folder remains yours across versions, with a protected migration path for changes that need one.
 
-- **To upgrade:** just run `npx dotaios@latest <command>`. It always fetches the
-  newest published release — there is nothing to uninstall or reinstall.
-- **To find out a new version exists:** `dotaios doctor` checks the npm registry
-  **when you run it** and prints the new version if there is one. There is no
-  background updater and no telemetry; set `DOTAIOS_NO_UPDATE_CHECK=1` to turn
-  the check off entirely, and it stays silent when you are offline.
-- **Your folder is safe across versions:** a newer CLI meeting an older `~/aios`
-  runs a versioned migration (`dotaios migrate`, with preview and recovery), and
-  `doctor` warns you when one is pending.
+## Good to know
 
-## Honest limits
+- A browser-only chat cannot open local files by itself.
+- Each assistant has its own way of discovering and using local context; setup does not guarantee that every assistant will actively use it.
+- Paid packs and checkout are **not** open. Nothing is purchasable yet.
 
-- Needs Node / `npx`. Browser-only chats cannot open your folder by themselves.
-- Client bridges report configuration coverage. Invocation still depends on each client.
-- Packs and paid checkout are **not** open. Catalog drafts may appear as coming soon; nothing is purchasable yet.
+## The promise
 
-## Pillars
-
-- **Local first.** No DotAIOS server. Your provider still processes whatever context you send it.
-- **Just files.** No vector DB. Not a hosted memory service.
-- **Agent-native.** Built for multi-agent builders, not mainstream consumer onboarding theater.
+- **Private by default.** DotAIOS does not run a hosted memory service.
+- **Yours to keep.** Your context lives in readable local files, not inside a locked-in account.
+- **Works with the assistants you choose.** Models are rented. Your context is owned.
 
 ## Docs
 
