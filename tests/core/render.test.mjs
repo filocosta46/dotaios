@@ -109,3 +109,57 @@ test("sync-gitignore.template ships in templates/", async () => {
   assert.ok(content.includes("*.token"));
   assert.ok(content.includes("node_modules/"));
 });
+
+// --- 1.27: the lifecycle instruction and the maintenance skill ---
+
+test("AGENTS.md.hbs tells agents to promote durable facts and retire stale ones", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  const sectionIdx = tpl.indexOf("## Keeping Knowledge True");
+  assert.ok(sectionIdx !== -1, "the template must teach the promotion lifecycle");
+
+  const section = tpl.slice(sectionIdx, tpl.indexOf("\n## ", sectionIdx + 1));
+  assert.match(section, /dotaios capture list/, "an agent needs the session id to promote anything");
+  assert.match(section, /dotaios memory promote/);
+  assert.match(section, /--operation supersede/, "retiring a stale fact must be reachable");
+  assert.match(section, /--match/, "supersede is unusable without --match");
+  assert.match(section, /--destination/, "context and vault promotions fail without --destination");
+  assert.match(section, /30 days/, "the signal retention window must be stated where it bites");
+});
+
+test("AGENTS.md.hbs warns that signals are the wrong home for a durable fact", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  assert.match(tpl, /--to signal/);
+  assert.match(tpl, /\bnot\b[\s\S]{0,120}durable|durable[\s\S]{0,120}\bnot\b/i);
+});
+
+test("memory-maintenance skill ships in skills/", async () => {
+  const content = await fs.readFile(
+    path.resolve("skills/memory-maintenance/SKILL.md"),
+    "utf8"
+  );
+  assert.match(content, /^---\n/);
+  assert.match(content, /\nname: memory-maintenance\n/);
+  assert.match(content, /\ntriggers: .*\S/);
+  assert.match(content, /\ndescription: .*\S/);
+  assert.match(content, /dotaios memory audit/, "the skill runs on machine-computed staleness, not vibes");
+  assert.match(content, /dotaios capture list/);
+  assert.match(content, /--operation supersede/);
+  assert.match(content, /--match/);
+  assert.match(content, /supersede/);
+  assert.match(content, /never erase|do not erase|non-destructive/i, "the doctrine is supersede, never erase");
+
+  const license = await fs.readFile(path.resolve("skills/memory-maintenance/LICENSE"), "utf8");
+  const reference = await fs.readFile(path.resolve("skills/weekly-review/LICENSE"), "utf8");
+  assert.equal(license, reference, "shipped skills carry the same MIT LICENSE");
+});
+
+test("INSTALL.md offers the memory-maintenance skill to a new user", async () => {
+  const install = await fs.readFile(path.resolve("INSTALL.md"), "utf8");
+  assert.match(install, /\/memory-maintenance/);
+});

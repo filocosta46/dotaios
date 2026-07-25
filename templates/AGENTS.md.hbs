@@ -56,6 +56,45 @@ projection used by local clients.
 - `memory/errors.jsonl`: load only when debugging failed operations.
 - `vault/`: load on demand when the task references knowledge, companies, people, writing style, or raw sources.
 
+## Keeping Knowledge True
+
+Memory nobody curates stops being worth reading. Two jobs here are yours, not
+the user's, and the time to do them is the moment you notice.
+
+Promote what should outlive the session — a decision, a preference, a
+constraint still true next month. Take the id from `dotaios capture list`:
+
+```bash
+dotaios memory promote <session-id> --to context \
+  --destination context/work.md --summary "<the fact, in the user's words>"
+```
+
+`--to context` and `--to vault` always need `--destination <relative-path.md>`.
+`--to project --project <slug>` defaults to that project's `README.md`. Add
+`--apply` to write; without it you get a preview to show the user first.
+
+Retire what stopped being true. Do not edit the old line away and do not
+delete it — supersede it, so the record still shows what was believed and when:
+
+```bash
+dotaios memory promote <session-id> --to context \
+  --destination context/work.md --operation supersede \
+  --match "<the old fact, verbatim>" --summary "<what is true now>" --apply
+```
+
+`--match` takes the old block's content hash or its summary text, exactly.
+It only resolves blocks that `dotaios memory promote` itself wrote. If a fact
+was typed into a file by hand there is nothing to match: edit that file
+directly, and say in one line what changed and why.
+
+`--to signal` is for a short-lived observation only. Signals are archived out
+of the routed window after 30 days, so a durable fact sent there stops being
+read. Durable facts go to `context`, `project`, or `vault`.
+
+Run the `memory-maintenance` skill when the user asks whether their memory is
+still accurate, or when `dotaios memory audit` reports stale or conflicting
+claims.
+
 ## Project Convention
 
 Each project should have `projects/<slug>/README.md` with frontmatter:

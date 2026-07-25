@@ -194,6 +194,7 @@ Then show them what they now have (adapt it to what they told you):
 > - `/closeday`, close the day and carry unfinished work forward
 > - `/ingest`, save any article, PDF, or document into your vault
 > - `/weekly-review`, review the week and update your context
+> - `/memory-maintenance`, find what stopped being true and retire it
 > - `/audit`, check that your setup is healthy
 >
 > **A brief any time:** `npx dotaios@latest brief` writes today's local brief into your

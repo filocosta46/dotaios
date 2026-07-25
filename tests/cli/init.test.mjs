@@ -40,3 +40,27 @@ test("init creates the vault at a creatable --vault-path", () => {
   assert.equal(fs.existsSync(path.join(vault, "wiki")), true);
   assert.equal(fs.existsSync(path.join(target, "aios.json")), true);
 });
+
+test("a freshly initialized folder ships the memory-maintenance skill and its lifecycle instruction", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-"));
+  const target = path.join(root, "aios");
+
+  const result = spawnSync(process.execPath, [cli, "init", "--yes", "--path", target], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+
+  assert.equal(
+    fs.existsSync(path.join(target, "skills", "memory-maintenance", "SKILL.md")),
+    true,
+    "the skill must reach a new user, not just the repo"
+  );
+
+  const registry = JSON.parse(fs.readFileSync(path.join(target, "skills", "_registry.json"), "utf8"));
+  assert.ok(registry.skills.includes("memory-maintenance"), "the registry must list it");
+
+  const index = fs.readFileSync(path.join(target, "skills", "INDEX.md"), "utf8");
+  assert.match(index, /memory-maintenance/, "the generated index must surface it");
+
+  const agents = fs.readFileSync(path.join(target, "AGENTS.md"), "utf8");
+  assert.match(agents, /## Keeping Knowledge True/, "the rendered AGENTS.md must carry the lifecycle instruction");
+  assert.match(agents, /--operation supersede/);
+});
