@@ -169,8 +169,37 @@ function pendingPathFor(archivePath) {
   return `${archivePath}.pending`;
 }
 
-// Advisory lock next to the file (same pattern as the sync tick lock). Another
-// live holder makes the caller skip; a stale or unreadable lock is taken over.
+// Is this pid still running? EPERM means it exists but belongs to another user.
+function pidIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+// Take over a lock we judged abandoned. rename() is atomic, so when two
+// processes race to steal the same lock exactly one wins and the loser gets
+// ENOENT — where unlink-then-write would let both delete and both acquire,
+// and this lock now guards the deletion of the user's signals.
+async function stealFileLock(lockPath, fileSystem) {
+  const moved = `${lockPath}.steal.${process.pid}.${Date.now()}`;
+  try {
+    await fileSystem.rename(lockPath, moved);
+  } catch {
+    return; // someone else already stole or released it
+  }
+  try {
+    await fileSystem.unlink(moved);
+  } catch {
+    // Best effort; a leftover .steal file is inert.
+  }
+}
+
+// Advisory lock next to the file (same pattern as the session index lock).
+// A live holder makes the caller skip no matter how long it has been working;
+// only a dead holder — or a lock we cannot read — is taken over.
 async function acquireFileLock(targetPath, fileSystem) {
   const lockPath = `${targetPath}.lock`;
   let waits = 0;
@@ -191,16 +220,17 @@ async function acquireFileLock(targetPath, fileSystem) {
       let stale = false;
       try {
         const held = JSON.parse(await fileSystem.readFile(lockPath, "utf8"));
-        stale = !held.ts || Date.now() - held.ts > LOCK_STALE_MS;
+        stale = Number.isInteger(held.pid) && held.pid > 0
+          // Liveness beats the stopwatch: a run that legitimately takes longer
+          // than the stale window must not have its lock pulled, and a crashed
+          // holder must not wedge maintenance until the window expires.
+          ? !pidIsAlive(held.pid)
+          : !held.ts || Date.now() - held.ts > LOCK_STALE_MS;
       } catch {
         stale = true;
       }
       if (stale) {
-        try {
-          await fileSystem.unlink(lockPath);
-        } catch {
-          // Raced with the holder's own release.
-        }
+        await stealFileLock(lockPath, fileSystem);
         continue;
       }
       if (waits >= LOCK_RETRY_DELAYS_MS.length) return null;
@@ -412,8 +442,16 @@ export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_D
         if (error.code === "ENOENT") continue;
         throw error;
       }
-      const stat = await fileSystem.stat(filePath);
-      sources.push({ filePath, size: stat.size });
+      // A synced folder (iCloud, Dropbox) can remove the file between the read
+      // and here. Its lines are already staged, so losing only the byte count
+      // is harmless — aborting the whole run would not be.
+      let size = 0;
+      try {
+        ({ size } = await fileSystem.stat(filePath));
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      sources.push({ filePath, size });
       for (const line of content.split("\n")) {
         if (line.trim()) staged.push(line);
       }
@@ -429,7 +467,12 @@ export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_D
     let removed = 0;
     let freedBytes = 0;
     for (const { filePath, size } of sources) {
-      await fileSystem.unlink(filePath);
+      try {
+        await fileSystem.unlink(filePath);
+      } catch (error) {
+        // Already gone is the outcome we wanted; anything else is real.
+        if (error.code !== "ENOENT") throw error;
+      }
       removed += 1;
       freedBytes += size;
     }

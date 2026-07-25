@@ -122,7 +122,10 @@ test("compaction skips gracefully when another process holds the lock", async ()
   const dir = tmpDir();
   const eventsPath = path.join(dir, "events.jsonl");
   seedEvents(eventsPath, 30);
-  fs.writeFileSync(`${eventsPath}.lock`, JSON.stringify({ pid: 99999, ts: Date.now() }));
+  // A held lock must name a pid that is genuinely running: the holder is now
+  // judged by liveness, not by how recent its timestamp looks. 99999 read as
+  // "held" only while staleness was a stopwatch.
+  fs.writeFileSync(`${eventsPath}.lock`, JSON.stringify({ pid: process.pid, ts: Date.now() }));
   const result = await compactEvents(eventsPath, 10);
   assert.equal(result.skipped, "locked");
   assert.equal(readLines(eventsPath).length, 30, "locked run must not touch the file");
@@ -617,4 +620,79 @@ test("freshness is silent on a folder with no context files yet", async () => {
   const check = await doctor.checkContextFreshness(dir);
 
   assert.equal(check.status, "ok");
+});
+
+// --- The signals lock now guards deletion of user data, so it must match the
+// session index lock: atomic steal, and liveness rather than a stopwatch. ---
+
+test("a lock held by a live process is respected however old it looks", async () => {
+  const { signalsDir, archivePath } = signalsFixture({ staleFiles: 1, linesPerFile: 2 });
+  // Our own pid is unambiguously alive; the timestamp is far past the stale window.
+  fs.writeFileSync(`${archivePath}.lock`, JSON.stringify({ pid: process.pid, ts: Date.now() - 60 * 60_000 }));
+
+  const result = await trimSignals(signalsDir, 30);
+
+  assert.equal(result.skipped, "locked", "a long-running holder must never be overrun");
+  assert.equal(fs.readdirSync(signalsDir).length, 1, "and its files must survive");
+});
+
+test("a lock left by a dead process is reclaimed without waiting out the window", async () => {
+  const { signalsDir, archivePath } = signalsFixture({ staleFiles: 1, linesPerFile: 2 });
+  // A pid that cannot be running, with a timestamp well inside the stale window.
+  fs.writeFileSync(`${archivePath}.lock`, JSON.stringify({ pid: 2147483646, ts: Date.now() }));
+
+  const result = await trimSignals(signalsDir, 30);
+
+  assert.equal(result.removed, 1, "a crashed holder must not wedge maintenance for five minutes");
+  assert.equal(readLines(archivePath).length, 2);
+});
+
+test("a stale lock is taken over by rename, never by unlink-then-write", async () => {
+  const { signalsDir, archivePath } = signalsFixture({ staleFiles: 1, linesPerFile: 1 });
+  fs.writeFileSync(`${archivePath}.lock`, JSON.stringify({ pid: 2147483646, ts: Date.now() }));
+
+  const seen = [];
+  const { filesystem } = faultFs({});
+  const watched = new Proxy(filesystem, {
+    get: (target, name) => (...args) => {
+      if (typeof args[0] === "string" && args[0].includes(".lock")) seen.push(`${String(name)}:${args[0]}`);
+      return target[name](...args);
+    }
+  });
+
+  await trimSignals(signalsDir, 30, { filesystem: watched });
+
+  // unlink-then-write lets two processes both delete a stale lock and both
+  // acquire. rename() is atomic: exactly one winner.
+  assert.ok(
+    seen.some((call) => call.startsWith("rename:")),
+    `the steal must be atomic; calls were ${JSON.stringify(seen)}`
+  );
+});
+
+test("a signal file removed by a sync client mid-run does not abort maintenance", async () => {
+  const { signalsDir, archivePath } = signalsFixture({ staleFiles: 3, linesPerFile: 2 });
+  const names = fs.readdirSync(signalsDir).sort();
+
+  // Drop the second file after its lines are staged but before the unlink loop
+  // reaches it — what iCloud or Dropbox does to a folder while it is syncing.
+  let reads = 0;
+  const { filesystem } = faultFs({});
+  const racing = new Proxy(filesystem, {
+    get: (target, name) => (...args) => {
+      if (name === "readFile" && String(args[0]).endsWith(".jsonl") && ++reads === 2) {
+        return target.readFile(...args).then((content) => {
+          fs.rmSync(path.join(signalsDir, names[1]), { force: true });
+          return content;
+        });
+      }
+      return target[name](...args);
+    }
+  });
+
+  const result = await trimSignals(signalsDir, 30, { filesystem: racing });
+
+  assert.equal(result.removed, 3, "the run must finish, not throw and leave the rest untrimmed");
+  assert.equal(readLines(archivePath).length, 6, "every staged line still reaches the archive");
+  assert.deepEqual(fs.readdirSync(signalsDir), []);
 });
