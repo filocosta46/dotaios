@@ -191,7 +191,8 @@ export async function checkMemoryHealth(target) {
 
   const quarantineFiles = [
     `${eventsPath}.bad.jsonl`,
-    `${path.join(memoryDir, "events-archive.jsonl")}.bad.jsonl`
+    `${path.join(memoryDir, "events-archive.jsonl")}.bad.jsonl`,
+    `${path.join(memoryDir, "signals-archive.jsonl")}.bad.jsonl`
   ];
   try {
     const signalsDir = path.join(memoryDir, "signals");
@@ -225,10 +226,12 @@ export async function checkMemoryHealth(target) {
   }
 
   let archiveBytes = 0;
-  try {
-    archiveBytes = (await fs.stat(path.join(memoryDir, "events-archive.jsonl"))).size;
-  } catch {
-    // No archive yet.
+  for (const name of ["events-archive.jsonl", "signals-archive.jsonl"]) {
+    try {
+      archiveBytes += (await fs.stat(path.join(memoryDir, name))).size;
+    } catch {
+      // That archive does not exist yet.
+    }
   }
 
   const detail = `${badTotal} bad line(s)${badDetails.length > 0 ? ` (${badDetails.join(", ")})` : ""}, last compaction: ${lastCompaction}, archive: ${(archiveBytes / 1024).toFixed(1)} KB`;

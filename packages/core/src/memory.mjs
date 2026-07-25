@@ -155,8 +155,18 @@ function archivePathFor(eventsPath) {
   return eventsPath.replace(/\.jsonl$/, "-archive.jsonl");
 }
 
-function pendingPathFor(eventsPath) {
-  return `${archivePathFor(eventsPath)}.pending`;
+/**
+ * Where trimmed signals go. A SIBLING of memory/signals/, next to
+ * memory/events-archive.jsonl — never inside signals/, because every scanner
+ * in this codebase treats `signals/*.jsonl` as a live daily file and would
+ * re-read, re-audit, and eventually re-trim the archive itself.
+ */
+export function signalsArchivePathFor(signalsDir) {
+  return path.join(path.dirname(path.resolve(signalsDir)), "signals-archive.jsonl");
+}
+
+function pendingPathFor(archivePath) {
+  return `${archivePath}.pending`;
 }
 
 // Advisory lock next to the file (same pattern as the sync tick lock). Another
@@ -201,19 +211,31 @@ async function acquireFileLock(targetPath, fileSystem) {
   return null;
 }
 
+async function fsyncFile(fileSystem, filePath) {
+  if (typeof fileSystem.open !== "function") return;
+  try {
+    const handle = await fileSystem.open(filePath, "r+");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    // fsync is best-effort; the commit point below is the atomicity boundary.
+  }
+}
+
 async function writeFileDurable(fileSystem, filePath, content) {
   await fileSystem.writeFile(filePath, content);
-  if (typeof fileSystem.open === "function") {
-    try {
-      const handle = await fileSystem.open(filePath, "r+");
-      try {
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-    } catch {
-      // fsync is best-effort; the rename below is the atomicity boundary.
-    }
+  await fsyncFile(fileSystem, filePath);
+}
+
+async function fileExists(fileSystem, filePath) {
+  try {
+    await fileSystem.stat(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -221,7 +243,8 @@ async function writeFileDurable(fileSystem, filePath, content) {
 // committed (rename happened → events no longer holds it → finish the flush)
 // or not (events still holds it → the staging file is stale, drop it).
 async function recoverPendingArchive(eventsPath, fileSystem) {
-  const pendingPath = pendingPathFor(eventsPath);
+  const archivePath = archivePathFor(eventsPath);
+  const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
   try {
     pendingContent = await fileSystem.readFile(pendingPath, "utf8");
@@ -247,14 +270,15 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
     await fileSystem.unlink(pendingPath);
     return;
   }
-  await flushPendingArchive(eventsPath, fileSystem);
+  await flushPendingArchive(archivePath, fileSystem);
 }
 
 // Append the staged batch to the archive, line-idempotently: a crashed earlier
-// flush may already have written part or all of it.
-async function flushPendingArchive(eventsPath, fileSystem) {
-  const pendingPath = pendingPathFor(eventsPath);
-  const archivePath = archivePathFor(eventsPath);
+// flush may already have written part or all of it. Returns only after the
+// append is on disk and fsynced, so callers may treat it as the point after
+// which deleting the source is safe.
+async function flushPendingArchive(archivePath, fileSystem) {
+  const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
   try {
     pendingContent = await fileSystem.readFile(pendingPath, "utf8");
@@ -269,13 +293,18 @@ async function flushPendingArchive(eventsPath, fileSystem) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  const tailLines = new Set(archiveContent.slice(-ARCHIVE_TAIL_BYTES).split("\n").filter((line) => line.trim()));
+  // The dedupe window must be at least as long as the batch it checks. A batch
+  // bigger than a fixed window would fail to find its own already-written early
+  // lines on a retry and append them a second time.
+  const windowBytes = Math.max(ARCHIVE_TAIL_BYTES, pendingContent.length + 1024);
+  const tailLines = new Set(archiveContent.slice(-windowBytes).split("\n").filter((line) => line.trim()));
   const missing = pendingLines.filter((line) => !tailLines.has(line));
   if (missing.length > 0) {
     // A torn earlier append can leave the archive without a final newline;
     // start on a fresh line so the fragment stays its own (visible) bad line.
     const prefix = archiveContent.length > 0 && !archiveContent.endsWith("\n") ? "\n" : "";
     await fileSystem.appendFile(archivePath, prefix + missing.map((line) => `${line}\n`).join(""));
+    await fsyncFile(fileSystem, archivePath);
   }
   await fileSystem.unlink(pendingPath);
 }
@@ -310,9 +339,9 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
     const tmpPath = `${eventsPath}.tmp`;
 
     await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
-    await writeFileDurable(fileSystem, pendingPathFor(eventsPath), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
+    await writeFileDurable(fileSystem, pendingPathFor(archivePathFor(eventsPath)), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
     await fileSystem.rename(tmpPath, eventsPath);
-    await flushPendingArchive(eventsPath, fileSystem);
+    await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
 
     return { archived: toArchive.length, kept: toKeep.length };
   } finally {
@@ -321,33 +350,94 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
 }
 
 /**
- * Remove signal files older than retentionDays.
- * Returns { removed: number, freedBytes: number }.
+ * Move signal files older than retentionDays out of memory/signals/ and into
+ * memory/signals-archive.jsonl. Retention controls what stays in the routed
+ * daily window — it is not a licence to destroy what the user wrote.
+ *
+ * Crash-safe transaction: the batch is staged and fsynced, appended to the
+ * archive line-idempotently, and only then are the source files unlinked.
+ * The unlink is the commit point, so every crash point leaves a line in both
+ * places (transient duplication the next run collapses) and never in neither.
+ * Staging order is unlink order, so a crash mid-delete leaves a suffix of the
+ * batch, which the sized dedupe window is guaranteed to cover.
+ *
+ * Returns { removed, archived, archivedFiles, freedBytes, archivePath } — or
+ * the same shape with skipped: "locked" when another live process holds the
+ * archive lock. `archived` counts non-empty LINES the archive is now
+ * responsible for; `archivedFiles` counts source files (an empty stale file
+ * archives zero lines but is still fully accounted for).
  */
-export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_DAYS) {
+export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_DAYS, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  const archivePath = options.archivePath || signalsArchivePathFor(signalsDir);
+  const pendingPath = pendingPathFor(archivePath);
+  const nothingToDo = { removed: 0, archived: 0, archivedFiles: 0, freedBytes: 0, archivePath };
+
   let entries;
   try {
-    entries = await fs.readdir(signalsDir);
+    entries = await fileSystem.readdir(signalsDir);
   } catch {
-    return { removed: 0, freedBytes: 0 };
+    return nothingToDo;
   }
 
   const cutoff = isoDate(new Date(Date.now() - retentionDays * 86400000));
-  let removed = 0;
-  let freedBytes = 0;
+  const stale = entries
+    .filter((file) => file.endsWith(".jsonl"))
+    .filter((file) => {
+      const date = signalFileDate(file);
+      return Boolean(date) && date < cutoff;
+    })
+    .sort();
 
-  for (const file of entries.filter((f) => f.endsWith(".jsonl"))) {
-    const date = signalFileDate(file);
-    if (!date || date >= cutoff) continue;
+  // Nothing stale and no crashed batch to finish: stay out of the folder
+  // entirely, so the common maintenance run writes no lock file at all.
+  if (stale.length === 0 && !await fileExists(fileSystem, pendingPath)) return nothingToDo;
 
-    const filePath = path.join(signalsDir, file);
-    const stat = await fs.stat(filePath);
-    freedBytes += stat.size;
-    await fs.unlink(filePath);
-    removed += 1;
+  const lock = await acquireFileLock(archivePath, fileSystem);
+  if (!lock) return { ...nothingToDo, skipped: "locked" };
+  try {
+    // Finish any batch a crashed earlier run staged but never appended. The
+    // append is line-idempotent, so replaying it can only duplicate work the
+    // dedupe collapses — it can never lose a line.
+    await flushPendingArchive(archivePath, fileSystem);
+
+    const sources = [];
+    const staged = [];
+    for (const file of stale) {
+      const filePath = path.join(signalsDir, file);
+      let content;
+      try {
+        content = await fileSystem.readFile(filePath, "utf8");
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      const stat = await fileSystem.stat(filePath);
+      sources.push({ filePath, size: stat.size });
+      for (const line of content.split("\n")) {
+        if (line.trim()) staged.push(line);
+      }
+    }
+
+    if (sources.length === 0) return nothingToDo;
+
+    if (staged.length > 0) {
+      await writeFileDurable(fileSystem, pendingPath, staged.map((line) => `${line}\n`).join(""));
+      await flushPendingArchive(archivePath, fileSystem);
+    }
+
+    let removed = 0;
+    let freedBytes = 0;
+    for (const { filePath, size } of sources) {
+      await fileSystem.unlink(filePath);
+      removed += 1;
+      freedBytes += size;
+    }
+
+    return { removed, archived: staged.length, archivedFiles: removed, freedBytes, archivePath };
+  } finally {
+    await lock.release();
   }
-
-  return { removed, freedBytes };
 }
 
 // --- Opportunistic maintenance ---
@@ -445,13 +535,17 @@ export async function maintainMemory(aiosPath, options = {}) {
     if (compacted.skipped !== "locked") {
       await appendEvent(eventsPath, {
         type: "memory.maintenance",
-        summary: `auto-maintenance: archived ${compacted.archived} event(s), removed ${trimmed.removed} stale signal file(s)`,
+        summary: `auto-maintenance: archived ${compacted.archived} event(s), archived and removed ${trimmed.removed} stale signal file(s)`,
         archived: compacted.archived,
         kept: compacted.kept,
-        signal_files_removed: trimmed.removed
+        signal_files_removed: trimmed.removed,
+        // Per-file proof that the removal was a move, not a delete. `dotaios
+        // doctor` reads these back and warns when removed outruns archived.
+        signal_files_archived: trimmed.archivedFiles,
+        signal_lines_archived: trimmed.archived
       });
     }
-    return { ran: true, archived: compacted.archived, removed: trimmed.removed };
+    return { ran: true, archived: compacted.archived, removed: trimmed.removed, signalLinesArchived: trimmed.archived };
   } finally {
     activeMaintenance.delete(aiosPath);
   }
