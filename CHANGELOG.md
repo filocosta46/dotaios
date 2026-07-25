@@ -5,7 +5,7 @@ All notable changes to DotAIOS will be documented in this file.
 ## [1.27.0] - 2026-07-25
 ### Fixed
 - **Stale signals are archived instead of deleted.** `trimSignals` previously `unlink`ed any `memory/signals/*.jsonl` older than 30 days with no archive, and it runs unattended as part of routine maintenance. Every line now lands in `memory/signals-archive.jsonl` before its source file is removed, using the same staged-append, crash-safe, idempotent path as event compaction. Archived signals stay searchable. Covered by crash-injection, idempotency, and lock-contention tests. If you kept your folder outside version control, this is data you were losing silently.
-- **`dotaios doctor` no longer certifies a folder healthy while signal files vanish.** The memory-health check reads maintenance receipts and warns when more signal files were removed than archived, and reports the live signal-file count. Previously it returned `ok` unless a corrupt-line sidecar existed, so unarchived deletion was invisible.
+- **`dotaios doctor` now reports the signal store instead of ignoring it.** The memory-health check reports the live signal-file count, and warns when it finds a maintenance receipt showing signal files removed without an archive. To be precise about what that second part buys you: every receipt 1.27 writes archives what it removes, so in practice this warning detects deletions performed by **1.26 and earlier**, and it can only see receipts still present in `memory/events.jsonl` — once those are compacted into the archive, the warning stops firing. It is an upgrade check, not an ongoing integrity guarantee. Previously the check returned `ok` unless a corrupt-line sidecar existed, so unarchived deletion was invisible either way.
 - Event compaction no longer re-archives a batch larger than the dedupe tail window when a crash interrupts the staging cleanup.
 
 ### Added
@@ -14,6 +14,8 @@ All notable changes to DotAIOS will be documented in this file.
 - `dotaios doctor` warns when hot context files have not been touched in a long time, using file mtime only — no frontmatter or schema change. Generated files are never reported as stale.
 
 ### Changed
+- **The Claude Code capture hook now runs through `npx`.** It was written as a bare `dotaios capture hook claude-code`, which does not resolve on the npx-only path the install guide prescribes — so on a machine without a global install, every session silently failed to capture. Hooks written by earlier releases are still recognised and are not duplicated.
+- `dotaios capture enable claude-code` creates `~/.claude` when it does not exist instead of failing with a raw `ENOENT`, and now refuses to run when `settings.json` exists but cannot be parsed, rather than replacing the file with a fresh one. The previous behaviour could overwrite an entire Claude Code configuration.
 - Session capture moved into the main setup flow in `INSTALL.md`. It was previously listed under "optional extras, do not run these during first-time setup" — which left a new user with a folder that recorded nothing unless they ran a command by hand. Capture is Claude Code only today and the docs now say so plainly.
 - `dotaios memory promote` states the 30-day signal retention window in the preview and the help text, lists durable destinations first, and no longer uses `--to signal` as its first worked example. Promoting a durable fact to `signal` previously looked like the default and expired within a month.
 

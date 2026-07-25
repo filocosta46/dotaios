@@ -11,7 +11,12 @@ export const level = ADAPTER_LEVELS.FULL_AUTO;
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
 const SETTINGS_PATH = path.join(CLAUDE_DIR, "settings.json");
-const HOOK_COMMAND = `dotaios capture hook claude-code`;
+// The documented install path is npx-only — INSTALL.md never installs dotaios
+// globally — so a bare `dotaios` in the hook would not resolve and every
+// session would fail to capture, silently. Match on the subcommand alone so a
+// hook written by an earlier release is still recognised and never duplicated.
+const HOOK_COMMAND = `npx -y dotaios@latest capture hook claude-code`;
+const HOOK_MARKER = "capture hook claude-code";
 
 // ---------- backfill ----------
 
@@ -170,7 +175,16 @@ export async function enable(aiosPath) {
   try {
     const raw = await fs.readFile(SETTINGS_PATH, "utf8");
     settings = JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      // The file exists but we cannot read or parse it. Starting from {} would
+      // write our hook over the user's entire Claude Code configuration.
+      // Refusing is the only safe move; they can fix or move the file.
+      throw new Error(
+        `Cannot read ${SETTINGS_PATH}: ${error.message}\n` +
+        "Fix or move that file, then run this again. Refusing to overwrite it."
+      );
+    }
     settings = {};
   }
 
@@ -178,7 +192,7 @@ export async function enable(aiosPath) {
   if (!settings.hooks.Stop) settings.hooks.Stop = [];
 
   const existing = settings.hooks.Stop.find(
-    (h) => h.hooks?.some?.((e) => e.command?.includes("dotaios capture hook claude-code"))
+    (h) => h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
   );
 
   if (existing) {
@@ -197,6 +211,8 @@ export async function enable(aiosPath) {
     ]
   });
 
+  // A machine that has never run Claude Code has no ~/.claude yet.
+  await fs.mkdir(CLAUDE_DIR, { recursive: true });
   await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
   console.log("Claude Code auto-save enabled.");
   console.log("Future conversations will be saved incrementally after each completed Claude Code response.");
