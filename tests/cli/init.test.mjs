@@ -64,3 +64,26 @@ test("a freshly initialized folder ships the memory-maintenance skill and its li
   assert.match(agents, /## Keeping Knowledge True/, "the rendered AGENTS.md must carry the lifecycle instruction");
   assert.match(agents, /--operation supersede/);
 });
+
+test("a new folder ships a scheduled memory check, not just a skills-symlink check", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-"));
+  const target = path.join(root, "aios");
+
+  const result = spawnSync(process.execPath, [cli, "init", "--yes", "--path", target], { encoding: "utf8" });
+  assert.equal(result.status, 0, result.stderr);
+
+  const schedules = fs.readFileSync(path.join(target, "schedules.yml"), "utf8");
+
+  assert.match(schedules, /dotaios memory audit/, "staleness must be detectable on a clock, not only when someone remembers");
+  assert.doesNotMatch(
+    schedules,
+    /dotaios skills doctor/,
+    "the weekly health check must inspect memory, not skill symlinks"
+  );
+  assert.match(schedules, /dotaios doctor/, "the health check must be the one that reads memory and context freshness");
+
+  // Scheduling must stay opt-in: DotAIOS may not install OS jobs a user never asked for.
+  const enabled = schedules.split("\n").filter((line) => line.includes("enabled:"));
+  assert.ok(enabled.length >= 3, "every shipped schedule declares its enabled state");
+  assert.ok(enabled.every((line) => line.includes("false")), "shipped schedules must default to off");
+});
