@@ -100,6 +100,18 @@ npx -y dotaios@latest skills doctor --json
 Treat any foreign aliases or collisions as visible review items. Do not delete
 them automatically; they may belong to another tool.
 
+Then turn on session capture, so the folder records the user's work without
+them having to remember to save anything:
+```
+npx -y dotaios@latest capture enable claude-code
+```
+
+This is what makes the memory self-maintaining rather than a folder they have
+to tend by hand. Without it, nothing is written unless the user runs a command.
+Capture is Claude Code only today; on other tools sessions are saved with the
+`save-session` skill instead. Say that plainly rather than implying every tool
+is covered.
+
 If the repository you are opening owns a project-local `skills/` directory,
 register and attach that checkout too:
 ```
@@ -207,8 +219,6 @@ Then show them what they now have (adapt it to what they told you):
 these exist and that they can turn them on whenever they want:
 
 - **Cross-device sync**, read your memory on your phone: `npx dotaios@latest sync setup`
-- **Save conversations**, keep AI sessions as local memory:
-  `npx dotaios@latest capture enable claude-code`
 - **Daily brief on a schedule**, `~/aios/` ships a pre-wired daily brief
   schedule; run `npx dotaios@latest schedule install --dry-run` to see how to enable it
   with the computer's own scheduler.

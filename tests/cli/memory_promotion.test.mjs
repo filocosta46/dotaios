@@ -474,3 +474,43 @@ test("promotion rejects a dangling symlink before creating its target", (t) => {
   assert.equal(fs.existsSync(outsideTarget), false);
   assert.deepEqual(readEvents(aiosPath), []);
 });
+
+test("a promotion to signal says out loud that signals are trimmed after 30 days", (t) => {
+  const { aiosPath } = setupAios(t);
+
+  const result = run(promoteArgs(aiosPath, "signal", "Waiting for design review."));
+
+  assert.match(result.stdout, /30 days/, "the retention window must appear where the choice is made");
+  assert.match(result.stdout, /context.*project.*vault|context, project, or vault/i, "the durable destinations must be named");
+});
+
+test("a promotion to a durable destination carries no retention warning", (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "Original context stays here.\n");
+
+  const result = run(promoteArgs(
+    aiosPath,
+    "context",
+    "Prefers written handoffs.",
+    ["--destination", "context/work.md"]
+  ));
+
+  assert.doesNotMatch(result.stdout, /30 days/, "the warning must be specific to signals, not boilerplate");
+});
+
+test("memory help does not present signal as the default-looking destination", () => {
+  const result = run(["memory", "--help"]);
+
+  const destinationsIdx = result.stdout.indexOf("Promotion destinations:");
+  assert.ok(destinationsIdx !== -1);
+  const durableIdx = result.stdout.indexOf("context", destinationsIdx);
+  const signalIdx = result.stdout.indexOf("signal", destinationsIdx);
+  assert.ok(durableIdx < signalIdx, "durable destinations must be listed before the 30-day one");
+  assert.match(result.stdout, /30 days/, "help must state the signal retention window");
+
+  const examplesIdx = result.stdout.indexOf("Examples:");
+  const firstExample = result.stdout.slice(examplesIdx, result.stdout.indexOf("\n", result.stdout.indexOf("promote", examplesIdx)));
+  assert.doesNotMatch(firstExample, /--to signal/, "the first worked example must not be the trimmed store");
+});

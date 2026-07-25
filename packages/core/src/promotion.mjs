@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists, readJson } from "./files.mjs";
-import { formatJsonlEntry, isoDate, readJsonl } from "./memory.mjs";
+import { SIGNAL_RETENTION_DAYS, formatJsonlEntry, isoDate, readJsonl } from "./memory.mjs";
 import { expandHome, isPathWithin, resolveVaultPath } from "./paths.mjs";
 
 export const PROMOTION_DESTINATIONS = [
@@ -291,6 +291,15 @@ export function renderPromotionPreview(plan) {
     ...(plan.project ? [`Project: ${plan.project}`] : []),
     `Receipt: ${plan.receiptRelativePath}`,
     ...(plan.planPath ? [`Plan: ${plan.planPath}`] : []),
+    // A signal is the one destination that expires. Say so where the choice is
+    // being made, not in docs the user will never open.
+    ...(plan.destinationType === "signal"
+      ? [
+        "",
+        `Retention: signals are trimmed after ${SIGNAL_RETENTION_DAYS} days (archived, not deleted).`,
+        "For a fact that should last, promote to context, project, or vault instead."
+      ]
+      : []),
     "",
     "Change preview:",
     plan.preview

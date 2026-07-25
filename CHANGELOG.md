@@ -2,6 +2,21 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.27.0] - 2026-07-25
+### Fixed
+- **Stale signals are archived instead of deleted.** `trimSignals` previously `unlink`ed any `memory/signals/*.jsonl` older than 30 days with no archive, and it runs unattended as part of routine maintenance. Every line now lands in `memory/signals-archive.jsonl` before its source file is removed, using the same staged-append, crash-safe, idempotent path as event compaction. Archived signals stay searchable. Covered by crash-injection, idempotency, and lock-contention tests. If you kept your folder outside version control, this is data you were losing silently.
+- **`dotaios doctor` no longer certifies a folder healthy while signal files vanish.** The memory-health check reads maintenance receipts and warns when more signal files were removed than archived, and reports the live signal-file count. Previously it returned `ok` unless a corrupt-line sidecar existed, so unarchived deletion was invisible.
+- Event compaction no longer re-archives a batch larger than the dedupe tail window when a crash interrupts the staging cleanup.
+
+### Added
+- **The scaffolded `AGENTS.md` now tells agents to maintain memory.** Agents are directed to promote a fact that should outlive the session, and to supersede a fact they find contradicted, rather than leaving both versions in place. The promotion lifecycle shipped in earlier releases but nothing ever invoked it, so context accumulated and went stale by design.
+- New shipped skill `memory-maintenance`: find stale or contradicted facts in `context/` and `projects/`, propose supersedes, apply only what the user approves.
+- `dotaios doctor` warns when hot context files have not been touched in a long time, using file mtime only — no frontmatter or schema change. Generated files are never reported as stale.
+
+### Changed
+- Session capture moved into the main setup flow in `INSTALL.md`. It was previously listed under "optional extras, do not run these during first-time setup" — which left a new user with a folder that recorded nothing unless they ran a command by hand. Capture is Claude Code only today and the docs now say so plainly.
+- `dotaios memory promote` states the 30-day signal retention window in the preview and the help text, lists durable destinations first, and no longer uses `--to signal` as its first worked example. Promoting a durable fact to `signal` previously looked like the default and expired within a month.
+
 ## [1.26.0] - 2026-07-22
 ### Added
 - Opt-in update check surfaced by `dotaios doctor`: tells you when a newer release is published. Foreground only — it runs because you asked for a health check. One plain GET to the npm registry, no request body, no identifiers, no background updater, no telemetry. Fail-open by design: offline, timeout, bad status, malformed payload, or an unreadable local version all degrade to a quiet skip, and an available update is a warning that never sets a non-zero exit code. Disable with `DOTAIOS_NO_UPDATE_CHECK=1`.
