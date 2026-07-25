@@ -450,3 +450,171 @@ test("maintenance runs at most once per day unless the log overflows", async () 
   const receipts = readLines(eventsPath).map((l) => JSON.parse(l)).filter((e) => e.type === "memory.maintenance");
   assert.equal(receipts.length, 1, "exactly one maintenance receipt after one real run");
 });
+
+// --- Defect 6: doctor must not certify a folder healthy while signals vanish ---
+
+function receipt(daysAgo, fields) {
+  return JSON.stringify({
+    ts: new Date(Date.now() - daysAgo * 86400000).toISOString(),
+    type: "memory.maintenance",
+    ...fields
+  });
+}
+
+test("doctor warns when maintenance receipts show more signal files removed than archived", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), [
+    receipt(3, { signal_files_removed: 10 }),
+    receipt(2, { signal_files_removed: 11 }),
+    receipt(1, { signal_files_removed: 1, signal_files_archived: 1 })
+  ].join("\n") + "\n");
+
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+  const check = await doctor.checkMemoryHealth(dir);
+
+  assert.equal(check.status, "warn", "a folder that lost signal files is not healthy");
+  assert.match(check.detail, /21/, "the number of unarchived removals must be named");
+  assert.ok(check.fix, "a warn without a fix is just noise");
+});
+
+test("doctor stays ok when every removed signal file was archived", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), [
+    receipt(2, { signal_files_removed: 11, signal_files_archived: 11 }),
+    receipt(1, { signal_files_removed: 0, signal_files_archived: 0 })
+  ].join("\n") + "\n");
+
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+  const check = await doctor.checkMemoryHealth(dir);
+
+  assert.equal(check.status, "ok");
+});
+
+test("doctor ignores maintenance receipts older than the lookback window", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(memoryDir, "events.jsonl"),
+    receipt(200, { signal_files_removed: 40 }) + "\n"
+  );
+
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+  const check = await doctor.checkMemoryHealth(dir);
+
+  assert.equal(check.status, "ok", "an old loss must stop nagging once it is out of the window");
+});
+
+test("doctor counts live signal files without opening them", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  const signalsDir = path.join(memoryDir, "signals");
+  fs.mkdirSync(signalsDir, { recursive: true });
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), '{"a":1}\n');
+  fs.writeFileSync(path.join(signalsDir, "2026-05-01.jsonl"), '{"x":1}\n');
+  fs.writeFileSync(path.join(signalsDir, "2026-05-02.jsonl"), '{"x":2}\n');
+
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+  const check = await doctor.checkMemoryHealth(dir);
+
+  assert.match(check.detail, /2 signal file/);
+});
+
+test("the memory-health check never writes to the folder it inspects", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  // A corrupt line would make the shared JSONL reader write a .bad.jsonl
+  // sidecar. A health check must not be the thing that mutates the folder,
+  // and must not race the maintenance it is auditing.
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), '{"a":1}\nbroken{\n');
+  const before = fs.readdirSync(memoryDir).sort();
+
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+  await doctor.checkMemoryHealth(dir);
+
+  assert.deepEqual(fs.readdirSync(memoryDir).sort(), before, "no file may appear or change");
+});
+
+// --- Defect 7: staleness has to be visible, not inferred ---
+
+function contextFolder({ ageDays = 0 } = {}) {
+  const dir = tmpDir();
+  fs.mkdirSync(path.join(dir, "context"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "memory"), { recursive: true });
+  const files = [
+    "context/identity.md",
+    "context/work.md",
+    "context/priorities.md",
+    "context/north-star.md",
+    "memory/profile.md"
+  ];
+  const mtime = new Date(Date.now() - ageDays * 86400000);
+  for (const relative of files) {
+    const filePath = path.join(dir, relative);
+    fs.writeFileSync(filePath, `# ${relative}\n`);
+    fs.utimesSync(filePath, mtime, mtime);
+  }
+  return { dir, files };
+}
+
+test("doctor stays quiet about context a user touched recently", async () => {
+  const { dir } = contextFolder({ ageDays: 5 });
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+
+  const check = await doctor.checkContextFreshness(dir);
+
+  assert.equal(check.status, "ok");
+  assert.match(check.detail, /5 day/);
+});
+
+test("doctor warns about context nobody has touched in a quarter", async () => {
+  const { dir } = contextFolder({ ageDays: 200 });
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+
+  const check = await doctor.checkContextFreshness(dir);
+
+  assert.equal(check.status, "warn");
+  assert.match(check.detail, /context\/work\.md/);
+  assert.match(check.detail, /200 day/);
+  assert.ok(check.fix);
+});
+
+test("doctor never calls a file DotAIOS itself generated stale", async () => {
+  const { dir } = contextFolder({ ageDays: 1 });
+  for (const relative of ["AGENTS.md", "CLAUDE.md", ".cursorrules"]) {
+    const filePath = path.join(dir, relative);
+    fs.writeFileSync(filePath, "generated\n");
+    const old = new Date(Date.now() - 400 * 86400000);
+    fs.utimesSync(filePath, old, old);
+  }
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+
+  const check = await doctor.checkContextFreshness(dir);
+
+  assert.equal(check.status, "ok", "an untouched template is not a stale fact");
+});
+
+test("a future mtime reports zero days, never a negative age", async () => {
+  const { dir } = contextFolder({ ageDays: -30 });
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+
+  const check = await doctor.checkContextFreshness(dir);
+
+  assert.equal(check.status, "ok");
+  assert.match(check.detail, /0 day/);
+  assert.doesNotMatch(check.detail, /-\d/);
+});
+
+test("freshness is silent on a folder with no context files yet", async () => {
+  const dir = tmpDir();
+  const doctor = await import("../../packages/cli/src/commands/doctor.mjs");
+
+  const check = await doctor.checkContextFreshness(dir);
+
+  assert.equal(check.status, "ok");
+});

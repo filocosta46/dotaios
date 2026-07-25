@@ -6,6 +6,7 @@ import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
+import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
 import { checkForUpdate } from "../../../core/src/version-check.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
@@ -55,6 +56,7 @@ export async function doctorCommand(args) {
   checks.push(await checkAiosFolder(target));
   checks.push(await checkAiosConfig(target));
   checks.push(await checkMemoryHealth(target));
+  checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
   checks.push(...await checkAgentBridges(target, homePath));
 
@@ -178,9 +180,47 @@ async function checkAiosConfig(target) {
   };
 }
 
+const MAINTENANCE_LOOKBACK_DAYS = 90;
+
+// Maintenance receipts are the only per-file evidence of what auto-maintenance
+// did. Read them by hand: the shared JSONL reader quarantines corrupt lines by
+// WRITING a .bad.jsonl sidecar, and a health check must not mutate the folder
+// it inspects — nor race the maintenance it is auditing.
+async function readMaintenanceReceipts(eventsPath, sinceMs) {
+  let content;
+  try {
+    content = await fs.readFile(eventsPath, "utf8");
+  } catch {
+    return [];
+  }
+  const receipts = [];
+  for (const line of content.split("\n")) {
+    if (!line.trim()) continue;
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue; // The quarantine check already reports unparseable lines.
+    }
+    if (entry?.type !== "memory.maintenance") continue;
+    const ts = Date.parse(entry.ts);
+    if (Number.isFinite(ts) && ts < sinceMs) continue;
+    receipts.push(entry);
+  }
+  return receipts;
+}
+
 /**
- * Memory health: corrupt-line quarantine counts, last compaction time, and
- * archive size. Exported so the safety tests can drive it directly.
+ * Memory health: corrupt-line quarantine counts, last compaction time, archive
+ * size, live signal count, and — the point of the check — whether
+ * auto-maintenance has been removing signal files without archiving them.
+ *
+ * The unarchived-removal verdict is receipt-driven, not directory-driven: a
+ * stale archive left over from six months ago must not certify today's
+ * deletions as fine. Receipts are per-file evidence; a directory is not.
+ * It also means this check hardcodes nothing about where the archive lives.
+ *
+ * Exported so the safety tests can drive it directly.
  */
 export async function checkMemoryHealth(target) {
   const memoryDir = path.join(target, "memory");
@@ -194,10 +234,13 @@ export async function checkMemoryHealth(target) {
     `${path.join(memoryDir, "events-archive.jsonl")}.bad.jsonl`,
     `${path.join(memoryDir, "signals-archive.jsonl")}.bad.jsonl`
   ];
+  let signalFiles = 0;
   try {
     const signalsDir = path.join(memoryDir, "signals");
     for (const name of await fs.readdir(signalsDir)) {
+      // .bad.jsonl also ends in .jsonl, so it must be tested first.
       if (name.endsWith(".bad.jsonl")) quarantineFiles.push(path.join(signalsDir, name));
+      else if (name.endsWith(".jsonl")) signalFiles += 1;
     }
   } catch {
     // No signals dir yet.
@@ -234,7 +277,18 @@ export async function checkMemoryHealth(target) {
     }
   }
 
-  const detail = `${badTotal} bad line(s)${badDetails.length > 0 ? ` (${badDetails.join(", ")})` : ""}, last compaction: ${lastCompaction}, archive: ${(archiveBytes / 1024).toFixed(1)} KB`;
+  const receipts = await readMaintenanceReceipts(
+    eventsPath,
+    Date.now() - MAINTENANCE_LOOKBACK_DAYS * 86_400_000
+  );
+  let unarchivedRemovals = 0;
+  for (const entry of receipts) {
+    const removed = Number(entry.signal_files_removed) || 0;
+    const archived = Number(entry.signal_files_archived) || 0;
+    if (removed > archived) unarchivedRemovals += removed - archived;
+  }
+
+  const detail = `${badTotal} bad line(s)${badDetails.length > 0 ? ` (${badDetails.join(", ")})` : ""}, ${signalFiles} signal file(s), last compaction: ${lastCompaction}, archive: ${(archiveBytes / 1024).toFixed(1)} KB`;
   if (badTotal > 0) {
     return {
       name: "Memory health",
@@ -243,7 +297,64 @@ export async function checkMemoryHealth(target) {
       fix: "Corrupt lines are preserved in the .bad.jsonl file(s) next to their source — review and clean them up."
     };
   }
+  if (unarchivedRemovals > 0) {
+    return {
+      name: "Memory health",
+      status: "warn",
+      detail: `${detail}. ${unarchivedRemovals} signal file(s) were removed without an archive in the last ${MAINTENANCE_LOOKBACK_DAYS} days.`,
+      fix: "Those signals were deleted by DotAIOS 1.26 or earlier and cannot be recovered here — restore them from a backup or your sync repository if you need them. Releases from 1.27 archive signals to memory/signals-archive.jsonl instead."
+    };
+  }
   return { name: "Memory health", status: "ok", detail };
+}
+
+// One quarter. Short enough that a file describing finished work gets caught,
+// long enough that a steady month never trains the user to ignore doctor.
+const CONTEXT_STALE_DAYS = 90;
+
+/**
+ * Freshness of the files the user (or an agent for them) writes. mtime only —
+ * this check never opens a file. Comparing mtimeMs against Date.now() keeps it
+ * in UTC milliseconds, so there are no date strings, no local-time parsing and
+ * no DST hazard; ages floor to whole days and clamp at 0 so clock skew or a
+ * restored backup prints "0 day(s)" rather than a negative number.
+ *
+ * Generated files are excluded on purpose: warning that a template DotAIOS
+ * itself wrote has not changed is noise, and noise is how you get a check
+ * nobody reads.
+ */
+export async function checkContextFreshness(target, { staleDays = CONTEXT_STALE_DAYS, now = Date.now } = {}) {
+  const nowMs = now();
+  const ages = await Promise.all(USER_MAINTAINED_CONTEXT_FILES.map(async (relative) => {
+    try {
+      const stats = await fs.stat(path.join(target, relative));
+      return { relative, days: Math.max(0, Math.floor((nowMs - stats.mtimeMs) / 86_400_000)) };
+    } catch {
+      return null; // Absent files are the folder check's business, not this one.
+    }
+  }));
+
+  const present = ages.filter(Boolean);
+  if (present.length === 0) {
+    return { name: "Context freshness", status: "ok", detail: "No context files yet — nothing to check." };
+  }
+
+  const stale = present.filter((file) => file.days > staleDays).sort((a, b) => b.days - a.days);
+  if (stale.length === 0) {
+    const newest = Math.min(...present.map((file) => file.days));
+    return {
+      name: "Context freshness",
+      status: "ok",
+      detail: `${present.length} context file(s), most recent edit ${newest} day(s) ago.`
+    };
+  }
+
+  return {
+    name: "Context freshness",
+    status: "warn",
+    detail: `Unchanged for over ${staleDays} days: ${stale.map((file) => `${file.relative} (${file.days} day(s))`).join(", ")}.`,
+    fix: "Tell your agent what changed, or run `npx dotaios@latest interview --review`. The `memory-maintenance` skill retires claims that stopped being true."
+  };
 }
 
 /**
