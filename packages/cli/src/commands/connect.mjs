@@ -399,7 +399,12 @@ async function connectGemini(aiosPath, options) {
   });
 
   console.log("\nGemini CLI connected.");
-  console.log("Every session start will inject your DotAIOS working context automatically.");
+  // docs/client-support.md records that Gemini CLI could not produce an
+  // invocation receipt in the bounded probe. Writing a hook file proves the
+  // configuration, never that the client runs it — claiming otherwise is the
+  // exact overclaim this project refuses to make about every other client.
+  console.log("A SessionStart hook is installed. Whether your Gemini version runs it is client-side behaviour —");
+  console.log("check the start of your next session to confirm your context arrives.");
 }
 
 async function writeGeminiBridge(filePath, aiosPath) {

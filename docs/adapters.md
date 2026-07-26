@@ -35,7 +35,7 @@ dotaios connect gemini
 
 Installs three things in `~/.gemini/`:
 - a `GEMINI.md` bridge pointing Gemini at your `~/aios` folder,
-- a **SessionStart hook** that injects your working-memory digest (`dotaios brief --compact`) at the start of every session, and
+- a **SessionStart hook** configured to inject your working-memory digest (`dotaios brief --compact`) at session start — discovery and invocation remain client-version dependent, and
 - native workflow links shared with supported local agents.
 
 If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses to overwrite a file that is not valid JSON (no partial install).

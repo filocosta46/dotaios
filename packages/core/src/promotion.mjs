@@ -737,13 +737,40 @@ function renderPromotionDiff({ destinationPath, destinationType, destinationExis
   if (operation === "add" && destinationType !== "session-only") {
     return renderDiff(destinationPath, addition, destinationType, destinationExists);
   }
-  const removed = before && before !== after
-    ? before.split("\n").filter((line) => line.trim()).slice(-PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `-${line}`)
-    : [];
-  const added = after && before !== after
-    ? after.split("\n").filter((line) => line.trim()).slice(-PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `+${line}`)
-    : [];
-  return [`Operation: ${operation}`, `--- ${destinationPath}`, `+++ ${destinationPath}`, "@@ replace @@", ...removed, ...added].join("\n");
+  // Show what actually changes. This used to print the last N lines of `before`
+  // as removals and the last N of `after` as additions — two unaligned tail
+  // windows, not a diff. A block deleted from the top of a long file showed no
+  // deletion at all, while untouched tail lines showed as both removed and
+  // added. A preview the user is asked to approve has to be true.
+  const beforeLines = before ? before.split("\n") : [];
+  const afterLines = after ? after.split("\n") : [];
+
+  let head = 0;
+  while (head < beforeLines.length && head < afterLines.length && beforeLines[head] === afterLines[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < beforeLines.length - head &&
+    tail < afterLines.length - head &&
+    beforeLines[beforeLines.length - 1 - tail] === afterLines[afterLines.length - 1 - tail]
+  ) tail += 1;
+
+  const removedLines = beforeLines.slice(head, beforeLines.length - tail).filter((line) => line.trim());
+  const addedLines = afterLines.slice(head, afterLines.length - tail).filter((line) => line.trim());
+
+  const clip = (lines, prefix) => {
+    const shown = lines.slice(0, PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `${prefix}${line}`);
+    const hidden = lines.length - shown.length;
+    return hidden > 0 ? [...shown, `${prefix}… ${hidden} more line(s)`] : shown;
+  };
+
+  return [
+    `Operation: ${operation}`,
+    `--- ${destinationPath}`,
+    `+++ ${destinationPath}`,
+    `@@ ${operation} @@`,
+    ...clip(removedLines, "-"),
+    ...clip(addedLines, "+")
+  ].join("\n");
 }
 
 function renderDiff(destinationPath, addition, destinationType, destinationExists) {
