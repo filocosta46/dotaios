@@ -25,9 +25,9 @@ There are no compatibility aliases or additional MCP tools.
 ## Preview client configuration
 
 ```bash
-npx dotaios mcp status
-npx dotaios mcp install --dry-run --agent claude
-npx dotaios mcp install --dry-run --agent cursor
+npx dotaios@latest mcp status
+npx dotaios@latest mcp install --dry-run --agent claude
+npx dotaios@latest mcp install --dry-run --agent cursor
 ```
 
 DotAIOS prints a local stdio configuration and a suggested client path. It does not edit the client configuration automatically. Restart the client after adding the configuration, then verify that the three tools are discoverable and invocable.

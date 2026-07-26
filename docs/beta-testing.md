@@ -11,10 +11,10 @@ DotAIOS ships a local folder (`~/aios/`) that supported local agents can use for
 ## Friend Beta Script
 
 ```bash
-npx dotaios setup        # init + activate + open folder (one command)
-npx dotaios context      # confirm what agents can see
-npx dotaios search "your name"
-npx dotaios status
+npx dotaios@latest setup        # init + activate + open folder (one command)
+npx dotaios@latest context      # confirm what agents can see
+npx dotaios@latest search "your name"
+npx dotaios@latest status
 ```
 
 Then open the agent they normally use and ask:
@@ -44,30 +44,30 @@ dotaios search "any topic you discussed"
 If they use Cursor for a project, also run:
 
 ```bash
-npx dotaios attach /path/to/project
+npx dotaios@latest attach /path/to/project
 ```
 
 Optional maintenance check:
 
 ```bash
-npx dotaios cleanup --dry-run
+npx dotaios@latest cleanup --dry-run
 ```
 
 Optional Google Workspace check for testers who already use Gmail or Calendar:
 
 ```bash
-npx dotaios connect google --dry-run
-npx dotaios google setup
-npx dotaios connect google --status
+npx dotaios@latest connect google --dry-run
+npx dotaios@latest google setup
+npx dotaios@latest connect google --status
 ```
 
 Only run the final connect after `gws auth status` is working:
 
 ```bash
-npx dotaios connect google
-npx dotaios google status
-npx dotaios google inbox
-npx dotaios google agenda --today
+npx dotaios@latest connect google
+npx dotaios@latest google status
+npx dotaios@latest google inbox
+npx dotaios@latest google agenda --today
 ```
 
 Useful feedback:
@@ -88,7 +88,7 @@ Useful feedback:
 - Keep secrets in `~/aios/.env`, not in chat.
 - Google OAuth credentials stay in `gws`, not DotAIOS.
 - Treat plugin permissions as descriptive, not sandboxed enforcement.
-- Use `npx dotaios install ./plugin --dry-run` before installing any local plugin.
+- Use `npx dotaios@latest install ./plugin --dry-run` before installing any local plugin.
 - Ask before sending email, creating events, or editing Google files.
 
 ## What Not To Test Yet

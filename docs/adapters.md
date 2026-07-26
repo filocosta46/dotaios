@@ -89,8 +89,8 @@ Configuration is not invocation proof. For a bounded acceptance check, run the
 explicit client probe against a disposable project fixture:
 
 ```bash
-npx dotaios skills probe --client codex --path ~/aios --dry-run
-npx dotaios skills probe --client codex --path ~/aios --run \
+npx dotaios@latest skills probe --client codex --path ~/aios --dry-run
+npx dotaios@latest skills probe --client codex --path ~/aios --run \
   --receipt /tmp/dotaios-codex-invocation.json
 ```
 
@@ -152,8 +152,8 @@ registry's declared `key` rather than assuming `skills.external_dirs`.
 Projects without a readable `skills/` directory are a no-op for this layer.
 
 ```bash
-npx dotaios attach /path/to/project --path ~/aios
-npx dotaios attach /path/to/project --path ~/aios --dry-run
+npx dotaios@latest attach /path/to/project --path ~/aios
+npx dotaios@latest attach /path/to/project --path ~/aios --dry-run
 ```
 
 This proves filesystem/configuration propagation. It does not claim that every

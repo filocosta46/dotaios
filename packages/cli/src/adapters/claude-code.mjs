@@ -234,7 +234,7 @@ export async function disable(aiosPath) {
   }
 
   settings.hooks.Stop = settings.hooks.Stop.filter(
-    (h) => !h.hooks?.some?.((e) => e.command?.includes("dotaios capture hook claude-code"))
+    (h) => !h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
   );
 
   if (settings.hooks.Stop.length === 0) delete settings.hooks.Stop;
@@ -249,7 +249,7 @@ export async function isEnabled() {
     const raw = await fs.readFile(SETTINGS_PATH, "utf8");
     const settings = JSON.parse(raw);
     return settings.hooks?.Stop?.some?.(
-      (h) => h.hooks?.some?.((e) => e.command?.includes("dotaios capture hook claude-code"))
+      (h) => h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
     ) ?? false;
   } catch {
     return false;

@@ -424,3 +424,59 @@ test("an unreadable settings file is never overwritten", () => {
   assert.notEqual(result.status, 0, "clobbering a user's client settings is worse than failing");
   assert.equal(fs.readFileSync(settingsPath, "utf8"), corrupt, "the user's file must survive untouched");
 });
+
+// The user must be able to STOP recording. enable/disable/status have to agree
+// on what a DotAIOS hook looks like, or consent becomes one-way.
+
+test("what enable turns on, disable turns off", () => {
+  const { home, aios } = isolatedHome();
+  const settingsPath = path.join(home, ".claude", "settings.json");
+
+  assert.equal(runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]).status, 0);
+  const enabled = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(enabled.hooks.Stop.length, 1, "precondition: the hook is installed");
+
+  const off = runWithHome(home, ["capture", "disable", "claude-code", "--path", aios]);
+  assert.equal(off.status, 0, off.stderr);
+
+  const after = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  const remaining = (after.hooks?.Stop || []).filter(
+    (h) => h.hooks?.some?.((e) => e.command?.includes("capture hook claude-code"))
+  );
+  assert.deepEqual(remaining, [], "printing 'disabled' while still recording is a consent failure");
+});
+
+test("status reports capture as on once it is on", () => {
+  const { home, aios } = isolatedHome();
+  // detect.mjs only claims full-auto once it can prove it can read a transcript,
+  // so a machine that has actually used Claude Code is the case under test.
+  const projectDir = path.join(home, ".claude", "projects", "some-project");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, "session.jsonl"), '{"type":"user","message":{"role":"user"}}\n');
+
+  runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+
+  const status = runWithHome(home, ["capture", "status", "--path", aios]);
+
+  assert.equal(status.status, 0, status.stderr);
+  // "import only" is what status prints when it cannot see a live hook. A user
+  // who just enabled auto-save must not be told their conversations are not
+  // being recorded when they are.
+  const claudeLine = status.stdout.split("\n").find((line) => line.includes("claude-code")) || "";
+  assert.doesNotMatch(claudeLine, /import only/, `status denied a hook it just wrote: ${claudeLine.trim()}`);
+  assert.match(claudeLine, /auto-save/, `status must show auto-save is live: ${claudeLine.trim()}`);
+});
+
+test("a hook written by an earlier release can still be turned off", () => {
+  const { home, aios } = isolatedHome();
+  const settingsPath = path.join(home, ".claude", "settings.json");
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: "command", command: `dotaios capture hook claude-code --path ${aios}` }] }] }
+  }));
+
+  assert.equal(runWithHome(home, ["capture", "disable", "claude-code", "--path", aios]).status, 0);
+
+  const after = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.deepEqual(after.hooks?.Stop || [], [], "upgrading must not strand a 1.26 hook the user cannot remove");
+});
