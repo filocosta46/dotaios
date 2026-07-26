@@ -385,7 +385,9 @@ test("the installed hook command resolves without a global install", () => {
 
   assert.match(command, /npx/, "INSTALL.md never installs dotaios globally, so a bare `dotaios` cannot resolve");
   assert.match(command, /capture hook claude-code/);
-  assert.match(command, new RegExp(`--path ${aios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  // The path is shell-quoted now, so assert it is PRESENT rather than pinning
+  // an unquoted form — quoting is what stops a home dir with a space breaking.
+  assert.ok(command.includes(aios), `hook must carry the AIOS path: ${command}`);
 });
 
 test("enabling capture creates the client directory instead of crashing", () => {
@@ -479,4 +481,59 @@ test("a hook written by an earlier release can still be turned off", () => {
 
   const after = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
   assert.deepEqual(after.hooks?.Stop || [], [], "upgrading must not strand a 1.26 hook the user cannot remove");
+});
+
+// --- The hook string is written into another program's config and executed by
+// a shell. It has to survive a real home directory and a real upgrade. ---
+
+function hookCommandFor(home) {
+  const settings = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
+  return settings.hooks.Stop[0].hooks[0].command;
+}
+
+test("a path containing a space does not word-split the hook", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios home "));
+  const aios = path.join(home, "my aios");
+  const init = spawnSync(process.execPath, [cli, "init", "--yes", "--path", aios], {
+    encoding: "utf8", env: { ...process.env, HOME: home, USERPROFILE: home }
+  });
+  assert.equal(init.status, 0, init.stderr);
+  fs.rmSync(path.join(home, ".claude"), { recursive: true, force: true });
+
+  assert.equal(runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]).status, 0);
+
+  const command = hookCommandFor(home);
+  // Claude Code runs this through a shell. Unquoted, `--path /a/my aios`
+  // becomes `--path /a/my` and every session silently fails to save.
+  assert.match(command, /--path '.*my aios'|--path ".*my aios"/, `path must be quoted: ${command}`);
+});
+
+test("the hook is pinned to a version, never to whatever is newest on npm", () => {
+  const { home, aios } = isolatedHome();
+  runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+
+  const command = hookCommandFor(home);
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+
+  assert.doesNotMatch(command, /@latest/, "a hook that auto-upgrades runs unreviewed code on every session end");
+  assert.match(command, new RegExp(`dotaios@${pkg.version.replace(/\./g, "\\.")}`), command);
+});
+
+test("enabling over a hook written by an older release repairs it", () => {
+  const { home, aios } = isolatedHome();
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  const settingsPath = path.join(home, ".claude", "settings.json");
+  // Exactly what 1.26 wrote: a bare `dotaios` that never resolves on the npx path.
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: "command", command: `dotaios capture hook claude-code --path ${aios}` }] }] }
+  }));
+
+  const result = runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const command = hookCommandFor(home);
+  assert.match(command, /npx/, `a broken hook must be repaired, not reported as fine: ${command}`);
+  assert.doesNotMatch(result.stdout, /already configured/, "silently leaving a broken hook is the bug");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(settings.hooks.Stop.length, 1, "repair must not duplicate the hook");
 });

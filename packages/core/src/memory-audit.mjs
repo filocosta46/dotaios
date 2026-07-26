@@ -101,7 +101,13 @@ function auditPromotionReceipts(entries) {
   }
 
   const findings = [];
-  for (const group of byDestination.values()) {
+  for (const unordered of byDestination.values()) {
+    // Replay in the order the writes actually happened. Folding in whatever
+    // order the caller supplied means a supersede seen before the block it
+    // replaces leaves that block in the map, and the correction the user was
+    // told to make gets reported back to them as a conflict — with a
+    // recommendation to remove one of the two.
+    const group = [...unordered].sort((a, b) => String(a.ts || "").localeCompare(String(b.ts || "")));
     const destination = group[0].destination_path;
     const hashes = new Map();
     for (const promotion of group) {

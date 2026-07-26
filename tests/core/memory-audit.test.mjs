@@ -318,3 +318,47 @@ test("applySkillPatchCandidates skips text-only skill path matches as review-onl
   assert.equal(result.results[0].reason, "review-only");
   assert.equal(content, "# research\n\nUse citations.\n");
 });
+
+// The release tells agents to supersede a fact that stopped being true. The
+// auditor must not then report that same workflow as a conflict and recommend
+// removing one of the two blocks — that would talk a user into deleting the
+// correction they just made.
+
+function promotionEvent(ts, { operation = "add", hash, matched }) {
+  return JSON.stringify({
+    ts,
+    type: "memory-promotion",
+    operation,
+    destination_path: "context/work.md",
+    content_hash: hash,
+    ...(matched ? { matched_content_hash: matched } : {}),
+    summary: `promotion ${hash}`
+  });
+}
+
+test("promote-then-supersede is not reported as a conflict", async () => {
+  const aios = await tmpAios();
+  await fs.writeFile(path.join(aios, "memory", "events.jsonl"), [
+    promotionEvent("2026-06-01T10:00:00.000Z", { hash: "aaa" }),
+    promotionEvent("2026-06-02T10:00:00.000Z", { operation: "supersede", hash: "bbb", matched: "aaa" })
+  ].join("\n") + "\n");
+
+  const report = await auditHot(aios, { memoryScope: "all" });
+
+  const conflicts = report.findings.filter((f) => /conflict/i.test(f.message || ""));
+  assert.deepEqual(conflicts, [], `superseding is the documented workflow, not a defect: ${JSON.stringify(conflicts)}`);
+});
+
+test("a conflict verdict does not depend on the order events are handed in", async () => {
+  const aios = await tmpAios();
+  // Newest first — the order a recency-ordered reader naturally produces.
+  await fs.writeFile(path.join(aios, "memory", "events.jsonl"), [
+    promotionEvent("2026-06-02T10:00:00.000Z", { operation: "supersede", hash: "bbb", matched: "aaa" }),
+    promotionEvent("2026-06-01T10:00:00.000Z", { hash: "aaa" })
+  ].join("\n") + "\n");
+
+  const report = await auditHot(aios, { memoryScope: "all" });
+
+  const conflicts = report.findings.filter((f) => /conflict/i.test(f.message || ""));
+  assert.deepEqual(conflicts, [], `the fold must sort by ts, not trust input order: ${JSON.stringify(conflicts)}`);
+});

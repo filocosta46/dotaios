@@ -284,7 +284,7 @@ async function createStarterFiles(target, data, writeMode) {
       "    enabled: false",
       "  - name: weekly-memory-audit",
       "    cadence: weekly",
-      "    command: \"dotaios memory audit\"",
+      "    command: \"dotaios memory audit --all-memory\"",
       "    enabled: false"
     ].join("\n") + "\n",
     "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"memory-maintenance\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"

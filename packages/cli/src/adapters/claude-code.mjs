@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
@@ -15,8 +16,28 @@ const SETTINGS_PATH = path.join(CLAUDE_DIR, "settings.json");
 // globally — so a bare `dotaios` in the hook would not resolve and every
 // session would fail to capture, silently. Match on the subcommand alone so a
 // hook written by an earlier release is still recognised and never duplicated.
-const HOOK_COMMAND = `npx -y dotaios@latest capture hook claude-code`;
+//
+// Pinned to this exact version, never @latest. @latest would resolve to
+// whatever is newest on npm at the moment the hook fires, so every session end
+// would execute a build the user never installed or reviewed. The pin also
+// makes the npx cache hit deterministic, which is what lets the hook work
+// offline after its first run.
+const HOOK_VERSION = JSON.parse(
+  readFileSync(new URL("../../../../package.json", import.meta.url), "utf8")
+).version;
+const HOOK_COMMAND = `npx -y dotaios@${HOOK_VERSION} capture hook claude-code`;
 const HOOK_MARKER = "capture hook claude-code";
+
+// The command is written into another program's config and run through a
+// shell, so a home directory with a space in it would otherwise word-split and
+// silently break every save.
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function hookCommandFor(aiosPath) {
+  return `${HOOK_COMMAND} --path ${shellQuote(aiosPath)}`;
+}
 
 // ---------- backfill ----------
 
@@ -191,12 +212,30 @@ export async function enable(aiosPath) {
   if (!settings.hooks) settings.hooks = {};
   if (!settings.hooks.Stop) settings.hooks.Stop = [];
 
+  const wanted = hookCommandFor(aiosPath);
   const existing = settings.hooks.Stop.find(
     (h) => h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
   );
 
   if (existing) {
-    console.log("Claude Code auto-save already configured.");
+    const entry = existing.hooks.find((e) => e.command?.includes(HOOK_MARKER));
+    if (entry.command === wanted) {
+      console.log("Claude Code auto-save already configured.");
+      return;
+    }
+    // An earlier release wrote a hook that no longer works — 1.26's bare
+    // `dotaios` never resolves on the npx-only install path, so it failed
+    // silently on every session. Reporting "already configured" would leave
+    // the user permanently broken with no signal.
+    console.log("Updating the Claude Code auto-save hook:");
+    console.log(`  was: ${entry.command}`);
+    console.log(`  now: ${wanted}`);
+    entry.command = wanted;
+    entry.type = "command";
+    if (entry.timeout == null) entry.timeout = 10;
+    await fs.mkdir(CLAUDE_DIR, { recursive: true });
+    await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    console.log("Claude Code auto-save repaired.");
     return;
   }
 
@@ -204,7 +243,7 @@ export async function enable(aiosPath) {
     hooks: [
       {
         type: "command",
-        command: `${HOOK_COMMAND} --path ${aiosPath}`,
+        command: wanted,
         timeout: 10,
         statusMessage: "Saving conversation to AIOS..."
       }

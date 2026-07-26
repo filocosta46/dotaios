@@ -11,7 +11,7 @@ being true and fixes it in place.
 
 ## What this does
 
-- Runs `dotaios memory audit` and works from what it reports: hot files over
+- Runs `dotaios memory audit --all-memory` and works from what it reports: hot files over
   budget, conflicting promoted blocks, stale signals, corrupt lines.
 - Reads the flagged claims and decides, per claim, whether it is still true.
 - Retires the ones that are not, with `--operation supersede`, which is
@@ -28,7 +28,7 @@ being true and fixes it in place.
 - It does not invent a replacement fact. If you cannot tell whether a claim is
   still true, ask the user in one sentence.
 - It does not run itself. `dotaios schedule` only runs DotAIOS commands, so
-  schedule `dotaios memory audit` and run this skill on what it reports.
+  schedule `dotaios memory audit --all-memory` and run this skill on what it reports.
 
 ## How to use it
 
@@ -40,7 +40,7 @@ Try saying:
 
 ## Agent steps
 
-1. Run `dotaios memory audit`. Treat its findings as the work list; do not go
+1. Run `dotaios memory audit --all-memory`. Treat its findings as the work list; do not go
    hunting through files it did not flag.
 2. Run `dotaios capture list` and note the session id you will attribute each
    change to. Every promotion needs one — there is no free-text promotion.
