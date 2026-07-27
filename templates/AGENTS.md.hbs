@@ -48,9 +48,11 @@ adapter is available, `read_working_context` returns the same projection.
 
 ## Keeping Knowledge True
 
-Run the `memory-maintenance` skill when the user asks to promote or retire a
-claim, or when `dotaios memory audit` reports stale or conflicting memory. That
-skill owns the detailed promotion and supersession procedure.
+Keeping this memory true is your job, not the user's. When you notice a claim
+here that is stale or contradicted by what you just learned, retire it then —
+do not wait to be asked. Run the `memory-maintenance` skill, which owns the
+promotion and supersession procedure; run it too when the user asks, or when
+`dotaios memory audit` reports stale or conflicting memory.
 
 Keep short-lived observations in signals. Durable facts belong in `context/`,
 `projects/`, or `vault/`. Preview durable changes before applying them and

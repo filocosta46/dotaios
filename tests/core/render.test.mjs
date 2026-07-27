@@ -129,6 +129,17 @@ test("AGENTS.md.hbs routes memory lifecycle work through the maintenance skill",
   assert.doesNotMatch(section, /--operation supersede/);
   assert.doesNotMatch(section, /--match/);
   assert.doesNotMatch(section, /--destination/);
+
+  // The commands belong in the skill; the TRIGGER does not. This release exists
+  // because the lifecycle shipped with nothing telling an agent to use it, and
+  // context rotted for months. An instruction that only fires when the user
+  // asks puts the human back in the loop as the detector — which is the manual
+  // curation the product is trying to replace.
+  assert.match(
+    section,
+    /notice|contradict|your job|not the user's/i,
+    "the router must tell an agent to retire stale claims on its own, not only on request"
+  );
 });
 
 test("AGENTS.md.hbs stays a bounded router instead of embedding skill procedures", async () => {
