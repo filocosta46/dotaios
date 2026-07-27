@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   appendEvent,
+  appendEventRecord,
   compactEvents,
   trimSignals,
   readJsonl,
@@ -138,6 +139,143 @@ test("compaction takes over a stale lock", async () => {
   fs.writeFileSync(`${eventsPath}.lock`, JSON.stringify({ pid: 99999, ts: Date.now() - 10 * 60_000 }));
   const result = await compactEvents(eventsPath, 10);
   assert.equal(result.archived, 20);
+});
+
+test("event append waits for compaction and the appended record survives replacement", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  seedEvents(eventsPath, 30);
+
+  let releaseRename;
+  let renameStarted;
+  const allowRename = new Promise((resolve) => {
+    releaseRename = resolve;
+  });
+  const atRename = new Promise((resolve) => {
+    renameStarted = resolve;
+  });
+  const filesystem = {
+    ...fsp,
+    async rename(source, destination) {
+      if (source === `${eventsPath}.tmp` && destination === eventsPath) {
+        renameStarted();
+        await allowRename;
+      }
+      return fsp.rename(source, destination);
+    }
+  };
+
+  const compaction = compactEvents(eventsPath, 10, { filesystem });
+  await atRename;
+  const appended = {
+    ts: "2026-01-02T00:00:00.000Z",
+    type: "concurrent",
+    summary: "must survive compaction"
+  };
+  const append = appendEventRecord(eventsPath, appended);
+  releaseRename();
+
+  await Promise.all([compaction, append]);
+
+  const all = [...readLines(archivePath), ...readLines(eventsPath)].map((line) => JSON.parse(line));
+  assert.equal(all.length, 31);
+  assert.equal(all.filter((entry) => entry.type === "concurrent").length, 1);
+});
+
+test("event append creates a missing memory directory before taking the writer lock", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "missing", "memory", "events.jsonl");
+  const event = {
+    ts: "2026-07-27T12:00:00.000Z",
+    type: "first-event",
+    summary: "create the store safely"
+  };
+
+  await appendEventRecord(eventsPath, event);
+
+  assert.deepEqual(readLines(eventsPath).map((line) => JSON.parse(line)), [event]);
+});
+
+test("a fresh partially written event lock is treated as live", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const lockPath = `${eventsPath}.lock`;
+  seedEvents(eventsPath, 1);
+  fs.writeFileSync(lockPath, "");
+
+  await assert.rejects(
+    appendEventRecord(eventsPath, {
+      ts: "2026-07-27T12:00:00.000Z",
+      type: "must-not-steal"
+    }, { lockRetryDelaysMs: [] }),
+    /Timed out waiting for memory writer lock/
+  );
+
+  assert.equal(readLines(eventsPath).length, 1);
+  assert.equal(fs.existsSync(lockPath), true, "the fresh partial lock still belongs to its creator");
+});
+
+test("event append surfaces a lock release failure", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const lockPath = `${eventsPath}.lock`;
+  fs.writeFileSync(eventsPath, "");
+  const filesystem = {
+    ...fsp,
+    async unlink(filePath) {
+      if (filePath === lockPath) {
+        const error = new Error("permission denied while releasing lock");
+        error.code = "EACCES";
+        throw error;
+      }
+      return fsp.unlink(filePath);
+    }
+  };
+
+  await assert.rejects(
+    appendEventRecord(eventsPath, {
+      ts: "2026-07-27T12:00:00.000Z",
+      type: "release-failure"
+    }, { filesystem }),
+    /permission denied while releasing lock/
+  );
+
+  assert.equal(readLines(eventsPath).length, 1, "the completed append stays visible");
+  assert.equal(fs.existsSync(lockPath), true, "a failed release must not be reported as success");
+  fs.rmSync(lockPath, { force: true });
+});
+
+test("event lock release never removes a replacement owner's lock", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const lockPath = `${eventsPath}.lock`;
+  fs.writeFileSync(eventsPath, "");
+  const replacement = {
+    pid: process.pid,
+    ts: Date.now(),
+    token: "replacement-owner"
+  };
+  const filesystem = {
+    ...fsp,
+    async appendFile(filePath, content) {
+      await fsp.appendFile(filePath, content);
+      if (filePath === eventsPath) {
+        await fsp.writeFile(lockPath, JSON.stringify(replacement));
+      }
+    }
+  };
+
+  await assert.rejects(
+    appendEventRecord(eventsPath, {
+      ts: "2026-07-27T12:00:00.000Z",
+      type: "ownership-check"
+    }, { filesystem }),
+    /lock ownership changed/
+  );
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(lockPath, "utf8")), replacement);
+  fs.rmSync(lockPath, { force: true });
 });
 
 // --- Defect 2: corrupt lines are preserved and visible, never silently dropped ---

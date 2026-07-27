@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists, readJson } from "./files.mjs";
-import { SIGNAL_RETENTION_DAYS, formatJsonlEntry, isoDate, readJsonl } from "./memory.mjs";
+import { SIGNAL_RETENTION_DAYS, formatJsonlEntry, isoDate, readJsonl, withEventStoreLock } from "./memory.mjs";
 import { expandHome, isPathWithin, resolveVaultPath } from "./paths.mjs";
 
 export const PROMOTION_DESTINATIONS = [
@@ -203,7 +203,7 @@ export async function consumePromotionPlan(plan) {
  * Apply a previously previewed plan. The source and destination must still
  * match the preview, otherwise the caller must build and show a fresh plan.
  */
-export async function applyPromotion(plan) {
+export async function applyPromotion(plan, options = {}) {
   assertPromotionPlan(plan);
 
   await assertSafeShelfPath(
@@ -212,27 +212,8 @@ export async function applyPromotion(plan) {
     plan.source.absolutePath,
     "captured session"
   );
-  const currentSource = await fs.readFile(plan.source.absolutePath, "utf8");
-  if (contentHash(currentSource) !== plan.source.hash) {
-    throw new Error("The captured session changed after the preview. Preview the promotion again.");
-  }
-
-  let destinationChange = null;
   if (plan.destinationType !== "session-only") {
     await assertSafeDestinationFromPlan(plan);
-    const destinationExists = await pathExists(plan.destinationAbsolutePath);
-    const currentDestination = await readTextIfPresent(plan.destinationAbsolutePath);
-    if (destinationExists !== plan.destinationExists || currentDestination !== plan.before) {
-      throw new Error("The destination changed after the preview. Preview the promotion again.");
-    }
-    destinationChange = {
-      target: plan.destinationAbsolutePath,
-      before: currentDestination,
-      existed: destinationExists,
-      after: plan.destinationAfter ?? (destinationExists
-        ? `${currentDestination}${plan.addition}`
-        : plan.addition.replace(/^\n+/, ""))
-    };
   }
 
   await assertSafeShelfPath(
@@ -241,43 +222,67 @@ export async function applyPromotion(plan) {
     plan.receiptPath,
     "promotion receipt"
   );
-  const receiptBefore = await readTextIfPresent(plan.receiptPath);
-  const receiptExists = await pathExists(plan.receiptPath);
-  const receipt = {
-    ts: new Date().toISOString(),
-    type: "memory-promotion",
-    source: plan.source.relativePath,
-    source_session_id: plan.source.sessionId,
-    destination_type: plan.destinationType,
-    destination_path: plan.destinationPath,
-    operation: plan.operation,
-    ...(plan.matchedContentHash && { matched_content_hash: plan.matchedContentHash }),
-    ...(plan.noop && { no_op: true, reason: "identical promoted content already exists at this destination" }),
-    ...(plan.project && { project: plan.project }),
-    summary: plan.summary,
-    source_hash: plan.source.hash,
-    content_hash: plan.contentHash,
-    actor: "dotaios-cli"
-  };
-  const receiptChange = {
-    target: plan.receiptPath,
-    before: receiptBefore,
-    existed: receiptExists,
-    after: `${receiptBefore}${formatJsonlEntry(receipt)}`
-  };
-  await replaceFilesAtomically([
-    receiptChange,
-    ...(destinationChange ? [destinationChange] : [])
-  ]);
+  return withEventStoreLock(plan.receiptPath, async () => {
+    const currentSource = await fs.readFile(plan.source.absolutePath, "utf8");
+    if (contentHash(currentSource) !== plan.source.hash) {
+      throw new Error("The captured session changed after the preview. Preview the promotion again.");
+    }
 
-  return {
-    applied: true,
-    noop: Boolean(plan.noop),
-    destinationType: plan.destinationType,
-    destinationPath: plan.destinationPath,
-    receiptPath: plan.receiptRelativePath,
-    receipt
-  };
+    let destinationChange = null;
+    if (plan.destinationType !== "session-only") {
+      const destinationExists = await pathExists(plan.destinationAbsolutePath);
+      const currentDestination = await readTextIfPresent(plan.destinationAbsolutePath);
+      if (destinationExists !== plan.destinationExists || currentDestination !== plan.before) {
+        throw new Error("The destination changed after the preview. Preview the promotion again.");
+      }
+      destinationChange = {
+        target: plan.destinationAbsolutePath,
+        before: currentDestination,
+        existed: destinationExists,
+        after: plan.destinationAfter ?? (destinationExists
+          ? `${currentDestination}${plan.addition}`
+          : plan.addition.replace(/^\n+/, ""))
+      };
+    }
+
+    const receiptBefore = await readTextIfPresent(plan.receiptPath);
+    const receiptExists = await pathExists(plan.receiptPath);
+    const receipt = {
+      ts: new Date().toISOString(),
+      type: "memory-promotion",
+      source: plan.source.relativePath,
+      source_session_id: plan.source.sessionId,
+      destination_type: plan.destinationType,
+      destination_path: plan.destinationPath,
+      operation: plan.operation,
+      ...(plan.matchedContentHash && { matched_content_hash: plan.matchedContentHash }),
+      ...(plan.noop && { no_op: true, reason: "identical promoted content already exists at this destination" }),
+      ...(plan.project && { project: plan.project }),
+      summary: plan.summary,
+      source_hash: plan.source.hash,
+      content_hash: plan.contentHash,
+      actor: "dotaios-cli"
+    };
+    const receiptChange = {
+      target: plan.receiptPath,
+      before: receiptBefore,
+      existed: receiptExists,
+      after: `${receiptBefore}${formatJsonlEntry(receipt)}`
+    };
+    await replaceFilesAtomically([
+      receiptChange,
+      ...(destinationChange ? [destinationChange] : [])
+    ]);
+
+    return {
+      applied: true,
+      noop: Boolean(plan.noop),
+      destinationType: plan.destinationType,
+      destinationPath: plan.destinationPath,
+      receiptPath: plan.receiptRelativePath,
+      receipt
+    };
+  }, options);
 }
 
 export function renderPromotionPreview(plan) {

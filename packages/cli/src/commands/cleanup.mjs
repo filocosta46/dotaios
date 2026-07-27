@@ -33,7 +33,9 @@ export async function cleanupCommand(args) {
     }
   } else {
     const result = await compactEvents(eventsPath);
-    if (result.archived > 0) {
+    if (result.skipped === "locked") {
+      throw new Error(`Cleanup stopped because the memory writer lock is held: ${eventsPath}.lock`);
+    } else if (result.archived > 0) {
       console.log(`[events] Archived ${result.archived} entries, kept ${result.kept}`);
     } else {
       console.log(`[events] ${result.kept} entries — nothing to compact`);

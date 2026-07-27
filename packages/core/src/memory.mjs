@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatJsonlEntry, parseJsonlLine, readJsonl } from "./jsonl.mjs";
@@ -73,6 +74,49 @@ export function readRecentSignals(signalsDir) {
 // --- Write operations ---
 
 /**
+ * Run one event-store mutation while holding the same advisory lock used by
+ * appenders and compaction.
+ */
+export async function withEventStoreLock(eventsPath, callback, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  await fileSystem.mkdir(path.dirname(eventsPath), { recursive: true });
+  const lock = await acquireFileLock(eventsPath, fileSystem, {
+    retryDelaysMs: options.lockRetryDelaysMs,
+    staleMs: options.lockStaleMs,
+    now: options.now
+  });
+  if (!lock) {
+    throw new EventStoreLockError(eventsPath);
+  }
+  try {
+    return await callback(fileSystem);
+  } finally {
+    await lock.release();
+  }
+}
+
+export class EventStoreLockError extends Error {
+  constructor(eventsPath) {
+    super(`Timed out waiting for memory writer lock: ${eventsPath}.lock`);
+    this.name = "EventStoreLockError";
+    this.code = "DOTAIOS_EVENT_STORE_LOCKED";
+  }
+}
+
+/**
+ * Append one already-formed event record under the same lock used by event
+ * compaction. Callers that preserve an existing event schema use this seam;
+ * appendEvent remains the structured convenience API.
+ */
+export async function appendEventRecord(eventsPath, entry, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  await withEventStoreLock(eventsPath, async () => {
+    await fileSystem.appendFile(eventsPath, formatJsonlEntry(entry));
+  }, options);
+  return entry;
+}
+
+/**
  * Append a structured event to events.jsonl.
  * Ensures required fields: ts, type.
  */
@@ -87,8 +131,7 @@ export async function appendEvent(eventsPath, { type, project, domain, summary, 
     ...(source && { source }),
     ...extra
   };
-  await fs.mkdir(path.dirname(eventsPath), { recursive: true });
-  await fs.appendFile(eventsPath, formatJsonlEntry(entry));
+  await appendEventRecord(eventsPath, entry);
   const aiosPath = aiosPathFromEvents(eventsPath);
   await maybeMaintain(aiosPath);
   if (aiosPath && entry.project) {
@@ -200,18 +243,36 @@ async function stealFileLock(lockPath, fileSystem) {
 // Advisory lock next to the file (same pattern as the session index lock).
 // A live holder makes the caller skip no matter how long it has been working;
 // only a dead holder — or a lock we cannot read — is taken over.
-async function acquireFileLock(targetPath, fileSystem) {
+async function acquireFileLock(targetPath, fileSystem, options = {}) {
   const lockPath = `${targetPath}.lock`;
+  const retryDelaysMs = options.retryDelaysMs ?? LOCK_RETRY_DELAYS_MS;
+  const staleMs = options.staleMs ?? LOCK_STALE_MS;
+  const now = options.now || (() => Date.now());
   let waits = 0;
   for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
+    const token = crypto.randomUUID();
     try {
-      await fileSystem.writeFile(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), { flag: "wx" });
+      await fileSystem.writeFile(lockPath, JSON.stringify({
+        pid: process.pid,
+        ts: now(),
+        token
+      }), { flag: "wx" });
       return {
         release: async () => {
+          let held;
+          try {
+            held = JSON.parse(await fileSystem.readFile(lockPath, "utf8"));
+          } catch (error) {
+            if (error.code === "ENOENT") return;
+            throw error;
+          }
+          if (held.token !== token) {
+            throw new Error(`Memory writer lock ownership changed before release: ${lockPath}`);
+          }
           try {
             await fileSystem.unlink(lockPath);
-          } catch {
-            // Already gone — releasing twice must stay harmless.
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
           }
         }
       };
@@ -225,20 +286,31 @@ async function acquireFileLock(targetPath, fileSystem) {
           // than the stale window must not have its lock pulled, and a crashed
           // holder must not wedge maintenance until the window expires.
           ? !pidIsAlive(held.pid)
-          : !held.ts || Date.now() - held.ts > LOCK_STALE_MS;
-      } catch {
-        stale = true;
+          : await malformedLockIsStale(lockPath, fileSystem, staleMs, now);
+      } catch (readError) {
+        if (readError.code === "ENOENT") continue;
+        stale = await malformedLockIsStale(lockPath, fileSystem, staleMs, now);
       }
       if (stale) {
         await stealFileLock(lockPath, fileSystem);
         continue;
       }
-      if (waits >= LOCK_RETRY_DELAYS_MS.length) return null;
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_DELAYS_MS[waits]));
+      if (waits >= retryDelaysMs.length) return null;
+      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[waits]));
       waits += 1;
     }
   }
   return null;
+}
+
+async function malformedLockIsStale(lockPath, fileSystem, staleMs, now) {
+  try {
+    const lockStat = await fileSystem.stat(lockPath);
+    return now() - lockStat.mtimeMs > staleMs;
+  } catch (error) {
+    if (error.code === "ENOENT") return true;
+    return false;
+  }
 }
 
 async function fsyncFile(fileSystem, filePath) {
@@ -354,28 +426,31 @@ async function flushPendingArchive(archivePath, fileSystem) {
  */
 export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, options = {}) {
   const fileSystem = options.filesystem || fs;
-  const lock = await acquireFileLock(eventsPath, fileSystem);
-  if (!lock) return { archived: 0, kept: 0, skipped: "locked" };
   try {
-    await recoverPendingArchive(eventsPath, fileSystem);
+    return await withEventStoreLock(eventsPath, async () => {
+      await recoverPendingArchive(eventsPath, fileSystem);
 
-    const all = await readJsonl(eventsPath, { filesystem: fileSystem });
-    if (all.length <= limit) {
-      return { archived: 0, kept: all.length };
+      const all = await readJsonl(eventsPath, { filesystem: fileSystem });
+      if (all.length <= limit) {
+        return { archived: 0, kept: all.length };
+      }
+
+      const toArchive = all.slice(0, -limit);
+      const toKeep = all.slice(-limit);
+      const tmpPath = `${eventsPath}.tmp`;
+
+      await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
+      await writeFileDurable(fileSystem, pendingPathFor(archivePathFor(eventsPath)), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
+      await fileSystem.rename(tmpPath, eventsPath);
+      await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
+
+      return { archived: toArchive.length, kept: toKeep.length };
+    }, options);
+  } catch (error) {
+    if (error instanceof EventStoreLockError) {
+      return { archived: 0, kept: 0, skipped: "locked" };
     }
-
-    const toArchive = all.slice(0, -limit);
-    const toKeep = all.slice(-limit);
-    const tmpPath = `${eventsPath}.tmp`;
-
-    await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
-    await writeFileDurable(fileSystem, pendingPathFor(archivePathFor(eventsPath)), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
-    await fileSystem.rename(tmpPath, eventsPath);
-    await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
-
-    return { archived: toArchive.length, kept: toKeep.length };
-  } finally {
-    await lock.release();
+    throw error;
   }
 }
 

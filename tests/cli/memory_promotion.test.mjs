@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,6 +11,7 @@ import {
   PROMOTION_OPERATIONS
 } from "../../packages/core/src/promotion.mjs";
 import { auditMemory } from "../../packages/core/src/memory-audit.mjs";
+import { compactEvents } from "../../packages/core/src/memory.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -285,6 +287,82 @@ test("receipt failure leaves an existing promotion destination byte-identical", 
   await assert.rejects(applyPromotion(plan));
 
   assert.deepEqual(fs.readFileSync(contextPath), before);
+});
+
+test("promotion and compaction share one writer lock without losing the receipt", async (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
+  const archivePath = path.join(aiosPath, "memory", "events-archive.jsonl");
+  const lockPath = `${eventsPath}.lock`;
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "Original context.\n");
+  fs.writeFileSync(
+    eventsPath,
+    Array.from({ length: 30 }, (_, index) => JSON.stringify({
+      ts: `2026-07-27T12:00:${String(index).padStart(2, "0")}.000Z`,
+      type: "seed",
+      index
+    })).join("\n") + "\n"
+  );
+  const plan = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "Concurrent promotion receipt survives."
+  });
+
+  let releaseRename;
+  let renameStarted;
+  const allowRename = new Promise((resolve) => {
+    releaseRename = resolve;
+  });
+  const atRename = new Promise((resolve) => {
+    renameStarted = resolve;
+  });
+  const compactionFilesystem = {
+    ...fsp,
+    async rename(source, destination) {
+      if (source === `${eventsPath}.tmp` && destination === eventsPath) {
+        renameStarted();
+        await allowRename;
+      }
+      return fsp.rename(source, destination);
+    }
+  };
+
+  let lockAttempted;
+  const atLockAttempt = new Promise((resolve) => {
+    lockAttempted = resolve;
+  });
+  const promotionFilesystem = {
+    ...fsp,
+    async writeFile(filePath, content, options) {
+      if (filePath === lockPath && options?.flag === "wx") {
+        lockAttempted();
+      }
+      return fsp.writeFile(filePath, content, options);
+    }
+  };
+
+  const compaction = compactEvents(eventsPath, 10, { filesystem: compactionFilesystem });
+  await atRename;
+  const promotion = applyPromotion(plan, { filesystem: promotionFilesystem });
+  const first = await Promise.race([
+    atLockAttempt.then(() => "lock-attempt"),
+    promotion.then(() => "promotion-completed")
+  ]);
+  releaseRename();
+  await Promise.all([compaction, promotion]);
+
+  assert.equal(first, "lock-attempt", "promotion must join the event writer protocol before applying");
+  const allEvents = [
+    ...fs.readFileSync(archivePath, "utf8").trim().split("\n"),
+    ...fs.readFileSync(eventsPath, "utf8").trim().split("\n")
+  ].filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(allEvents.length, 31);
+  assert.equal(allEvents.filter((event) => event.type === "memory-promotion").length, 1);
+  assert.match(fs.readFileSync(contextPath, "utf8"), /Concurrent promotion receipt survives/);
 });
 
 test("promotion uses the canonical local ISO date for signal and Markdown destinations", async (t) => {

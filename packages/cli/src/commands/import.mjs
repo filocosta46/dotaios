@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { formatJsonlEntry } from "../../../core/src/memory.mjs";
+import { appendEventRecord, formatJsonlEntry } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { pathExists, readJson, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -154,7 +154,7 @@ function buildImportPlan(target, vaultPath, imported, sourcePath) {
   }
 
   for (const event of asArray(imported.events)) {
-    plan.push(jsonlAppend(path.join(target, "memory", "events.jsonl"), {
+    plan.push(eventAppend(path.join(target, "memory", "events.jsonl"), {
       ts: event.ts || importedAt,
       type: event.type || "import",
       project: event.project || null,
@@ -191,10 +191,26 @@ function jsonlAppend(destination, entry, bucket) {
   };
 }
 
+function eventAppend(destination, entry) {
+  return {
+    kind: "event",
+    action: "append",
+    bucket: "memory/events",
+    path: destination,
+    entry,
+    content: formatJsonlEntry(entry)
+  };
+}
+
 async function applyImportItem(item) {
   if (item.kind === "markdown" && !await pathExists(item.path)) {
     const title = path.basename(item.path, ".md") === "README" ? path.basename(path.dirname(item.path)) : path.basename(item.path, ".md");
     return writeFileSafe(item.path, `# ${title}\n${item.content}`, "preserve");
+  }
+
+  if (item.kind === "event") {
+    await appendEventRecord(item.path, item.entry);
+    return { action: "updated", path: item.path };
   }
 
   await fs.mkdir(path.dirname(item.path), { recursive: true });
