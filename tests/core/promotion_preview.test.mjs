@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planPromotion } from "../../packages/core/src/promotion.mjs";
+import { planPromotion, applyPromotion } from "../../packages/core/src/promotion.mjs";
 
 // The product's core safety promise is preview-then-apply. A preview that does
 // not show the real change is worse than none: it manufactures consent.
@@ -69,4 +69,42 @@ test("the preview never reports a deletion the operation is not making", async (
 
   const removals = plan.preview.split("\n").filter((line) => line.startsWith("-") && !line.startsWith("---"));
   assert.deepEqual(removals, [], `an append deletes nothing, so the preview must show no removals:\n${plan.preview}`);
+});
+
+// The two tests above exercise `add`, which renderPromotionDiff short-circuits
+// to a different renderer. The replace/remove/supersede path is the one that
+// used to print two unaligned tail windows dressed up as a diff, so it needs
+// its own coverage — a mutation of that code must turn this red.
+
+test("superseding shows the new fact and reports no phantom deletions", async (t) => {
+  const aiosPath = setupAios(t);
+  const target = path.join(aiosPath, "context", "work.md");
+  fs.writeFileSync(target, `${TAIL}\n`);
+
+  const first = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "Ships on Friday.",
+    operation: "add"
+  });
+  await applyPromotion(first);
+
+  const plan = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "Slipped to next month.",
+    operation: "supersede",
+    match: "Ships on Friday."
+  });
+
+  // Superseding is non-destructive on purpose: the old block stays, marked.
+  // So the honest preview has NO removals. The old renderer printed the last
+  // twelve lines of the file as deletions regardless, which is what made it a
+  // lie rather than a diff.
+  const removals = plan.preview.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---"));
+  assert.deepEqual(removals, [], `supersede deletes nothing; every line here is a phantom:\n${plan.preview}`);
+  assert.match(plan.preview, /\+.*Slipped to next month/, `the new fact must be visible:\n${plan.preview}`);
+  assert.match(plan.preview, /superseded-by=/, `the retirement marker must be visible:\n${plan.preview}`);
 });
