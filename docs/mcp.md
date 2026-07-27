@@ -27,13 +27,36 @@ There are no compatibility aliases or additional MCP tools.
 ```bash
 npx dotaios@latest mcp status
 npx dotaios@latest mcp install --dry-run --agent claude
+npx dotaios@latest mcp install --dry-run --agent codex
 npx dotaios@latest mcp install --dry-run --agent cursor
+npx dotaios@latest mcp install --dry-run --agent gemini
+npx dotaios@latest mcp install --dry-run --agent antigravity
+npx dotaios@latest mcp install --dry-run --agent kimi
 ```
 
-DotAIOS prints a local stdio configuration and a suggested client path. It does not edit the client configuration automatically. Restart the client after adding the configuration, then verify that the three tools are discoverable and invocable.
+DotAIOS prints a client-specific local stdio fragment and the documented user
+configuration path:
+
+| Client | Suggested target | Output format |
+|---|---|---|
+| Claude Code | `~/.claude.json` | JSON |
+| Codex | `~/.codex/config.toml` | TOML |
+| Cursor | `~/.cursor/mcp.json` | JSON |
+| Gemini CLI | `~/.gemini/settings.json` | JSON |
+| Antigravity | `~/.gemini/config/mcp_config.json` | JSON |
+| Kimi Code CLI | `~/.kimi-code/mcp.json` | JSON |
+
+Merge the fragment into an existing configuration instead of replacing the
+file. DotAIOS does not edit client configuration automatically. Restart the
+client after adding it, confirm that the server and its three tools appear,
+then invoke one tool and record the returned value. A valid configuration file
+proves configuration only. It does not prove the client invoked the server.
 
 The adapter source can also be started directly from a repository checkout:
 
 ```bash
 node packages/mcp/src/server.mjs --path ~/aios
 ```
+
+See [Compatibility acceptance](compatibility-acceptance.md) for the release
+evidence required before a client is described as tested.
