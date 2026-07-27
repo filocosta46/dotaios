@@ -112,30 +112,65 @@ test("sync-gitignore.template ships in templates/", async () => {
 
 // --- 1.27: the lifecycle instruction and the maintenance skill ---
 
-test("AGENTS.md.hbs tells agents to promote durable facts and retire stale ones", async () => {
+test("AGENTS.md.hbs routes memory lifecycle work through the maintenance skill", async () => {
   const tpl = await fs.readFile(
     path.resolve("templates/AGENTS.md.hbs"),
     "utf8"
   );
   const sectionIdx = tpl.indexOf("## Keeping Knowledge True");
-  assert.ok(sectionIdx !== -1, "the template must teach the promotion lifecycle");
+  assert.ok(sectionIdx !== -1, "the router must retain the memory lifecycle boundary");
 
   const section = tpl.slice(sectionIdx, tpl.indexOf("\n## ", sectionIdx + 1));
-  assert.match(section, /dotaios capture list/, "an agent needs the session id to promote anything");
-  assert.match(section, /dotaios memory promote/);
-  assert.match(section, /--operation supersede/, "retiring a stale fact must be reachable");
-  assert.match(section, /--match/, "supersede is unusable without --match");
-  assert.match(section, /--destination/, "context and vault promotions fail without --destination");
-  assert.match(section, /30 days/, "the signal retention window must be stated where it bites");
+  assert.match(section, /memory-maintenance/);
+  assert.match(section, /durable/i);
+  assert.match(section, /short-lived/i);
+  assert.doesNotMatch(section, /dotaios capture list/);
+  assert.doesNotMatch(section, /dotaios memory promote/);
+  assert.doesNotMatch(section, /--operation supersede/);
+  assert.doesNotMatch(section, /--match/);
+  assert.doesNotMatch(section, /--destination/);
 });
 
-test("AGENTS.md.hbs warns that signals are the wrong home for a durable fact", async () => {
+test("AGENTS.md.hbs stays a bounded router instead of embedding skill procedures", async () => {
   const tpl = await fs.readFile(
     path.resolve("templates/AGENTS.md.hbs"),
     "utf8"
   );
-  assert.match(tpl, /--to signal/);
-  assert.match(tpl, /\bnot\b[\s\S]{0,120}durable|durable[\s\S]{0,120}\bnot\b/i);
+  const lines = tpl.trimEnd().split("\n");
+  const words = tpl.trim().split(/\s+/);
+
+  assert.ok(lines.length <= 116, `expected at most 116 lines, got ${lines.length}`);
+  assert.ok(words.length <= 825, `expected at most 825 words, got ${words.length}`);
+  assert.doesNotMatch(tpl, /git clone <url> \/tmp\/dotaios-plugin/);
+  assert.doesNotMatch(tpl, /npx dotaios install \/tmp\/dotaios-plugin/);
+});
+
+test("AGENTS.md.hbs retains portability, ownership, and durable-write approval boundaries", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+
+  assert.match(tpl, /Repositories stay outside this AIOS\s+folder/);
+  assert.match(tpl, /never store machine-local paths/);
+  assert.match(tpl, /plain text the user owns/);
+  assert.match(tpl, /Never expose secrets/);
+  assert.match(tpl, /Ask before writing durable identity, CRM, or wiki\s+knowledge/);
+});
+
+test("AGENTS.md.hbs routes explicit plugin installs before ordinary URL ingest", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  const installRule = tpl.indexOf("explicitly asks to install a skill or plugin");
+  const ingestRule = tpl.indexOf("When the user shares a URL");
+
+  assert.ok(installRule !== -1, "the router must retain the explicit plugin-install capability");
+  assert.ok(installRule < ingestRule, "plugin installation must be resolved before the general URL-ingest rule");
+  assert.match(tpl, /docs\/security\.md#plugins/);
+  assert.match(tpl, /docs\/plugin-development\.md/);
+  assert.match(tpl, /--dry-run/);
 });
 
 test("memory-maintenance skill ships in skills/", async () => {

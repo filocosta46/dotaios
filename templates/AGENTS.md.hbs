@@ -1,16 +1,13 @@
 {{#if user_name}}# {{user_name}}'s AIOS{{else}}# My AIOS{{/if}}
 
-If you are an AI agent and this folder was just opened, read this file top to
-bottom first. It is the single source of truth for this folder — it works for
-any agent (Claude Code, Codex, Gemini, Cursor, and ones not listed here).
+Read this file when the folder is opened. It is the cross-agent router for this
+AIOS folder. Follow its interfaces, then load deeper context only when needed.
 
 ## What This Is
 
-This folder is {{#if user_name}}{{user_name}}'s{{else}}your{{/if}} local AIOS: durable, local-first context that
-helps AI agents understand who the user is, their active work, priorities, and
-communication preferences. It is local-first plain text the user owns. Optional
-private Git sync may copy it to the user's own repository. The selected AI
-provider still processes context sent to that provider.
+This is {{#if user_name}}{{user_name}}'s{{else}}your{{/if}} local, durable context layer for AI agents. The files are
+plain text the user owns. Optional private Git sync may copy them to the user's
+own repository. The selected AI provider still processes context sent to it.
 
 {{#if vault_path}}
 Long-term knowledge is configured at `{{vault_path}}`.
@@ -20,16 +17,14 @@ Long-term knowledge is configured at `vault/`.
 
 ## Where Things Live
 
-| Folder | What |
+| Folder | Purpose |
 |---|---|
-| `context/` | Who the user is, what they are working on, current priorities |
-| `projects/` | Active work, one folder per project |
-| `memory/` | Recent operational memory; load only the routed slices |
+| `context/` | Identity, active work, priorities, and standing constraints |
+| `projects/` | Portable records for active projects |
+| `memory/` | Recent operational evidence, loaded through the bounded projection |
 | `vault/` | Long-term knowledge, loaded on demand |
-| `connections/` | Service registry and API notes |
-| `skills/` | Reusable markdown workflows |
-| `plugins/` | Optional extensions with declared permissions |
-| `decisions/log.md` | Append-only architectural and product decisions |
+| `skills/` | Reusable workflows and their routing index |
+| `connections/` and `plugins/` | Optional service and extension metadata |
 
 ## Read Order
 
@@ -37,130 +32,66 @@ Long-term knowledge is configured at `vault/`.
 2. `context/priorities.md`
 3. `context/work.md`
 4. `context/north-star.md`
-5. If working on a project: `projects/<slug>/README.md`
-6. Load declared domain files from `context/domains/<domain>.md`
+5. For project work, `projects/<slug>/README.md`
+6. Any domain or vault file the task specifically requires
 
 ## Memory Routing
 
 At session start, run `dotaios brief --compact`. For project work, add
-`--project <slug-or-id>`. This command is the canonical bounded working-context
-projection used by local clients.
+`--project <slug-or-id>`. This is the canonical bounded working-context
+projection.
 
-- Route `memory/events.jsonl`, `memory/signals/`, and `memory/sessions/` into
-  working context only through that projection. Do not preload those stores
-  directly or recreate a different recency window. Use `dotaios search` for an
-  explicit on-demand lookup.
-- If the optional MCP adapter is available, `read_working_context` returns the
-  same projection. The adapter exposes exactly `read_working_context`,
-  `search_aios`, and `resolve_skill`; it has no compatibility aliases.
-- `memory/errors.jsonl`: load only when debugging failed operations.
-- `vault/`: load on demand when the task references knowledge, companies, people, writing style, or raw sources.
+Do not preload `memory/events.jsonl`, `memory/signals/`, or `memory/sessions/`,
+and do not invent another recency window. Use `dotaios search` for explicit
+lookups. Load `memory/errors.jsonl` only while debugging. If the optional MCP
+adapter is available, `read_working_context` returns the same projection.
 
 ## Keeping Knowledge True
 
-Memory nobody curates stops being worth reading. Two jobs here are yours, not
-the user's, and the time to do them is the moment you notice.
+Run the `memory-maintenance` skill when the user asks to promote or retire a
+claim, or when `dotaios memory audit` reports stale or conflicting memory. That
+skill owns the detailed promotion and supersession procedure.
 
-Promote what should outlive the session — a decision, a preference, a
-constraint still true next month. Take the id from `dotaios capture list`:
-
-```bash
-dotaios memory promote <session-id> --to context \
-  --destination context/work.md --summary "<the fact, in the user's words>"
-```
-
-`--to context` and `--to vault` always need `--destination <relative-path.md>`.
-`--to project --project <slug>` defaults to that project's `README.md`. Add
-`--apply` to write; without it you get a preview to show the user first.
-
-Retire what stopped being true. Do not edit the old line away and do not
-delete it — supersede it, so the record still shows what was believed and when:
-
-```bash
-dotaios memory promote <session-id> --to context \
-  --destination context/work.md --operation supersede \
-  --match "<the old fact, verbatim>" --summary "<what is true now>" --apply
-```
-
-`--match` takes the old block's content hash or its summary text, exactly.
-It only resolves blocks that `dotaios memory promote` itself wrote. If a fact
-was typed into a file by hand there is nothing to match: edit that file
-directly, and say in one line what changed and why.
-
-`--to signal` is for a short-lived observation only. Signals are archived out
-of the routed window after 30 days, so a durable fact sent there stops being
-read. Durable facts go to `context`, `project`, or `vault`.
-
-Run the `memory-maintenance` skill when the user asks whether their memory is
-still accurate, or when `dotaios memory audit` reports stale or conflicting
-claims.
+Keep short-lived observations in signals. Durable facts belong in `context/`,
+`projects/`, or `vault/`. Preview durable changes before applying them and
+preserve replaced claims through supersession.
 
 ## Project Convention
 
-Each project should have `projects/<slug>/README.md` with frontmatter:
+Each project lives at `projects/<slug>/README.md` with portable frontmatter for
+its stable `id`, `project` or `name`, `domain`, `status`, and `repo_url`.
 
-```yaml
----
-id: stable-project-id
-project: example-project
-name: Example Project
-domain: [build]
-status: active
-repo_url: https://github.com/example/example-project.git
----
-```
-
-The README is the synced project record. Actual repositories stay outside this
-AIOS folder and keep independent Git histories. Resolve the current machine's
-checkout with `dotaios project resolve <slug-or-id>`; never store machine-local
-paths in the project README.
-
-Available domains:
-
-- `make`: creative output, content, publishing
-- `sell`: outreach, applications, positioning, proposals
-- `build`: software, systems, automations
+The README is the synced project record. Repositories stay outside this AIOS
+folder with independent Git histories. Resolve the local checkout with
+`dotaios project resolve <slug-or-id>`; never store machine-local paths in the
+project README. Domains are `make`, `sell`, and `build`.
 
 ## Skills
 
-Skills are reusable workflows in `skills/<name>/SKILL.md` — plain markdown
-instruction sets. **Any agent can run one**: open that skill's `SKILL.md` and
-follow it. Run a skill when the user invokes it by name or asks for that workflow.
+Use `skills/INDEX.md` to see installed skills and `skills/RESOLVER.md` to match
+intent to the most specific workflow. Open the selected `SKILL.md` and follow
+it before acting. If nothing fits and the workflow is likely to repeat, offer
+to run `skillify`; never save a generated skill without approval.
 
-`skills/INDEX.md` is the live list of every skill installed in this folder, each
-with a one-line description. It is auto-generated and kept current — read it to
-see what is available.
-
-`skills/RESOLVER.md` is the routing table: it maps what the user might say
-(trigger phrases) to the skill that handles it. To answer a request, match the
-user's intent against RESOLVER.md, then open that skill's `SKILL.md` and follow
-it. Prefer the most specific match. Both files are auto-generated.
-
-For a programmatic match, run `dotaios skills resolve "<intent>"` (or call the
-MCP `resolve_skill` tool). It returns the ranked skills that fit the intent, with
-the `SKILL.md` path to open. Exit code 2 means nothing fits, hand-roll the work
-and offer to skillify a repeat. `dotaios skills resolve --boot-context` prints a
-Markdown `## Skills first` prompt block for fleet scripts. Capture it as text
-with `BOOT_CONTEXT="$(dotaios skills resolve --boot-context)"`, then append that
+For a programmatic match, run `dotaios skills resolve "<intent>"` or call the
+MCP `resolve_skill` tool. `dotaios skills resolve --boot-context` prints a
+Markdown prompt block for fleet scripts. Capture it with
+`BOOT_CONTEXT="$(dotaios skills resolve --boot-context)"`, then append that
 variable to the agent prompt.
-
-### Installing new skills
-
-If the user gives you a repository URL and asks you to install a skill or plugin:
-1. Clone the repository to a temporary folder: `git clone <url> /tmp/dotaios-plugin`
-2. Install it locally: `npx dotaios install /tmp/dotaios-plugin`
-3. Clean up: `rm -rf /tmp/dotaios-plugin`
-4. Confirm to the user that it is installed and summarize what the new skill does.
 
 ## Rules
 
-- Treat `context/` as always relevant.
-- Treat `memory/` as recent operational state, not an infinite transcript.
-- Treat `vault/` as routed long-term knowledge.
-- When the user shares a URL, run `dotaios ingest <url>` to read and save it. This uses a local headless browser that renders JavaScript. Prefer it over your own web fetch tools.
-- Never expose secrets.
-- Ask before writing durable identity, CRM, or wiki knowledge.
-- Suggest a new skill when a workflow repeats: offer to run the `skillify` skill, which drafts a new skill (with trigger phrases) and asks for approval before saving it. Never save a generated skill without the user's OK.
-- At the start of a work session, if `memory/inbox/` contains files, read them before anything else and use the `process-inbox` skill to file each one into the right place, then delete the inbox file. These are notes captured on another device.
-- Cross-device sync is optional. Do not run a mutating sync command unless the user has enabled sync and asked for it. Use `dotaios sync status` for a read-only check.
-- When a work session is wrapping up, offer to save it: "Want me to save this session to your AIOS memory?" Use the `save-session` skill.
+- Treat `context/` as standing context, `memory/` as recent evidence, and
+  `vault/` as on-demand knowledge.
+- Only when the user explicitly asks to install a skill or plugin, follow
+  `docs/security.md#plugins` and `docs/plugin-development.md`, run `--dry-run`
+  first, and review permissions. This takes precedence over ordinary URL ingest.
+- When the user shares a URL, run `dotaios ingest <url>` to render, read, and
+  save it.
+- Never expose secrets. Ask before writing durable identity, CRM, or wiki
+  knowledge.
+- If `memory/inbox/` contains files at session start, run `process-inbox` before
+  other work, file each note, then remove the inbox copy.
+- Cross-device sync is optional. Do not mutate sync unless the user enabled it
+  and asked. Use `dotaios sync status` for a read-only check.
+- Before finishing, offer to run `save-session` so useful context is not lost.

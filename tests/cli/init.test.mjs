@@ -41,7 +41,7 @@ test("init creates the vault at a creatable --vault-path", () => {
   assert.equal(fs.existsSync(path.join(target, "aios.json")), true);
 });
 
-test("a freshly initialized folder ships the memory-maintenance skill and its lifecycle instruction", () => {
+test("a freshly initialized folder ships a lean memory-maintenance router", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-"));
   const target = path.join(root, "aios");
 
@@ -61,8 +61,10 @@ test("a freshly initialized folder ships the memory-maintenance skill and its li
   assert.match(index, /memory-maintenance/, "the generated index must surface it");
 
   const agents = fs.readFileSync(path.join(target, "AGENTS.md"), "utf8");
-  assert.match(agents, /## Keeping Knowledge True/, "the rendered AGENTS.md must carry the lifecycle instruction");
-  assert.match(agents, /--operation supersede/);
+  assert.match(agents, /## Keeping Knowledge True/, "the rendered AGENTS.md must retain the lifecycle boundary");
+  assert.match(agents, /memory-maintenance/);
+  assert.doesNotMatch(agents, /--operation supersede/, "the detailed procedure belongs in the skill");
+  assert.doesNotMatch(agents, /git clone <url> \/tmp\/dotaios-plugin/, "third-party installation belongs in docs");
 });
 
 test("a new folder ships a scheduled memory check, not just a skills-symlink check", () => {
