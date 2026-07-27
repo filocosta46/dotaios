@@ -225,6 +225,16 @@ export async function runSkillInvocationProbe({
       const output = await readOutput(outputPath, result.stdout || "");
       const produced = markerWasProduced(output, marker);
       const timedOut = result.error?.code === "ETIMEDOUT";
+      // A client that refuses usually says why — a missing entitlement, an
+      // expired login, a model that needs a flag. Reporting only the timeout
+      // hands back a receipt nobody can act on, so carry the client's own words.
+      const clientSaid = String(result.stderr || "")
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 3)
+        .join(" ")
+        .slice(0, 400);
       receipt = createInvocationReceipt({
         client: definition.label,
         clientVersion: version,
@@ -239,7 +249,17 @@ export async function runSkillInvocationProbe({
         command: command.receiptCommand,
         marker,
         exitCode: result.status,
-        limitation: timedOut ? `client exceeded ${timeoutMs}ms` : null,
+        limitation: [
+          timedOut ? `client exceeded ${timeoutMs}ms` : null,
+          clientSaid ? `client said: ${clientSaid}` : null,
+          // Exit 0 with nothing written is an environment problem, not a
+          // verdict on the skill. Left unlabelled it reads as "the client ran
+          // fine and declined to use DotAIOS", which is a harsher and less
+          // true claim than the evidence supports.
+          !timedOut && !clientSaid && !String(output || "").trim()
+            ? "client returned no output; treat as environment limitation, not a compatibility result"
+            : null
+        ].filter(Boolean).join(" — ") || null,
         error: result.error ? result.error.code || "client-process-error" : null,
         startedAt,
         finishedAt: new Date().toISOString()
