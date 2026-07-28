@@ -32,6 +32,7 @@ npx dotaios@latest mcp install --dry-run --agent cursor
 npx dotaios@latest mcp install --dry-run --agent gemini
 npx dotaios@latest mcp install --dry-run --agent antigravity
 npx dotaios@latest mcp install --dry-run --agent kimi
+npx dotaios@latest mcp install --dry-run --agent opencode
 ```
 
 DotAIOS prints a client-specific local stdio fragment and the documented user
@@ -43,16 +44,21 @@ configuration path:
 | Codex | `~/.codex/config.toml` | TOML |
 | Cursor | `~/.cursor/mcp.json` | JSON |
 | Gemini CLI | `~/.gemini/settings.json` | JSON |
-| Antigravity | `~/.gemini/config/mcp_config.json` | JSON |
+| Antigravity IDE | `~/.gemini/config/mcp_config.json` | JSON |
 | Kimi Code CLI | `~/.kimi-code/mcp.json` | JSON |
+| OpenCode | `~/.config/opencode/opencode.json` | JSON |
 
 Merge the fragment into an existing configuration instead of replacing the
-file. DotAIOS does not edit client configuration automatically. Restart the
+file. For OpenCode, `dotaios connect opencode` performs the same guarded merge
+and refuses unrecognized same-name entries. DotAIOS does not edit other client
+configurations automatically. Restart the
 client after adding it, confirm that the server and its three tools appear,
 then invoke one tool and record the returned value. A valid configuration file
 proves configuration only. It does not prove the client invoked the server.
 
-The adapter source can also be started directly from a repository checkout:
+Generated fragments use a version-pinned `npx --package` launcher so they do
+not retain a disposable npm cache path. The adapter source can also be started
+directly from a repository checkout:
 
 ```bash
 node packages/mcp/src/server.mjs --path ~/aios

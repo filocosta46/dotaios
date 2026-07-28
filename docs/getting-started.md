@@ -170,12 +170,15 @@ Projects can carry their own skills without replacing your global library. Put
 npx dotaios@latest attach /path/to/project
 ```
 
-DotAIOS links project-owned skills into the checkout's Claude Code,
-Agent-Skills, Antigravity, and Hermes project surfaces. Re-running the command
-is safe and preserves foreign entries; use `--dry-run` to preview it. A native
-filesystem link is not treated as proof that a particular client version will
-invoke the skill, so runtime acceptance remains explicit. Global skill links
-work the same way: `dotaios activate` links `~/aios/skills` into Claude Code,
-the shared Agent-Skills folder (Codex, Cursor, Gemini, Warp, VS Code),
-Antigravity, and Hermes, verifies filesystem propagation, and `dotaios skills
-doctor` reports configured / discoverable / invoked status per surface.
+DotAIOS links project-owned skills into the checkout's Claude Code, shared
+`.agents/skills` surface for Codex, Cursor, Gemini CLI, Kimi Code CLI, OpenCode,
+and Antigravity IDE, plus Hermes. Re-running the command is safe and preserves
+foreign entries; use `--dry-run` to preview it. A native filesystem link is not
+treated as proof that a particular client version will invoke the skill, so
+runtime acceptance remains explicit. Global skill links work the same way:
+`dotaios activate` links `~/aios/skills` into Claude Code, the shared Agent
+Skills folder for Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode, the
+Antigravity IDE global folder, and Hermes, then verifies filesystem
+propagation. `dotaios skills doctor` reports configuration and discoverability
+per surface. A bounded client probe records invocation separately, while only
+`produced=yes` proves that the client used the skill.

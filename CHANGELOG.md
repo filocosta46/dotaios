@@ -2,6 +2,49 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.27.1] - 2026-07-28
+
+### Fixed
+
+- Antigravity IDE skills now use Google's documented
+  `~/.gemini/antigravity/skills/` global path and `.agents/skills/` workspace
+  path. The previous `.gemini/config/skills` project path was not documented for
+  any current Antigravity surface.
+- `dotaios connect opencode` now writes OpenCode's current `mcp.dotaios` local
+  server schema with a version-pinned `npx --package` command. Native skills use
+  the shared `.agents/skills` target, avoiding duplicate same-name discovery.
+  Recognizable legacy DotAIOS entries migrate safely; foreign or malformed
+  same-name entries fail closed. New files use private permissions and atomic
+  replacement.
+- MCP fragments now use the published package launcher instead of a source path
+  that may live in a disposable npm cache.
+- Invocation receipts now preserve a bounded, redacted client diagnostic when a
+  probe cannot run. A marker counts as produced only when the client exits
+  successfully, and dry runs do not launch a version probe.
+- Project attachment uses root `AGENTS.md` as Cursor's single context bridge and
+  removes only a managed legacy `.cursor/rules/dotaios.mdc`.
+
+### Changed
+
+- Compatibility documentation now names Antigravity IDE specifically, records
+  Kimi Code CLI and OpenCode on the documented shared Agent Skills surface, and
+  keeps Kimi K2, Kimi K3, and Z.ai GLM claims at the model-through-host level.
+- Compatibility receipts now state all four evidence fields explicitly:
+  configured, discoverable, invoked, and produced. Public support requires
+  reproducible `produced=yes`.
+- Client support references were refreshed against official OpenAI, Anthropic,
+  Google, Cursor, Kimi, OpenCode, Moonshot, and Z.ai documentation on
+  2026-07-28.
+
+### Tests
+
+- Added CLI stdout regression coverage for every JSON MCP client alongside the
+  existing Codex TOML coverage.
+- Added regression coverage for Antigravity IDE skill targets, stable user
+  overrides, OpenCode MCP migration, foreign-server preservation, runtime
+  health rows, atomic private config writes, probe false positives, dry-run
+  process isolation, client-version sanitization, and diagnostic redaction.
+
 ## [1.27.0] - 2026-07-25
 ### Fixed
 - **Stale signals are archived instead of deleted.** `trimSignals` previously `unlink`ed any `memory/signals/*.jsonl` older than 30 days with no archive, and it runs unattended as part of routine maintenance. Every line now lands in `memory/signals-archive.jsonl` before its source file is removed, using the same staged-append, crash-safe, idempotent path as event compaction. Archived signals stay searchable. Covered by crash-injection, idempotency, and lock-contention tests. If you kept your folder outside version control, this is data you were losing silently.

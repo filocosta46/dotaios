@@ -305,3 +305,38 @@ test("inspectSkillHealth keeps configured paths separate from runtime installati
   assert.equal(runtime.capabilities.invocation, "not-run");
   assert.equal(report.healthy, true);
 });
+
+test("inspectSkillHealth reports Kimi Code CLI and OpenCode as separate runtimes", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  await installSymlinkSkills({
+    aiosPath,
+    targetDir: path.join(homePath, ".agents", "skills")
+  });
+  await fs.mkdir(path.join(homePath, ".kimi-code"), { recursive: true });
+  await fs.mkdir(path.join(homePath, ".config", "opencode"), { recursive: true });
+
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+
+  for (const name of ["Kimi Code CLI", "OpenCode"]) {
+    const runtime = report.runtimes.find((entry) => entry.name === name);
+    assert.ok(runtime, `${name} should have its own runtime row`);
+    assert.equal(runtime.installed, true);
+    assert.equal(runtime.capabilities.configured, "yes");
+    assert.equal(runtime.capabilities.discoverable, "path-ready");
+    assert.equal(runtime.capabilities.invocation, "not-run");
+  }
+});
+
+test("inspectSkillHealth activates the shared target for Kimi-only and OpenCode-only installs", async () => {
+  for (const detectedHome of [".kimi-code", path.join(".config", "opencode")]) {
+    const { aiosPath, homePath } = await makeAios();
+    await fs.mkdir(path.join(homePath, detectedHome), { recursive: true });
+
+    const report = await inspectSkillHealth({ aiosPath, homePath });
+    const shared = report.targets.find((entry) => entry.dir === ".agents/skills");
+
+    assert.equal(shared.status, "active", detectedHome);
+    assert.ok(shared.missing.length > 0, detectedHome);
+    assert.equal(report.healthy, false, detectedHome);
+  }
+});

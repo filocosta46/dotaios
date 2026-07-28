@@ -171,7 +171,11 @@ test("activation covers detected native clients and every Hermes profile without
   const foreign = path.join(homePath, ".cursor", "skills", "humanizer");
   fs.mkdirSync(foreign, { recursive: true });
   fs.writeFileSync(path.join(foreign, "SKILL.md"), "foreign skill\n");
-  for (const retiredDir of [path.join(homePath, ".cursor", "skills"), path.join(homePath, ".gemini", "skills")]) {
+  for (const retiredDir of [
+    path.join(homePath, ".cursor", "skills"),
+    path.join(homePath, ".gemini", "skills"),
+    path.join(homePath, ".gemini", "config", "skills")
+  ]) {
     fs.mkdirSync(retiredDir, { recursive: true });
     fs.symlinkSync(source, path.join(retiredDir, skillName), "dir");
     fs.mkdirSync(path.join(retiredDir, "coding-standards"), { recursive: true });
@@ -184,7 +188,7 @@ test("activation covers detected native clients and every Hermes profile without
   for (const targetDir of [
     ".agents/skills",
     ".claude/skills",
-    ".gemini/config/skills"
+    ".gemini/antigravity/skills"
   ]) {
     const link = path.join(homePath, targetDir, skillName);
     assert.equal(fs.readlinkSync(link), source, `${targetDir} should expose the canonical skill`);

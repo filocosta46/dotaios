@@ -17,7 +17,7 @@ test("activate creates global and project agent bridges for installed tools", ()
   assert.match(read(path.join(homePath, ".claude", "CLAUDE.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
   assert.match(read(path.join(homePath, ".codex", "AGENTS.md")), new RegExp(escapeRegex(path.join(aiosPath, "AGENTS.md"))));
   assert.match(read(path.join(homePath, ".gemini", "GEMINI.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
-  assert.match(read(path.join(projectPath, ".cursor", "rules", "dotaios.mdc")), /alwaysApply: true/);
+  assert.equal(fs.existsSync(path.join(projectPath, ".cursor", "rules", "dotaios.mdc")), false);
   assert.match(read(path.join(projectPath, "AGENTS.md")), /DotAIOS Project Bridge/);
 });
 

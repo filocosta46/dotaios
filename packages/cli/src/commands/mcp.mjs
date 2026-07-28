@@ -1,17 +1,17 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { mcpLauncher } from "../lib/mcp-launcher.mjs";
 
-const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 export const supportedMcpAgents = new Set([
   "claude",
   "codex",
   "cursor",
   "gemini",
   "antigravity",
-  "kimi"
+  "kimi",
+  "opencode"
 ]);
 
 export async function mcpCommand(args) {
@@ -45,7 +45,7 @@ function printMcpHelp() {
 
 Options:
   --path <dir>      Use a non-default AIOS folder
-  --agent <agent>   claude, codex, cursor, gemini, antigravity, or kimi
+  --agent <agent>   claude, codex, cursor, gemini, antigravity, kimi, or opencode
   --dry-run         Preview install guidance without changing files
   --home <dir>      Use a non-default home path for target hints
 
@@ -98,7 +98,7 @@ async function assertAiosFolder(target) {
 async function printStatus(target) {
   console.log("DotAIOS optional MCP adapter");
   console.log(`AIOS path: ${target}`);
-  console.log(`[ok] MCP server: ${serverPath()}`);
+  console.log("[ok] MCP server launcher: version-pinned npx package");
   console.log("[info] Transport: stdio");
   console.log("[info] Read-only tools: read_working_context, search_aios, resolve_skill");
   console.log("[next] Run `dotaios mcp install --dry-run --agent claude` to print client config.");
@@ -122,18 +122,15 @@ function printInstall(target, options) {
 }
 
 function mcpServerConfig(target) {
+  const launcher = mcpLauncher(target);
   return {
     mcpServers: {
       dotaios: {
-        command: process.execPath,
-        args: [serverPath(), "--path", target]
+        command: launcher.command,
+        args: launcher.args
       }
     }
   };
-}
-
-function serverPath() {
-  return path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
 }
 
 export function mcpClientConfig(agent, target, homePath) {
@@ -147,7 +144,8 @@ export function mcpClientConfig(agent, target, homePath) {
     cursor: path.join(homePath, ".cursor", "mcp.json"),
     gemini: path.join(homePath, ".gemini", "settings.json"),
     antigravity: path.join(homePath, ".gemini", "config", "mcp_config.json"),
-    kimi: path.join(homePath, ".kimi-code", "mcp.json")
+    kimi: path.join(homePath, ".kimi-code", "mcp.json"),
+    opencode: path.join(homePath, ".config", "opencode", "opencode.json")
   };
 
   if (agent === "codex") {
@@ -160,6 +158,23 @@ export function mcpClientConfig(agent, target, homePath) {
         `command = ${JSON.stringify(server.command)}`,
         `args = ${JSON.stringify(server.args)}`
       ].join("\n")
+    };
+  }
+
+  if (agent === "opencode") {
+    const server = mcpServerConfig(target).mcpServers.dotaios;
+    return {
+      target: targets[agent],
+      format: "JSON",
+      text: JSON.stringify({
+        mcp: {
+          dotaios: {
+            type: "local",
+            command: [server.command, ...server.args],
+            enabled: true
+          }
+        }
+      }, null, 2)
     };
   }
 

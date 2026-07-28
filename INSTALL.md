@@ -23,7 +23,7 @@ Run every command yourself when you can. Only hand off to the user for
 Node install if every automated path fails.
 
 **Prerequisite:** you need file-editing tools (Claude Code, Cursor, Codex, and
-Antigravity all qualify), Step 4 edits the user's context files for them.
+Antigravity IDE all qualify), Step 4 edits the user's context files for them.
 
 ---
 

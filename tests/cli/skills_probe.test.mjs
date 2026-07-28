@@ -51,6 +51,43 @@ test("skills probe dry-run emits a receipt without invoking Codex", () => {
   }
 });
 
+test("skills probe dry-run never spawns the client, including a version probe", () => {
+  const { root, aiosPath } = setupAios();
+  const fakeBin = path.join(root, "bin");
+  const sentinel = path.join(root, "spawned");
+  fs.mkdirSync(fakeBin, { recursive: true });
+  const fakeCodex = path.join(fakeBin, "codex");
+  fs.writeFileSync(fakeCodex, `#!/bin/sh\ntouch "${sentinel}"\nexit 0\n`);
+  fs.chmodSync(fakeCodex, 0o755);
+
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "skills",
+        "probe",
+        "--client",
+        "codex",
+        "--dry-run",
+        "--json",
+        "--path",
+        aiosPath
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` }
+      }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).clientVersion, null);
+    assert.equal(fs.existsSync(sentinel), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skills probe requires an explicit client", () => {
   const { root, aiosPath } = setupAios();
   try {
