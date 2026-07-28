@@ -1,6 +1,6 @@
 # Saving AI Conversations
 
-DotAIOS can save your AI conversations locally so every agent on your machine can remember what you've talked about.
+DotAIOS can save AI conversations locally so supported agents that can read your folder can find what you chose to preserve.
 
 ## Where conversations are saved
 

@@ -14,7 +14,7 @@ DotAIOS is a local file convention.
 
 ## Context
 
-`context/` is loaded every session. It describes identity, active work, priorities, long-term direction, and domain-specific modes.
+`context/` is the durable source for identity, active work, priorities, long-term direction, and domain-specific modes. Managed bridges point supported hosts to it, but a configured path does not prove that every client session loaded it.
 
 ## Projects
 

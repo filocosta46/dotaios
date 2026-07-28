@@ -35,6 +35,9 @@ All notable changes to DotAIOS will be documented in this file.
 - Client support references were refreshed against official OpenAI, Anthropic,
   Google, Cursor, Kimi, OpenCode, Moonshot, and Z.ai documentation on
   2026-07-28.
+- Public launch copy now promises continuity across supported local agents and
+  states the current capture boundary instead of implying every AI or every
+  session is automatically connected.
 
 ### Tests
 

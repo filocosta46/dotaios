@@ -131,7 +131,7 @@ It should answer using the work description you typed in Step 1. If it does, Dot
 After all 5 steps, you have:
 
 1. A folder at `~/aios/` with small Markdown files for context, memory, vault notes, and skill folders. You can open them. You can edit them. You own them.
-2. Your AI tool answers personal questions correctly without you re-introducing yourself every session.
+2. The AI tool you connected answers personal questions correctly after you verify that it loaded the DotAIOS context.
 3. A `_index.md` your agents can scan to find specific files.
 4. Skill folders in `~/aios/skills/` that explain what each skill does, what it does not do, and how to trigger it.
 
@@ -139,7 +139,7 @@ Each morning you can run `npx dotaios@latest brief` to get a local summary of to
 
 ## Optional: save your AI conversations
 
-If you use Claude Code, you can enable automatic saving so every session is remembered across tools:
+If you use Claude Code, you can enable automatic saving so those conversations become local files that other capable agents can search:
 
 ```bash
 npx dotaios@latest capture enable claude-code
