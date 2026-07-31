@@ -1,0 +1,36 @@
+{
+  "schema": "dotaios.skill-invocation.v1",
+  "client": "Codex",
+  "clientVersion": "codex-cli 0.137.0",
+  "targetPath": "<temporary-project>/.agents/skills",
+  "skill": {
+    "name": "dotaios-probe",
+    "path": "<temporary-project>/skills/dotaios-probe/SKILL.md",
+    "sha256": "e85f0a4109268e49a3106b116afda09cbe372c7fe4693b7d8a8295eada00d7fe"
+  },
+  "evidence": {
+    "configured": "yes",
+    "discoverable": "path-ready",
+    "invoked": "yes",
+    "produced": "yes"
+  },
+  "command": [
+    "codex",
+    "exec",
+    "--ephemeral",
+    "--sandbox",
+    "read-only",
+    "--skip-git-repo-check",
+    "--ignore-user-config",
+    "-C",
+    "<temporary-project>",
+    "--output-last-message",
+    "<temporary-output>"
+  ],
+  "marker": "DOTAIOS_PROBE_OK_f14500bb54affa2e",
+  "exitCode": 0,
+  "limitation": "The process reported unrelated local cache and plugin warnings.",
+  "error": null,
+  "startedAt": "2026-07-31T15:07:41.261Z",
+  "finishedAt": "2026-07-31T15:07:55.705Z"
+}

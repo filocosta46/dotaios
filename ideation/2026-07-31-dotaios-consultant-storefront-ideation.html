@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: DotAIOS + Consultant Storefront</title>
+  <style>
+    :root { color-scheme: light; --bg:#f5f5f7; --paper:#fff; --ink:#1d1d1f; --muted:#646469; --line:#dedee3; --blue:#0676e8; --soft:#eaf4ff; }
+    * { box-sizing:border-box; }
+    html { scroll-behavior:smooth; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    main { width:min(920px,calc(100% - 32px)); margin:0 auto; padding:64px 0 88px; }
+    header { padding-bottom:38px; border-bottom:1px solid var(--line); }
+    .eyebrow,.meta dt { color:var(--blue); font-size:12px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    h1 { max-width:760px; margin:10px 0 18px; font-size:clamp(42px,8vw,78px); line-height:.98; letter-spacing:-.065em; }
+    h2 { margin:0 0 18px; font-size:28px; letter-spacing:-.04em; }
+    h3 { margin:0; font-size:22px; letter-spacing:-.035em; }
+    p { max-width:72ch; margin:0; }
+    .lede { color:var(--muted); font-size:18px; }
+    .meta { display:flex; flex-wrap:wrap; gap:18px 34px; margin:26px 0 0; }
+    .meta div { display:grid; gap:2px; }
+    .meta dd { margin:0; }
+    section { padding:44px 0; border-bottom:1px solid var(--line); }
+    .context { display:grid; grid-template-columns:1fr 1fr; gap:28px; }
+    .context p { color:var(--muted); }
+    .axes,.jump { display:flex; flex-wrap:wrap; gap:8px; margin:16px 0 0; padding:0; list-style:none; }
+    .axes li,.jump a,.pill { padding:7px 10px; border:1px solid var(--line); border-radius:999px; background:var(--paper); color:var(--muted); font-size:12px; }
+    .jump a:hover { border-color:var(--blue); color:var(--blue); }
+    .cards { display:grid; gap:18px; margin-top:24px; }
+    article { padding:26px; border:1px solid var(--line); border-radius:18px; background:var(--paper); box-shadow:0 10px 34px rgba(29,29,31,.04); }
+    .card-head { display:flex; justify-content:space-between; gap:18px; align-items:start; }
+    .rank { color:var(--blue); font:700 12px ui-monospace,SFMono-Regular,monospace; }
+    .card-meta { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 20px; }
+    .card-grid { display:grid; grid-template-columns:1fr 1fr; gap:18px 26px; }
+    .field { color:var(--muted); }
+    .field strong { display:block; margin-bottom:4px; color:var(--ink); font-size:12px; letter-spacing:.05em; text-transform:uppercase; }
+    .shape { display:grid; grid-template-columns:1fr auto 1fr; gap:12px; align-items:center; margin:22px 0 0; padding:18px; border-radius:14px; background:var(--soft); }
+    .shape div { padding:14px; border:1px solid #bfdcff; border-radius:11px; background:#fff; text-align:center; font-weight:650; }
+    .shape span { color:var(--blue); font-size:20px; }
+    table { width:100%; border-collapse:collapse; background:var(--paper); }
+    th,td { padding:13px 14px; border:1px solid var(--line); text-align:left; vertical-align:top; }
+    th { background:#ededf0; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+    footer { padding-top:28px; color:var(--muted); font:12px/1.5 ui-monospace,SFMono-Regular,monospace; }
+    @media (max-width:680px) { main{padding-top:38px}.context,.card-grid{grid-template-columns:1fr}.card-head{display:grid}.shape{grid-template-columns:1fr}.shape span{transform:rotate(90deg);text-align:center}article{padding:21px} }
+    @media (prefers-reduced-motion:reduce) { html{scroll-behavior:auto} }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Repo-grounded ideation</p>
+    <h1>DotAIOS + Consultant Storefront</h1>
+    <p class="lede">A sparse flagship for the free foundation. A separate, purchase-first page for one consultant outcome.</p>
+    <dl class="meta">
+      <div><dt>Date</dt><dd><time datetime="2026-07-31">2026-07-31</time></dd></div>
+      <div><dt>Topic</dt><dd>dotaios-consultant-storefront</dd></div>
+      <div><dt>Focus</dt><dd>Less copy, clearer offer, no Finder on the Pack page</dd></div>
+      <div><dt>Mode</dt><dd>repo-grounded</dd></div>
+    </dl>
+  </header>
+
+  <section id="codebase-context">
+    <h2>Codebase Context</h2>
+    <div class="context">
+      <p>The current root page asks one visitor to understand a free folder, a future paid pack, three workflows, host evidence, and an install journey. The free setup action repeats three times.</p>
+      <p>The offer is truthfully unavailable. The meeting workflow is the only candidate outcome. Price, readiness, evidence, EN/IT parity, and the absence of checkout fields are enforced by tests.</p>
+    </div>
+  </section>
+
+  <section id="topic-axes">
+    <h2>Topic Axes</h2>
+    <ul class="axes">
+      <li>Main-site hierarchy</li><li>Storefront + mobile handoff</li><li>Proof + motion + accessibility</li><li>React page/content seam</li>
+    </ul>
+  </section>
+
+  <section id="ranked-ideas">
+    <h2>Ranked Ideas</h2>
+    <nav class="jump" aria-label="Ranked ideas">
+      <a href="#idea-1">1. One product per page</a><a href="#idea-2">2. First finished job</a><a href="#idea-3">3. Commerce rail</a><a href="#idea-4">4. Work receipt</a><a href="#idea-5">5. Stillness</a><a href="#idea-6">6. Truth seam</a>
+    </nav>
+    <div class="cards">
+      <article id="idea-1">
+        <div class="card-head"><div><span class="rank">IDEA 1</span><h3>One product per page</h3></div><span class="pill">Hierarchy</span></div>
+        <div class="card-meta"><span class="pill">Confidence 96%</span><span class="pill">Complexity Medium</span></div>
+        <div class="card-grid">
+          <p class="field"><strong>Description</strong>Make `/` a sub-150-word page for free DotAIOS. Move price, readiness, outcomes, proof, and purchase flow to `/consultant-pack`.</p>
+          <p class="field"><strong>Basis</strong><b>direct:</b> the root currently renders Foundation → transition → Pack → journey and repeats the setup CTA three times.</p>
+          <p class="field"><strong>Rationale</strong>A visitor can explain the flagship before choosing a profession pack. The paid page can finally behave like commerce.</p>
+          <p class="field"><strong>Downside</strong>The Pack gets less exposure on the homepage; a strong, quiet doorway must carry discovery.</p>
+        </div>
+        <div class="shape" aria-label="One mixed page becomes two focused pages"><div>DotAIOS<br>Free foundation</div><span>→</span><div>Consultant Pack<br>€35 once</div></div>
+      </article>
+
+      <article id="idea-2">
+        <div class="card-head"><div><span class="rank">IDEA 2</span><h3>Sell the first finished job</h3></div><span class="pill">Storefront</span></div>
+        <div class="card-meta"><span class="pill">Confidence 95%</span><span class="pill">Complexity Low</span></div>
+        <div class="card-grid">
+          <p class="field"><strong>Description</strong>Lead with one concrete result: a client meeting becomes decisions, assigned actions, follow-up, and the next project update. Mention the other two workflows later.</p>
+          <p class="field"><strong>Basis</strong><b>direct:</b> meeting-to-follow-up is `candidate`; the other two workflows are `intended`. <b>external:</b> Superlog leads with one job and one finished artifact.</p>
+          <p class="field"><strong>Rationale</strong>The offer becomes textable. Proof supports the promise instead of competing with a feature catalogue.</p>
+          <p class="field"><strong>Downside</strong>The Pack appears narrower until the other workflows earn equivalent evidence.</p>
+        </div>
+      </article>
+
+      <article id="idea-3">
+        <div class="card-head"><div><span class="rank">IDEA 3</span><h3>One truthful commerce rail</h3></div><span class="pill">Storefront + mobile</span></div>
+        <div class="card-meta"><span class="pill">Confidence 94%</span><span class="pill">Complexity Medium</span></div>
+        <div class="card-grid">
+          <p class="field"><strong>Description</strong>Put €35 once, permanent ownership, prerequisites, and exactly one readiness-aware action in the first mobile viewport. Then show the real handoff: buy anywhere, install from the local DotAIOS folder later.</p>
+          <p class="field"><strong>Basis</strong><b>direct:</b> checkout must stay link-free while unavailable; the commerce provider owns payment/recovery while the public CLI owns verification and install.</p>
+          <p class="field"><strong>Rationale</strong>Price, fit, state, and next action stop being scattered across cards and caveats. Mobile intent no longer collides with a desktop-only install.</p>
+          <p class="field"><strong>Downside</strong>Front-loaded requirements reduce clicks, but improve buyer qualification and lower support risk.</p>
+        </div>
+        <div class="shape" aria-label="Purchase and install happen in separate moments"><div>Any device<br>Choose + recover</div><span>→</span><div>Your Mac<br>Verify + install</div></div>
+      </article>
+
+      <article id="idea-4">
+        <div class="card-head"><div><span class="rank">IDEA 4</span><h3>One work receipt</h3></div><span class="pill">Proof</span></div>
+        <div class="card-meta"><span class="pill">Confidence 93%</span><span class="pill">Complexity Medium</span></div>
+        <div class="card-grid">
+          <p class="field"><strong>Description</strong>Make a realistic meeting result the Pack page’s only large visual: source excerpt, four usable outputs, and a compact evidence receipt. No Finder or folder chrome.</p>
+          <p class="field"><strong>Basis</strong><b>direct:</b> the approved visual brief requires an inspectable tested workflow object; the current implementation already holds the evidence fields.</p>
+          <p class="field"><strong>Rationale</strong>Consultants judge professional output, not an AI metaphor. Candidate status and limitations stay visible instead of being marketed away.</p>
+          <p class="field"><strong>Downside</strong>Visible limitations may reduce conversion until the workflow is approved.</p>
+        </div>
+      </article>
+
+      <article id="idea-5">
+        <div class="card-head"><div><span class="rank">IDEA 5</span><h3>Stillness by default</h3></div><span class="pill">Motion + accessibility</span></div>
+        <div class="card-meta"><span class="pill">Confidence 91%</span><span class="pill">Complexity Low</span></div>
+        <div class="card-grid">
+          <p class="field"><strong>Description</strong>Remove blanket GSAP scroll reveals. Keep only short feedback transitions and, if it earns its place, one meaningful continuity cue on the free homepage.</p>
+          <p class="field"><strong>Basis</strong><b>direct:</b> every tagged surface currently receives the same reveal; the brief asks for calm editorial proof and warns against excessive trust-content motion.</p>
+          <p class="field"><strong>Rationale</strong>Price, proof, and limitations are readable at first paint and remain identical under reduced motion.</p>
+          <p class="field"><strong>Downside</strong>Typography, spacing, and the proof object must carry the premium feel without choreography.</p>
+        </div>
+      </article>
+
+      <article id="idea-6">
+        <div class="card-head"><div><span class="rank">IDEA 6</span><h3>Two routes, one truth seam</h3></div><span class="pill">React architecture</span></div>
+        <div class="card-meta"><span class="pill">Confidence 90%</span><span class="pill">Complexity Medium</span></div>
+        <div class="card-grid">
+          <p class="field"><strong>Description</strong>Select two page compositions by pathname without adding a router. Share locale, metadata, offer facts, CTA state, proof, analytics, and direct-load behavior.</p>
+          <p class="field"><strong>Basis</strong><b>direct:</b> the app has one fixed composition, no pathname handling, root-only locale metadata, no router dependency, and no Vercel rewrite.</p>
+          <p class="field"><strong>Rationale</strong>This is a deep seam: one small interface hides route normalization, locale URLs, and page metadata while each page remains locally understandable.</p>
+          <p class="field"><strong>Downside</strong>A third or fourth content route would justify revisiting the hand-rolled selector.</p>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section id="rejection-summary">
+    <h2>Rejection Summary</h2>
+    <table>
+      <thead><tr><th>#</th><th>Idea</th><th>Reason rejected</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td>Buy anywhere, install at the desk</td><td>Sound, but fully contained by the stronger commerce-rail idea.</td></tr>
+        <tr><td>2</td><td>Box-back prerequisites</td><td>Sound, but works best as the compact specification inside the commerce rail.</td></tr>
+        <tr><td>3</td><td>Fresh-context verifier</td><td>The bounded verification pass did not return; orchestrator verification used the four evidence dossiers instead.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="composition-signal">Composed 2026-07-31T18:30Z by ce-ideate from the current DotAIOS repository and user direction.</footer>
+</main>
+</body>
+</html>

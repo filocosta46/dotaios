@@ -1,26 +1,16 @@
 {
-  "version": "1.2",
-  "generated_at": "2026-07-15",
-  "registry_notes": "The free DotAIOS workflows ship with the CLI. Paid outcome packs remain unavailable until delivery, updates, and recovery are verified.",
+  "version": "1.3",
+  "generated_at": "2026-07-31",
+  "registry_notes": "The free DotAIOS foundation ships with the CLI. The Consultant Pack remains unavailable until delivery, recovery, and professional outcome checks pass.",
   "entries": [
     {
-      "id": "guided-work",
-      "name": "Guided Work",
-      "type": "outcome-pack",
-      "paid": true,
-      "price_eur": "12.99",
-      "problem": "You want better work from your agent without researching prompts, plugins, or setup.",
-      "description": "Planned guided workflows for writing, research, applications, CRM work, and design.",
-      "status": "draft"
-    },
-    {
-      "id": "done-for-you-systems",
-      "name": "Done For You Systems",
+      "id": "consultant-pack",
+      "name": "Consultant Pack",
       "type": "outcome-pack",
       "paid": true,
       "price_eur": "35.00",
-      "problem": "You want to hand recurring work to your agent with a setup you can trust.",
-      "description": "Planned verified systems with guided installation, operation, and recovery.",
+      "problem": "Independent consultants want repeatable client workflows without adopting another platform.",
+      "description": "A planned permanent edition for client setup, meeting follow-up, and proposal or deliverable starts in a local DotAIOS folder.",
       "status": "draft"
     }
   ]

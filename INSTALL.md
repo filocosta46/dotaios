@@ -132,8 +132,9 @@ Ask these three questions **one at a time**. Wait for each answer before asking
 the next. Be warm and natural, you are having a conversation, not filling out a
 form.
 
-After each answer, write it directly into the correct file using your
-file-editing tools. Do not ask permission to write, just do it.
+Before the first write, name the three target files and ask once for approval
+to update them. After approval, write each answer directly into the correct
+file using your file-editing tools.
 
 **Question 1:**
 > "What's your name, and what do you do for work?"

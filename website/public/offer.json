@@ -1,0 +1,139 @@
+{
+  "schema": "dotaios.public-offer.v1",
+  "id": "consultant-pack",
+  "name": "Consultant Pack",
+  "audience": "Independent consultants and freelancers",
+  "price": {
+    "amount": "35.00",
+    "currency": "EUR",
+    "state": "planned"
+  },
+  "ownership": "permanent-edition",
+  "ownershipSummary": "The edition you buy stays yours permanently.",
+  "optionalUpdates": {
+    "amount": "4.00",
+    "currency": "EUR",
+    "cadence": "month",
+    "state": "planned-optional"
+  },
+  "readiness": {
+    "state": "unavailable",
+    "summary": "Not available yet. Delivery, recovery, and professional outcome checks are still in progress.",
+    "commerceNotice": "Final tax treatment and purchase terms will be shown before sales open.",
+    "remainingGates": [
+      "checkout",
+      "entitlement",
+      "signed-delivery",
+      "recovery",
+      "rollback",
+      "revoked-access",
+      "professional-outcomes"
+    ],
+    "nextAction": "free-setup-prompt"
+  },
+  "outcomes": [
+    {
+      "id": "contact-to-client-workspace",
+      "state": "intended",
+      "label": "Contact to client workspace",
+      "result": "Turn a new contact into a structured client workspace."
+    },
+    {
+      "id": "meeting-to-actions-and-follow-up",
+      "state": "candidate",
+      "label": "Meeting to actions and follow-up",
+      "result": "Turn a meeting into decisions, actions, owners, dates, a follow-up draft, and a proposed project update."
+    },
+    {
+      "id": "request-to-proposal-or-deliverable",
+      "state": "intended",
+      "label": "Request to proposal or deliverable",
+      "result": "Turn a client request into a proposal or deliverable starting point."
+    }
+  ],
+  "hostStates": [
+    {
+      "id": "codex",
+      "name": "Codex",
+      "kind": "local-agent-host",
+      "certificationTarget": true,
+      "foundationEvidence": {
+        "state": "outcome-produced",
+        "scope": "free-foundation explicit skill probe",
+        "clientVersion": "codex-cli 0.137.0",
+        "observedAt": "2026-07-31",
+        "receipt": "docs/probes/2026-07-31-codex-invocation.json",
+        "configured": "yes",
+        "discoverable": "path-ready",
+        "invoked": "yes",
+        "produced": "yes",
+        "summary": "A bounded DotAIOS skill probe produced its expected marker in Codex.",
+        "limitation": "The process reported unrelated local cache and plugin manifest warnings."
+      },
+      "packEvidence": {
+        "state": "candidate",
+        "summary": "Consultant Pack outcome certification has not run."
+      }
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "kind": "local-agent-host",
+      "certificationTarget": true,
+      "foundationEvidence": {
+        "state": "invoked-no-outcome",
+        "scope": "free-foundation explicit skill probe",
+        "clientVersion": "2.1.220 (Claude Code)",
+        "observedAt": "2026-07-31",
+        "receipt": "docs/probes/2026-07-31-claude-code-invocation.json",
+        "configured": "yes",
+        "discoverable": "path-ready",
+        "invoked": "yes",
+        "produced": "no",
+        "summary": "Claude Code found and invoked the bounded DotAIOS skill, but did not produce its expected marker.",
+        "limitation": "The invocation exited successfully without producing the expected outcome. Automatic selection is also not proven.",
+        "bulkProbeEvidence": {
+          "state": "failed",
+          "summary": "A separate complete-corpus probe exceeded its 90000 millisecond bound."
+        }
+      },
+      "packEvidence": {
+        "state": "candidate",
+        "summary": "Consultant Pack outcome certification has not run."
+      }
+    }
+  ],
+  "browserFallback": {
+    "clients": [
+      "ChatGPT",
+      "Claude"
+    ],
+    "state": "manual-fallback",
+    "localFolderAccess": false,
+    "action": "Paste or attach a bounded brief. Browser chats cannot read your local folder directly."
+  },
+  "evidenceSummary": {
+    "workflow": "meeting-to-actions-and-follow-up",
+    "state": "candidate",
+    "approved": false,
+    "evidenceLevel": "candidate",
+    "testedHost": "Not tested",
+    "testedHostVersion": "Not tested",
+    "testedAt": "Not tested",
+    "result": "No approved Consultant Pack outcome is public yet.",
+    "permissions": "Human review will be required before any client record is changed.",
+    "dataMovement": "Local files stay on the device. The chosen AI provider processes the context the user sends.",
+    "retestStatus": "Pending the first end-to-end outcome run.",
+    "limitations": [
+      "The professional workflow is still being assembled and tested.",
+      "Codex, Claude Code, delivery, and recovery gates are not complete."
+    ],
+    "nextStep": "Complete synthetic outcome, Codex, Claude Code, recovery, and final review gates."
+  },
+  "eventNames": [
+    "free_setup_prompt_copied",
+    "consultant_pack_viewed",
+    "consultant_pack_evidence_opened",
+    "consultant_pack_free_setup_selected"
+  ]
+}

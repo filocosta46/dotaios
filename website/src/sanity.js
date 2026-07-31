@@ -15,12 +15,18 @@ import {CURRENT_COPY_RELEASE} from './content.js'
 const PROJECT_ID = 'h7araeal'
 const DATASET = 'production'
 const STUDIO_URL = 'https://dotaios.sanity.studio'
-const QUERY = '*[_type == "landingPage"][0]'
+const QUERY = `*[_type == "landingPage"][0]{
+  copyRelease,
+  i18n,
+  footerTagline,
+  footerDocs
+}`
 
-const previewParams = new URLSearchParams(window.location.search)
+const browserWindow = typeof window === 'undefined' ? null : window
+const previewParams = new URLSearchParams(browserWindow?.location.search ?? '')
 const hasPreviewToken =
   previewParams.has('sanity-preview-perspective') || previewParams.has('sanity-preview-secret')
-const isEmbedded = window.self !== window.top
+const isEmbedded = browserWindow ? browserWindow.self !== browserWindow.top : false
 
 // Overlays: Studio iframe. Drafts API: only when Studio passes preview params.
 export const isPreview = hasPreviewToken || isEmbedded
@@ -38,11 +44,6 @@ function getClient() {
       studioUrl: STUDIO_URL,
     },
   })
-}
-
-function releaseMatches(doc) {
-  if (isPreview) return true
-  return doc?.copyRelease === CURRENT_COPY_RELEASE
 }
 
 /** Localized string: returns undefined (not '') so merge() keeps the bundled value. */
@@ -68,52 +69,13 @@ function fromI18nBlob(doc) {
   return blob && blob.en && blob.it ? blob : null
 }
 
-/** Legacy per-field Studio schema, mapped onto the new dictionary shape. */
+/** Legacy footer fields retained while Studio transitions to the i18n blob. */
 function fromLegacyFields(doc) {
   const build = (lang) => ({
-    meta: {
-      title: ls(doc.metaTitle, lang),
-      description: ls(doc.metaDescription, lang),
-    },
-    skipLink: ls(doc.skipLink, lang),
-    nav: {
-      folder: ls(doc.navFolder, lang),
-      ask: ls(doc.navAsk, lang),
-      github: ls(doc.navGithub, lang),
-      cta: ls(doc.navCta, lang),
-      language: ls(doc.navLangAria, lang),
-    },
-    hero: {
-      titleLine1: ls(doc.heroH1Line1, lang),
-      titleLine2: ls(doc.heroH1Line2, lang),
-      intro: ls(doc.heroSub, lang),
-      promptLabel: ls(doc.installTitle, lang),
-      promptHelp: ls(doc.installDesc, lang),
-      terminal: ls(doc.installTerminalSummary, lang),
-    },
-    folder: {
-      title: ls(doc.explorerTitle, lang),
-      desc: ls(doc.explorerDesc, lang),
-    },
-    ask: {
-      title: ls(doc.askTitle, lang),
-      desc: ls(doc.askDesc, lang),
-      examples: Array.isArray(doc.askItems)
-        ? doc.askItems
-            .map((row) => [ls(row.title, lang), ls(row.desc, lang)])
-            .filter((pair) => pair[0] && pair[1])
-        : undefined,
-    },
-    cta: {
-      text: ls(doc.ctaText, lang),
-      button: ls(doc.ctaBtn, lang),
-    },
     footer: {
       tagline: ls(doc.footerTagline, lang),
       docs: ls(doc.footerDocs, lang),
     },
-    copied: ls(doc.installCopied, lang),
-    copy: ls(doc.installCopy, lang),
   })
 
   return {en: build('en'), it: build('it')}
@@ -135,15 +97,35 @@ function merge(base, patch) {
   return patch
 }
 
-export async function loadRemoteDictionary(bundled) {
-  const doc = await getClient().fetch(QUERY)
-  if (!doc || !releaseMatches(doc)) return null
+function editorialPatch(remote, lang) {
+  const localized = remote?.[lang]
+  if (!localized || typeof localized !== 'object') return {}
+
+  // Price, readiness, evidence, navigation, and conversion copy are code-owned
+  // so the claims reviewed in CI are the claims a visitor receives.
+  return {
+    folder: localized.folder,
+    footer: localized.footer,
+  }
+}
+
+export function buildRemoteDictionary(
+  bundled,
+  doc,
+  {preview = false, currentRelease = CURRENT_COPY_RELEASE} = {},
+) {
+  if (!doc || (!preview && doc.copyRelease !== currentRelease)) return null
 
   const remote = fromI18nBlob(doc) || fromLegacyFields(doc)
   if (!remote) return null
 
   return {
-    en: merge(bundled.en, remote.en),
-    it: merge(bundled.it, remote.it),
+    en: merge(bundled.en, editorialPatch(remote, 'en')),
+    it: merge(bundled.it, editorialPatch(remote, 'it')),
   }
+}
+
+export async function loadRemoteDictionary(bundled) {
+  const doc = await getClient().fetch(QUERY)
+  return buildRemoteDictionary(bundled, doc, {preview: isPreview})
 }

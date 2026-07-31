@@ -3,18 +3,17 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { dictionary } from "../../website/src/content.js";
+import { PUBLIC_OFFER } from "../../website/src/offer.js";
 import { validateMarketRegistry } from "../../packages/core/src/market-registry.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 
 test("draft website offers expose no purchase path or automatic update claim", async () => {
   for (const language of Object.values(dictionary)) {
-    for (const pack of language.packs.items) {
-      assert.equal(pack.href, null);
-      assert.doesNotMatch(pack.cta, /buy|get|prendi|acquista/i);
-    }
+    assert.equal(language.consultantPack.action.href, null);
+    assert.doesNotMatch(language.consultantPack.action.label, /buy|purchase|compra|acquista/i);
     assert.doesNotMatch(
-      JSON.stringify(language.packs),
+      JSON.stringify(language.consultantPack),
       /updated weekly|aggiornat[ae] ogni settimana/i
     );
   }
@@ -38,7 +37,19 @@ test("the public registry contains only schema-valid non-purchasable drafts", as
   const registry = validateMarketRegistry(JSON.parse(await fs.readFile(file, "utf8")), {
     source: file
   });
-  assert.ok(registry.entries.length > 0);
+  assert.equal(registry.entries.length, 1);
+  assert.deepEqual(
+    {
+      id: registry.entries[0].id,
+      name: registry.entries[0].name,
+      price_eur: registry.entries[0].price_eur
+    },
+    {
+      id: PUBLIC_OFFER.id,
+      name: PUBLIC_OFFER.name,
+      price_eur: PUBLIC_OFFER.price.amount
+    }
+  );
   assert.ok(registry.entries.every((entry) => entry.status === "draft"));
   assert.ok(registry.entries.every((entry) => !entry.checkout_url && !entry.gumroad_url));
 });
