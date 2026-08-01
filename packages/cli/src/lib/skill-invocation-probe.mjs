@@ -104,13 +104,13 @@ export const PROBE_CLIENTS = {
         "--print",
         "--no-session-persistence",
         "--permission-mode", "plan",
-        "--tools", "Read",
+        "--tools", "Skill",
         "--setting-sources", "project",
         prompt
       ],
       receiptCommand: [
         "claude", "--print", "--no-session-persistence", "--permission-mode",
-        "plan", "--tools", "Read", "--setting-sources", "project",
+        "plan", "--tools", "Skill", "--setting-sources", "project",
         "<probe-prompt>"
       ],
       cwd: projectPath
