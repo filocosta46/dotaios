@@ -55,8 +55,6 @@
     "verify:npm": "node scripts/verify-npm-freshness.mjs",
     "smoke": "node scripts/smoke.mjs",
     "test": "node --test tests/**/*.test.mjs",
-    "site:build": "pnpm --dir website build",
-    "site:verify": "node scripts/verify-website.mjs",
     "pack:check": "npm pack --dry-run",
     "changelog": "git log --oneline $(git describe --tags --abbrev=0)..HEAD",
     "release:check": "node scripts/release-checklist.mjs"
