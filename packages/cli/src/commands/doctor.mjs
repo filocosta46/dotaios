@@ -7,7 +7,7 @@ import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
-import { checkForUpdate } from "../../../core/src/version-check.mjs";
+import { checkForUpdate } from "../adapters/npm-registry.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
 const MIN_NODE_MAJOR = 20;

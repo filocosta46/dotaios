@@ -14,7 +14,6 @@ const {
   licenseFile,
   listLicenses,
   removeLicense,
-  verifyGumroadLicense
 } = await import("../../packages/core/src/licenses.mjs");
 
 test("license store starts empty", async () => {
@@ -57,42 +56,12 @@ test("removeLicense deletes only the requested entry", async () => {
   assert.equal(await removeLicense("does-not-exist"), false);
 });
 
-test("verifyGumroadLicense posts to Gumroad and parses success", async () => {
-  let capturedUrl;
-  let capturedBody;
-  const stubFetch = async (url, init) => {
-    capturedUrl = url;
-    capturedBody = init.body;
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({ success: true, uses: 7, purchase: { email: "a@b.com" } })
-    };
-  };
-  const result = await verifyGumroadLicense({ productId: "p1", key: "k1", fetchImpl: stubFetch });
-  assert.equal(result.success, true);
-  assert.equal(result.uses, 7);
-  assert.equal(capturedUrl, "https://api.gumroad.com/v2/licenses/verify");
-  assert.match(capturedBody, /product_id=p1/);
-  assert.match(capturedBody, /license_key=k1/);
-});
-
-test("verifyGumroadLicense returns the rejection message", async () => {
-  const stubFetch = async () => ({
-    ok: false,
-    status: 404,
-    json: async () => ({ success: false, message: "That license does not exist." })
-  });
-  const result = await verifyGumroadLicense({ productId: "p1", key: "bad", fetchImpl: stubFetch });
-  assert.equal(result.success, false);
-  assert.match(result.message, /does not exist/);
-});
-
-test("verifyGumroadLicense handles network failure gracefully", async () => {
-  const stubFetch = async () => {
-    throw new Error("getaddrinfo ENOTFOUND");
-  };
-  const result = await verifyGumroadLicense({ productId: "p1", key: "k1", fetchImpl: stubFetch });
-  assert.equal(result.success, false);
-  assert.match(result.message, /Could not reach Gumroad/);
+test("addLicense refuses to run without an explicit verifier", async () => {
+  // Core is offline (CLAUDE.md hard rule 6): the caller must supply the vendor
+  // verifier. See packages/cli/src/adapters/gumroad-license.mjs.
+  await assert.rejects(
+    () => addLicense({ productId: "no-verifier", key: "K" }),
+    /license verifier is required/
+  );
+  assert.equal(await hasLicense("no-verifier"), false);
 });

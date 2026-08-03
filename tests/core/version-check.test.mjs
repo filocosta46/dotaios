@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { checkForUpdate, compareVersions } from "../../packages/core/src/version-check.mjs";
+import { compareVersions } from "../../packages/core/src/version-check.mjs";
+import { checkForUpdate } from "../../packages/cli/src/adapters/npm-registry.mjs";
 
 function jsonResponse(body) {
   return { ok: true, status: 200, json: async () => body };
