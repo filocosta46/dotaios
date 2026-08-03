@@ -2,6 +2,7 @@
 name: privacy-brief
 triggers: make a privacy brief, redact this before sharing, cloud-safe brief, strip sensitive info
 description: Distill sensitive local context into a cloud-safe brief before using Claude, Codex, Gemini, or another cloud model.
+when_to_use: make a privacy brief · redact this before sharing · cloud-safe brief · strip sensitive info
 ---
 
 # privacy-brief

@@ -2,6 +2,7 @@
 name: research
 triggers: deep research, research this, look this up properly, compare the options, what's the latest on, find out everything about
 description: Deep research on any question — break it into parts, search the web across all of them, and write back one clear report with sources. Use when a question needs real, current answers from many places, not a single quick search.
+when_to_use: deep research · research this · look this up properly · compare the options · what's the latest on · find out everything about
 ---
 
 # research
