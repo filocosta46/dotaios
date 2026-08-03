@@ -120,3 +120,79 @@ test("bundled plan-today skill resolves from its real frontmatter triggers", asy
 test("MIN_SCORE is a small positive number", () => {
   assert.ok(MIN_SCORE > 0 && MIN_SCORE < 1);
 });
+
+// --- ranking hardening (1.27.1) -------------------------------------------
+// scoreOne used to ACCUMULATE across every trigger, so declaring more triggers
+// raised a skill's score on intents it did not match. Measured against the real
+// folder: "start my day" scored today 1.682 and closeday 1.095, and closeday's
+// 1.095 came almost entirely from two of its five triggers each contributing on
+// the shared low-information token "day".
+
+const DAY_SKILLS = [
+  {
+    dir: "today",
+    name: "today",
+    description: "Build today's plan and save it as a daily note.",
+    triggers: ["start my day", "open today's note", "today's plan", "build today"]
+  },
+  {
+    dir: "closeday",
+    name: "closeday",
+    description: "Close out the day and carry tasks over.",
+    triggers: ["close the day", "wrap up today", "end of day", "log what I shipped", "close out my daily note"]
+  }
+];
+
+test("a shared low-information token cannot lift a skill above the real match", () => {
+  const ranked = rankSkills("start my day", DAY_SKILLS);
+  assert.equal(ranked[0].dir, "today");
+  assert.ok(
+    ranked[0].score > (ranked[1]?.score ?? 0),
+    `today must outrank closeday, got ${JSON.stringify(ranked.map((r) => [r.dir, r.score]))}`
+  );
+});
+
+test("adding more triggers cannot raise a skill's score on an unrelated intent", () => {
+  const lean = [{ dir: "closeday", name: "closeday", description: "Close out the day.", triggers: ["close the day"] }];
+  const padded = [{
+    dir: "closeday",
+    name: "closeday",
+    description: "Close out the day.",
+    triggers: ["close the day", "end of day", "finish the day", "wrap the day", "day done"]
+  }];
+
+  const leanScore = rankSkills("start my day", lean)[0]?.score ?? 0;
+  const paddedScore = rankSkills("start my day", padded)[0]?.score ?? 0;
+  assert.ok(
+    paddedScore <= leanScore + 1e-9,
+    `padding triggers must not inflate rank: lean ${leanScore} vs padded ${paddedScore}`
+  );
+});
+
+test("confidence separates a clear winner from a near tie", () => {
+  const clear = resolveIntent("start my day", DAY_SKILLS);
+  assert.equal(clear.dir, "today");
+
+  const tie = resolveIntent("day", [
+    { dir: "alpha", name: "alpha", description: "Day handling.", triggers: ["day"] },
+    { dir: "beta", name: "beta", description: "Day handling.", triggers: ["day"] }
+  ]);
+
+  assert.ok(
+    tie.confidence < clear.confidence,
+    `a tie must report lower confidence than a clear win: tie ${tie.confidence} vs clear ${clear.confidence}`
+  );
+  assert.ok(tie.confidence <= 0.6, `a two-way tie should sit near 0.5, got ${tie.confidence}`);
+});
+
+test("an exact name match still reports full confidence", () => {
+  const hit = resolveIntent("today", DAY_SKILLS);
+  assert.equal(hit.dir, "today");
+  assert.equal(hit.confidence, 1);
+});
+
+test("resolveIntent exposes the raw score alongside confidence", () => {
+  const hit = resolveIntent("start my day", DAY_SKILLS);
+  assert.equal(typeof hit.score, "number");
+  assert.ok(hit.score > 0);
+});
