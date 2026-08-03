@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
-import { collectSkills } from "../../../core/src/skills.mjs";
+import { collectSkills, planTriggerVisibility, applyTriggerVisibility } from "../../../core/src/skills.mjs";
 import { rankSkills, resolveIntent, renderBootContext } from "../../../core/src/skill-resolver.mjs";
 import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
 import { activateCommand } from "./activate.mjs";
@@ -15,6 +15,7 @@ const HELP_TEXT = `Usage:
   dotaios skills doctor [options]
   dotaios skills probe [options]
   dotaios skills resolve "<intent>" [options]
+  dotaios skills sync-triggers [--apply]
 
 List installed skills, show detail for one skill, or resolve a free-text intent
 to the skill that handles it.
@@ -81,6 +82,11 @@ export async function skillsCommand(args) {
     return;
   }
 
+  if (args[0] === "sync-triggers") {
+    await syncTriggersCommand(args.slice(1));
+    return;
+  }
+
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
   const skills = await collectSkills(aiosPath);
 
@@ -91,6 +97,43 @@ export async function skillsCommand(args) {
   } else {
     listSkills(skills);
   }
+}
+
+// Preview-first, matching the promotion boundary: plan and print by default,
+// write only under an explicit --apply.
+async function syncTriggersCommand(args) {
+  let apply = false;
+  let pathOption = null;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === "--apply") apply = true;
+    else if (args[index] === "--path") {
+      pathOption = readOptionValue(args, index, "--path");
+      index += 1;
+    } else throw new Error(`Unknown skills sync-triggers option: ${args[index]}`);
+  }
+
+  const aiosPath = path.resolve(expandHome(pathOption || defaultAiosPath()));
+  const plan = await planTriggerVisibility(aiosPath);
+
+  if (plan.length === 0) {
+    console.log("Every skill with triggers already exposes them to your agents. Nothing to do.");
+    return;
+  }
+
+  console.log(`${plan.length} skill(s) keep their routing phrases in \`triggers:\`, which no agent reads.`);
+  console.log("Copying them into `when_to_use:` puts them in the listing your agents route on.\n");
+  for (const entry of plan) {
+    console.log(`  ${entry.dir}`);
+    console.log(`    when_to_use: ${entry.whenToUse}`);
+  }
+
+  if (!apply) {
+    console.log("\nPreview only. Re-run with --apply to write these lines.");
+    return;
+  }
+
+  const written = await applyTriggerVisibility(aiosPath, plan);
+  console.log(`\nUpdated ${written.length} skill(s). Run \`dotaios activate\` to refresh your agents.`);
 }
 
 async function probeSkillCommand(args) {
