@@ -2,6 +2,7 @@
 name: skillify
 description: Turn a repeated workflow or prompt into a reusable DotAIOS skill, drafted for you, saved only after you approve.
 triggers: skillify this, make this a skill, turn this into a skill, save this as a skill, I keep doing this, automate this workflow, remember how to do this
+when_to_use: skillify this · make this a skill · turn this into a skill · save this as a skill · I keep doing this · automate this workflow · remember how to do this
 ---
 
 # Skillify

@@ -2,6 +2,7 @@
 name: process-inbox
 triggers: process my inbox, file my inbox notes, sort my captured notes
 description: File notes captured on another device (memory/inbox/) into the right place in this AIOS, then clear them.
+when_to_use: process my inbox · file my inbox notes · sort my captured notes
 ---
 
 # process-inbox

@@ -1,4 +1,5 @@
 import { addLicense, licenseFile, listLicenses, removeLicense } from "../../../core/src/licenses.mjs";
+import { verifyGumroadLicense } from "../adapters/gumroad-license.mjs";
 import { hasHelpFlag } from "../lib/args.mjs";
 
 const HELP_TEXT = `Usage:
@@ -35,7 +36,7 @@ export async function licenseCommand(args) {
       throw new Error("Usage: dotaios license add <product-id> <key>");
     }
     console.log(`Verifying license for ${productId}...`);
-    const entry = await addLicense({ productId, key });
+    const entry = await addLicense({ productId, key, verifier: verifyGumroadLicense });
     console.log(`[ok] License saved to ${licenseFile()}.`);
     console.log(`     product_id: ${entry.product_id}`);
     if (entry.uses != null) console.log(`     uses: ${entry.uses}`);

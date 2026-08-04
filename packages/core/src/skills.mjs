@@ -3,6 +3,11 @@ import path from "node:path";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 
+// `when_to_use` is prose the host appends to the description, so it is written
+// with a middot rather than the comma `triggers` uses. Accept both on read.
+const TRIGGER_SEPARATOR_RE = /[·,]/;
+const TRIGGER_JOINER = " · ";
+
 // Read one field out of a SKILL.md YAML frontmatter block. Deliberately tiny —
 // skills only need `name` and `description`, both single-line scalars.
 function readFrontmatterField(content, field) {
@@ -19,10 +24,12 @@ function unquoteScalar(value) {
   return value.trim().replace(/^(['"])(.*)\1$/, "$2");
 }
 
-// Read either a comma-separated scalar or an indented YAML block list. Skill
+// Read either a separator-joined scalar or an indented YAML block list. Skill
 // frontmatter only needs these two trigger shapes, so no YAML dependency is
-// necessary.
-function readFrontmatterList(content, field) {
+// necessary. `triggers` is authored comma-separated; `when_to_use` is free text
+// the host appends to the description, so it also accepts the "·" DotAIOS uses
+// when it writes that field itself.
+function readFrontmatterList(content, field, separator = ",") {
   const frontmatter = content.match(FRONTMATTER_RE)?.[1];
   if (!frontmatter) return [];
 
@@ -33,7 +40,7 @@ function readFrontmatterList(content, field) {
 
   const inlineValue = lines[fieldIndex].match(fieldPattern)?.[1].trim();
   if (inlineValue) {
-    return unquoteScalar(inlineValue).split(",").map(unquoteScalar).filter(Boolean);
+    return unquoteScalar(inlineValue).split(separator).map(unquoteScalar).filter(Boolean);
   }
 
   const values = [];
@@ -75,12 +82,74 @@ export async function collectSkills(aiosPath) {
       dir: entry.name,
       name: readFrontmatterField(content, "name") || entry.name,
       description: readFrontmatterField(content, "description"),
-      triggers: readFrontmatterList(content, "triggers")
+      triggers: readFrontmatterList(content, "triggers"),
+      whenToUse: readFrontmatterList(content, "when_to_use", TRIGGER_SEPARATOR_RE)
     });
   }
 
   skills.sort((a, b) => a.name.localeCompare(b.name));
   return skills;
+}
+
+// Hosts route on a listing built from `description` (+ `when_to_use` where the
+// host documents it). DotAIOS has always authored routing phrases as
+// `triggers:`, which no host reads — so the phrases that make
+// `dotaios skills resolve` deterministic stayed invisible to the agent actually
+// choosing the skill. Report every skill in that state. Preview only: this
+// plans the edit, it never writes.
+export async function planTriggerVisibility(aiosPath) {
+  const skills = await collectSkills(aiosPath);
+  return skills
+    .filter((skill) => skill.triggers.length > 0 && skill.whenToUse.length === 0)
+    .map((skill) => ({
+      dir: skill.dir,
+      name: skill.name,
+      path: path.join(aiosPath, "skills", skill.dir, "SKILL.md"),
+      whenToUse: skill.triggers.join(TRIGGER_JOINER)
+    }));
+}
+
+// Routing phrases are the user's own words, so the writer has to survive their
+// punctuation. A YAML plain scalar cannot hold ": " or " #", cannot open with an
+// indicator character, and cannot carry leading or trailing space — any of those
+// makes the whole frontmatter unparseable, which drops the skill from the very
+// host listing this field exists to reach. Fall back to a double-quoted scalar;
+// JSON's escape set is a subset of YAML's, and `unquoteScalar` strips the pair
+// back off on read.
+const YAML_PLAIN_UNSAFE_RE = /^[-?:,[\]{}#&*!|>'"%@`]|:\s|\s#|[\n\r\t]/;
+
+function yamlScalar(value) {
+  const unsafe = value === "" || value !== value.trim() || YAML_PLAIN_UNSAFE_RE.test(value);
+  return unsafe ? JSON.stringify(value) : value;
+}
+
+// Apply a plan produced by planTriggerVisibility. Appends one `when_to_use:`
+// line to the frontmatter and touches nothing else — the existing `triggers:`
+// list stays authoritative for DotAIOS's own resolver, and the body is never
+// rewritten. Skills absent from the supplied plan are never opened.
+export async function applyTriggerVisibility(aiosPath, plan) {
+  const written = [];
+
+  for (const entry of plan) {
+    const content = await fs.readFile(entry.path, "utf8");
+    const frontmatter = content.match(FRONTMATTER_RE);
+    if (!frontmatter) continue;
+    if (/^when_to_use:/m.test(frontmatter[1])) continue;
+
+    // Both replacements take a function, not a string: `$&`, `` $` ``, `$'` and
+    // `$$` in a routing phrase would otherwise expand as replacement patterns
+    // and splice the frontmatter into itself. The captured newline is reused so
+    // a CRLF-authored file does not come back with mixed line endings.
+    const line = `when_to_use: ${yamlScalar(entry.whenToUse)}`;
+    const updated = content.replace(FRONTMATTER_RE, (block) =>
+      block.replace(/(\r?\n)---$/, (_match, eol) => `${eol}${line}${eol}---`)
+    );
+
+    await fs.writeFile(entry.path, updated);
+    written.push(entry);
+  }
+
+  return written;
 }
 
 // Render the human- and agent-readable skills index.

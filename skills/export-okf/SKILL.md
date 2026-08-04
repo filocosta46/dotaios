@@ -2,6 +2,7 @@
 name: export-okf
 triggers: export to okf, export my knowledge, make an okf bundle, open knowledge format, export my context, share my vault
 description: Use when the user wants to export their DotAIOS knowledge into an Open Knowledge Format (OKF) bundle, or asks to produce, share, or hand off a portable copy of their context/vault/projects. Gates any external sharing behind the user's own decision.
+when_to_use: export to okf · export my knowledge · make an okf bundle · open knowledge format · export my context · share my vault
 ---
 
 # export-okf

@@ -8,10 +8,18 @@ import assert from "node:assert/strict";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
-function run(args) {
+// Every spawn gets an isolated HOME. `createContext` (packages/core/src/projects.mjs)
+// falls back to `os.homedir()/.dotaios/projects.json` whenever `--home` is absent,
+// so a single call that forgets the flag writes the machine's real project registry.
+// Defence in depth: pin HOME here too, not only the flag, so a missing `--home`
+// costs a failed assertion instead of the developer's own state.
+const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-cli-home-"));
+
+function run(args, { home = sandboxHome } = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env: { ...process.env, HOME: home }
   });
   assert.equal(
     result.status,

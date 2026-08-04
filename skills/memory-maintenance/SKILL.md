@@ -2,6 +2,7 @@
 name: memory-maintenance
 triggers: is my memory still accurate, clean up my memory, my context is out of date, retire stale facts, memory maintenance, curate my memory
 description: Find claims in this AIOS that have gone stale or contradict each other, then retire them by superseding — so memory stays true instead of just growing.
+when_to_use: is my memory still accurate · clean up my memory · my context is out of date · retire stale facts · memory maintenance · curate my memory
 ---
 
 # memory-maintenance

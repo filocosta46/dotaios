@@ -2,6 +2,7 @@
 name: save-session
 triggers: save this session, save to memory, remember this session, log this work session
 description: Save the current AI conversation as a clean local session summary with decisions, open threads, and action items.
+when_to_use: save this session · save to memory · remember this session · log this work session
 ---
 
 # save-session

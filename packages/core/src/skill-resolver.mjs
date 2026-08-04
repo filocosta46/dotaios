@@ -60,14 +60,20 @@ function scoreOne(skill, intent, intentTokens) {
   let score = 0;
   let reason = "";
 
+  // Take the BEST trigger, never the sum. Accumulating meant a skill that
+  // declared five near-duplicate triggers outranked one that declared a single
+  // exact trigger, purely on count — "start my day" was lifting `closeday`
+  // because two of its triggers each scored on the shared token "day".
   const triggerHits = [];
+  let bestTrigger = 0;
   for (const trigger of skill.triggers || []) {
     const triggerTokens = uniqueTokens(trigger);
     const overlap = tokenOverlap(intentTokens, triggerTokens);
     if (overlap > 0) triggerHits.push({ trigger, overlap });
     const sub = substringBonus(intentLower, trigger.toLowerCase());
-    score += overlap + sub;
+    bestTrigger = Math.max(bestTrigger, overlap + sub);
   }
+  score += bestTrigger;
 
   const descTokens = uniqueTokens(skill.description);
   const descOverlap = Math.min(tokenOverlap(intentTokens, descTokens), 0.5);
@@ -107,27 +113,30 @@ export function rankSkills(intent, skills, { skillsDir } = {}) {
 
   scored.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
-    // Specificity: a skill with more declared triggers wins.
-    const at = a.triggers.length;
-    const bt = b.triggers.length;
-    if (bt !== at) return bt - at;
+    // Deterministic tiebreak only. Trigger count deliberately plays no part:
+    // rewarding it here would reintroduce the padding bias the scorer removes.
     return a.name.localeCompare(b.name);
   });
 
   return scored;
 }
 
-// Return the single best match, or null when nothing clears the bar. The
-// confidence is the score normalized to a 0..1 display value (exact-name hits
-// show as 1.0).
+// Return the single best match, or null when nothing clears the bar.
+//
+// `confidence` is SEPARATION, not magnitude: how far the winner stands clear of
+// the runner-up, in 0..1. The old value was `Math.min(1, score)`, which
+// saturated — a 1.68 winner and a 1.10 runner-up both displayed 1.00, so no
+// caller could gate on it. Now a lone match reports 1, a two-way tie reports
+// ~0.5, and the raw `score` is still available for callers that want magnitude.
 export function resolveIntent(intent, skills, options = {}) {
   const ranked = rankSkills(intent, skills, options);
   if (ranked.length === 0) return null;
   const best = ranked[0];
-  return {
-    ...best,
-    confidence: best.score >= EXACT_NAME_BONUS ? 1 : Math.min(1, best.score)
-  };
+  if (best.score >= EXACT_NAME_BONUS) return { ...best, confidence: 1 };
+
+  const runnerUp = ranked[1]?.score ?? 0;
+  const total = best.score + runnerUp;
+  return { ...best, confidence: total > 0 ? best.score / total : 1 };
 }
 
 // Render Markdown prompt context for fleet scripts and other non-IDE consumers.
