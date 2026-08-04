@@ -64,6 +64,51 @@ export function parsePorcelainZ(stdout) {
   return paths;
 }
 
+// Git records a directory that contains its own `.git` as a *gitlink* — index
+// mode 160000, a bare commit pointer — and it does so with a warning on stderr
+// and an exit code of 0. Nothing about that is visible to a caller that only
+// checks the exit code, so the commit succeeds, the push succeeds, and a clone
+// of the mirror contains an empty directory where the user's project should be.
+// Worse, `git status` is then clean, so no later run can notice either.
+//
+// Parse `git ls-files -s` ("<mode> <object> <stage>\t<path>") and report every
+// gitlink so the caller can refuse before anything is committed.
+export function findGitlinks(lsFilesStdout) {
+  if (!lsFilesStdout) return [];
+  const paths = [];
+  for (const line of lsFilesStdout.split("\n")) {
+    if (!line.startsWith("160000 ")) continue;
+    const tab = line.indexOf("\t");
+    if (tab === -1) continue;
+    const path = line.slice(tab + 1).trim();
+    if (path) paths.push(path);
+  }
+  return paths;
+}
+
+export function nestedRepoMessage(paths) {
+  const list = paths.map((p) => `  ${p}`).join("\n");
+  return [
+    paths.length === 1
+      ? "Cannot sync: a project inside your AIOS folder has its own Git repository."
+      : "Cannot sync: some projects inside your AIOS folder have their own Git repository.",
+    "",
+    list,
+    "",
+    "Git would store only a pointer, not the files. The push would look like it",
+    "worked while none of that code actually reached the mirror — and a copy of",
+    "your folder on another machine would find those directories empty.",
+    "",
+    "Nothing was committed. Your files have not been changed.",
+    "",
+    "Move the project outside your AIOS folder and register it instead:",
+    "  dotaios project add <path-to-project>",
+    "",
+    "The project keeps its own Git history and its own remote; DotAIOS records",
+    "where it lives so it can be restored on your other machines."
+  ].join("\n");
+}
+
 export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, accessToken = null } = {}) {
   const gitEnv = accessToken
     ? { ...env, ...SYNC_GIT_IDENTITY, DOTAIOS_SYNC_TOKEN: accessToken }
@@ -119,6 +164,19 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, ac
       if (addResult.code !== 0) {
         throw new Error(`git add failed: ${redactToken(addResult.stderr.trim())}`);
       }
+      // `git add` exits 0 for a nested repository, so the exit code above proves
+      // nothing about what actually landed in the index. Inspect the index
+      // itself before any commit can be built from it.
+      const indexed = await run(["ls-files", "-s"]);
+      const gitlinks = findGitlinks(indexed.stdout);
+      if (gitlinks.length > 0) {
+        // Unstage only what we just staged, returning the index to the state we
+        // found it in. `git rm --cached` is not usable here: it errors when the
+        // staged content differs from HEAD.
+        await run(["reset", "--quiet", "--", ...paths]);
+        throw new Error(nestedRepoMessage(gitlinks));
+      }
+
       const staged = await run(["diff", "--cached", "--quiet"]);
       if (staged.code === 0) return null;
       const commit = await run(["commit", "-m", message]);

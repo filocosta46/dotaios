@@ -113,6 +113,10 @@ test("commitAll() stages explicit paths (never git add -A) and returns sha", asy
       if (full.startsWith("git add --")) {
         return Promise.resolve({ stdout: "", stderr: "", code: 0 });
       }
+      if (full.includes("ls-files -s")) {
+        // An ordinary blob, not a gitlink — the nested-repo guard lets it pass.
+        return Promise.resolve({ stdout: "100644 abc123 0\tfile.md\n", stderr: "", code: 0 });
+      }
       if (full.includes("diff --cached --quiet")) {
         return Promise.resolve({ stdout: "", stderr: "", code: 1 }); // changes present
       }

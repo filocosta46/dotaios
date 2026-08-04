@@ -6,6 +6,13 @@ const LOCK_RETRY_MS = 50;
 const LOCK_WAIT_MS = 5_000;
 const SYNC_CONFLICT_SUMMARY =
   "Sync stopped because local and remote changes overlap. Your pre-existing edits were preserved. DotAIOS recorded the conflict locally and did not create a recovery branch, reset files, or push. Ask your agent to resolve it safely, then run `dotaios sync now` again.";
+// Git reported changes in the folder, but staging them produced nothing to
+// commit. The usual cause is a nested project repository: its own commits move
+// while the pointer recorded in this repo does not, so every tick sees a dirty
+// tree, stages nothing, and used to report success. Left silent this repeats
+// forever while the user's work is never mirrored.
+const SYNC_STALLED_SUMMARY =
+  "Sync found changes in your folder but had nothing it could record. This usually means a project inside your AIOS folder has its own Git repository, which Git stores as a pointer rather than as files. Run `dotaios doctor` to see which paths are affected. Nothing was lost, and nothing was pushed.";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -97,8 +104,12 @@ export async function runTick({
 
     // 1. Commit local changes FIRST — rebase refuses to run on a dirty tree.
     let pushedSha = null;
+    let stalled = false;
     if (await git.dirty()) {
       pushedSha = await git.commitAll(`sync: ${startedIso}`);
+      // dirty() saw changes and commitAll could stage none of them. Record it —
+      // writing last_error: null here is what made the stall invisible.
+      stalled = pushedSha === null;
     }
 
     // 2. Pull by rebasing the local commit(s) on top of origin.
@@ -152,12 +163,13 @@ export async function runTick({
       last_tick_at: startedIso,
       last_push_sha: pushed ? pushedHead : (cfg.last_push_sha ?? null),
       last_pull_at: startedIso,
-      last_error: null
+      last_error: stalled ? SYNC_STALLED_SUMMARY : null
     });
 
     return {
       pulled: pullResult,
       pushed,
+      stalled,
       sha: pushed ? pushedHead : null
     };
   } catch (err) {
