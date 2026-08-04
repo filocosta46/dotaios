@@ -95,6 +95,7 @@ export async function setupCommand(args) {
     await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome });
   } catch (err) {
     activateOk = false;
+    process.exitCode = 1;
     await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
     console.error(`Step 2 failed: ${err.message}`);
     console.error("Re-run: dotaios activate to retry connecting your tools.");
@@ -203,66 +204,76 @@ export async function setupCommand(args) {
   await emitPilotMetric(aiosPath, {
     type: "install_end",
     command: "setup",
-    outcome: activateOk && configuredContextCount > 0 ? "ok" : "warn",
+    outcome: activateOk ? (configuredContextCount > 0 ? "ok" : "warn") : "fail",
     run_id: runId,
     duration_ms: Date.now() - startedAt
   });
 }
 
-// Everything `dotaios init` itself writes at the top level of the AIOS folder.
-// A folder holding only these and no aios.json is the debris of an install
-// that died halfway, not a place the user keeps their own things.
-const GENERATED_TOP_LEVEL = new Set([
-  ".cursorrules",
-  ".env.example",
-  ".gitignore",
-  "AGENTS.md",
-  "CLAUDE.md",
-  "FIRST_SESSION.md",
-  "README.md",
-  "aios.json",
-  "archives",
-  "connections",
-  "context",
-  "decisions",
-  "memory",
-  "plugins",
-  "projects",
-  "schedules.yml",
-  "skills",
-  "vault"
-]);
-
 // The retry we print on failure is `dotaios setup`, so that retry has to be
-// able to get past the debris of the run that failed. One --force attempt
-// clears an unfinished DotAIOS folder; every other cause fails closed, so the
-// real error still reaches the user.
+// able to get past the exact residue created by setup 1.27.1. One --force
+// attempt completes that known partial install; every other cause fails closed,
+// so user-authored content can never be mistaken for generated debris.
 async function runInitWithRecovery(passthrough, aiosPath) {
   try {
     await initCommand(passthrough);
     return;
   } catch (error) {
     if (!/exists and is not empty/i.test(error.message)) throw error;
-    if (!(await isUnfinishedAiosFolder(aiosPath))) throw error;
+    if (!(await isFailedSetupResidue(aiosPath))) throw error;
     await initCommand([...passthrough, "--force"]);
     console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
   }
 }
 
-async function isUnfinishedAiosFolder(aiosPath) {
-  // aios.json marks a finished folder. Forcing over one would bury the honest
-  // "you already have an AIOS here" under a fake success, and forcing over a
-  // folder awaiting a versioned migration is exactly what init refuses to do.
-  if (await pathExists(path.join(aiosPath, "aios.json"))) return false;
+async function isFailedSetupResidue(aiosPath) {
+  const memoryPath = path.join(aiosPath, "memory");
+  const metricsPath = path.join(memoryPath, "metrics");
+  const pilotPath = path.join(metricsPath, "pilot.jsonl");
 
-  let entries;
+  let rootEntries;
+  let memoryEntries;
+  let metricsEntries;
+  let contents;
   try {
-    entries = await fs.readdir(aiosPath);
+    rootEntries = await fs.readdir(aiosPath, { withFileTypes: true });
+    memoryEntries = await fs.readdir(memoryPath, { withFileTypes: true });
+    metricsEntries = await fs.readdir(metricsPath, { withFileTypes: true });
+    contents = await fs.readFile(pilotPath, "utf8");
   } catch {
     return false;
   }
-  if (entries.length === 0) return false;
-  return entries.every((entry) => GENERATED_TOP_LEVEL.has(entry));
+
+  if (rootEntries.length !== 1 || rootEntries[0].name !== "memory" || !rootEntries[0].isDirectory()) return false;
+  if (memoryEntries.length !== 1 || memoryEntries[0].name !== "metrics" || !memoryEntries[0].isDirectory()) return false;
+  if (metricsEntries.length !== 1 || metricsEntries[0].name !== "pilot.jsonl" || !metricsEntries[0].isFile()) return false;
+
+  const lines = contents.split(/\r?\n/);
+  if (lines.at(-1) === "") lines.pop();
+  if (lines.length === 0 || lines.some((line) => line.trim() === "")) return false;
+
+  let metrics;
+  try {
+    metrics = lines.map((line) => JSON.parse(line));
+  } catch {
+    return false;
+  }
+
+  const isFailedInitEnd = (metric) =>
+    metric.type === "setup_phase_end"
+      && metric.phase === "init"
+      && metric.outcome === "fail";
+  const isKnownFailedInitMetric = (metric) => {
+    if (!metric || typeof metric !== "object" || Array.isArray(metric)) return false;
+    if (metric.type === "setup_phase_start") return metric.phase === "init";
+    if (isFailedInitEnd(metric)) return true;
+    return metric.type === "install_end"
+      && metric.command === "setup"
+      && metric.phase === "init"
+      && metric.outcome === "fail";
+  };
+
+  return metrics.every(isKnownFailedInitMetric) && metrics.some(isFailedInitEnd);
 }
 
 async function setupLightpanda({ nonInteractive, installRequested }) {

@@ -25,10 +25,12 @@ const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
 function makeSandbox(label) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `dotaios-${label}-`));
+  const processHomePath = path.join(root, "process-home");
   const homePath = path.join(root, "home");
   const aiosPath = path.join(root, "aios");
+  fs.mkdirSync(processHomePath, { recursive: true });
   fs.mkdirSync(homePath, { recursive: true });
-  return { root, homePath, aiosPath };
+  return { root, processHomePath, homePath, aiosPath };
 }
 
 // stdin is "ignore" so process.stdin.isTTY is undefined — the exact shape of a
@@ -40,7 +42,7 @@ function runSetup(sandbox, args) {
     stdio: ["ignore", "pipe", "pipe"],
     // PATH is trimmed for the same reason setup.test.mjs trims it:
     // resolveLightpanda falls back to `which lightpanda`.
-    env: { ...process.env, HOME: sandbox.homePath, PATH: "/usr/bin:/bin" }
+    env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin" }
   });
 }
 
@@ -79,6 +81,28 @@ test("a failed setup does not create the AIOS folder", () => {
       fs.existsSync(sandbox.aiosPath) ? JSON.stringify(listTree(sandbox.aiosPath)) : ""
     }`
   );
+});
+
+test("an activation failure exits non-zero and records a failed install", () => {
+  const sandbox = makeSandbox("setup-activate-exit");
+  const invalidHomePath = path.join(sandbox.root, "home-is-a-file");
+  fs.writeFileSync(invalidHomePath, "not a directory\n");
+
+  const result = runSetup(sandbox, ["--yes", "--all", "--home", invalidHomePath]);
+
+  assert.ok(
+    fs.existsSync(path.join(sandbox.aiosPath, "aios.json")),
+    "init must finish before the invalid home makes activation fail"
+  );
+  assert.match(result.stderr, /Step 2 failed:/);
+  assert.notEqual(result.status, 0, "an activation failure must be observable to the caller");
+
+  const rows = fs.readFileSync(
+    path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl"),
+    "utf8"
+  ).trim().split("\n").map((line) => JSON.parse(line));
+  const installEnd = rows.findLast((row) => row.type === "install_end");
+  assert.equal(installEnd?.outcome, "fail", "a failed activation is a failed install, not a warning");
 });
 
 test("the retry after a failed setup reports the original error, not a folder collision", () => {
@@ -125,6 +149,57 @@ test("setup completes on a folder an earlier failed run left half-made", () => {
   assert.match(fs.readFileSync(path.join(metricsDir, "pilot.jsonl"), "utf8"), /"outcome":"fail"/);
 });
 
+test("setup refuses malformed failed-run residue", () => {
+  const sandbox = makeSandbox("setup-malformed-residue");
+  const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl");
+  fs.mkdirSync(path.dirname(metricsFile), { recursive: true });
+  fs.writeFileSync(metricsFile, "{not valid json}\n");
+
+  const result = runSetup(sandbox, ["--yes"]);
+
+  assert.notEqual(result.status, 0, "malformed metrics do not prove this is safe setup residue");
+  assert.match(result.stderr, /already exists and is not empty/);
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+  assert.match(fs.readFileSync(metricsFile, "utf8"), /^\{not valid json\}\n/);
+});
+
+test("setup refuses failed-run metrics mixed with an unknown JSON row", () => {
+  const sandbox = makeSandbox("setup-foreign-metric");
+  const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl");
+  fs.mkdirSync(path.dirname(metricsFile), { recursive: true });
+  fs.writeFileSync(metricsFile, [
+    JSON.stringify({ type: "setup_phase_end", phase: "init", outcome: "fail" }),
+    JSON.stringify({ type: "private_note", text: "not setup residue" })
+  ].join("\n") + "\n");
+
+  const result = runSetup(sandbox, ["--yes"]);
+
+  assert.notEqual(result.status, 0, "an unknown JSON row must make recovery fail closed");
+  assert.match(result.stderr, /already exists and is not empty/);
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+  assert.match(fs.readFileSync(metricsFile, "utf8"), /"type":"private_note"/);
+});
+
+test("setup refuses failed-run residue when any extra file is present", () => {
+  const sandbox = makeSandbox("setup-extra-residue");
+  const metricsDir = path.join(sandbox.aiosPath, "memory", "metrics");
+  const metricsFile = path.join(metricsDir, "pilot.jsonl");
+  const extraFile = path.join(metricsDir, "private-notes.md");
+  fs.mkdirSync(metricsDir, { recursive: true });
+  fs.writeFileSync(
+    metricsFile,
+    `${JSON.stringify({ type: "setup_phase_end", phase: "init", outcome: "fail" })}\n`
+  );
+  fs.writeFileSync(extraFile, "keep me\n");
+
+  const result = runSetup(sandbox, ["--yes"]);
+
+  assert.notEqual(result.status, 0, "only the exact 1.27.1 residue shape may be recovered");
+  assert.match(result.stderr, /already exists and is not empty/);
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+  assert.equal(fs.readFileSync(extraFile, "utf8"), "keep me\n");
+});
+
 test("setup refuses to auto-force a complete AIOS folder", () => {
   const sandbox = makeSandbox("setup-healthy");
   const first = runSetup(sandbox, ["--yes"]);
@@ -150,6 +225,20 @@ test("setup refuses to auto-force a folder holding foreign content", () => {
   assert.notEqual(result.status, 0, "a folder with the user's own files must fail closed");
   assert.match(result.stderr, /already exists and is not empty/);
   assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+});
+
+test("setup refuses foreign content nested under a generated folder name", () => {
+  const sandbox = makeSandbox("setup-nested-foreign");
+  const foreignFile = path.join(sandbox.aiosPath, "projects", "client-work", "private-notes.md");
+  fs.mkdirSync(path.dirname(foreignFile), { recursive: true });
+  fs.writeFileSync(foreignFile, "private client notes\n");
+
+  const result = runSetup(sandbox, ["--yes"]);
+
+  assert.notEqual(result.status, 0, "foreign nested content must fail closed");
+  assert.match(result.stderr, /already exists and is not empty/);
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+  assert.equal(fs.readFileSync(foreignFile, "utf8"), "private client notes\n");
 });
 
 test("a folder needing migration surfaces the migration error, not the retry", () => {
@@ -190,7 +279,7 @@ test("pilot-score still creates its metrics directory", () => {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, HOME: sandbox.homePath, PATH: "/usr/bin:/bin" }
+    env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin" }
   });
 
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);

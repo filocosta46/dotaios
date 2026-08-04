@@ -23,11 +23,14 @@ function run(args, opts = {}) {
 test("setup/search/capture emit pilot metrics jsonl", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-pilot-metrics-"));
   const aiosPath = path.join(tempRoot, "aios");
+  const processHomePath = path.join(tempRoot, "process-home");
+  const activationHomePath = path.join(tempRoot, "activation-home");
   const convFile = path.join(tempRoot, "conv.md");
+  fs.mkdirSync(processHomePath, { recursive: true });
   fs.writeFileSync(convFile, "Human: hi\nAssistant: hello\n", "utf8");
 
-  run(["setup", "--path", aiosPath, "--yes", "--skip-reveal"], {
-    env: { ...process.env, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
+  run(["setup", "--path", aiosPath, "--home", activationHomePath, "--yes", "--skip-reveal"], {
+    env: { ...process.env, HOME: processHomePath, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
   });
   run(["search", "hello", "--path", aiosPath]);
   run(["capture", "import", "file", convFile, "--path", aiosPath]);
@@ -49,9 +52,12 @@ test("setup/search/capture emit pilot metrics jsonl", () => {
 test("setup emits phase start/end events with stable run_id", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-phases-"));
   const aiosPath = path.join(tempRoot, "aios");
+  const processHomePath = path.join(tempRoot, "process-home");
+  const activationHomePath = path.join(tempRoot, "activation-home");
+  fs.mkdirSync(processHomePath, { recursive: true });
 
-  run(["setup", "--path", aiosPath, "--yes", "--skip-reveal"], {
-    env: { ...process.env, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
+  run(["setup", "--path", aiosPath, "--home", activationHomePath, "--yes", "--skip-reveal"], {
+    env: { ...process.env, HOME: processHomePath, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
   });
 
   const metricsFile = path.join(aiosPath, "memory", "metrics", "pilot.jsonl");
