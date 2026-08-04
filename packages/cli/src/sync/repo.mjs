@@ -19,6 +19,16 @@ export function plainRemoteUrl(fullName) {
   return `https://github.com/${fullName}.git`;
 }
 
+// A body we cannot parse must not be read as consent. Callers treat null as
+// "unknown", which fails closed.
+async function readJsonSafe(res) {
+  try {
+    return typeof res.json === "function" ? await res.json() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function pollForRepoExists({
   accessToken,
   fullName,
@@ -37,6 +47,21 @@ export async function pollForRepoExists({
   while (now() - startedAt < timeoutMs) {
     const res = await fetchImpl(`https://api.github.com/repos/${fullName}`, { headers });
     if (res.ok) {
+      // `visibility=private` in the create URL is only a prefill on a page the
+      // user drives, and a repo can be flipped public later. Everything sync
+      // carries — identity, clients, decisions, session transcripts — is
+      // confidential only if this is true, so read it rather than assume it.
+      // A response that does not say is treated as not-private on purpose:
+      // silence must never be read as a privacy guarantee.
+      const repo = await readJsonSafe(res);
+      if (repo?.private !== true) {
+        throw new Error(
+          `the repo ${fullName} is public. DotAIOS will not sync your personal ` +
+          `context to a public repository. On github.com open the repo, go to ` +
+          `Settings, and change its visibility to Private — then re-run ` +
+          `"dotaios sync setup".`
+        );
+      }
       // Repo exists. Confirm it is EMPTY — pushing the initial mirror to a repo
       // that already has commits (the user ticked "Add a README" etc. on the
       // create page) is rejected non-fast-forward, and setup would die with a

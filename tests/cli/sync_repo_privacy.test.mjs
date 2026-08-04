@@ -1,0 +1,54 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+import { pollForRepoExists } from "../../packages/cli/src/sync/repo.mjs";
+
+// `visibility: private` in buildCreateRepoUrl is only a query-string prefill on
+// github.com/new — a page the user drives and can change, and a setting they can
+// flip afterwards. The whole confidentiality story of sync rests on that repo
+// actually being private, so it has to be read from the API rather than assumed.
+
+function githubStub({ private: isPrivate, repoOk = true } = {}) {
+  return async (url) => {
+    if (url.endsWith("/commits")) return { ok: false, status: 409, json: async () => ({}) };
+    return {
+      ok: repoOk,
+      status: repoOk ? 200 : 404,
+      json: async () => ({ full_name: "user/user-aios", private: isPrivate })
+    };
+  };
+}
+
+const base = {
+  accessToken: "T",
+  fullName: "user/user-aios",
+  sleep: async () => {},
+  now: () => 0,
+  timeoutMs: 1000
+};
+
+test("a private repo is accepted", async () => {
+  const ok = await pollForRepoExists({ ...base, fetchImpl: githubStub({ private: true }) });
+  assert.equal(ok, true);
+});
+
+test("a PUBLIC repo is refused, and the message says why it matters", async () => {
+  await assert.rejects(
+    () => pollForRepoExists({ ...base, fetchImpl: githubStub({ private: false }) }),
+    (err) => {
+      assert.match(err.message, /public/i, "the message names the problem");
+      assert.match(err.message, /user\/user-aios/, "the message names the repo");
+      return true;
+    },
+    "setup must not proceed against a public repo"
+  );
+});
+
+test("a repo whose privacy cannot be determined is refused rather than assumed", async () => {
+  // A response missing the field entirely must not be read as private.
+  const fetchImpl = async (url) => {
+    if (url.endsWith("/commits")) return { ok: false, status: 409, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => ({ full_name: "user/user-aios" }) };
+  };
+  await assert.rejects(() => pollForRepoExists({ ...base, fetchImpl }));
+});

@@ -33,7 +33,7 @@ test("pollForRepoExists resolves once the repo exists and is empty", async () =>
       // empty repo -> GitHub returns 409 for the commits list
       if (url.endsWith("/commits")) return { ok: false, status: 409, json: async () => ({}) };
       repoCalls += 1;
-      return { ok: repoCalls >= 2, status: repoCalls >= 2 ? 200 : 404, json: async () => ({}) };
+      return { ok: repoCalls >= 2, status: repoCalls >= 2 ? 200 : 404, json: async () => ({ private: true }) };
     },
     sleep: () => Promise.resolve(),
     timeoutMs: 60_000,
@@ -51,7 +51,9 @@ test("pollForRepoExists rejects a repo that was created with files in it", async
         if (url.endsWith("/commits")) {
           return { ok: true, status: 200, json: async () => [{ sha: "abc" }] };
         }
-        return { ok: true, status: 200, json: async () => ({}) };
+        // Private, so this test still exercises the not-empty rejection rather
+        // than tripping the privacy guard first.
+        return { ok: true, status: 200, json: async () => ({ private: true }) };
       },
       sleep: () => Promise.resolve(),
       timeoutMs: 60_000,
