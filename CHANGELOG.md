@@ -2,6 +2,25 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [Unreleased]
+
+### Fixed
+
+- **Sync no longer reports success when Git cannot mirror a nested project.**
+  Gitlink pointers are refused before commit, an index inspection failure stops
+  safely, and a dirty tree that cannot stage content now exits non-zero instead
+  of printing “already up to date.”
+- **Every manual sync re-verifies that the GitHub mirror is private.** A mirror
+  changed to public—or whose visibility cannot be confirmed—is rejected before
+  DotAIOS commits, pulls, or pushes personal context.
+- **Setup now reports activation failures to callers.** Step-one and step-two
+  failures exit non-zero, failed activation is recorded as a failed install,
+  and retry recovery accepts only the exact failed-install residue produced by
+  1.27.1 rather than treating arbitrary user files as generated content.
+- **Activation preserves user-authored bridge content.** DotAIOS replaces only
+  its managed block, keeps surrounding bytes intact, and writes the original
+  bridge to a one-time `.dotaios-backup` before the first splice.
+
 ## [1.27.1] - 2026-08-04
 
 ### Removed
