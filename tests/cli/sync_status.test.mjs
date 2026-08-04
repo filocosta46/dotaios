@@ -69,6 +69,21 @@ test("renderStatus makes a failed remote check visible", () => {
   assert.match(out, /git ls-remote failed/);
 });
 
+test("renderStatus never reports MATCH after the last sync failed", () => {
+  const out = renderStatus({
+    access_token: "T",
+    username: "alice",
+    repo_full_name: "alice/alice-aios",
+    last_push_sha: "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1",
+    last_error: "Sync found changes but could not record them."
+  }, {
+    sha: "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1"
+  });
+
+  assert.doesNotMatch(out, /Remote parity:\s+MATCH/);
+  assert.match(out, /Remote parity:\s+UNKNOWN/);
+});
+
 test("runStatus authenticates remoteHead with the sync token (plain remotes need it)", async () => {
   const { runStatus } = await import("../../packages/cli/src/sync/status-cmd.mjs");
   const calls = [];

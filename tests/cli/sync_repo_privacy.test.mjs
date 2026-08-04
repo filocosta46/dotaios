@@ -1,7 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { pollForRepoExists } from "../../packages/cli/src/sync/repo.mjs";
+import * as repo from "../../packages/cli/src/sync/repo.mjs";
+
+const { pollForRepoExists } = repo;
 
 // `visibility: private` in buildCreateRepoUrl is only a query-string prefill on
 // github.com/new — a page the user drives and can change, and a setting they can
@@ -51,4 +53,36 @@ test("a repo whose privacy cannot be determined is refused rather than assumed",
     return { ok: true, status: 200, json: async () => ({ full_name: "user/user-aios" }) };
   };
   await assert.rejects(() => pollForRepoExists({ ...base, fetchImpl }));
+});
+
+test("sync privacy verification accepts only an explicit private response", async () => {
+  assert.equal(typeof repo.verifyRepoPrivate, "function");
+  await assert.doesNotReject(() => repo.verifyRepoPrivate({
+    accessToken: "T",
+    fullName: "user/user-aios",
+    fetchImpl: githubStub({ private: true })
+  }));
+});
+
+test("sync privacy verification fails closed for public, non-OK, and unparseable responses", async () => {
+  assert.equal(typeof repo.verifyRepoPrivate, "function");
+  await assert.rejects(() => repo.verifyRepoPrivate({
+    accessToken: "T",
+    fullName: "user/user-aios",
+    fetchImpl: githubStub({ private: false })
+  }), /public/i);
+  await assert.rejects(() => repo.verifyRepoPrivate({
+    accessToken: "T",
+    fullName: "user/user-aios",
+    fetchImpl: githubStub({ repoOk: false })
+  }), /could not verify/i);
+  await assert.rejects(() => repo.verifyRepoPrivate({
+    accessToken: "T",
+    fullName: "user/user-aios",
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      json: async () => { throw new Error("invalid json"); }
+    })
+  }), /could not verify/i);
 });

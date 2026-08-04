@@ -136,6 +136,42 @@ test("commitAll() stages explicit paths (never git add -A) and returns sha", asy
   assert.ok(!calls.some((c) => c.includes("add -A")), "must never use `git add -A`");
 });
 
+test("commitAll() refuses when the staged-index probe fails", async () => {
+  const calls = [];
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: (cmd, args) => {
+      const full = [cmd, ...args].join(" ");
+      calls.push(full);
+      if (full.includes("status --porcelain -z")) {
+        return Promise.resolve({ stdout: " M file.md\0", stderr: "", code: 0 });
+      }
+      if (full.startsWith("git add --")) {
+        return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      }
+      if (full.includes("ls-files -s")) {
+        return Promise.resolve({
+          stdout: "100644 abc123 0\tfile.md\n",
+          stderr: "fatal: x-access-token:ghu_SECRET@ probe failed",
+          code: 128
+        });
+      }
+      if (full.startsWith("git reset --quiet --")) {
+        return Promise.resolve({ stdout: "", stderr: "", code: 0 });
+      }
+      throw new Error(`unstubbed git call: ${full}`);
+    }
+  });
+
+  await assert.rejects(git.commitAll("sync"), (error) => {
+    assert.match(error.message, /index inspection failed/i);
+    assert.ok(!error.message.includes("ghu_SECRET"), "probe errors must redact tokens");
+    return true;
+  });
+  assert.ok(calls.some((call) => call.startsWith("git reset --quiet -- file.md")));
+  assert.ok(!calls.some((call) => call.includes("commit -m")), "unknown index state must not commit");
+});
+
 test("parsePorcelainZ stages rename destinations and skips the source field", () => {
   // R  new.md\0old.md\0 M other.md\0
   const stdout = "R  new.md\0old.md\0 M other.md\0";

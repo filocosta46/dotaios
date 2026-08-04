@@ -3,12 +3,19 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runTick, acquireLock, releaseLock } from "../../packages/cli/src/sync/tick.mjs";
+import { runTick as runTickImpl, acquireLock, releaseLock } from "../../packages/cli/src/sync/tick.mjs";
 import { appendSyncEvent, reportTickResult, runTickCommand } from "../../packages/cli/src/sync/tick-cmd.mjs";
 
 async function tmpLock() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-tick-"));
   return { lockPath: path.join(dir, "sync.lock"), dir };
+}
+
+function runTick(options) {
+  return runTickImpl({
+    verifyRepoPrivate: async () => true,
+    ...options
+  });
 }
 
 function makeGit({ branch = "main", dirty = false, pullResult = "up-to-date", commitSha = null, calls = [] } = {}) {
@@ -144,20 +151,75 @@ test("tick commits before pulling, then pushes when dirty and remote up-to-date"
     const calls = [];
     const result = await runTick({
       lockPath,
-      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      readConfig: async () => ({ access_token: "T", repo_full_name: "alice/alice-aios", last_tick_at: null }),
       writeConfig: async () => {},
       makeGit: () => makeGit({ dirty: true, pullResult: "up-to-date", commitSha: "deadbeef", calls }),
+      verifyRepoPrivate: async ({ accessToken, fullName }) => {
+        calls.push(`privacy:${accessToken}:${fullName}`);
+        return true;
+      },
       appendEvent: async () => {},
       now: () => Date.now()
     });
     assert.ok(calls.includes("pullRebase:main"));
     assert.ok(calls.includes("push:main"));
+    assert.ok(calls.indexOf("privacy:T:alice/alice-aios") < calls.indexOf("dirty"), "privacy is verified before mutation");
     const commitIdx = calls.findIndex((c) => c.startsWith("commit:sync:"));
     const pullIdx = calls.indexOf("pullRebase:main");
     assert.ok(commitIdx !== -1, "must commit local work");
     assert.ok(commitIdx < pullIdx, "commit must happen before the rebase pull");
     assert.equal(result.pushed, true);
     assert.equal(result.sha, "sha-current", "reported sha is HEAD after push, not the pre-rebase commit");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick refuses a public repo before mutating git", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({
+        access_token: "T",
+        repo_full_name: "alice/alice-aios",
+        last_tick_at: null
+      }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: true, commitSha: "sha", calls }),
+      verifyRepoPrivate: async () => {
+        throw new Error("the repo alice/alice-aios is public");
+      },
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+
+    assert.match(result.error, /public/i);
+    assert.deepEqual(calls, ["branch-current:main"], "privacy failure must precede every git mutation");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick fails closed when repo privacy is unknown", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({
+        access_token: "T",
+        repo_full_name: "alice/alice-aios",
+        last_tick_at: null
+      }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: true, commitSha: "sha", calls }),
+      verifyRepoPrivate: async () => {
+        throw new Error("could not verify that alice/alice-aios is private");
+      },
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+
+    assert.match(result.error, /could not verify/i);
+    assert.deepEqual(calls, ["branch-current:main"], "unknown privacy must precede every git mutation");
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
@@ -401,6 +463,27 @@ test("sync command reporting returns non-zero when the sync lock is held", () =>
 
     assert.equal(process.exitCode, 1);
     assert.match(logs.join("\n"), /another sync is already running/i);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = originalExitCode;
+  }
+});
+
+test("sync command reporting treats a stalled tick as a visible failure", () => {
+  const originalExitCode = process.exitCode;
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    process.exitCode = 0;
+    reportTickResult({
+      stalled: true,
+      pushed: false
+    });
+
+    assert.equal(process.exitCode, 1);
+    assert.doesNotMatch(logs.join("\n"), /already up to date/i);
+    assert.match(logs.join("\n"), /could not record|nothing it could record/i);
   } finally {
     console.log = originalLog;
     process.exitCode = originalExitCode;

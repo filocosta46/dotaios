@@ -168,12 +168,27 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, ac
       // nothing about what actually landed in the index. Inspect the index
       // itself before any commit can be built from it.
       const indexed = await run(["ls-files", "-s"]);
+      if (indexed.code !== 0) {
+        const reset = await run(["reset", "--quiet", "--", ...paths]);
+        const resetWarning = reset.code === 0
+          ? ""
+          : ` The staged paths could not be reset: ${redactToken(reset.stderr.trim()) || `git reset exited ${reset.code}`}.`;
+        throw new Error(
+          `git index inspection failed: ${redactToken(indexed.stderr.trim()) || `git ls-files exited ${indexed.code}`}.${resetWarning}`
+        );
+      }
       const gitlinks = findGitlinks(indexed.stdout);
       if (gitlinks.length > 0) {
         // Unstage only what we just staged, returning the index to the state we
         // found it in. `git rm --cached` is not usable here: it errors when the
         // staged content differs from HEAD.
-        await run(["reset", "--quiet", "--", ...paths]);
+        const reset = await run(["reset", "--quiet", "--", ...paths]);
+        if (reset.code !== 0) {
+          throw new Error(
+            `${nestedRepoMessage(gitlinks)}\n\nWarning: Git could not unstage the refused paths: ` +
+            `${redactToken(reset.stderr.trim()) || `git reset exited ${reset.code}`}.`
+          );
+        }
         throw new Error(nestedRepoMessage(gitlinks));
       }
 

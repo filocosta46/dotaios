@@ -143,6 +143,7 @@ test("a dirty tree that stages nothing is reported, not silently called success"
     lockPath: path.join(dir, "sync.lock"),
     readConfig: async () => ({ access_token: "T", last_tick_at: null, last_push_sha: "abc1234" }),
     writeConfig: async (patch) => written.push(patch),
+    verifyRepoPrivate: async () => true,
     makeGit: () => ({
       currentBranch: async () => "main",
       dirty: async () => true,        // git sees changes
@@ -156,6 +157,7 @@ test("a dirty tree that stages nothing is reported, not silently called success"
   });
 
   assert.equal(result.stalled, true, "the stall is reported to the caller");
+  assert.match(result.error, /nothing it could record/i, "the stall is a user-visible failure");
   assert.equal(result.pushed, false);
   const cfg = written.find((w) => "last_error" in w);
   assert.ok(cfg?.last_error, "last_error is recorded instead of null");

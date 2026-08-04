@@ -28,7 +28,9 @@ export function renderStatus(cfg, remote = null) {
   if (cfg.last_error) lines.push(`  Last error:     ${cfg.last_error}`);
   if (remote?.sha) {
     lines.push(`  Remote main sha: ${remote.sha.slice(0, 7)}`);
-    if (!cfg.last_push_sha) {
+    if (cfg.last_error) {
+      lines.push("  Remote parity: UNKNOWN (last sync failed)");
+    } else if (!cfg.last_push_sha) {
       lines.push("  Remote parity: UNKNOWN (no recorded push sha)");
     } else if (cfg.last_push_sha === remote.sha) {
       lines.push("  Remote parity: MATCH");

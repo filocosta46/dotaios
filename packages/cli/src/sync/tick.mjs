@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { verifyRepoPrivate as defaultVerifyRepoPrivate } from "./repo.mjs";
 
 const MIN_TICK_GAP_MS = 10_000;
 const STALE_LOCK_MS = 5 * 60 * 1000;
@@ -11,7 +12,7 @@ const SYNC_CONFLICT_SUMMARY =
 // while the pointer recorded in this repo does not, so every tick sees a dirty
 // tree, stages nothing, and used to report success. Left silent this repeats
 // forever while the user's work is never mirrored.
-const SYNC_STALLED_SUMMARY =
+export const SYNC_STALLED_SUMMARY =
   "Sync found changes in your folder but had nothing it could record. This usually means a project inside your AIOS folder has its own Git repository, which Git stores as a pointer rather than as files. Run `dotaios doctor` to see which paths are affected. Nothing was lost, and nothing was pushed.";
 
 function delay(ms) {
@@ -73,6 +74,7 @@ export async function runTick({
   readConfig,
   writeConfig,
   makeGit,
+  verifyRepoPrivate = defaultVerifyRepoPrivate,
   appendEvent,
   now = () => Date.now()
 }) {
@@ -101,15 +103,25 @@ export async function runTick({
   const startedIso = new Date(now()).toISOString();
 
   try {
+    if (typeof verifyRepoPrivate !== "function") {
+      throw new Error("sync privacy verification is unavailable");
+    }
+    await verifyRepoPrivate({
+      accessToken: cfg.access_token,
+      fullName: cfg.repo_full_name
+    });
 
     // 1. Commit local changes FIRST — rebase refuses to run on a dirty tree.
     let pushedSha = null;
-    let stalled = false;
     if (await git.dirty()) {
       pushedSha = await git.commitAll(`sync: ${startedIso}`);
       // dirty() saw changes and commitAll could stage none of them. Record it —
       // writing last_error: null here is what made the stall invisible.
-      stalled = pushedSha === null;
+      if (pushedSha === null) {
+        const error = new Error(SYNC_STALLED_SUMMARY);
+        error.syncStalled = true;
+        throw error;
+      }
     }
 
     // 2. Pull by rebasing the local commit(s) on top of origin.
@@ -163,13 +175,13 @@ export async function runTick({
       last_tick_at: startedIso,
       last_push_sha: pushed ? pushedHead : (cfg.last_push_sha ?? null),
       last_pull_at: startedIso,
-      last_error: stalled ? SYNC_STALLED_SUMMARY : null
+      last_error: null
     });
 
     return {
       pulled: pullResult,
       pushed,
-      stalled,
+      stalled: false,
       sha: pushed ? pushedHead : null
     };
   } catch (err) {
@@ -180,7 +192,10 @@ export async function runTick({
     try {
       await appendEvent({ type: "sync-error", reason: err.message, at: startedIso });
     } catch { /* swallow */ }
-    return { error: err.message };
+    return {
+      error: err.message,
+      ...(err.syncStalled && { stalled: true, pushed: false, sha: null })
+    };
   } finally {
     try {
       await releaseLock(lockPath);

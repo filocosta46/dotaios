@@ -3,7 +3,8 @@ import { appendEventRecord } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, expandHome, syncConfigPath } from "../../../core/src/paths.mjs";
 import { readSyncConfig, writeSyncConfig } from "../../../core/src/sync-config.mjs";
 import { createGit } from "./git.mjs";
-import { runTick } from "./tick.mjs";
+import { runTick, SYNC_STALLED_SUMMARY } from "./tick.mjs";
+import { verifyRepoPrivate } from "./repo.mjs";
 import { readOptionValue } from "../lib/args.mjs";
 
 const LOCK_FILENAME = "sync.lock";
@@ -40,6 +41,7 @@ export async function runTickCommand(args = []) {
     readConfig: () => readSyncConfig(),
     writeConfig: (patch) => writeSyncConfig(patch),
     makeGit: () => createGit({ cwd: aiosPath, accessToken }),
+    verifyRepoPrivate,
     appendEvent: (evt) => appendSyncEvent(aiosPath, evt),
     now: () => Date.now()
   });
@@ -49,7 +51,7 @@ export async function runTickCommand(args = []) {
 }
 
 export function reportTickResult(result, args = []) {
-  if (result.conflict || result.error || result.skipped === "locked") {
+  if (result.conflict || result.error || result.stalled || result.skipped === "locked") {
     process.exitCode = 1;
   }
 
@@ -60,16 +62,16 @@ export function reportTickResult(result, args = []) {
 
   if (result.pushed) {
     console.log("DotAIOS is synced.");
-  } else if (result.conflict || result.error) {
+  } else if (result.conflict || result.error || result.stalled) {
     console.log("Sync stopped safely. Your pre-existing edits were preserved.");
-    console.log(`Reason: ${result.error || "local and remote changes overlap"}`);
+    console.log(`Reason: ${result.error || (result.stalled ? SYNC_STALLED_SUMMARY : "local and remote changes overlap")}`);
     if (result.event_log_error) {
       console.log(`Event log warning: ${result.event_log_error}`);
     }
     if (result.config_error) {
       console.log(`Sync state warning: ${result.config_error}`);
     }
-    console.log("Resolve the Git conflict, then run `dotaios sync now` again.");
+    console.log("Fix the issue above, then run `dotaios sync now` again.");
   } else if (result.skipped === "locked") {
     console.log("Sync did not run because another sync is already running.");
     console.log("Wait for it to finish, then run `dotaios sync now` again.");

@@ -29,6 +29,53 @@ async function readJsonSafe(res) {
   }
 }
 
+function publicRepoMessage(fullName, command) {
+  return (
+    `the repo ${fullName} is public. DotAIOS will not sync your personal ` +
+    `context to a public repository. On github.com open the repo, go to ` +
+    `Settings, and change its visibility to Private — then re-run ` +
+    `"${command}".`
+  );
+}
+
+/**
+ * Verify the configured mirror's current privacy before a sync mutates Git.
+ * Any response other than an explicit `private: true` is unknown and therefore
+ * refused. Setup polling remains separate because a 404 there means "keep
+ * waiting for the user to create the repo", not a completed sync check.
+ */
+export async function verifyRepoPrivate({ accessToken, fullName, fetchImpl = fetch }) {
+  if (!accessToken || !fullName) {
+    throw new Error("could not verify that the sync repository is private because the sync configuration is incomplete");
+  }
+
+  let res;
+  try {
+    res = await fetchImpl(`https://api.github.com/repos/${fullName}`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: "application/vnd.github+json",
+        "User-Agent": "dotaios-sync"
+      }
+    });
+  } catch {
+    throw new Error(`could not verify that ${fullName} is private. Sync stopped before changing Git.`);
+  }
+
+  if (!res?.ok) {
+    throw new Error(`could not verify that ${fullName} is private (GitHub returned ${res?.status ?? "an unknown response"}). Sync stopped before changing Git.`);
+  }
+
+  const repo = await readJsonSafe(res);
+  if (repo?.private === false) {
+    throw new Error(publicRepoMessage(fullName, "dotaios sync now"));
+  }
+  if (repo?.private !== true) {
+    throw new Error(`could not verify that ${fullName} is private. Sync stopped before changing Git.`);
+  }
+  return true;
+}
+
 export async function pollForRepoExists({
   accessToken,
   fullName,
@@ -55,12 +102,7 @@ export async function pollForRepoExists({
       // silence must never be read as a privacy guarantee.
       const repo = await readJsonSafe(res);
       if (repo?.private !== true) {
-        throw new Error(
-          `the repo ${fullName} is public. DotAIOS will not sync your personal ` +
-          `context to a public repository. On github.com open the repo, go to ` +
-          `Settings, and change its visibility to Private — then re-run ` +
-          `"dotaios sync setup".`
-        );
+        throw new Error(publicRepoMessage(fullName, "dotaios sync setup"));
       }
       // Repo exists. Confirm it is EMPTY — pushing the initial mirror to a repo
       // that already has commits (the user ticked "Add a README" etc. on the
