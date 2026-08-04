@@ -39,6 +39,10 @@ import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 const managedStart = MANAGED_START;
 const managedEnd = MANAGED_END;
 
+// Written next to a bridge file the first time DotAIOS splices into it, so a
+// user whose file predates splicing can always recover their original.
+const backupSuffix = ".dotaios-backup";
+
 export async function activateCommand(args) {
   if (hasHelpFlag(args)) {
     printActivateHelp();
@@ -497,16 +501,68 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
   }
 
   const current = await fs.readFile(destination, "utf8");
-  const managed = current.includes(managedStart) && current.includes(managedEnd);
-  if (!managed && !overwrite) {
-    return { action: "kept", path: destination, note: "existing unmanaged file" };
+  const existingBlock = findManagedBlock(current);
+
+  // No usable managed block: this is somebody else's file. Replacing it whole
+  // stays an explicit --overwrite decision.
+  if (!existingBlock) {
+    if (!overwrite) {
+      return { action: "kept", path: destination, note: "existing unmanaged file" };
+    }
+    if (!dryRun) {
+      await fs.writeFile(destination, content);
+    }
+    return { action: dryRun ? "would update" : "updated", path: destination };
   }
 
-  if (!dryRun) {
-    await fs.writeFile(destination, content);
+  // Managed block present: replace only the block. Every byte the user wrote
+  // outside the markers survives untouched.
+  const generatedBlock = findManagedBlock(content);
+  const next = generatedBlock
+    ? `${current.slice(0, existingBlock.start)}${generatedBlock.text}${current.slice(existingBlock.end)}`
+    : content;
+
+  if (dryRun) {
+    return { action: "would update", path: destination };
   }
 
-  return { action: dryRun ? "would update" : "updated", path: destination };
+  // Nothing to do when the block is already current. Rewriting an identical
+  // file would only churn mtimes and litter a pointless backup beside it.
+  if (next === current) {
+    return { action: "updated", path: destination };
+  }
+
+  const backedUp = await backupOnce(destination);
+  await fs.writeFile(destination, next);
+  return {
+    action: "updated",
+    path: destination,
+    ...(backedUp ? { note: `backed up the previous file to ${path.basename(destination)}${backupSuffix}` } : {})
+  };
+}
+
+// Locate the managed block. Returns null when a marker is missing or the
+// markers are out of order, so a malformed file is never spliced blind.
+function findManagedBlock(text) {
+  const start = text.indexOf(managedStart);
+  if (start < 0) return null;
+  const endStart = text.indexOf(managedEnd, start + managedStart.length);
+  if (endStart < 0) return null;
+  const end = endStart + managedEnd.length;
+  return { start, end, text: text.slice(start, end) };
+}
+
+// Copy the pre-existing file aside once. COPYFILE_EXCL keeps an older backup
+// authoritative, so a later run can never bury the original under a copy of
+// the already-spliced file.
+async function backupOnce(destination) {
+  try {
+    await fs.copyFile(destination, `${destination}${backupSuffix}`, fs.constants.COPYFILE_EXCL);
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST") return false;
+    throw error;
+  }
 }
 
 async function removeRetiredManagedFile(destination, { dryRun = false, projectRoot = null } = {}) {
