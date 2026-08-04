@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runTick as runTickImpl, acquireLock, releaseLock } from "../../packages/cli/src/sync/tick.mjs";
+import { runTick as runTickImpl } from "../../packages/cli/src/sync/tick.mjs";
+import {
+  acquireOperationLock,
+  releaseOperationLock
+} from "../../packages/cli/src/sync/operation-lock.mjs";
 import { appendSyncEvent, reportTickResult, runTickCommand } from "../../packages/cli/src/sync/tick-cmd.mjs";
 
 async function tmpLock() {
@@ -459,19 +463,19 @@ test("acquireLock steals a stale lock older than staleMs", async () => {
   const { lockPath, dir } = await tmpLock();
   try {
     // write a lock timestamped 10 minutes ago
-    await fs.writeFile(lockPath, JSON.stringify({ pid: 1, at: Date.now() - 10 * 60 * 1000 }));
-    const got = await acquireLock(lockPath, { now: () => Date.now(), staleMs: 5 * 60 * 1000 });
-    assert.equal(got, true);
-    await releaseLock(lockPath);
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 2147483647, at: Date.now() - 10 * 60 * 1000 }));
+    const got = await acquireOperationLock(lockPath, { now: () => Date.now(), staleMs: 5 * 60 * 1000 });
+    assert.ok(got);
+    await releaseOperationLock(got);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
 test("acquireLock returns false when a fresh lock is held", async () => {
   const { lockPath, dir } = await tmpLock();
   try {
-    await fs.writeFile(lockPath, JSON.stringify({ pid: 1, at: Date.now() }));
-    const got = await acquireLock(lockPath, { now: () => Date.now(), staleMs: 5 * 60 * 1000 });
-    assert.equal(got, false);
+    await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, at: Date.now() }));
+    const got = await acquireOperationLock(lockPath, { now: () => Date.now(), staleMs: 5 * 60 * 1000 });
+    assert.equal(got, null);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
@@ -506,16 +510,50 @@ test("acquireLock: two racers on a stale lock — exactly one wins", async () =>
   const { lockPath, dir } = await tmpLock();
   try {
     // pre-write a stale lock (10 min old)
-    await fs.writeFile(lockPath, JSON.stringify({ pid: 1, at: Date.now() - 10 * 60 * 1000 }));
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 2147483647, at: Date.now() - 10 * 60 * 1000 }));
     const opts = { now: () => Date.now(), staleMs: 5 * 60 * 1000 };
     const [a, b] = await Promise.all([
-      acquireLock(lockPath, opts),
-      acquireLock(lockPath, opts)
+      acquireOperationLock(lockPath, opts),
+      acquireOperationLock(lockPath, opts)
     ]);
-    // exactly one true, one false
+    // exactly one owner object, one null
     assert.equal([a, b].filter(Boolean).length, 1);
-    await releaseLock(lockPath);
+    await releaseOperationLock(a || b);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("operation lock recovers a dead recovery owner without abandoning ABA protection", async () => {
+  const { lockPath, dir } = await tmpLock();
+  const now = Date.now();
+  const deadPid = 2147483647;
+  const format = "dotaios-sync-operation-lock/v1";
+  try {
+    await fs.writeFile(lockPath, JSON.stringify({
+      format,
+      pid: deadPid,
+      owner: "dead-main-owner",
+      at: now - 10 * 60 * 1000
+    }));
+    await fs.writeFile(`${lockPath}.recovery`, JSON.stringify({
+      format,
+      pid: deadPid,
+      owner: "dead-recovery-owner",
+      at: now - 10 * 60 * 1000
+    }));
+
+    const acquired = await acquireOperationLock(lockPath, {
+      now: () => now,
+      staleMs: 5 * 60 * 1000,
+      isOwnerAlive: (pid) => pid === process.pid
+    });
+
+    assert.ok(acquired, "a SIGKILL residue in the recovery gate must not lock sync forever");
+    await assert.rejects(fs.lstat(`${lockPath}.recovery`), { code: "ENOENT" });
+    await assert.rejects(fs.lstat(`${lockPath}.recovery.recovery`), { code: "ENOENT" });
+    await releaseOperationLock(acquired);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test("runTickCommand resolves without throwing when sync not enabled", async () => {

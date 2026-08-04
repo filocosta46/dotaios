@@ -173,15 +173,11 @@ export async function pollForRepoExists({
         `https://api.github.com/repos/${fullName}/commits`,
         { headers }
       );
-      if (commits.status === 409) return true; // empty — as expected
+      if (commits.status === 409) return { state: "empty" };
       if (commits.ok) {
-        throw new Error(
-          `the repo ${fullName} was created with files already in it. On github.com, ` +
-          `delete that repo, then re-run "dotaios sync setup" — and this time leave ` +
-          `every "Initialize this repository" option (README, .gitignore, license) unchecked.`
-        );
+        return { state: "populated" };
       }
-      return true; // any other status — proceed; the push will surface real errors
+      throw new Error(`could not determine whether ${fullName} is empty; GitHub returned ${commits.status}`);
     }
     await sleep(intervalSec);
   }
@@ -193,7 +189,9 @@ export async function initialMirrorPush({
   fullName,
   gitignoreContent,
   git,
-  filesystem = fs
+  filesystem = fs,
+  recordIntendedSha = async () => {},
+  preserveExistingOrigin = false
 }) {
   // Refuse before touching .gitignore or Git metadata. Once Git stages a
   // nested repository it records only a gitlink pointer, never its files.
@@ -215,10 +213,17 @@ export async function initialMirrorPush({
 
   // 3. Set the plain remote — the token authenticates via git's credential
   //    helper (git was constructed with accessToken), never via the URL.
-  await git.addRemote(plainRemoteUrl(fullName));
+  if (!preserveExistingOrigin) {
+    await git.addRemote(plainRemoteUrl(fullName));
+  }
 
   // 4. Add + commit everything.
-  const sha = await git.commitAll("Initial DotAIOS mirror");
+  const sha = await git.commitAll("Initial DotAIOS mirror") || await git.currentSha();
+
+  // Persist the exact commit receipt before the network call. If the process
+  // stops after GitHub accepts the push, an identical retry can prove and
+  // adopt that upload without asking the user to delete the repository.
+  await recordIntendedSha(sha);
 
   // 5. Push.
   await git.push("main");

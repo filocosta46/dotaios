@@ -45,7 +45,7 @@ Options:
 const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
 const SETUP_TRANSACTION_FORMAT = "dotaios-setup-transaction/v1";
 
-export async function setupCommand(args) {
+export async function setupCommand(args, { lifecycle = {} } = {}) {
   if (hasHelpFlag(args)) {
     console.log(HELP_TEXT);
     return;
@@ -67,30 +67,26 @@ export async function setupCommand(args) {
   try {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
-    setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath);
+    setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle);
     await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
     await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
     await emitPilotMetric(aiosPath, { type: "install_start", command: "setup", run_id: runId });
-    if (setupTransactionActive && process.env.DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT === "1") {
-      process.kill(process.pid, "SIGKILL");
-    }
+    await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
   } catch (err) {
     // createAios: false — a metric must never be the thing that creates the
     // folder a failed install did not. Otherwise the retry this very message
     // recommends trips over the wreckage of the attempt that printed it.
-    if (!(await hasSetupTransaction(aiosPath))) {
-      const dropIfMissing = { createAios: false };
-      await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
-      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
-      await emitPilotMetric(aiosPath, {
-        type: "install_end",
-        command: "setup",
-        outcome: "fail",
-        phase: "init",
-        run_id: runId,
-        duration_ms: Date.now() - startedAt
-      }, dropIfMissing);
-    }
+    const dropIfMissing = { createAios: false };
+    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
+    await emitPilotMetric(aiosPath, {
+      type: "install_end",
+      command: "setup",
+      outcome: "fail",
+      phase: "init",
+      run_id: runId,
+      duration_ms: Date.now() - startedAt
+    }, dropIfMissing);
     console.error(`Step 1 failed: ${err.message}`);
     console.error("Re-run: dotaios init to retry this step.");
     console.error("");
@@ -107,7 +103,7 @@ export async function setupCommand(args) {
   console.log("");
   await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "activate", run_id: runId });
   try {
-    const activation = await activateCommand(passthrough);
+    const activation = await activateCommand(passthrough, { lifecycle: lifecycle.activation });
     configuredContextCount = activation.configuredContextCount;
     const outcome = configuredContextCount > 0 ? "ok" : "warn";
     await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome });
@@ -153,7 +149,7 @@ export async function setupCommand(args) {
       rl.close();
     }
     // Close this prompt's readline BEFORE runSetup — its token-paste step
-    // opens its own readline, and two interfaces on one stdin clash.
+    // temporarily owns the terminal in raw mode.
     if (wantsSync) {
       const { runSetup } = await import("../sync/setup-flow.mjs");
       try {
@@ -235,17 +231,22 @@ export async function setupCommand(args) {
 // recorded the complete expected tree before createBaseTree, and every path
 // left behind still matches that record. Only that narrow case gets an internal
 // --force retry. The metrics-only recognizer below remains for 1.27.1 upgrades.
-async function runInitWithRecovery(passthrough, aiosPath) {
+async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
+  if (await hasSetupTransaction(aiosPath)) {
+    if (passthrough.includes("--force") || passthrough.includes("--overwrite")) {
+      throw new Error(
+        "An unfinished setup marker is present. Re-run the identical setup command without --force or --overwrite."
+      );
+    }
+  }
   let transactionStarted = false;
   try {
     await initCommand(passthrough, {
       beforeScaffold: async (plan) => {
-        transactionStarted = await beginSetupTransaction(aiosPath, passthrough, plan);
+        transactionStarted = await beginSetupTransaction(aiosPath, passthrough, plan, lifecycle);
       },
       afterCreateBaseTree: async () => {
-        if (transactionStarted && process.env.DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE === "1") {
-          throw new Error("injected setup interruption after createBaseTree");
-        }
+        if (transactionStarted) await lifecycle.afterCreateBaseTree?.({ aiosPath });
       }
     });
     return transactionStarted;
@@ -253,7 +254,10 @@ async function runInitWithRecovery(passthrough, aiosPath) {
     if (!/exists and is not empty/i.test(error.message)) throw error;
     const transaction = await readRecoverableSetupTransaction(aiosPath, passthrough);
     if (transaction) {
-      await initCommand([...passthrough, "--force"], { plan: transaction.plan });
+      await initCommand([...passthrough, "--force"], {
+        plan: transaction.plan,
+        allowSetupTransactionRecovery: true
+      });
       console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
       return true;
     }
@@ -277,7 +281,7 @@ async function hasSetupTransaction(aiosPath) {
   }
 }
 
-async function beginSetupTransaction(aiosPath, passthrough, plan) {
+async function beginSetupTransaction(aiosPath, passthrough, plan, lifecycle = {}) {
   // A caller already using --force/--overwrite has explicitly chosen init's
   // preserve/replace semantics. It is not an empty first install whose residue
   // setup can later claim as its own.
@@ -304,13 +308,15 @@ async function beginSetupTransaction(aiosPath, passthrough, plan) {
 
   const temporaryMarker = path.join(aiosPath, `.dotaios-setup-${randomUUID()}.tmp`);
   const markerPath = setupTransactionPath(aiosPath);
-  await fs.writeFile(temporaryMarker, `${JSON.stringify(transaction, null, 2)}\n`, { flag: "wx" });
+  await fs.writeFile(temporaryMarker, `${JSON.stringify(transaction, null, 2)}\n`, {
+    flag: "wx",
+    mode: 0o600
+  });
   try {
-    if (process.env.DOTAIOS_TEST_RACE_SETUP_MARKER === "1") {
-      await fs.writeFile(markerPath, "foreign marker bytes\n", { flag: "wx" });
-    }
+    await lifecycle.beforePublishMarker?.({ aiosPath, markerPath });
     try {
       await fs.link(temporaryMarker, markerPath);
+      await lifecycle.afterPublishMarker?.({ aiosPath, markerPath, temporaryMarker });
     } catch (error) {
       if (error.code === "EEXIST") {
         throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
@@ -331,15 +337,17 @@ async function beginSetupTransaction(aiosPath, passthrough, plan) {
 async function readRecoverableSetupTransaction(aiosPath, passthrough) {
   const markerPath = setupTransactionPath(aiosPath);
   let transaction;
+  let markerStats;
   try {
-    const stats = await fs.lstat(markerPath);
-    if (!stats.isFile() || stats.isSymbolicLink()) return null;
+    markerStats = await fs.lstat(markerPath);
+    if (!markerStats.isFile() || markerStats.isSymbolicLink()) return null;
     transaction = JSON.parse(await fs.readFile(markerPath, "utf8"));
   } catch {
     return null;
   }
 
   if (!isSetupTransaction(transaction, aiosPath, passthrough)) return null;
+  if (!await cleanupLinkedSetupMarkerTemps(aiosPath, markerStats)) return null;
 
   let expected;
   try {
@@ -383,6 +391,35 @@ async function readRecoverableSetupTransaction(aiosPath, passthrough) {
   return transaction;
 }
 
+async function cleanupLinkedSetupMarkerTemps(aiosPath, markerStats) {
+  let entries;
+  try {
+    entries = await fs.readdir(aiosPath, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const entry of entries) {
+    if (!/^\.dotaios-setup-[^.]+\.tmp$/.test(entry.name)) continue;
+    const candidate = path.join(aiosPath, entry.name);
+    let stats;
+    try {
+      stats = await fs.lstat(candidate);
+    } catch {
+      return false;
+    }
+    if (
+      !stats.isFile()
+      || stats.isSymbolicLink()
+      || stats.dev !== markerStats.dev
+      || stats.ino !== markerStats.ino
+    ) {
+      return false;
+    }
+    await fs.unlink(candidate);
+  }
+  return true;
+}
+
 async function isRecoverableSetupMetrics(aiosPath, extraEntries) {
   if (extraEntries.length === 0) return true;
   const allowed = new Set(["memory/metrics", "memory/metrics/pilot.jsonl"]);
@@ -398,18 +435,69 @@ async function isRecoverableSetupMetrics(aiosPath, extraEntries) {
   if (lines.length === 0) return false;
 
   try {
-    return lines.map(parseJsonlLine).every((metric) => {
-      if (!metric || typeof metric !== "object" || Array.isArray(metric)) return false;
-      if (metric.type === "setup_phase_start") return ["init", "activate"].includes(metric.phase);
-      if (metric.type === "setup_phase_end") {
-        if (metric.phase === "init") return metric.outcome === "ok";
-        return metric.phase === "activate" && ["ok", "warn", "fail"].includes(metric.outcome);
-      }
-      return metric.type === "install_start" && metric.command === "setup";
-    });
+    return isRecoverableTransactionMetricSequence(lines.map(parseJsonlLine));
   } catch {
     return false;
   }
+}
+
+function hasMetricKeys(metric, keys) {
+  return metric
+    && typeof metric === "object"
+    && !Array.isArray(metric)
+    && JSON.stringify(Object.keys(metric).sort()) === JSON.stringify([...keys].sort())
+    && typeof metric.ts === "string"
+    && !Number.isNaN(Date.parse(metric.ts))
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(metric.run_id || "");
+}
+
+function isRecoverableTransactionMetricSequence(metrics) {
+  const groups = [];
+  const seen = new Set();
+  for (const metric of metrics) {
+    const current = groups.at(-1);
+    if (!current || current[0].run_id !== metric?.run_id) {
+      if (seen.has(metric?.run_id)) return false;
+      seen.add(metric?.run_id);
+      groups.push([metric]);
+    } else {
+      current.push(metric);
+    }
+  }
+
+  return groups.every((group) => {
+    const [start, initEnd, install, activateStart, activateEnd] = group;
+    if (group.length > 5) return false;
+    if (!hasMetricKeys(start, ["ts", "type", "phase", "run_id"])) return false;
+    if (start.type !== "setup_phase_start" || start.phase !== "init") return false;
+    if (!initEnd) return true;
+    if (!hasMetricKeys(initEnd, ["ts", "type", "phase", "run_id", "outcome"])) return false;
+    if (initEnd.type !== "setup_phase_end" || initEnd.phase !== "init" || !["ok", "fail"].includes(initEnd.outcome)) return false;
+
+    if (initEnd.outcome === "fail") {
+      if (!install) return true;
+      return group.length === 3
+        && hasMetricKeys(install, ["ts", "type", "command", "outcome", "phase", "run_id", "duration_ms"])
+        && install.type === "install_end"
+        && install.command === "setup"
+        && install.phase === "init"
+        && install.outcome === "fail"
+        && Number.isFinite(install.duration_ms)
+        && install.duration_ms >= 0;
+    }
+
+    if (!install) return true;
+    if (!hasMetricKeys(install, ["ts", "type", "command", "run_id"])) return false;
+    if (install.type !== "install_start" || install.command !== "setup") return false;
+    if (!activateStart) return true;
+    if (!hasMetricKeys(activateStart, ["ts", "type", "phase", "run_id"])) return false;
+    if (activateStart.type !== "setup_phase_start" || activateStart.phase !== "activate") return false;
+    if (!activateEnd) return true;
+    return hasMetricKeys(activateEnd, ["ts", "type", "phase", "run_id", "outcome"])
+      && activateEnd.type === "setup_phase_end"
+      && activateEnd.phase === "activate"
+      && ["ok", "warn", "fail"].includes(activateEnd.outcome);
+  });
 }
 
 function isSetupTransaction(transaction, aiosPath, passthrough) {
@@ -540,21 +628,28 @@ async function isFailedSetupResidue(aiosPath) {
     return false;
   }
 
-  const isFailedInitEnd = (metric) =>
-    metric.type === "setup_phase_end"
-      && metric.phase === "init"
-      && metric.outcome === "fail";
-  const isKnownFailedInitMetric = (metric) => {
-    if (!metric || typeof metric !== "object" || Array.isArray(metric)) return false;
-    if (metric.type === "setup_phase_start") return metric.phase === "init";
-    if (isFailedInitEnd(metric)) return true;
-    return metric.type === "install_end"
-      && metric.command === "setup"
-      && metric.phase === "init"
-      && metric.outcome === "fail";
-  };
-
-  return metrics.every(isKnownFailedInitMetric) && metrics.some(isFailedInitEnd);
+  // Compatibility for the exact 1.27.1 wreckage, verified from the tagged
+  // source: one failed setup wrote these three ordered rows under one run id.
+  if (metrics.length !== 3) return false;
+  const [start, end, installEnd] = metrics;
+  if (!hasMetricKeys(start, ["ts", "type", "phase", "run_id"])) return false;
+  if (!hasMetricKeys(end, ["ts", "type", "phase", "run_id", "outcome"])) return false;
+  if (!hasMetricKeys(installEnd, [
+    "ts", "type", "command", "outcome", "phase", "run_id", "duration_ms"
+  ])) return false;
+  if (start.run_id !== end.run_id || start.run_id !== installEnd.run_id) return false;
+  if (Date.parse(start.ts) > Date.parse(end.ts) || Date.parse(end.ts) > Date.parse(installEnd.ts)) return false;
+  return start.type === "setup_phase_start"
+    && start.phase === "init"
+    && end.type === "setup_phase_end"
+    && end.phase === "init"
+    && end.outcome === "fail"
+    && installEnd.type === "install_end"
+    && installEnd.command === "setup"
+    && installEnd.phase === "init"
+    && installEnd.outcome === "fail"
+    && Number.isFinite(installEnd.duration_ms)
+    && installEnd.duration_ms >= 0;
 }
 
 async function setupLightpanda({ nonInteractive, installRequested }) {

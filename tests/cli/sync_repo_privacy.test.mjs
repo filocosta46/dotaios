@@ -36,7 +36,7 @@ const publicSetupMessage =
 
 test("a private repo is accepted", async () => {
   const ok = await pollForRepoExists({ ...base, fetchImpl: githubStub({ private: true }) });
-  assert.equal(ok, true);
+  assert.deepEqual(ok, { state: "empty" });
 });
 
 test("a PUBLIC repo is refused, and the message says why it matters", async () => {

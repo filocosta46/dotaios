@@ -14,6 +14,7 @@ import {
 import { createGit } from "../../packages/cli/src/sync/git.mjs";
 
 const run = promisify(execFile);
+const RECEIPT = "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1";
 
 async function git(cwd, ...args) {
   return run("git", args, { cwd });
@@ -33,7 +34,7 @@ test("plainRemoteUrl carries no credential", () => {
   assert.ok(!url.includes("x-access-token"), "the stored remote must never embed a token");
 });
 
-test("pollForRepoExists resolves once the repo exists and is empty", async () => {
+test("pollForRepoExists classifies an empty private repo", async () => {
   let repoCalls = 0;
   const ok = await pollForRepoExists({
     accessToken: "T",
@@ -48,12 +49,12 @@ test("pollForRepoExists resolves once the repo exists and is empty", async () =>
     timeoutMs: 60_000,
     now: () => 0
   });
-  assert.equal(ok, true);
+  assert.deepEqual(ok, { state: "empty" });
 });
 
-test("pollForRepoExists rejects a repo that was created with files in it", async () => {
-  await assert.rejects(
-    pollForRepoExists({
+test("pollForRepoExists classifies an existing populated private repo for safe adoption", async () => {
+  assert.deepEqual(
+    await pollForRepoExists({
       accessToken: "T",
       fullName: "u/u-aios",
       fetchImpl: async (url) => {
@@ -68,7 +69,7 @@ test("pollForRepoExists rejects a repo that was created with files in it", async
       timeoutMs: 60_000,
       now: () => 0
     }),
-    /created with files already in it/
+    { state: "populated" }
   );
 });
 
@@ -90,17 +91,42 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
       accessToken: "T",
       fullName: "u/u-aios",
       gitignoreContent: ".env\n",
-      git: fakeGit
+      git: fakeGit,
+      recordIntendedSha: async (intended) => calls.push(`receipt:${intended}`)
     });
     assert.deepEqual(calls, [
       "init",
       "remote:https://github.com/u/u-aios.git",
       "commit:Initial DotAIOS mirror",
+      "receipt:deadbeef",
       "push:main"
     ]);
     assert.equal(sha, "deadbeef", "returns the initial commit sha for last_push_sha");
     const writtenGitignore = await fs.readFile(path.join(tmp, ".gitignore"), "utf8");
     assert.equal(writtenGitignore, ".env\n");
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("initialMirrorPush leaves a matching existing origin untouched", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-mirror-origin-"));
+  try {
+    await fs.writeFile(path.join(tmp, "hello.md"), "hi");
+    const calls = [];
+    await initialMirrorPush({
+      aiosPath: tmp,
+      fullName: "u/u-aios",
+      gitignoreContent: ".env\n",
+      preserveExistingOrigin: true,
+      git: {
+        init: async () => calls.push("init"),
+        addRemote: async () => calls.push("remote-mutated"),
+        commitAll: async () => RECEIPT,
+        push: async () => calls.push("push")
+      }
+    });
+    assert.deepEqual(calls, ["init", "push"]);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }

@@ -11,3 +11,5 @@ license/*.json
 cache/
 tmp/
 node_modules/
+.dotaios-setup-transaction.json
+.dotaios-setup-*.tmp

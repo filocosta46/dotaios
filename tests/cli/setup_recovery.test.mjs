@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+const lifecycleHarness = path.join(repoRoot, "tests", "fixtures", "setup-lifecycle-harness.mjs");
 
 function makeSandbox(label) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `dotaios-${label}-`));
@@ -36,7 +37,11 @@ function makeSandbox(label) {
 // stdin is "ignore" so process.stdin.isTTY is undefined — the exact shape of a
 // run pasted into a chat window, a CI job, or an agent shell.
 function runSetup(sandbox, args, env = {}) {
-  return spawnSync(process.execPath, [cli, "setup", "--path", sandbox.aiosPath, "--home", sandbox.homePath, "--skip-reveal", ...args], {
+  const usesLifecycleHarness = Object.keys(env).some((key) => key.startsWith("DOTAIOS_TEST_"));
+  const commandArgs = usesLifecycleHarness
+    ? [lifecycleHarness, "--path", sandbox.aiosPath, "--home", sandbox.homePath, "--skip-reveal", ...args]
+    : [cli, "setup", "--path", sandbox.aiosPath, "--home", sandbox.homePath, "--skip-reveal", ...args];
+  return spawnSync(process.execPath, commandArgs, {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
@@ -149,10 +154,23 @@ test("setup completes on a folder an earlier failed run left half-made", () => {
   // error path wrote, and nothing else. Users upgrading are already in this
   // state, so the fix has to clear it rather than only stop creating it.
   const metricsDir = path.join(sandbox.aiosPath, "memory", "metrics");
+  const legacyRunId = "2ca5bf65-d4cf-4f03-9e31-3df7efdcbe2b";
   fs.mkdirSync(metricsDir, { recursive: true });
   fs.writeFileSync(
     path.join(metricsDir, "pilot.jsonl"),
-    `${JSON.stringify({ ts: new Date().toISOString(), type: "setup_phase_end", phase: "init", outcome: "fail" })}\n`
+    [
+      { ts: "2026-08-04T10:00:00.000Z", type: "setup_phase_start", phase: "init", run_id: legacyRunId },
+      { ts: "2026-08-04T10:00:00.010Z", type: "setup_phase_end", phase: "init", run_id: legacyRunId, outcome: "fail" },
+      {
+        ts: "2026-08-04T10:00:00.020Z",
+        type: "install_end",
+        command: "setup",
+        outcome: "fail",
+        phase: "init",
+        run_id: legacyRunId,
+        duration_ms: 20
+      }
+    ].map((row) => JSON.stringify(row)).join("\n") + "\n"
   );
 
   const result = runSetup(sandbox, ["--yes"]);
@@ -172,6 +190,31 @@ test("setup completes on a folder an earlier failed run left half-made", () => {
   assert.match(fs.readFileSync(path.join(metricsDir, "pilot.jsonl"), "utf8"), /"outcome":"fail"/);
 });
 
+test("legacy 1.27.1 residue requires its exact ordered three-row shared-run shape", () => {
+  const runId = "2ca5bf65-d4cf-4f03-9e31-3df7efdcbe2b";
+  const exactRows = [
+    { ts: "2026-08-04T10:00:00.000Z", type: "setup_phase_start", phase: "init", run_id: runId },
+    { ts: "2026-08-04T10:00:00.010Z", type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" },
+    { ts: "2026-08-04T10:00:00.020Z", type: "install_end", command: "setup", outcome: "fail", phase: "init", run_id: runId, duration_ms: 20 }
+  ];
+
+  for (const [label, rows] of [
+    ["different run", exactRows.map((row, index) => index === 1 ? { ...row, run_id: "00000000-0000-4000-8000-000000000000" } : row)],
+    ["reordered", [exactRows[1], exactRows[0], exactRows[2]]],
+    ["extra field", exactRows.map((row, index) => index === 2 ? { ...row, note: "foreign" } : row)],
+    ["missing install end", exactRows.slice(0, 2)]
+  ]) {
+    const sandbox = makeSandbox(`legacy-residue-${label.replaceAll(" ", "-")}`);
+    const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl");
+    fs.mkdirSync(path.dirname(metricsFile), { recursive: true });
+    fs.writeFileSync(metricsFile, `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
+
+    const result = runSetup(sandbox, ["--yes"]);
+    assert.notEqual(result.status, 0, `${label} must not prove legacy setup ownership`);
+    assert.match(result.stderr, /already exists and is not empty/);
+  }
+});
+
 test("the identical setup command recovers an interruption after the base tree is created", () => {
   const sandbox = makeSandbox("setup-transaction-recover");
   const first = runSetup(sandbox, ["--yes"], {
@@ -184,6 +227,12 @@ test("the identical setup command recovers an interruption after the base tree i
     fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
     "setup must record ownership before createBaseTree mutates the target"
   );
+  const metrics = fs.readFileSync(
+    path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl"),
+    "utf8"
+  );
+  assert.match(metrics, /"setup_phase_end".*"init".*"fail"/, "mid-scaffold failure remains visible in metrics");
+  assert.match(metrics, /"install_end".*"fail"/, "the failed install remains visible in metrics");
 
   const retry = runSetup(sandbox, ["--yes"]);
 
@@ -195,6 +244,63 @@ test("the identical setup command recovers an interruption after the base tree i
     "a completed setup must remove its recovery marker"
   );
   assert.match(`${retry.stdout}${retry.stderr}`, /unfinished folder/i);
+});
+
+test("--force refuses an unfinished setup marker instead of orphaning it", () => {
+  const sandbox = makeSandbox("setup-marker-force");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE: "1"
+  });
+  assert.notEqual(first.status, 0);
+  const marker = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const before = fs.readFileSync(marker);
+
+  const forced = runSetup(sandbox, ["--yes", "--force"]);
+  assert.notEqual(forced.status, 0);
+  assert.match(forced.stderr, /unfinished setup|re-run.*without.*force/i);
+  assert.deepEqual(fs.readFileSync(marker), before);
+});
+
+test("init --force cannot bypass an unfinished setup marker", () => {
+  const sandbox = makeSandbox("init-marker-force");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE: "1"
+  });
+  assert.notEqual(first.status, 0);
+  const marker = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const before = fs.readFileSync(marker);
+
+  const forced = spawnSync(process.execPath, [
+    cli,
+    "init",
+    "--path", sandbox.aiosPath,
+    "--yes",
+    "--force"
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin" }
+  });
+
+  assert.notEqual(forced.status, 0);
+  assert.match(forced.stderr, /unfinished setup|re-run.*without.*force/i);
+  assert.deepEqual(fs.readFileSync(marker), before);
+});
+
+test("production setup and activation contain no environment-controlled test branches", () => {
+  for (const relative of [
+    "packages/cli/src/commands/setup.mjs",
+    "packages/cli/src/commands/activate.mjs"
+  ]) {
+    assert.doesNotMatch(fs.readFileSync(path.join(repoRoot, relative), "utf8"), /DOTAIOS_TEST_/);
+  }
+});
+
+test("the sync mirror ignores permanent and temporary setup transaction markers", () => {
+  const template = fs.readFileSync(path.join(repoRoot, "templates", "sync-gitignore.template"), "utf8");
+  assert.match(template, /^\.dotaios-setup-transaction\.json$/m);
+  assert.match(template, /^\.dotaios-setup-\*\.tmp$/m);
 });
 
 test("the identical setup command recovers a hard interruption after init", () => {
@@ -215,6 +321,31 @@ test("the identical setup command recovers a hard interruption after init", () =
   assert.equal(retry.status, 0, `the identical retry must preserve init output and continue:\n${retry.stdout}\n${retry.stderr}`);
   assert.equal(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")), false);
   assert.match(`${retry.stdout}${retry.stderr}`, /unfinished folder/i);
+});
+
+test("setup recovers a crash between linking and unlinking its private marker", () => {
+  const sandbox = makeSandbox("setup-marker-link-interrupt");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_MARKER_LINK: "1"
+  });
+  assert.equal(first.signal, "SIGKILL");
+
+  const marker = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const temporary = fs.readdirSync(sandbox.aiosPath)
+    .find((entry) => /^\.dotaios-setup-[^.]+\.tmp$/.test(entry));
+  assert.ok(temporary, "the crash window must leave the temporary hard link");
+  const markerStats = fs.statSync(marker);
+  const temporaryStats = fs.statSync(path.join(sandbox.aiosPath, temporary));
+  assert.equal(markerStats.ino, temporaryStats.ino, "both names must identify the same complete marker inode");
+  if (process.platform !== "win32") {
+    assert.equal(markerStats.mode & 0o777, 0o600);
+    assert.equal(temporaryStats.mode & 0o777, 0o600);
+  }
+
+  const retry = runSetup(sandbox, ["--yes"]);
+  assert.equal(retry.status, 0, `same-inode marker recovery must finish:\n${retry.stdout}\n${retry.stderr}`);
+  assert.equal(fs.existsSync(marker), false);
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, temporary)), false);
 });
 
 test("the identical setup command recovers a hard interruption after activation persists skills-first", () => {
@@ -268,7 +399,16 @@ test("setup publishes its recovery marker without clobbering a raced destination
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Target changed while setup was preparing it/);
   assert.equal(fs.readFileSync(marker, "utf8"), "foreign marker bytes\n", "exclusive publication must not replace the raced file");
-  assert.deepEqual(listTree(sandbox.aiosPath), [".dotaios-setup-transaction.json"]);
+  assert.deepEqual(listTree(sandbox.aiosPath), [
+    ".dotaios-setup-transaction.json",
+    "memory/metrics/pilot.jsonl"
+  ]);
+  const rows = fs.readFileSync(
+    path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl"),
+    "utf8"
+  ).trim().split("\n").map((line) => JSON.parse(line));
+  assert.equal(rows.findLast((row) => row.type === "setup_phase_end")?.outcome, "fail");
+  assert.equal(rows.findLast((row) => row.type === "install_end")?.outcome, "fail");
 });
 
 test("foreign content injected after an interrupted base-tree write blocks recovery without overwrite", () => {
@@ -339,6 +479,28 @@ test("setup refuses failed-run metrics mixed with an unknown JSON row", () => {
   assert.match(result.stderr, /already exists and is not empty/);
   assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
   assert.match(fs.readFileSync(metricsFile, "utf8"), /"type":"private_note"/);
+});
+
+test("setup transaction recovery rejects reordered, cross-run, or widened metric rows", () => {
+  for (const [label, mutate] of [
+    ["reordered", (rows) => [rows[1], rows[0], ...rows.slice(2)]],
+    ["cross-run", (rows) => rows.map((row, index) => index === 1 ? { ...row, run_id: "00000000-0000-4000-8000-000000000000" } : row)],
+    ["widened", (rows) => rows.map((row, index) => index === 0 ? { ...row, private_note: "not setup state" } : row)]
+  ]) {
+    const sandbox = makeSandbox(`setup-metric-${label}`);
+    const first = runSetup(sandbox, ["--yes"], {
+      DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE: "1"
+    });
+    assert.notEqual(first.status, 0);
+    const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl");
+    const rows = fs.readFileSync(metricsFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    fs.writeFileSync(metricsFile, `${mutate(rows).map((row) => JSON.stringify(row)).join("\n")}\n`);
+
+    const retry = runSetup(sandbox, ["--yes"]);
+    assert.notEqual(retry.status, 0, `${label} metrics must not prove setup ownership`);
+    assert.match(retry.stderr, /already exists and is not empty/);
+    assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+  }
 });
 
 test("setup refuses failed-run residue when any extra file is present", () => {

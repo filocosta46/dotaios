@@ -388,6 +388,18 @@ export function createGit({
       return (await run(["rev-parse", "HEAD"])).stdout.trim();
     },
 
+    async isAncestor(ancestor, descendant = "HEAD") {
+      if (!/^[0-9a-f]{40}$/i.test(ancestor || "")) {
+        throw new Error("invalid Git commit receipt");
+      }
+      const result = await run(["merge-base", "--is-ancestor", ancestor, descendant]);
+      if (result.code === 0) return true;
+      if (result.code === 1) return false;
+      throw new Error(
+        `could not verify local Git ancestry: ${redactToken(result.stderr.trim()) || `git merge-base exited ${result.code}`}`
+      );
+    },
+
     async hasUnpushedCommits(branch = "main") {
       if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-")) {
         throw new Error("invalid sync branch");

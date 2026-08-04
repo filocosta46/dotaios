@@ -18,6 +18,7 @@ import {
 import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
 
 export async function initCommand(args, lifecycle = {}) {
   if (hasHelpFlag(args)) {
@@ -27,6 +28,15 @@ export async function initCommand(args, lifecycle = {}) {
 
   const options = parseOptions(args);
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+  if (
+    options.force
+    && !lifecycle.allowSetupTransactionRecovery
+    && await pathExists(path.join(target, SETUP_TRANSACTION_FILE))
+  ) {
+    throw new Error(
+      "An unfinished setup marker is present. Re-run the identical `dotaios setup` command without --force or --overwrite."
+    );
+  }
   let vaultInsideTarget = false;
   if (options.vaultPath) {
     vaultInsideTarget = isPathWithinLexically(target, options.vaultPath);

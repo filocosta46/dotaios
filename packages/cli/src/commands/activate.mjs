@@ -43,7 +43,7 @@ const managedEnd = MANAGED_END;
 // user whose file predates splicing can always recover their original.
 const backupSuffix = ".dotaios-backup";
 
-export async function activateCommand(args) {
+export async function activateCommand(args, { lifecycle = {} } = {}) {
   if (hasHelpFlag(args)) {
     printActivateHelp();
     return;
@@ -69,9 +69,7 @@ export async function activateCommand(args) {
   // requested value for its preview without changing aios.json.
   if (configPatch) {
     await updateAiosConfig(aiosPath, configPatch);
-    if (process.env.DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_ACTIVATION_CONFIG === "1") {
-      process.kill(process.pid, "SIGKILL");
-    }
+    await lifecycle.afterConfigPersisted?.({ aiosPath, configPatch });
   }
 
   // Refresh before writing bridges. Dry-run renders the same catalog in memory
