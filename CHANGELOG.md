@@ -2,10 +2,47 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
-## [1.27.1] - 2026-07-28
+## [1.27.1] - 2026-08-04
+
+### Removed
+
+- **Breaking for importers:** `verifyGumroadLicense` is no longer exported from
+  `packages/core/src/licenses.mjs`. It moved to
+  `packages/cli/src/adapters/gumroad-license.mjs`, and `addLicense` now requires
+  an explicit `verifier` argument rather than defaulting to a network call. This
+  keeps `packages/core` offline. Nothing in the CLI changes for users; only a
+  direct importer of that symbol is affected.
+- The marketing site source no longer ships in the public repository, and the
+  release checklist and CI no longer run its build and verify steps. The site is
+  built and deployed from its own repository.
+
+### Added
+
+- `dotaios skills sync-triggers` writes routing phrases into the `when_to_use`
+  frontmatter field that hosts actually read. It previews by default and only
+  writes with `--apply`. All 15 bundled skills are backfilled. `triggers:`
+  remains authoritative for DotAIOS's own resolver.
 
 ### Fixed
 
+- **Refunded purchases no longer keep access.** Gumroad answers `success: true`
+  for any key it ever issued, including one whose money has gone back, and the
+  local licence store is verified once then read offline forever. Verification
+  now rejects `refunded`, `chargebacked`, and `disputed` purchases unless the
+  seller won the dispute.
+- **The trigger writer no longer corrupts frontmatter.** It emitted an unquoted
+  YAML scalar through a string replacement. A phrase containing `": "` or `" #"`
+  made the whole frontmatter unparseable, so the skill vanished from the host
+  listing; `$&` and `` $` `` expanded as replacement patterns and spliced the
+  frontmatter into itself; CRLF files came back with mixed line endings. Bundled
+  skills were unaffected — this hit skills you author yourself.
+- **Resolver ranking no longer rewards trigger count.** Scores were summed across
+  every declared trigger, so a skill with more phrases outranked a better match.
+  It now scores on the best single trigger, and the sort tiebreak no longer
+  rewards count either.
+- The CLI test suite spawned without an isolated `env`, so running `npm test`
+  wrote the developer's real `~/.dotaios/projects.json`, and concurrent runs
+  raced on it.
 - Antigravity IDE skills now use Google's documented
   `~/.gemini/antigravity/skills/` global path and `.agents/skills/` workspace
   path. The previous `.gemini/config/skills` project path was not documented for
@@ -26,6 +63,11 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Changed
 
+- **`confidence` now means separation, not raw score.** `dotaios skills resolve`
+  previously reported `Math.min(1, score)`, which saturated at 1.00 for a clear
+  win and a near-tie alike. It is now the winner's share against the runner-up,
+  so the number can discriminate. Note the CLI's own match header still prints
+  the old value; the new definition is exposed through `resolveIntent`.
 - Compatibility documentation now names Antigravity IDE specifically, records
   Kimi Code CLI and OpenCode on the documented shared Agent Skills surface, and
   keeps Kimi K2, Kimi K3, and Z.ai GLM claims at the model-through-host level.
@@ -47,6 +89,12 @@ All notable changes to DotAIOS will be documented in this file.
   overrides, OpenCode MCP migration, foreign-server preservation, runtime
   health rows, atomic private config writes, probe false positives, dry-run
   process isolation, client-version sanitization, and diagnostic redaction.
+- `tests/core/core-is-offline.test.mjs` fails on any URL literal, `fetch` call,
+  or `node:http` import added to `packages/core`, so the offline rule is
+  enforced rather than documented.
+- Added coverage for reversed purchases, for frontmatter phrases containing YAML
+  punctuation and `$` replacement patterns, and for CRLF line-ending
+  preservation.
 
 ## [1.27.0] - 2026-07-25
 ### Fixed
