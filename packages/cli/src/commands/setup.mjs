@@ -54,13 +54,17 @@ export async function setupCommand(args) {
   try {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
-    await initCommand(passthrough);
+    await runInitWithRecovery(passthrough, aiosPath);
     await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
     await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
     await emitPilotMetric(aiosPath, { type: "install_start", command: "setup", run_id: runId });
   } catch (err) {
-    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" });
+    // createAios: false — a metric must never be the thing that creates the
+    // folder a failed install did not. Otherwise the retry this very message
+    // recommends trips over the wreckage of the attempt that printed it.
+    const dropIfMissing = { createAios: false };
+    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
+    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
     await emitPilotMetric(aiosPath, {
       type: "install_end",
       command: "setup",
@@ -68,11 +72,12 @@ export async function setupCommand(args) {
       phase: "init",
       run_id: runId,
       duration_ms: Date.now() - startedAt
-    });
+    }, dropIfMissing);
     console.error(`Step 1 failed: ${err.message}`);
     console.error("Re-run: dotaios init to retry this step.");
     console.error("");
     console.error("Setup could not complete. Fix the error above, then re-run: dotaios setup");
+    process.exitCode = 1;
     return;
   }
 
@@ -202,6 +207,62 @@ export async function setupCommand(args) {
     run_id: runId,
     duration_ms: Date.now() - startedAt
   });
+}
+
+// Everything `dotaios init` itself writes at the top level of the AIOS folder.
+// A folder holding only these and no aios.json is the debris of an install
+// that died halfway, not a place the user keeps their own things.
+const GENERATED_TOP_LEVEL = new Set([
+  ".cursorrules",
+  ".env.example",
+  ".gitignore",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "FIRST_SESSION.md",
+  "README.md",
+  "aios.json",
+  "archives",
+  "connections",
+  "context",
+  "decisions",
+  "memory",
+  "plugins",
+  "projects",
+  "schedules.yml",
+  "skills",
+  "vault"
+]);
+
+// The retry we print on failure is `dotaios setup`, so that retry has to be
+// able to get past the debris of the run that failed. One --force attempt
+// clears an unfinished DotAIOS folder; every other cause fails closed, so the
+// real error still reaches the user.
+async function runInitWithRecovery(passthrough, aiosPath) {
+  try {
+    await initCommand(passthrough);
+    return;
+  } catch (error) {
+    if (!/exists and is not empty/i.test(error.message)) throw error;
+    if (!(await isUnfinishedAiosFolder(aiosPath))) throw error;
+    await initCommand([...passthrough, "--force"]);
+    console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
+  }
+}
+
+async function isUnfinishedAiosFolder(aiosPath) {
+  // aios.json marks a finished folder. Forcing over one would bury the honest
+  // "you already have an AIOS here" under a fake success, and forcing over a
+  // folder awaiting a versioned migration is exactly what init refuses to do.
+  if (await pathExists(path.join(aiosPath, "aios.json"))) return false;
+
+  let entries;
+  try {
+    entries = await fs.readdir(aiosPath);
+  } catch {
+    return false;
+  }
+  if (entries.length === 0) return false;
+  return entries.every((entry) => GENERATED_TOP_LEVEL.has(entry));
 }
 
 async function setupLightpanda({ nonInteractive, installRequested }) {
