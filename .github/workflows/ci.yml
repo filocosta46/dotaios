@@ -48,9 +48,3 @@ jobs:
 
       - name: Verify package contents
         run: npm pack --dry-run
-
-      - name: Build website
-        run: pnpm run site:build
-
-      - name: Verify website registry
-        run: pnpm run site:verify

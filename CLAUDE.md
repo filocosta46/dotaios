@@ -35,8 +35,11 @@ tests/
 templates/  # Templates rendered during `dotaios init` / `dotaios activate`
 skills/     # Bundled skill markdown (shipped inside the npm package)
 docs/       # Architecture and user docs
-website/    # React and Vite marketing site with optional Sanity copy hydration; not shipped in the npm package
 ```
+
+The commercial website and its deployment configuration are maintained outside
+this public repository. Do not add storefront source, offer copy, or deployment
+secrets here.
 
 ## v1.23 architecture boundaries
 
@@ -69,7 +72,7 @@ website/    # React and Vite marketing site with optional Sanity copy hydration;
 
 1. **ESM only.** All source is `.mjs`, `"type": "module"`. No CommonJS `require()`.
 2. **Node >= 20.** Both the root and the `mcp` package declare `>=20`. Don't use APIs that need a newer floor without bumping `engines` deliberately.
-3. **No build step for the CLI packages.** Source under `packages/` ships directly. The separate `website/` uses React and Vite.
+3. **No build step.** Source under `packages/` ships directly.
 4. **KISS.** No new heavy dependencies (linters, formatters, bundlers, ORMs,
    cloud SDKs, vector DBs). Four runtime dependencies serve ingest; `yaml`
    validates portable project frontmatter.

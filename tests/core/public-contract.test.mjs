@@ -1,46 +1,57 @@
 import fs from "node:fs/promises";
+import { execFile } from "node:child_process";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dictionary } from "../../website/src/content.js";
+import { promisify } from "node:util";
 import { validateMarketRegistry } from "../../packages/core/src/market-registry.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
+const run = promisify(execFile);
 
-test("draft website offers expose no purchase path or automatic update claim", async () => {
-  for (const language of Object.values(dictionary)) {
-    for (const pack of language.packs.items) {
-      assert.equal(pack.href, null);
-      assert.doesNotMatch(pack.cta, /buy|get|prendi|acquista/i);
-    }
-    assert.doesNotMatch(
-      JSON.stringify(language.packs),
-      /updated weekly|aggiornat[ae] ogni settimana/i
-    );
-  }
+test("commercial website source stays outside the public repository", async () => {
+  const { stdout } = await run("git", ["-C", repoRoot, "ls-files", "--", "website"]);
+  assert.equal(stdout.trim(), "");
+});
 
-  const publicFiles = await Promise.all([
-    fs.readFile(path.join(repoRoot, "README.md"), "utf8"),
-    fs.readFile(path.join(repoRoot, "website", "index.html"), "utf8"),
-    fs.readFile(path.join(repoRoot, "website", "src", "content.js"), "utf8"),
-    fs.readFile(path.join(repoRoot, "website", "public", "registry.json"), "utf8"),
-    fs.readFile(path.join(repoRoot, "docs", "adapters.md"), "utf8"),
-    fs.readFile(path.join(repoRoot, "docs", "client-support.md"), "utf8"),
-    fs.readFile(path.join(repoRoot, "packages", "cli", "src", "commands", "activate.mjs"), "utf8")
-  ]);
-  const corpus = publicFiles.join("\n");
-  assert.doesNotMatch(corpus, /gumroad\.com|updated weekly|refreshed every week/i);
+test("public claims stay inside the verified product boundary", async () => {
+  const relativeFiles = [
+    "README.md",
+    "docs/adapters.md",
+    "docs/client-support.md",
+    "docs/getting-started.md",
+    "packages/cli/src/commands/activate.mjs",
+  ];
+  const contents = await Promise.all(
+    relativeFiles.map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8"))
+  );
+  const corpus = contents.join("\n");
+
+  assert.doesNotMatch(corpus, /gumroad\.com|lemonsqueezy\.com|updated weekly|refreshed every week/i);
   assert.doesNotMatch(corpus, /every AI reads|no cloud memory|native in every tool/i);
 });
 
-test("the public registry contains only schema-valid non-purchasable drafts", async () => {
-  const file = path.join(repoRoot, "website", "public", "registry.json");
+test("the public registry fixture is schema-valid and non-purchasable", async () => {
+  const file = path.join(repoRoot, "tests", "fixtures", "market-registry-draft.json");
   const registry = validateMarketRegistry(JSON.parse(await fs.readFile(file, "utf8")), {
-    source: file
+    source: file,
   });
+  const forbiddenDeliveryFields = [
+    "checkout_url",
+    "download_url",
+    "entitlement_url",
+    "git_url",
+    "gumroad_url",
+    "install_url",
+    "license_url",
+    "product_id",
+  ];
+
   assert.ok(registry.entries.length > 0);
-  assert.ok(registry.entries.every((entry) => entry.status === "draft"));
-  assert.ok(registry.entries.every((entry) => !entry.checkout_url && !entry.gumroad_url));
+  for (const entry of registry.entries) {
+    assert.match(entry.status, /^(draft|planned)$/);
+    for (const field of forbiddenDeliveryFields) assert.equal(entry[field], undefined);
+  }
 });
 
 test("public context guidance documents only the current MCP tools and one memory projection", async () => {
@@ -50,7 +61,7 @@ test("public context guidance documents only the current MCP tools and one memor
     "docs/sessions.md",
     "docs/architecture.md",
     "templates/AGENTS.md.hbs",
-    "packages/core/src/bridges.mjs"
+    "packages/core/src/bridges.mjs",
   ];
   const contents = await Promise.all(
     relativeFiles.map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8"))
@@ -64,7 +75,7 @@ test("public context guidance documents only the current MCP tools and one memor
     ["read", "session", "digest"], ["read", "context"], ["list", "skills"],
     ["search", "memory"], ["search", "vault"], ["list", "projects"],
     ["log", "event"], ["google", "status"], ["google", "gmail", "search"],
-    ["google", "calendar", "agenda"], ["google", "drive", "search"]
+    ["google", "calendar", "agenda"], ["google", "drive", "search"],
   ].map((parts) => parts.join("_"));
 
   assert.deepEqual(documentedTools, ["read_working_context", "search_aios", "resolve_skill"]);

@@ -4,10 +4,33 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { redactDiagnosticText } from "../../packages/cli/src/lib/skill-invocation-probe.mjs";
+import {
+  PROBE_CLIENTS,
+  redactDiagnosticText
+} from "../../packages/cli/src/lib/skill-invocation-probe.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+
+test("Claude probe enables the native Skill tool and not generic file reads", () => {
+  const command = PROBE_CLIENTS["claude-code"].build({
+    projectPath: "/tmp/project",
+    prompt: "probe"
+  });
+  const toolsIndex = command.args.indexOf("--tools");
+
+  assert.notEqual(toolsIndex, -1);
+  assert.equal(command.args[toolsIndex + 1], "Skill");
+  assert.doesNotMatch(command.args.join(" "), /--tools Read/);
+  assert.deepEqual(command.receiptCommand.slice(-6), [
+    "plan",
+    "--tools",
+    "Skill",
+    "--setting-sources",
+    "project",
+    "<probe-prompt>"
+  ]);
+});
 
 // A failing client usually says exactly what is wrong. Reporting only "client
 // exceeded 90000ms" throws that away and leaves the user with a receipt they

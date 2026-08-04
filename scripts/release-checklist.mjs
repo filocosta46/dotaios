@@ -41,8 +41,6 @@ const items = [
     check: () => options.allowBranch
       || execSync("git branch --show-current", { encoding: "utf8" }).trim() === options.branch,
   },
-  { label: "Website production build passes", check: () => run("pnpm run site:build") },
-  { label: "Built website registry matches its validated source", check: () => run("pnpm run site:verify") },
 ];
 
 let allPass = true;

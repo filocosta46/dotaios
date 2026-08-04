@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "generated_at": "2026-08-01",
+  "entries": [
+    {
+      "id": "draft-example",
+      "name": "Draft example",
+      "description": "Non-purchasable registry fixture used by public CLI tests.",
+      "status": "draft"
+    }
+  ]
+}

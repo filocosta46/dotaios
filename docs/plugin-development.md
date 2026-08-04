@@ -77,4 +77,4 @@ The installer stages the copy before replacing an existing plugin, and rejects s
 
 ## Marketplace Direction
 
-A future plugin catalog should show one-line CLI install commands, permission previews, package provenance, and checksum/version metadata. The website should not write directly into user AIOS folders.
+A future catalog UI should show one-line CLI install commands, permission previews, package provenance, and checksum/version metadata. A catalog must not write directly into user AIOS folders.
