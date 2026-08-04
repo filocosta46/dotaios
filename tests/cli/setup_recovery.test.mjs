@@ -35,14 +35,14 @@ function makeSandbox(label) {
 
 // stdin is "ignore" so process.stdin.isTTY is undefined — the exact shape of a
 // run pasted into a chat window, a CI job, or an agent shell.
-function runSetup(sandbox, args) {
+function runSetup(sandbox, args, env = {}) {
   return spawnSync(process.execPath, [cli, "setup", "--path", sandbox.aiosPath, "--home", sandbox.homePath, "--skip-reveal", ...args], {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
     // PATH is trimmed for the same reason setup.test.mjs trims it:
     // resolveLightpanda falls back to `which lightpanda`.
-    env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin" }
+    env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin", ...env }
   });
 }
 
@@ -83,6 +83,23 @@ test("a failed setup does not create the AIOS folder", () => {
   );
 });
 
+test("setup rejects duplicate --path values before either target is mutated", () => {
+  const sandbox = makeSandbox("setup-duplicate-path");
+  const secondTarget = path.join(sandbox.root, "second-aios");
+  const foreignFile = path.join(secondTarget, "private-notes.md");
+  fs.mkdirSync(secondTarget, { recursive: true });
+  fs.writeFileSync(foreignFile, "keep this byte-for-byte\n");
+  const before = fs.readFileSync(foreignFile);
+
+  const result = runSetup(sandbox, ["--yes", "--force", "--path", secondTarget]);
+
+  assert.notEqual(result.status, 0, "ambiguous setup targets must be rejected");
+  assert.match(result.stderr, /--path may only be provided once/);
+  assert.equal(fs.existsSync(sandbox.aiosPath), false, "the first target must stay absent");
+  assert.deepEqual(fs.readFileSync(foreignFile), before, "foreign bytes in the second target must survive");
+  assert.deepEqual(listTree(secondTarget), ["private-notes.md"], "setup must not add scaffold files to either target");
+});
+
 test("an activation failure exits non-zero and records a failed install", () => {
   const sandbox = makeSandbox("setup-activate-exit");
   const invalidHomePath = path.join(sandbox.root, "home-is-a-file");
@@ -103,6 +120,12 @@ test("an activation failure exits non-zero and records a failed install", () => 
   ).trim().split("\n").map((line) => JSON.parse(line));
   const installEnd = rows.findLast((row) => row.type === "install_end");
   assert.equal(installEnd?.outcome, "fail", "a failed activation is a failed install, not a warning");
+  assert.equal(
+    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    false,
+    "a handled activation failure that directs the user to activate must close the setup transaction"
+  );
+  assert.match(result.stderr, /dotaios activate/);
 });
 
 test("the retry after a failed setup reports the original error, not a folder collision", () => {
@@ -147,6 +170,144 @@ test("setup completes on a folder an earlier failed run left half-made", () => {
   // The residue is evidence, not garbage — recovery adds missing files, it
   // never overwrites what is already there.
   assert.match(fs.readFileSync(path.join(metricsDir, "pilot.jsonl"), "utf8"), /"outcome":"fail"/);
+});
+
+test("the identical setup command recovers an interruption after the base tree is created", () => {
+  const sandbox = makeSandbox("setup-transaction-recover");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE: "1"
+  });
+
+  assert.notEqual(first.status, 0, "the injected interruption must stop the first setup");
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+  assert.ok(
+    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    "setup must record ownership before createBaseTree mutates the target"
+  );
+
+  const retry = runSetup(sandbox, ["--yes"]);
+
+  assert.equal(retry.status, 0, `the documented identical retry must recover:\n${retry.stdout}\n${retry.stderr}`);
+  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")));
+  assert.equal(
+    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    false,
+    "a completed setup must remove its recovery marker"
+  );
+  assert.match(`${retry.stdout}${retry.stderr}`, /unfinished folder/i);
+});
+
+test("the identical setup command recovers a hard interruption after init", () => {
+  const sandbox = makeSandbox("setup-after-init-interrupt");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT: "1"
+  });
+
+  assert.equal(first.signal, "SIGKILL", `expected the deterministic hard interruption:\n${first.stdout}\n${first.stderr}`);
+  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), "init must have completed before interruption");
+  assert.ok(
+    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    "ownership evidence must survive until activation reaches a handled outcome"
+  );
+
+  const retry = runSetup(sandbox, ["--yes"]);
+
+  assert.equal(retry.status, 0, `the identical retry must preserve init output and continue:\n${retry.stdout}\n${retry.stderr}`);
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")), false);
+  assert.match(`${retry.stdout}${retry.stderr}`, /unfinished folder/i);
+});
+
+test("the identical setup command recovers a hard interruption after activation persists skills-first", () => {
+  const sandbox = makeSandbox("setup-activation-config-interrupt");
+  const first = runSetup(sandbox, ["--yes", "--skills-first"], {
+    DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_ACTIVATION_CONFIG: "1"
+  });
+
+  assert.equal(first.signal, "SIGKILL", `expected interruption after the activation config write:\n${first.stdout}\n${first.stderr}`);
+  const interruptedConfig = JSON.parse(fs.readFileSync(path.join(sandbox.aiosPath, "aios.json"), "utf8"));
+  assert.equal(interruptedConfig.skills_first, true, "activation must persist the preference before interruption");
+  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")));
+
+  const retry = runSetup(sandbox, ["--yes", "--skills-first"]);
+
+  assert.equal(retry.status, 0, `the identical retry must accept only activation's expected config transition:\n${retry.stdout}\n${retry.stderr}`);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(sandbox.aiosPath, "aios.json"), "utf8")).skills_first, true);
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")), false);
+  assert.match(`${retry.stdout}${retry.stderr}`, /unfinished folder/i);
+});
+
+test("an arbitrary aios.json edit after interruption blocks recovery without changing its bytes", () => {
+  const sandbox = makeSandbox("setup-config-tamper");
+  const first = runSetup(sandbox, ["--yes", "--skills-first"], {
+    DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT: "1"
+  });
+  assert.equal(first.signal, "SIGKILL");
+
+  const configPath = path.join(sandbox.aiosPath, "aios.json");
+  const tampered = `${JSON.stringify({
+    ...JSON.parse(fs.readFileSync(configPath, "utf8")),
+    private_note: "do not claim this as setup output"
+  }, null, 2)}\n`;
+  fs.writeFileSync(configPath, tampered);
+
+  const retry = runSetup(sandbox, ["--yes", "--skills-first"]);
+
+  assert.notEqual(retry.status, 0, "only the exact activation transition may pass manifest validation");
+  assert.match(retry.stderr, /already exists and is not empty/);
+  assert.equal(fs.readFileSync(configPath, "utf8"), tampered);
+  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")));
+});
+
+test("setup publishes its recovery marker without clobbering a raced destination", () => {
+  const sandbox = makeSandbox("setup-marker-race");
+  const result = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_RACE_SETUP_MARKER: "1"
+  });
+  const marker = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /Target changed while setup was preparing it/);
+  assert.equal(fs.readFileSync(marker, "utf8"), "foreign marker bytes\n", "exclusive publication must not replace the raced file");
+  assert.deepEqual(listTree(sandbox.aiosPath), [".dotaios-setup-transaction.json"]);
+});
+
+test("foreign content injected after an interrupted base-tree write blocks recovery without overwrite", () => {
+  const sandbox = makeSandbox("setup-transaction-foreign");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE: "1"
+  });
+  assert.notEqual(first.status, 0);
+
+  const foreignFile = path.join(sandbox.aiosPath, "projects", "private-client-notes.md");
+  fs.writeFileSync(foreignFile, "keep this private\n");
+
+  const retry = runSetup(sandbox, ["--yes"]);
+
+  assert.notEqual(retry.status, 0, "an extra path that setup did not generate must fail closed");
+  assert.match(retry.stderr, /already exists and is not empty/);
+  assert.equal(fs.readFileSync(foreignFile, "utf8"), "keep this private\n");
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
+  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")));
+});
+
+test("a malformed setup recovery marker blocks recovery without touching scaffold residue", () => {
+  const sandbox = makeSandbox("setup-transaction-malformed");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE: "1"
+  });
+  assert.notEqual(first.status, 0);
+
+  const marker = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  fs.writeFileSync(marker, "{not valid json}\n");
+  const before = listTree(sandbox.aiosPath);
+
+  const retry = runSetup(sandbox, ["--yes"]);
+
+  assert.notEqual(retry.status, 0, "malformed ownership evidence must fail closed");
+  assert.match(retry.stderr, /already exists and is not empty/);
+  assert.deepEqual(listTree(sandbox.aiosPath), before);
+  assert.equal(fs.readFileSync(marker, "utf8"), "{not valid json}\n");
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")), false);
 });
 
 test("setup refuses malformed failed-run residue", () => {

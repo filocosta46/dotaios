@@ -20,6 +20,22 @@ async function git(cwd, ...args) {
   return run("git", args, { cwd });
 }
 
+function realGitFailing(cwd, shouldFail, failure) {
+  return async (cmd, args, opts) => {
+    if (shouldFail(args)) return { stdout: "", stderr: failure.stderr, code: failure.code };
+    try {
+      const { stdout, stderr } = await run(cmd, args, { cwd, env: opts.env });
+      return { stdout, stderr, code: 0 };
+    } catch (error) {
+      return {
+        stdout: error.stdout || "",
+        stderr: error.stderr || error.message,
+        code: Number.isInteger(error.code) ? error.code : 1
+      };
+    }
+  };
+}
+
 async function makeRepo(dir) {
   await fs.mkdir(dir, { recursive: true });
   await git(dir, "init", "-q");
@@ -79,6 +95,114 @@ test("a refused commit leaves the user's files exactly where they were", async (
   // tick commit the gitlink anyway.
   const { stdout } = await git(aios, "diff", "--cached", "--name-only");
   assert.equal(stdout.trim(), "", "the index is clean after the refusal");
+});
+
+test("a gitlink refusal preserves a pre-existing partially staged index byte-for-byte", async () => {
+  const aios = await makeAios();
+  const notesPath = path.join(aios, "notes.md");
+  await fs.writeFile(notesPath, "first: base\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await git(aios, "commit", "-q", "-m", "add notes");
+
+  await fs.writeFile(notesPath, "first: staged\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await fs.writeFile(notesPath, "first: staged\nsecond: unstaged\n");
+  await nestProject(aios, "projects/myapp");
+
+  const indexPath = path.join(aios, ".git", "index");
+  const indexBefore = await fs.readFile(indexPath);
+  const { stdout: cachedDiffBefore } = await git(aios, "diff", "--cached", "--binary");
+
+  const client = createGit({ cwd: aios });
+  await assert.rejects(() => client.commitAll("sync"), /projects\/myapp/);
+
+  const indexAfter = await fs.readFile(indexPath);
+  const { stdout: cachedDiffAfter } = await git(aios, "diff", "--cached", "--binary");
+  assert.deepEqual(indexAfter, indexBefore, "the real index bytes are unchanged");
+  assert.equal(cachedDiffAfter, cachedDiffBefore, "the user's exact staged patch is unchanged");
+});
+
+test("a failing commit hook restores a pre-existing partially staged index byte-for-byte", async () => {
+  const aios = await makeAios();
+  const notesPath = path.join(aios, "notes.md");
+  await fs.writeFile(notesPath, "first: base\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await git(aios, "commit", "-q", "-m", "add notes");
+
+  await fs.writeFile(notesPath, "first: staged\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await fs.writeFile(notesPath, "first: staged\nsecond: unstaged\n");
+  const hooks = path.join(aios, "hooks");
+  await fs.mkdir(hooks);
+  const hook = path.join(hooks, "pre-commit");
+  await fs.writeFile(hook, "#!/bin/sh\nexit 1\n");
+  await fs.chmod(hook, 0o755);
+  await git(aios, "config", "core.hooksPath", hooks);
+
+  const indexPath = path.join(aios, ".git", "index");
+  const indexBefore = await fs.readFile(indexPath);
+  const client = createGit({ cwd: aios });
+
+  await assert.rejects(() => client.commitAll("sync"), /git commit failed/i);
+  assert.deepEqual(
+    await fs.readFile(indexPath),
+    indexBefore,
+    "a rejected commit restores the exact real index bytes"
+  );
+});
+
+test("a staged-diff inspection error leaves a partially staged index byte-for-byte unchanged", async () => {
+  const aios = await makeAios();
+  const notesPath = path.join(aios, "notes.md");
+  await fs.writeFile(notesPath, "first: base\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await git(aios, "commit", "-q", "-m", "add notes");
+  await fs.writeFile(notesPath, "first: staged\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await fs.writeFile(notesPath, "first: staged\nsecond: unstaged\n");
+
+  const indexPath = path.join(aios, ".git", "index");
+  const indexBefore = await fs.readFile(indexPath);
+  const client = createGit({
+    cwd: aios,
+    spawnImpl: realGitFailing(
+      aios,
+      (args) => args[0] === "diff" && args.includes("--cached") && args.includes("--quiet"),
+      { code: 2, stderr: "fatal: staged diff inspection failed" }
+    )
+  });
+
+  await assert.rejects(() => client.commitAll("sync"), /staged diff inspection failed/i);
+  assert.deepEqual(await fs.readFile(indexPath), indexBefore);
+});
+
+test("a HEAD rev-parse failure after commit keeps the committed index aligned with the new HEAD", async () => {
+  const aios = await makeAios();
+  const notesPath = path.join(aios, "notes.md");
+  await fs.writeFile(notesPath, "first: base\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await git(aios, "commit", "-q", "-m", "add notes");
+  await fs.writeFile(notesPath, "first: staged\nsecond: base\n");
+  await git(aios, "add", "notes.md");
+  await fs.writeFile(notesPath, "first: staged\nsecond: unstaged\n");
+
+  const { stdout: headBefore } = await git(aios, "rev-parse", "HEAD");
+  const client = createGit({
+    cwd: aios,
+    spawnImpl: realGitFailing(
+      aios,
+      (args) => args[0] === "rev-parse" && args[1] === "HEAD",
+      { code: 128, stderr: "fatal: cannot resolve HEAD" }
+    )
+  });
+
+  await assert.rejects(() => client.commitAll("sync"), /commit identity failed/i);
+  const { stdout: headAfter } = await git(aios, "rev-parse", "HEAD");
+  assert.notEqual(headAfter.trim(), headBefore.trim(), "Git already created the commit");
+  await assert.doesNotReject(
+    () => git(aios, "diff", "--cached", "--quiet"),
+    "the installed index remains aligned with the commit Git created"
+  );
 });
 
 test("a nested repository is caught at arbitrary depth", async () => {
@@ -141,11 +265,17 @@ test("a dirty tree that stages nothing is reported, not silently called success"
   const written = [];
   const result = await runTick({
     lockPath: path.join(dir, "sync.lock"),
-    readConfig: async () => ({ access_token: "T", last_tick_at: null, last_push_sha: "abc1234" }),
+    readConfig: async () => ({
+      access_token: "T",
+      repo_full_name: "user/user-aios",
+      last_tick_at: null,
+      last_push_sha: "abc1234"
+    }),
     writeConfig: async (patch) => written.push(patch),
     verifyRepoPrivate: async () => true,
     makeGit: () => ({
       currentBranch: async () => "main",
+      originUrl: async () => "https://github.com/user/user-aios.git",
       dirty: async () => true,        // git sees changes
       commitAll: async () => null,    // but none of them can be staged
       pullRebase: async () => "ok",

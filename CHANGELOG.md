@@ -12,11 +12,15 @@ All notable changes to DotAIOS will be documented in this file.
   of printing “already up to date.”
 - **Every manual sync re-verifies that the GitHub mirror is private.** A mirror
   changed to public—or whose visibility cannot be confirmed—is rejected before
-  DotAIOS commits, pulls, or pushes personal context.
+  DotAIOS commits, pulls, or pushes personal context. The verified repository
+  must also match the checkout's real Git origin; credential helpers are bound
+  to that exact GitHub path, URL rewrites and hooks are disabled for token-bearing
+  network operations, and a failed safety check preserves the user's staged work.
 - **Setup now reports activation failures to callers.** Step-one and step-two
   failures exit non-zero, failed activation is recorded as a failed install,
-  and retry recovery accepts only the exact failed-install residue produced by
-  1.27.1 rather than treating arbitrary user files as generated content.
+  and an ownership marker makes interrupted first installs recoverable only when
+  every existing generated path still matches. Legacy 1.27.1 residue remains
+  recoverable; arbitrary, modified, symlinked, or extra user content fails closed.
 - **Activation preserves user-authored bridge content.** DotAIOS replaces only
   its managed block, keeps surrounding bytes intact, and writes the original
   bridge to a one-time `.dotaios-backup` before the first splice.

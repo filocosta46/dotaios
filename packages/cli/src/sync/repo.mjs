@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { nestedRepoMessage } from "./git.mjs";
 
 const REPO_DESCRIPTION = "DotAIOS personal memory mirror — synced from local ~/aios/. Auto-managed by dotaios.";
 
@@ -19,6 +20,21 @@ export function plainRemoteUrl(fullName) {
   return `https://github.com/${fullName}.git`;
 }
 
+export function githubRepoIdentity(remoteUrl) {
+  let parsed;
+  try {
+    parsed = new URL(String(remoteUrl));
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.port) {
+    return null;
+  }
+  const match = parsed.pathname.match(/^\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?$/);
+  if (!match || parsed.search || parsed.hash) return null;
+  return `${match[1]}/${match[2]}`.toLowerCase();
+}
+
 // A body we cannot parse must not be read as consent. Callers treat null as
 // "unknown", which fails closed.
 async function readJsonSafe(res) {
@@ -36,6 +52,48 @@ function publicRepoMessage(fullName, command) {
     `Settings, and change its visibility to Private — then re-run ` +
     `"${command}".`
   );
+}
+
+function unverifiableSetupPrivacyMessage(fullName) {
+  return (
+    `could not verify that ${fullName} is private. DotAIOS will not upload your ` +
+    `personal context until GitHub explicitly confirms the repository is private. ` +
+    `Re-run "dotaios sync setup".`
+  );
+}
+
+async function findNestedRepositories(root, filesystem) {
+  const found = [];
+  const pending = [root];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    const entries = await filesystem.readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.name === ".git") {
+        const relativeParent = path.relative(root, current);
+        if (relativeParent) found.push(relativeParent.split(path.sep).join("/"));
+        continue;
+      }
+      if (entry.isDirectory()) pending.push(entryPath);
+    }
+  }
+  return found.sort();
+}
+
+async function readExistingFile(filePath, filesystem) {
+  try {
+    return await filesystem.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function mergeGitignore(existing, template) {
+  if (existing === null) return template;
+  if (!template || existing.includes(template)) return existing;
+  return `${existing}${existing.endsWith("\n") ? "" : "\n"}${template}`;
 }
 
 /**
@@ -101,8 +159,11 @@ export async function pollForRepoExists({
       // A response that does not say is treated as not-private on purpose:
       // silence must never be read as a privacy guarantee.
       const repo = await readJsonSafe(res);
-      if (repo?.private !== true) {
+      if (repo?.private === false) {
         throw new Error(publicRepoMessage(fullName, "dotaios sync setup"));
+      }
+      if (repo?.private !== true) {
+        throw new Error(unverifiableSetupPrivacyMessage(fullName));
       }
       // Repo exists. Confirm it is EMPTY — pushing the initial mirror to a repo
       // that already has commits (the user ticked "Add a README" etc. on the
@@ -129,14 +190,25 @@ export async function pollForRepoExists({
 
 export async function initialMirrorPush({
   aiosPath,
-  accessToken,
   fullName,
   gitignoreContent,
   git,
   filesystem = fs
 }) {
-  // 1. Write the .gitignore (overwriting if exists).
-  await filesystem.writeFile(path.join(aiosPath, ".gitignore"), gitignoreContent);
+  // Refuse before touching .gitignore or Git metadata. Once Git stages a
+  // nested repository it records only a gitlink pointer, never its files.
+  const nestedRepositories = await findNestedRepositories(aiosPath, filesystem);
+  if (nestedRepositories.length > 0) {
+    throw new Error(nestedRepoMessage(nestedRepositories));
+  }
+
+  // Preserve custom rules while adding DotAIOS' sync exclusions.
+  const gitignorePath = path.join(aiosPath, ".gitignore");
+  const existingGitignore = await readExistingFile(gitignorePath, filesystem);
+  await filesystem.writeFile(
+    gitignorePath,
+    mergeGitignore(existingGitignore, gitignoreContent)
+  );
 
   // 2. Init git repo on default branch "main" if not already.
   await git.init();

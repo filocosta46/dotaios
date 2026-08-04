@@ -54,7 +54,13 @@ export async function runStatus(args = [], dependencies = {}) {
       // Plain remotes (no token in URL) need the credential helper — same as
       // tick/setup. Passing the token here is what keeps `sync status` parity
       // checks working after credential-hygiene removed embedded PATs.
-      remote = { sha: await gitFactory({ cwd: aiosPath, accessToken: cfg.access_token }).remoteHead("main") };
+      remote = {
+        sha: await gitFactory({
+          cwd: aiosPath,
+          accessToken: cfg.access_token,
+          expectedRepoFullName: cfg.repo_full_name
+        }).remoteHead("main")
+      };
     } catch (error) {
       remote = { error: error.message };
     }

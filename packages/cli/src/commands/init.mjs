@@ -8,12 +8,18 @@ import { previewMigration } from "../../../core/src/migrations.mjs";
 import { renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
 import { createAiosConfig } from "../../../core/src/schema.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
-import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import {
+  defaultAiosPath,
+  expandHome,
+  isPathWithin,
+  isPathWithinLexically,
+  resolveVaultPath
+} from "../../../core/src/paths.mjs";
+import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
-export async function initCommand(args) {
+export async function initCommand(args, lifecycle = {}) {
   if (hasHelpFlag(args)) {
     printInitHelp();
     return;
@@ -21,6 +27,24 @@ export async function initCommand(args) {
 
   const options = parseOptions(args);
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+  let vaultInsideTarget = false;
+  if (options.vaultPath) {
+    vaultInsideTarget = isPathWithinLexically(target, options.vaultPath);
+    if (!vaultInsideTarget) {
+      try {
+        vaultInsideTarget = await isPathWithin(target, options.vaultPath);
+      } catch {
+        // The existing vault usability check below owns invalid-path errors and
+        // gives the user the actionable --vault-path diagnostic.
+      }
+    }
+  }
+  if (vaultInsideTarget) {
+    throw new Error(
+      `Invalid --vault-path: ${options.vaultPath}\n` +
+      "An external vault must be outside the AIOS target. Omit --vault-path to use the target's built-in vault."
+    );
+  }
   const exists = await pathExists(target);
 
   if (exists && await pathExists(path.join(target, "aios.json"))) {
@@ -47,21 +71,26 @@ export async function initCommand(args) {
     await assertVaultPathUsable(options.vaultPath);
   }
 
-  const answers = options.yes ? defaultAnswers() : await promptAnswers();
-  const config = createAiosConfig({
+  const planned = lifecycle.plan;
+  const answers = planned ? null : (options.yes ? defaultAnswers() : await promptAnswers());
+  const config = planned?.config || createAiosConfig({
     aiTools: splitCsv(answers.ai_tools),
     vaultPath: options.vaultPath || null
   });
 
-  const data = {
+  const data = planned?.data || {
     ...answers,
     created_at: config.created_at,
     ai_tools: config.ai_tools,
     vault_path: config.vault_path
   };
 
+  await lifecycle.beforeScaffold?.({ config, data });
   await createBaseTree(target, Boolean(config.vault_path));
-  await createVaultTree(resolveVaultPath(config, target));
+  await lifecycle.afterCreateBaseTree?.();
+  if (!lifecycle.skipVaultTree) {
+    await createVaultTree(resolveVaultPath(config, target));
+  }
   const writeMode = options.overwrite ? "overwrite" : "preserve";
   const results = [];
   results.push(...await renderTemplates(target, data, writeMode));
@@ -70,10 +99,13 @@ export async function initCommand(args) {
   results.push(...await createStarterFiles(target, data, writeMode));
   await writeSkillsIndex(target);
 
-  printSuccess(target, resolveVaultPath(config, target), results);
+  if (!lifecycle.quiet) {
+    printSuccess(target, resolveVaultPath(config, target), results);
+  }
 }
 
 function parseOptions(args = []) {
+  assertUniqueOptions(args, ["--path", "--vault-path"]);
   const options = { force: false, overwrite: false, path: null, vaultPath: null, yes: false };
 
   for (let index = 0; index < args.length; index += 1) {

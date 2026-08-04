@@ -1,4 +1,8 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
 
 // Strip an embedded credential (https://x-access-token:TOKEN@host) from any
 // string before it reaches an error message or log. git echoes the full
@@ -17,7 +21,21 @@ export function stripEmbeddedCredential(url) {
 // .git/config, and the token travels in the environment, never in argv or on
 // disk. An empty helper first clears any inherited global helper.
 const CREDENTIAL_HELPER =
-  '!f() { test "$1" = get && printf "username=x-access-token\\npassword=%s\\n" "$DOTAIOS_SYNC_TOKEN"; }; f';
+  '!f() { ' +
+  'test "$1" = get || exit 0; ' +
+  'protocol= host= path=; ' +
+  'while IFS= read -r line; do ' +
+  'case "$line" in ' +
+  'protocol=*) protocol=${line#protocol=} ;; ' +
+  'host=*) host=${line#host=} ;; ' +
+  'path=*) path=${line#path=} ;; ' +
+  'esac; ' +
+  'done; ' +
+  'test "$protocol" = https || exit 0; ' +
+  'test "$host" = github.com || exit 0; ' +
+  'test "$path" = "$DOTAIOS_SYNC_REPO_PATH" || exit 0; ' +
+  'printf "username=x-access-token\\npassword=%s\\n" "$DOTAIOS_SYNC_TOKEN"; ' +
+  '}; f "$@"';
 
 function defaultSpawn(cmd, args, opts) {
   return new Promise((resolve, reject) => {
@@ -86,7 +104,7 @@ function findGitlinks(lsFilesStdout) {
   return paths;
 }
 
-function nestedRepoMessage(paths) {
+export function nestedRepoMessage(paths) {
   const list = paths.map((p) => `  ${p}`).join("\n");
   return [
     paths.length === 1
@@ -109,18 +127,78 @@ function nestedRepoMessage(paths) {
   ].join("\n");
 }
 
-export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, accessToken = null } = {}) {
-  const gitEnv = accessToken
-    ? { ...env, ...SYNC_GIT_IDENTITY, DOTAIOS_SYNC_TOKEN: accessToken }
-    : { ...env, ...SYNC_GIT_IDENTITY };
+export function createGit({
+  cwd,
+  spawnImpl = defaultSpawn,
+  env = process.env,
+  accessToken = null,
+  expectedRepoFullName = null,
+  filesystem = fs
+} = {}) {
+  const gitEnv = { ...env, ...SYNC_GIT_IDENTITY };
+  delete gitEnv.DOTAIOS_SYNC_TOKEN;
   // Authenticate network ops via the inline helper instead of a token-in-URL
   // remote. Empty-then-set clears any inherited global helper first.
   const credArgs = accessToken
-    ? ["-c", "credential.helper=", "-c", `credential.helper=${CREDENTIAL_HELPER}`]
+    ? [
+        "-c", "credential.helper=",
+        "-c", "credential.useHttpPath=true",
+        "-c", `credential.helper=${CREDENTIAL_HELPER}`
+      ]
     : [];
 
-  function run(args) {
-    return spawnImpl("git", args, { cwd, env: gitEnv });
+  function run(args, { indexFile, credentialed = false } = {}) {
+    const commandEnv = {
+      ...gitEnv,
+      ...(indexFile && { GIT_INDEX_FILE: indexFile }),
+      ...(credentialed && accessToken && {
+        DOTAIOS_SYNC_TOKEN: accessToken,
+        DOTAIOS_SYNC_REPO_PATH: `${expectedRepoFullName}.git`
+      })
+    };
+    return spawnImpl("git", args, { cwd, env: commandEnv });
+  }
+
+  function networkDestination() {
+    if (!accessToken) return "origin";
+    if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(expectedRepoFullName || "")) {
+      throw new Error("sync repository identity is unavailable; refusing credentialed Git access");
+    }
+    return `https://github.com/${expectedRepoFullName}.git`;
+  }
+
+  async function preflightCredentialedNetwork() {
+    const destination = networkDestination();
+    const configured = await run(["config", "--null", "--name-only", "--list"]);
+    if (configured.code !== 0) {
+      throw new Error(
+        `could not inspect effective Git configuration; refusing credentialed Git access: ${redactToken(configured.stderr.trim()) || `git config exited ${configured.code}`}`
+      );
+    }
+    const rewriteKeys = configured.stdout
+      .split("\0")
+      .map((key) => key.trim())
+      .filter((key) => /^url\..*\.(?:insteadof|pushinsteadof)$/i.test(key));
+    if (rewriteKeys.length > 0) {
+      throw new Error(
+        "effective Git configuration contains a URL rewrite rule; refusing credentialed Git access before changing the remote or contacting the network"
+      );
+    }
+    return destination;
+  }
+
+  async function runCredentialedNetwork(args) {
+    const disabledHooksPath = await filesystem.mkdtemp(
+      path.join(os.tmpdir(), "dotaios-disabled-hooks-")
+    );
+    try {
+      return await run(
+        [...credArgs, "-c", `core.hooksPath=${disabledHooksPath}`, ...args],
+        { credentialed: true }
+      );
+    } finally {
+      await filesystem.rm(disabledHooksPath, { recursive: true, force: true });
+    }
   }
 
   // Heal a legacy token-embedded remote (older installs stored the credential
@@ -145,6 +223,14 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, ac
       return branch || null;
     },
 
+    async originUrl() {
+      const { code, stdout, stderr } = await run(["remote", "get-url", "origin"]);
+      if (code !== 0) {
+        throw new Error(`could not read Git origin: ${redactToken(stderr.trim()) || `git remote exited ${code}`}`);
+      }
+      return stdout.trim();
+    },
+
     async dirty() {
       const { stdout } = await run(["status", "--porcelain"]);
       return stdout.trim().length > 0;
@@ -160,60 +246,123 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, ac
       const { stdout } = await run(["status", "--porcelain", "-z"]);
       const paths = parsePorcelainZ(stdout);
       if (paths.length === 0) return null;
-      const addResult = await run(["add", "--", ...paths]);
-      if (addResult.code !== 0) {
-        throw new Error(`git add failed: ${redactToken(addResult.stderr.trim())}`);
-      }
-      // `git add` exits 0 for a nested repository, so the exit code above proves
-      // nothing about what actually landed in the index. Inspect the index
-      // itself before any commit can be built from it.
-      const indexed = await run(["ls-files", "-s"]);
-      if (indexed.code !== 0) {
-        const reset = await run(["reset", "--quiet", "--", ...paths]);
-        const resetWarning = reset.code === 0
-          ? ""
-          : ` The staged paths could not be reset: ${redactToken(reset.stderr.trim()) || `git reset exited ${reset.code}`}.`;
+      const indexLocation = await run(["rev-parse", "--git-path", "index"]);
+      if (indexLocation.code !== 0 || !indexLocation.stdout.trim()) {
         throw new Error(
-          `git index inspection failed: ${redactToken(indexed.stderr.trim()) || `git ls-files exited ${indexed.code}`}.${resetWarning}`
+          `git index location failed: ${redactToken(indexLocation.stderr.trim()) || `git rev-parse exited ${indexLocation.code}`}`
         );
       }
-      const gitlinks = findGitlinks(indexed.stdout);
-      if (gitlinks.length > 0) {
-        // Unstage only what we just staged, returning the index to the state we
-        // found it in. `git rm --cached` is not usable here: it errors when the
-        // staged content differs from HEAD.
-        const reset = await run(["reset", "--quiet", "--", ...paths]);
-        if (reset.code !== 0) {
+      const reportedIndexPath = indexLocation.stdout.trim();
+      const indexPath = path.isAbsolute(reportedIndexPath)
+        ? reportedIndexPath
+        : path.resolve(cwd, reportedIndexPath);
+      const temporaryIndex = `${indexPath}.dotaios-${process.pid}-${randomUUID()}`;
+      const backupIndex = `${temporaryIndex}.original`;
+      let originalIndexExists = false;
+      let installed = false;
+      let commitCreated = false;
+      try {
+        try {
+          await filesystem.copyFile(indexPath, backupIndex);
+          originalIndexExists = true;
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        }
+        if (originalIndexExists) {
+          await filesystem.copyFile(backupIndex, temporaryIndex);
+        }
+
+        // Stage and inspect against an isolated copy. A refusal must leave a
+        // user's carefully staged or partially staged real index byte-identical.
+        const addResult = await run(["add", "--", ...paths], { indexFile: temporaryIndex });
+        if (addResult.code !== 0) {
+          throw new Error(`git add failed: ${redactToken(addResult.stderr.trim())}`);
+        }
+        const indexed = await run(["ls-files", "-s"], { indexFile: temporaryIndex });
+        if (indexed.code !== 0) {
           throw new Error(
-            `${nestedRepoMessage(gitlinks)}\n\nWarning: Git could not unstage the refused paths: ` +
-            `${redactToken(reset.stderr.trim()) || `git reset exited ${reset.code}`}.`
+            `git index inspection failed: ${redactToken(indexed.stderr.trim()) || `git ls-files exited ${indexed.code}`}`
           );
         }
-        throw new Error(nestedRepoMessage(gitlinks));
-      }
+        const gitlinks = findGitlinks(indexed.stdout);
+        if (gitlinks.length > 0) throw new Error(nestedRepoMessage(gitlinks));
 
-      const staged = await run(["diff", "--cached", "--quiet"]);
-      if (staged.code === 0) return null;
-      const commit = await run(["commit", "-m", message]);
-      if (commit.code !== 0) {
-        throw new Error(`git commit failed: ${redactToken(commit.stderr.trim())}`);
+        const staged = await run(["diff", "--cached", "--quiet"], { indexFile: temporaryIndex });
+        if (staged.code === 0) return null;
+        if (staged.code !== 1) {
+          throw new Error(
+            `git staged diff inspection failed: ${redactToken(staged.stderr.trim()) || `git diff exited ${staged.code}`}`
+          );
+        }
+
+        // Validation succeeded. Install the already-built index in one rename,
+        // then commit through Git's normal real-index path.
+        await filesystem.rename(temporaryIndex, indexPath);
+        installed = true;
+
+        const commit = await run(["commit", "-m", message]);
+        if (commit.code !== 0) {
+          throw new Error(`git commit failed: ${redactToken(commit.stderr.trim())}`);
+        }
+        commitCreated = true;
+        const sha = await run(["rev-parse", "HEAD"]);
+        if (sha.code !== 0 || !sha.stdout.trim()) {
+          throw new Error(
+            `git commit identity failed: ${redactToken(sha.stderr.trim()) || `git rev-parse exited ${sha.code}`}`
+          );
+        }
+        return sha.stdout.trim();
+      } catch (error) {
+        // Before a commit exists, failure must restore the exact index found at
+        // entry. After Git creates the commit, its updated index belongs with
+        // the new HEAD; restoring the old index would manufacture staged drift.
+        if (installed && !commitCreated) {
+          try {
+            if (originalIndexExists) {
+              await filesystem.rename(backupIndex, indexPath);
+            } else {
+              await filesystem.rm(indexPath, { force: true });
+            }
+          } catch (restoreError) {
+            throw new AggregateError(
+              [error, restoreError],
+              `Git failed and the original index could not be restored: ${error.message}`
+            );
+          }
+        }
+        throw error;
+      } finally {
+        await filesystem.rm(temporaryIndex, { force: true });
+        await filesystem.rm(backupIndex, { force: true });
       }
-      const sha = await run(["rev-parse", "HEAD"]);
-      return sha.stdout.trim();
     },
 
     async push(branch = "main") {
       // Push the checked-out commit, not a possibly unrelated local branch.
       // The tick guard ensures this is the exact local main checkout, so the
       // checked-out HEAD is the one mirrored by this push.
+      const destination = accessToken
+        ? await preflightCredentialedNetwork()
+        : networkDestination();
       await ensurePlainRemote();
-      const { code, stderr } = await run([...credArgs, "push", "origin", `HEAD:${branch}`]);
+      const { code, stderr } = accessToken
+        ? await runCredentialedNetwork(["push", destination, `HEAD:${branch}`])
+        : await run(["push", destination, `HEAD:${branch}`]);
       if (code !== 0) throw new Error(`git push failed: ${redactToken(stderr.trim())}`);
     },
 
-    async fetch() {
+    async fetch(branch = "main") {
+      if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-")) {
+        throw new Error("invalid sync branch");
+      }
+      const destination = accessToken
+        ? await preflightCredentialedNetwork()
+        : networkDestination();
       await ensurePlainRemote();
-      const { code, stderr } = await run([...credArgs, "fetch", "origin"]);
+      const fetchArgs = ["fetch", destination, `+refs/heads/${branch}:refs/remotes/origin/${branch}`];
+      const { code, stderr } = accessToken
+        ? await runCredentialedNetwork(fetchArgs)
+        : await run(["fetch", destination]);
       if (code !== 0) throw new Error(`git fetch failed: ${redactToken(stderr.trim())}`);
     },
 
@@ -225,8 +374,13 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, ac
         throw new Error("invalid sync branch");
       }
       const ref = `refs/heads/${branch}`;
+      const destination = accessToken
+        ? await preflightCredentialedNetwork()
+        : networkDestination();
       await ensurePlainRemote();
-      const { code, stdout, stderr } = await run([...credArgs, "ls-remote", "origin", ref]);
+      const { code, stdout, stderr } = accessToken
+        ? await runCredentialedNetwork(["ls-remote", destination, ref])
+        : await run(["ls-remote", destination, ref]);
       if (code !== 0) {
         throw new Error(`git ls-remote failed: ${redactToken(stderr.trim())}`);
       }
@@ -244,7 +398,7 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, ac
     // clash. The failed rebase is aborted so the tree is left untouched and
     // the caller can stop safely).
     async pullRebase(branch = "main") {
-      await this.fetch();
+      await this.fetch(branch);
       const behind = parseInt(
         (await run(["rev-list", "--count", `HEAD..origin/${branch}`])).stdout.trim(),
         10
@@ -262,6 +416,20 @@ export function createGit({ cwd, spawnImpl = defaultSpawn, env = process.env, ac
 
     async currentSha() {
       return (await run(["rev-parse", "HEAD"])).stdout.trim();
+    },
+
+    async hasUnpushedCommits(branch = "main") {
+      if (!/^[A-Za-z0-9._/-]+$/.test(branch) || branch.startsWith("-")) {
+        throw new Error("invalid sync branch");
+      }
+      const result = await run(["rev-list", "--count", `origin/${branch}..HEAD`]);
+      const count = Number.parseInt(result.stdout.trim(), 10);
+      if (result.code !== 0 || !Number.isInteger(count) || count < 0) {
+        throw new Error(
+          `could not inspect unpushed Git commits: ${redactToken(result.stderr.trim()) || `git rev-list exited ${result.code}`}`
+        );
+      }
+      return count > 0;
     },
 
     async init() {

@@ -18,6 +18,14 @@ function fakeSpawn(plan) {
   };
 }
 
+function fakeIndexFilesystem() {
+  return {
+    copyFile: async () => { const error = new Error("missing"); error.code = "ENOENT"; throw error; },
+    rename: async () => {},
+    rm: async () => {}
+  };
+}
+
 test("createGit stamps a DotAIOS git identity into the spawn env", async () => {
   let capturedEnv;
   const git = createGit({
@@ -73,6 +81,17 @@ test("pullRebase() returns 'rebased' when remote ahead and rebase succeeds", asy
   assert.equal(await git.pullRebase("main"), "rebased");
 });
 
+test("hasUnpushedCommits() detects commits ahead of the fetched origin branch", async () => {
+  const git = createGit({
+    cwd: "/x",
+    spawnImpl: fakeSpawn([{
+      match: "rev-list --count origin/main..HEAD",
+      stdout: "1\n"
+    }])
+  });
+  assert.equal(await git.hasUnpushedCommits("main"), true);
+});
+
 test("pullRebase() aborts and returns 'conflict' when rebase fails", async () => {
   const calls = [];
   const git = createGit({
@@ -104,11 +123,15 @@ test("commitAll() stages explicit paths (never git add -A) and returns sha", asy
   const calls = [];
   const git = createGit({
     cwd: "/x",
+    filesystem: fakeIndexFilesystem(),
     spawnImpl: (cmd, args) => {
       const full = [cmd, ...args].join(" ");
       calls.push(full);
       if (full.includes("status --porcelain -z")) {
         return Promise.resolve({ stdout: " M file.md\0", stderr: "", code: 0 });
+      }
+      if (full.includes("rev-parse --git-path index")) {
+        return Promise.resolve({ stdout: ".git/index\n", stderr: "", code: 0 });
       }
       if (full.startsWith("git add --")) {
         return Promise.resolve({ stdout: "", stderr: "", code: 0 });
@@ -140,11 +163,15 @@ test("commitAll() refuses when the staged-index probe fails", async () => {
   const calls = [];
   const git = createGit({
     cwd: "/x",
+    filesystem: fakeIndexFilesystem(),
     spawnImpl: (cmd, args) => {
       const full = [cmd, ...args].join(" ");
       calls.push(full);
       if (full.includes("status --porcelain -z")) {
         return Promise.resolve({ stdout: " M file.md\0", stderr: "", code: 0 });
+      }
+      if (full.includes("rev-parse --git-path index")) {
+        return Promise.resolve({ stdout: ".git/index\n", stderr: "", code: 0 });
       }
       if (full.startsWith("git add --")) {
         return Promise.resolve({ stdout: "", stderr: "", code: 0 });
@@ -168,7 +195,7 @@ test("commitAll() refuses when the staged-index probe fails", async () => {
     assert.ok(!error.message.includes("ghu_SECRET"), "probe errors must redact tokens");
     return true;
   });
-  assert.ok(calls.some((call) => call.startsWith("git reset --quiet -- file.md")));
+  assert.ok(!calls.some((call) => call.startsWith("git reset")), "the real index is never reset on refusal");
   assert.ok(!calls.some((call) => call.includes("commit -m")), "unknown index state must not commit");
 });
 

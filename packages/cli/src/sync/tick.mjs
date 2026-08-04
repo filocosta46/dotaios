@@ -1,5 +1,9 @@
 import fs from "node:fs/promises";
-import { verifyRepoPrivate as defaultVerifyRepoPrivate } from "./repo.mjs";
+import {
+  githubRepoIdentity,
+  plainRemoteUrl,
+  verifyRepoPrivate as defaultVerifyRepoPrivate
+} from "./repo.mjs";
 
 const MIN_TICK_GAP_MS = 10_000;
 const STALE_LOCK_MS = 5 * 60 * 1000;
@@ -13,7 +17,7 @@ const SYNC_CONFLICT_SUMMARY =
 // tree, stages nothing, and used to report success. Left silent this repeats
 // forever while the user's work is never mirrored.
 export const SYNC_STALLED_SUMMARY =
-  "Sync found changes in your folder but had nothing it could record. This usually means a project inside your AIOS folder has its own Git repository, which Git stores as a pointer rather than as files. Run `dotaios doctor` to see which paths are affected. Nothing was lost, and nothing was pushed.";
+  "Sync found changes in your folder but had nothing it could record. This usually means a project inside your AIOS folder has its own Git repository, which Git stores as a pointer rather than as files. Ask your agent to inspect the folder for nested Git repositories. Nothing was lost, and nothing was pushed.";
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -88,10 +92,12 @@ export async function runTick({
     }
   }
 
-  const git = makeGit();
+  // Inspect checkout identity in a Git process that has no sync token. The
+  // token is not allowed into Git until origin is bound to the configured repo.
+  const inspectionGit = makeGit({ accessToken: null, expectedRepoFullName: null });
   let currentBranch = null;
   try {
-    currentBranch = await git.currentBranch();
+    currentBranch = await inspectionGit.currentBranch();
   } catch {
     // An unknown checkout is not safe to mutate.
   }
@@ -103,12 +109,24 @@ export async function runTick({
   const startedIso = new Date(now()).toISOString();
 
   try {
+    const expectedIdentity = githubRepoIdentity(plainRemoteUrl(cfg.repo_full_name || ""));
+    const originIdentity = githubRepoIdentity(await inspectionGit.originUrl());
+    if (!expectedIdentity || originIdentity !== expectedIdentity) {
+      throw new Error(
+        `the configured Git origin does not match the private sync repository ${cfg.repo_full_name || "(unknown)"}. ` +
+        `Sync stopped before sending credentials or changing Git.`
+      );
+    }
     if (typeof verifyRepoPrivate !== "function") {
       throw new Error("sync privacy verification is unavailable");
     }
     await verifyRepoPrivate({
       accessToken: cfg.access_token,
       fullName: cfg.repo_full_name
+    });
+    const git = makeGit({
+      accessToken: cfg.access_token,
+      expectedRepoFullName: cfg.repo_full_name
     });
 
     // 1. Commit local changes FIRST — rebase refuses to run on a dirty tree.
@@ -162,8 +180,11 @@ export async function runTick({
       };
     }
 
-    if (pushedSha) {
-      // 4. Local commit (now replayed on top of origin) goes up.
+    const hasUnpushedCommit = pushedSha
+      ? true
+      : await git.hasUnpushedCommits("main");
+    if (hasUnpushedCommit) {
+      // 4. A new local commit, or one left by an earlier failed push, goes up.
       await git.push("main");
       // Record the actual HEAD after push: a rebase above may have rewritten
       // the commit, so commitAll's pre-rebase sha can no longer exist.
@@ -179,6 +200,7 @@ export async function runTick({
     });
 
     return {
+      outcome: "success",
       pulled: pullResult,
       pushed,
       stalled: false,

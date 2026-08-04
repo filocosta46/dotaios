@@ -12,6 +12,8 @@ import { createGit } from "./git.mjs";
 import { runTick } from "./tick.mjs";
 import { readOptionValue } from "../lib/args.mjs";
 
+const FIRST_TICK_SUCCESS_OUTCOME = "success";
+
 // Parse `--path <dir>` from args; undefined when absent.
 function readPathOption(args) {
   const index = args.indexOf("--path");
@@ -96,7 +98,10 @@ export async function orchestrateSetup({
 
   log("");
   log("Step 4/4 - Verify sync setup");
-  await runFirstTick();
+  const firstTick = await runFirstTick();
+  if (firstTick?.outcome !== FIRST_TICK_SUCCESS_OUTCOME) {
+    throw new Error(firstTick?.error || "Sync verification did not complete safely.");
+  }
   log("  Setup verified. Sync is manual by default.");
 
   log("");
@@ -127,20 +132,18 @@ export async function runSetup(args = [], { orchestrate = orchestrateSetup } = {
     openInBrowser: async (url) => defaultOpenInBrowser(url),
     pollForRepoExists,
     initialMirrorPush: async ({ aiosPath: p, accessToken, fullName, gitignoreContent: g }) => {
-      const git = createGit({ cwd: p, accessToken });
-      const sha = await initialMirrorPush({ aiosPath: p, accessToken, fullName, gitignoreContent: g, git });
+      const git = createGit({ cwd: p, accessToken, expectedRepoFullName: fullName });
+      const sha = await initialMirrorPush({ aiosPath: p, fullName, gitignoreContent: g, git });
       // Record the first push so `sync status` is accurate before any tick.
       if (sha) await writeSyncConfig({ last_push_sha: sha });
     },
     runFirstTick: async () => {
-      const accessToken = (await readSyncConfig())?.access_token || null;
-      const git = createGit({ cwd: aiosPath, accessToken });
       const lockPath = path.join(path.dirname(syncConfigPath()), "sync.lock");
-      await runTick({
+      return runTick({
         lockPath,
         readConfig: () => readSyncConfig(),
         writeConfig: (patch) => writeSyncConfig(patch),
-        makeGit: () => git,
+        makeGit: (options) => createGit({ cwd: aiosPath, ...options }),
         appendEvent: async () => {},
         now: () => Date.now()
       });

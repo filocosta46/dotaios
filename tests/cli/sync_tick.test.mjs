@@ -12,13 +12,28 @@ async function tmpLock() {
 }
 
 function runTick(options) {
+  const readConfig = options.readConfig;
+  const makeGitFactory = options.makeGit;
   return runTickImpl({
     verifyRepoPrivate: async () => true,
-    ...options
+    ...options,
+    readConfig: async () => {
+      const cfg = await readConfig();
+      return cfg?.access_token
+        ? { repo_full_name: "alice/alice-aios", ...cfg }
+        : cfg;
+    },
+    makeGit: (factoryOptions) => {
+      const client = makeGitFactory(factoryOptions);
+      if (typeof client.originUrl !== "function") {
+        client.originUrl = async () => "https://github.com/alice/alice-aios.git";
+      }
+      return client;
+    }
   });
 }
 
-function makeGit({ branch = "main", dirty = false, pullResult = "up-to-date", commitSha = null, calls = [] } = {}) {
+function makeGit({ branch = "main", dirty = false, pullResult = "up-to-date", commitSha = null, ahead = false, calls = [] } = {}) {
   return {
     async currentBranch() { calls.push(`branch-current:${branch ?? "unknown"}`); return branch; },
     async dirty() { calls.push("dirty"); return dirty; },
@@ -26,6 +41,7 @@ function makeGit({ branch = "main", dirty = false, pullResult = "up-to-date", co
     async push(b) { calls.push(`push:${b}`); },
     async fetch() { calls.push("fetch"); },
     async pullRebase(b) { calls.push(`pullRebase:${b}`); return pullResult; },
+    async hasUnpushedCommits(b) { calls.push(`ahead:${b}`); return ahead; },
     async currentSha() { return "sha-current"; }
   };
 }
@@ -168,8 +184,30 @@ test("tick commits before pulling, then pushes when dirty and remote up-to-date"
     const pullIdx = calls.indexOf("pullRebase:main");
     assert.ok(commitIdx !== -1, "must commit local work");
     assert.ok(commitIdx < pullIdx, "commit must happen before the rebase pull");
+    assert.equal(result.outcome, "success", "a completed tick has the explicit success outcome");
     assert.equal(result.pushed, true);
     assert.equal(result.sha, "sha-current", "reported sha is HEAD after push, not the pre-rebase commit");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("a clean tick pushes a commit left ahead of origin by the previous failed push", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null, last_push_sha: "old-sha" }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: false, pullResult: "up-to-date", ahead: true, calls }),
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+
+    assert.ok(calls.includes("ahead:main"), "a clean tick checks for an unpushed local commit");
+    assert.ok(calls.includes("push:main"), "the existing commit is retried");
+    assert.equal(result.outcome, "success");
+    assert.equal(result.pushed, true);
+    assert.equal(result.sha, "sha-current");
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
@@ -222,6 +260,50 @@ test("tick fails closed when repo privacy is unknown", async () => {
     assert.deepEqual(calls, ["branch-current:main"], "unknown privacy must precede every git mutation");
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
+
+for (const [label, origin] of [
+  ["hostile host", "https://attacker.example/alice/alice-aios.git"],
+  ["different GitHub repository", "https://github.com/mallory/public-mirror.git"],
+  ["SSH transport", "git@github.com:alice/alice-aios.git"]
+]) {
+  test(`tick refuses a ${label} origin before creating a credentialed Git client`, async () => {
+    const { lockPath, dir } = await tmpLock();
+    try {
+      const factoryTokens = [];
+      const calls = [];
+      let privacyChecks = 0;
+      const result = await runTickImpl({
+        lockPath,
+        readConfig: async () => ({
+          access_token: "SECRET",
+          repo_full_name: "alice/alice-aios",
+          last_tick_at: null
+        }),
+        writeConfig: async () => {},
+        makeGit: ({ accessToken = null } = {}) => {
+          factoryTokens.push(accessToken);
+          return {
+            currentBranch: async () => { calls.push("branch"); return "main"; },
+            originUrl: async () => { calls.push("origin"); return origin; },
+            dirty: async () => { calls.push("dirty"); return true; },
+            pullRebase: async () => { calls.push("fetch"); return "up-to-date"; },
+            push: async () => { calls.push("push"); }
+          };
+        },
+        verifyRepoPrivate: async () => { privacyChecks += 1; return true; },
+        appendEvent: async () => {},
+        now: () => Date.now()
+      });
+
+      assert.match(result.error, /origin.*does not match/i);
+      assert.deepEqual(factoryTokens, [null], "the sync token never enters a Git process");
+      assert.deepEqual(calls, ["branch", "origin"], "no staging, fetch, or push runs");
+      assert.equal(privacyChecks, 0, "the token is not sent to GitHub before origin binding");
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("tick releases lock after a successful run", async () => {
   const { lockPath, dir } = await tmpLock();
@@ -421,10 +503,14 @@ test("runTickCommand resolves without throwing when sync not enabled", async () 
   // With no sync.json configured, runTick returns { skipped: "no-token" }.
   // runTickCommand must simply resolve — no throw, no crash.
   const origLog = console.log;
+  const originalExitCode = process.exitCode;
   console.log = () => {};
   try {
     await runTickCommand([]);
-  } finally { console.log = origLog; }
+  } finally {
+    console.log = origLog;
+    process.exitCode = originalExitCode;
+  }
   // reaching here = did not throw
   assert.ok(true);
 });
@@ -463,6 +549,65 @@ test("sync command reporting returns non-zero when the sync lock is held", () =>
 
     assert.equal(process.exitCode, 1);
     assert.match(logs.join("\n"), /another sync is already running/i);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = originalExitCode;
+  }
+});
+
+for (const [skip, expected] of [
+  ["rate-limit-gap", /ran less than 10 seconds ago/i],
+  ["not-main-branch", /not on main/i],
+  ["unexpected-skip", /unexpected-skip/i]
+]) {
+  test(`sync command reporting fails loudly and truthfully for ${skip}`, () => {
+    const originalExitCode = process.exitCode;
+    const originalLog = console.log;
+    const logs = [];
+    console.log = (...args) => logs.push(args.join(" "));
+    try {
+      process.exitCode = 0;
+      reportTickResult({ skipped: skip });
+
+      assert.equal(process.exitCode, 1);
+      assert.match(logs.join("\n"), expected);
+      assert.doesNotMatch(logs.join("\n"), /already up to date|is synced/i);
+    } finally {
+      console.log = originalLog;
+      process.exitCode = originalExitCode;
+    }
+  });
+}
+
+test("sync command reports up to date only for an explicit success outcome", () => {
+  const originalExitCode = process.exitCode;
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    process.exitCode = 0;
+    reportTickResult({ outcome: "success", pushed: false });
+
+    assert.equal(process.exitCode, 0);
+    assert.match(logs.join("\n"), /already up to date/i);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = originalExitCode;
+  }
+});
+
+test("sync not configured remains an informational command result", () => {
+  const originalExitCode = process.exitCode;
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    process.exitCode = 0;
+    reportTickResult({ skipped: "no-token" });
+
+    assert.equal(process.exitCode, 0);
+    assert.match(logs.join("\n"), /not set up/i);
+    assert.doesNotMatch(logs.join("\n"), /already up to date|is synced/i);
   } finally {
     console.log = originalLog;
     process.exitCode = originalExitCode;

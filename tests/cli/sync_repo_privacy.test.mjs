@@ -29,6 +29,11 @@ const base = {
   timeoutMs: 1000
 };
 
+const unverifiableSetupMessage =
+  "could not verify that user/user-aios is private. DotAIOS will not upload your personal context until GitHub explicitly confirms the repository is private. Re-run \"dotaios sync setup\".";
+const publicSetupMessage =
+  "the repo user/user-aios is public. DotAIOS will not sync your personal context to a public repository. On github.com open the repo, go to Settings, and change its visibility to Private — then re-run \"dotaios sync setup\".";
+
 test("a private repo is accepted", async () => {
   const ok = await pollForRepoExists({ ...base, fetchImpl: githubStub({ private: true }) });
   assert.equal(ok, true);
@@ -37,11 +42,7 @@ test("a private repo is accepted", async () => {
 test("a PUBLIC repo is refused, and the message says why it matters", async () => {
   await assert.rejects(
     () => pollForRepoExists({ ...base, fetchImpl: githubStub({ private: false }) }),
-    (err) => {
-      assert.match(err.message, /public/i, "the message names the problem");
-      assert.match(err.message, /user\/user-aios/, "the message names the repo");
-      return true;
-    },
+    { message: publicSetupMessage },
     "setup must not proceed against a public repo"
   );
 });
@@ -52,7 +53,23 @@ test("a repo whose privacy cannot be determined is refused rather than assumed",
     if (url.endsWith("/commits")) return { ok: false, status: 409, json: async () => ({}) };
     return { ok: true, status: 200, json: async () => ({ full_name: "user/user-aios" }) };
   };
-  await assert.rejects(() => pollForRepoExists({ ...base, fetchImpl }));
+  await assert.rejects(
+    () => pollForRepoExists({ ...base, fetchImpl }),
+    { message: unverifiableSetupMessage }
+  );
+});
+
+test("a malformed setup privacy response is reported as unverifiable, not public", async () => {
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => { throw new Error("invalid json"); }
+  });
+
+  await assert.rejects(
+    () => pollForRepoExists({ ...base, fetchImpl }),
+    { message: unverifiableSetupMessage }
+  );
 });
 
 test("sync privacy verification accepts only an explicit private response", async () => {

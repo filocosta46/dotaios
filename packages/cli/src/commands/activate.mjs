@@ -63,11 +63,15 @@ export async function activateCommand(args) {
 
   const config = await readAiosConfig(aiosPath);
   const skillsFirst = options.skillsFirst ?? Boolean(config.skills_first);
+  const configPatch = activationConfigPatch(options);
 
   // A real activation persists an explicit preference. Dry-run uses the
   // requested value for its preview without changing aios.json.
-  if (!options.dryRun && options.skillsFirst !== undefined) {
-    await updateAiosConfig(aiosPath, { skills_first: options.skillsFirst });
+  if (configPatch) {
+    await updateAiosConfig(aiosPath, configPatch);
+    if (process.env.DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_ACTIVATION_CONFIG === "1") {
+      process.kill(process.pid, "SIGKILL");
+    }
   }
 
   // Refresh before writing bridges. Dry-run renders the same catalog in memory
@@ -176,6 +180,15 @@ function parseOptions(args = []) {
   }
 
   return options;
+}
+
+export function plannedActivationConfigPatch(args = []) {
+  return activationConfigPatch(parseOptions(args));
+}
+
+function activationConfigPatch(options) {
+  if (options.dryRun || options.skillsFirst === undefined) return null;
+  return { skills_first: options.skillsFirst };
 }
 
 function printActivateHelp() {

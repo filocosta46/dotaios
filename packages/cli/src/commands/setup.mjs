@@ -1,12 +1,14 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { hasHelpFlag } from "../lib/args.mjs";
+import { assertUniqueOptions, hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { parseJsonlLine } from "../../../core/src/jsonl.mjs";
+import { schemaVersion } from "../../../core/src/schema.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import {
   LIGHTPANDA_VERSION,
@@ -15,7 +17,7 @@ import {
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
-import { activateCommand } from "./activate.mjs";
+import { activateCommand, plannedActivationConfigPatch } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
 import {
   emitPilotMetric,
@@ -40,11 +42,16 @@ Options:
   --overwrite         Replace generated files in the target folder
 `;
 
+const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
+const SETUP_TRANSACTION_FORMAT = "dotaios-setup-transaction/v1";
+
 export async function setupCommand(args) {
   if (hasHelpFlag(args)) {
     console.log(HELP_TEXT);
     return;
   }
+
+  assertUniqueOptions(args, ["--path", "--vault-path"]);
 
   const passthrough = args.filter((arg) => !["--skip-reveal", "--install-lightpanda"].includes(arg));
   const skipReveal = args.includes("--skip-reveal");
@@ -53,31 +60,37 @@ export async function setupCommand(args) {
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
   const startedAt = Date.now();
   const runId = randomUUID();
+  let setupTransactionActive = false;
 
   console.log("DotAIOS setup — step 1 of 3: create your folder");
   console.log("");
   try {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
-    await runInitWithRecovery(passthrough, aiosPath);
+    setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath);
     await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
     await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
     await emitPilotMetric(aiosPath, { type: "install_start", command: "setup", run_id: runId });
+    if (setupTransactionActive && process.env.DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT === "1") {
+      process.kill(process.pid, "SIGKILL");
+    }
   } catch (err) {
     // createAios: false — a metric must never be the thing that creates the
     // folder a failed install did not. Otherwise the retry this very message
     // recommends trips over the wreckage of the attempt that printed it.
-    const dropIfMissing = { createAios: false };
-    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
-    await emitPilotMetric(aiosPath, {
-      type: "install_end",
-      command: "setup",
-      outcome: "fail",
-      phase: "init",
-      run_id: runId,
-      duration_ms: Date.now() - startedAt
-    }, dropIfMissing);
+    if (!(await hasSetupTransaction(aiosPath))) {
+      const dropIfMissing = { createAios: false };
+      await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
+      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
+      await emitPilotMetric(aiosPath, {
+        type: "install_end",
+        command: "setup",
+        outcome: "fail",
+        phase: "init",
+        run_id: runId,
+        duration_ms: Date.now() - startedAt
+      }, dropIfMissing);
+    }
     console.error(`Step 1 failed: ${err.message}`);
     console.error("Re-run: dotaios init to retry this step.");
     console.error("");
@@ -105,6 +118,9 @@ export async function setupCommand(args) {
     console.error(`Step 2 failed: ${err.message}`);
     console.error("Re-run: dotaios activate to retry connecting your tools.");
     console.error("");
+  }
+  if (setupTransactionActive) {
+    await fs.unlink(setupTransactionPath(aiosPath));
   }
 
   // Step 3: reveal (best-effort, never blocks)
@@ -215,20 +231,281 @@ export async function setupCommand(args) {
   });
 }
 
-// The retry we print on failure is `dotaios setup`, so that retry has to be
-// able to get past the exact residue created by setup 1.27.1. One --force
-// attempt completes that known partial install; every other cause fails closed,
-// so user-authored content can never be mistaken for generated debris.
+// Setup owns a partial scaffold only when it started from an empty target,
+// recorded the complete expected tree before createBaseTree, and every path
+// left behind still matches that record. Only that narrow case gets an internal
+// --force retry. The metrics-only recognizer below remains for 1.27.1 upgrades.
 async function runInitWithRecovery(passthrough, aiosPath) {
+  let transactionStarted = false;
   try {
-    await initCommand(passthrough);
-    return;
+    await initCommand(passthrough, {
+      beforeScaffold: async (plan) => {
+        transactionStarted = await beginSetupTransaction(aiosPath, passthrough, plan);
+      },
+      afterCreateBaseTree: async () => {
+        if (transactionStarted && process.env.DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE === "1") {
+          throw new Error("injected setup interruption after createBaseTree");
+        }
+      }
+    });
+    return transactionStarted;
   } catch (error) {
     if (!/exists and is not empty/i.test(error.message)) throw error;
+    const transaction = await readRecoverableSetupTransaction(aiosPath, passthrough);
+    if (transaction) {
+      await initCommand([...passthrough, "--force"], { plan: transaction.plan });
+      console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
+      return true;
+    }
     if (!(await isFailedSetupResidue(aiosPath))) throw error;
     await initCommand([...passthrough, "--force"]);
     console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
+    return false;
   }
+}
+
+function setupTransactionPath(aiosPath) {
+  return path.join(aiosPath, SETUP_TRANSACTION_FILE);
+}
+
+async function hasSetupTransaction(aiosPath) {
+  try {
+    await fs.lstat(setupTransactionPath(aiosPath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function beginSetupTransaction(aiosPath, passthrough, plan) {
+  // A caller already using --force/--overwrite has explicitly chosen init's
+  // preserve/replace semantics. It is not an empty first install whose residue
+  // setup can later claim as its own.
+  if (passthrough.includes("--force") || passthrough.includes("--overwrite")) return false;
+
+  const existed = await pathExists(aiosPath);
+  if (existed && (await fs.readdir(aiosPath)).length !== 0) {
+    throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
+  }
+
+  const manifest = await expectedSetupManifest(plan);
+  const transaction = {
+    format: SETUP_TRANSACTION_FORMAT,
+    target: aiosPath,
+    args: passthrough,
+    plan,
+    manifest
+  };
+
+  await fs.mkdir(aiosPath, { recursive: true });
+  if ((await fs.readdir(aiosPath)).length !== 0) {
+    throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
+  }
+
+  const temporaryMarker = path.join(aiosPath, `.dotaios-setup-${randomUUID()}.tmp`);
+  const markerPath = setupTransactionPath(aiosPath);
+  await fs.writeFile(temporaryMarker, `${JSON.stringify(transaction, null, 2)}\n`, { flag: "wx" });
+  try {
+    if (process.env.DOTAIOS_TEST_RACE_SETUP_MARKER === "1") {
+      await fs.writeFile(markerPath, "foreign marker bytes\n", { flag: "wx" });
+    }
+    try {
+      await fs.link(temporaryMarker, markerPath);
+    } catch (error) {
+      if (error.code === "EEXIST") {
+        throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
+      }
+      throw error;
+    }
+  } finally {
+    await fs.unlink(temporaryMarker).catch(() => {});
+  }
+
+  const entries = await fs.readdir(aiosPath);
+  if (entries.length !== 1 || entries[0] !== SETUP_TRANSACTION_FILE) {
+    throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
+  }
+  return true;
+}
+
+async function readRecoverableSetupTransaction(aiosPath, passthrough) {
+  const markerPath = setupTransactionPath(aiosPath);
+  let transaction;
+  try {
+    const stats = await fs.lstat(markerPath);
+    if (!stats.isFile() || stats.isSymbolicLink()) return null;
+    transaction = JSON.parse(await fs.readFile(markerPath, "utf8"));
+  } catch {
+    return null;
+  }
+
+  if (!isSetupTransaction(transaction, aiosPath, passthrough)) return null;
+
+  let expected;
+  try {
+    expected = await expectedSetupManifest(transaction.plan);
+  } catch {
+    return null;
+  }
+  if (JSON.stringify(expected) !== JSON.stringify(transaction.manifest)) return null;
+
+  let actual;
+  try {
+    actual = await treeManifest(aiosPath, { ignoreRoot: SETUP_TRANSACTION_FILE });
+  } catch {
+    return null;
+  }
+  const expectedByPath = new Map(expected.map((entry) => [entry.path, entry]));
+  const extra = actual.filter((entry) => !expectedByPath.has(entry.path));
+  let activationConfigEntry = null;
+  try {
+    const configPatch = plannedActivationConfigPatch(passthrough);
+    if (configPatch) {
+      const content = `${JSON.stringify({ ...transaction.plan.config, ...configPatch }, null, 2)}\n`;
+      activationConfigEntry = {
+        path: "aios.json",
+        type: "file",
+        sha256: createHash("sha256").update(content).digest("hex")
+      };
+    }
+  } catch {
+    return null;
+  }
+  if (actual.some((entry) => {
+    if (!expectedByPath.has(entry.path)) return false;
+    if (JSON.stringify(entry) === JSON.stringify(expectedByPath.get(entry.path))) return false;
+    return !activationConfigEntry || JSON.stringify(entry) !== JSON.stringify(activationConfigEntry);
+  })) {
+    return null;
+  }
+  if (!(await isRecoverableSetupMetrics(aiosPath, extra))) return null;
+
+  return transaction;
+}
+
+async function isRecoverableSetupMetrics(aiosPath, extraEntries) {
+  if (extraEntries.length === 0) return true;
+  const allowed = new Set(["memory/metrics", "memory/metrics/pilot.jsonl"]);
+  if (extraEntries.some((entry) => !allowed.has(entry.path))) return false;
+  if (!extraEntries.some((entry) => entry.path === "memory/metrics/pilot.jsonl" && entry.type === "file")) return false;
+
+  let lines;
+  try {
+    lines = (await fs.readFile(pilotMetricsFile(aiosPath), "utf8")).trim().split(/\r?\n/).filter(Boolean);
+  } catch {
+    return false;
+  }
+  if (lines.length === 0) return false;
+
+  try {
+    return lines.map(parseJsonlLine).every((metric) => {
+      if (!metric || typeof metric !== "object" || Array.isArray(metric)) return false;
+      if (metric.type === "setup_phase_start") return ["init", "activate"].includes(metric.phase);
+      if (metric.type === "setup_phase_end") {
+        if (metric.phase === "init") return metric.outcome === "ok";
+        return metric.phase === "activate" && ["ok", "warn", "fail"].includes(metric.outcome);
+      }
+      return metric.type === "install_start" && metric.command === "setup";
+    });
+  } catch {
+    return false;
+  }
+}
+
+function isSetupTransaction(transaction, aiosPath, passthrough) {
+  if (!transaction || typeof transaction !== "object" || Array.isArray(transaction)) return false;
+  if (transaction.format !== SETUP_TRANSACTION_FORMAT || transaction.target !== aiosPath) return false;
+  if (!Array.isArray(transaction.args) || transaction.args.some((arg) => typeof arg !== "string")) return false;
+  if (JSON.stringify(transaction.args) !== JSON.stringify(passthrough)) return false;
+  if (!transaction.plan || typeof transaction.plan !== "object" || Array.isArray(transaction.plan)) return false;
+  if (!isSetupPlan(transaction.plan, passthrough)) return false;
+  if (!Array.isArray(transaction.manifest)) return false;
+  return transaction.manifest.every((entry) =>
+    entry
+      && typeof entry === "object"
+      && typeof entry.path === "string"
+      && (entry.type === "directory" || (entry.type === "file" && typeof entry.sha256 === "string"))
+  );
+}
+
+function isSetupPlan(plan, passthrough) {
+  const { config, data } = plan;
+  if (!hasExactKeys(config, ["schema_version", "created_at", "ai_tools", "vault_path"])) return false;
+  if (!hasExactKeys(data, [
+    "user_name",
+    "user_role",
+    "current_work",
+    "priorities",
+    "ai_tools",
+    "created_at",
+    "vault_path"
+  ])) return false;
+  if (config.schema_version !== schemaVersion) return false;
+  if (typeof config.created_at !== "string" || Number.isNaN(Date.parse(config.created_at))) return false;
+  if (!Array.isArray(config.ai_tools) || config.ai_tools.some((tool) => typeof tool !== "string")) return false;
+  if (config.vault_path !== null && typeof config.vault_path !== "string") return false;
+  if (data.created_at !== config.created_at || data.vault_path !== config.vault_path) return false;
+  if (JSON.stringify(data.ai_tools) !== JSON.stringify(config.ai_tools)) return false;
+  if ([data.user_name, data.user_role, data.current_work, data.priorities].some((value) => typeof value !== "string")) return false;
+
+  const vaultOption = extractOption(passthrough, "--vault-path");
+  const expectedVault = vaultOption === null ? null : expandHome(vaultOption);
+  return config.vault_path === expectedVault;
+}
+
+function hasExactKeys(value, keys) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const actual = Object.keys(value).sort();
+  return JSON.stringify(actual) === JSON.stringify([...keys].sort());
+}
+
+function extractOption(args, option) {
+  let value = null;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === option && index + 1 < args.length) value = args[index + 1];
+  }
+  return value;
+}
+
+async function expectedSetupManifest(plan) {
+  const referenceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-setup-reference-"));
+  const referenceAios = path.join(referenceRoot, "aios");
+  try {
+    await initCommand(["--path", referenceAios, "--yes"], {
+      plan,
+      quiet: true,
+      skipVaultTree: true
+    });
+    return await treeManifest(referenceAios);
+  } finally {
+    await fs.rm(referenceRoot, { recursive: true, force: true });
+  }
+}
+
+async function treeManifest(root, { ignoreRoot = null } = {}) {
+  const manifest = [];
+
+  async function visit(directory, prefix = "") {
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      if (!prefix && entry.name === ignoreRoot) continue;
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const resolved = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        manifest.push({ path: relative, type: "directory" });
+        await visit(resolved, relative);
+      } else if (entry.isFile()) {
+        const content = await fs.readFile(resolved);
+        manifest.push({ path: relative, type: "file", sha256: createHash("sha256").update(content).digest("hex") });
+      } else {
+        throw new Error(`Unsupported setup residue: ${relative}`);
+      }
+    }
+  }
+
+  await visit(root);
+  return manifest;
 }
 
 async function isFailedSetupResidue(aiosPath) {

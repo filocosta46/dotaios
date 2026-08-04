@@ -41,6 +41,58 @@ test("init creates the vault at a creatable --vault-path", () => {
   assert.equal(fs.existsSync(path.join(target, "aios.json")), true);
 });
 
+test("init rejects duplicate target and vault options before writing files", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-duplicates-"));
+  const firstTarget = path.join(root, "first-aios");
+  const secondTarget = path.join(root, "second-aios");
+  const foreignFile = path.join(secondTarget, "private-notes.md");
+  fs.mkdirSync(secondTarget, { recursive: true });
+  fs.writeFileSync(foreignFile, "preserve me\n");
+  const before = fs.readFileSync(foreignFile);
+
+  const duplicatePath = spawnSync(process.execPath, [
+    cli, "init", "--yes", "--force", "--path", firstTarget, "--path", secondTarget
+  ], { encoding: "utf8" });
+
+  assert.notEqual(duplicatePath.status, 0);
+  assert.match(duplicatePath.stderr, /--path may only be provided once/);
+  assert.equal(fs.existsSync(firstTarget), false);
+  assert.deepEqual(fs.readFileSync(foreignFile), before);
+  assert.deepEqual(fs.readdirSync(secondTarget), ["private-notes.md"]);
+
+  const target = path.join(root, "vault-duplicate-aios");
+  const firstVault = path.join(root, "first-vault");
+  const secondVault = path.join(root, "second-vault");
+  const duplicateVault = spawnSync(process.execPath, [
+    cli, "init", "--yes", "--path", target,
+    "--vault-path", firstVault, "--vault-path", secondVault
+  ], { encoding: "utf8" });
+
+  assert.notEqual(duplicateVault.status, 0);
+  assert.match(duplicateVault.stderr, /--vault-path may only be provided once/);
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.existsSync(firstVault), false);
+  assert.equal(fs.existsSync(secondVault), false);
+});
+
+test("init rejects an external vault equal to or inside the AIOS target before mutation", () => {
+  for (const suffix of [[], ["vault"]]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-contained-vault-"));
+    const target = path.join(root, "aios");
+    const vault = path.join(target, ...suffix);
+
+    const result = spawnSync(
+      process.execPath,
+      [cli, "init", "--yes", "--path", target, "--vault-path", vault],
+      { encoding: "utf8" }
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /external.*outside the AIOS target/i);
+    assert.equal(fs.existsSync(target), false, `contained vault ${vault} must not create the target`);
+  }
+});
+
 test("a freshly initialized folder ships a lean memory-maintenance router", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-"));
   const target = path.join(root, "aios");
