@@ -73,7 +73,7 @@ export function parsePorcelainZ(stdout) {
 //
 // Parse `git ls-files -s` ("<mode> <object> <stage>\t<path>") and report every
 // gitlink so the caller can refuse before anything is committed.
-export function findGitlinks(lsFilesStdout) {
+function findGitlinks(lsFilesStdout) {
   if (!lsFilesStdout) return [];
   const paths = [];
   for (const line of lsFilesStdout.split("\n")) {
@@ -86,7 +86,7 @@ export function findGitlinks(lsFilesStdout) {
   return paths;
 }
 
-export function nestedRepoMessage(paths) {
+function nestedRepoMessage(paths) {
   const list = paths.map((p) => `  ${p}`).join("\n");
   return [
     paths.length === 1

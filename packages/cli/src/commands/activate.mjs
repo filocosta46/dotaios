@@ -518,9 +518,10 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
   // Managed block present: replace only the block. Every byte the user wrote
   // outside the markers survives untouched.
   const generatedBlock = findManagedBlock(content);
-  const next = generatedBlock
-    ? `${current.slice(0, existingBlock.start)}${generatedBlock.text}${current.slice(existingBlock.end)}`
-    : content;
+  if (!generatedBlock) {
+    throw new Error("generated bridge content is missing its managed block");
+  }
+  const next = `${current.slice(0, existingBlock.start)}${generatedBlock.text}${current.slice(existingBlock.end)}`;
 
   if (dryRun) {
     return { action: "would update", path: destination };
@@ -587,17 +588,16 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
     return { action: "kept", path: destination, note: "retired path is not a regular file" };
   }
   const current = await fs.readFile(destination, "utf8");
-  const managed = current.includes(managedStart) && current.includes(managedEnd);
-  if (!managed) {
-    return { action: "kept", path: destination, note: "existing unmanaged file" };
+  const managedBlock = findManagedBlock(current);
+  if (!managedBlock) {
+    const hasBothMarkers = current.includes(managedStart) && current.includes(managedEnd);
+    return {
+      action: "kept",
+      path: destination,
+      note: hasBothMarkers ? "managed markers are out of order" : "existing unmanaged file"
+    };
   }
-  const blockStart = current.indexOf(managedStart);
-  const blockEndStart = current.indexOf(managedEnd, blockStart + managedStart.length);
-  if (blockEndStart < 0) {
-    return { action: "kept", path: destination, note: "managed markers are out of order" };
-  }
-  const blockEnd = blockEndStart + managedEnd.length;
-  let remainder = `${current.slice(0, blockStart)}${current.slice(blockEnd)}`;
+  let remainder = `${current.slice(0, managedBlock.start)}${current.slice(managedBlock.end)}`;
   remainder = remainder.replace(
     /^---\r?\ndescription: DotAIOS personal context\r?\nglobs:\r?\nalwaysApply: true\r?\n---\r?\n*/u,
     ""

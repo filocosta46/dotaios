@@ -4,7 +4,6 @@ import { defaultAiosPath, expandHome, syncConfigPath } from "../../../core/src/p
 import { readSyncConfig, writeSyncConfig } from "../../../core/src/sync-config.mjs";
 import { createGit } from "./git.mjs";
 import { runTick, SYNC_STALLED_SUMMARY } from "./tick.mjs";
-import { verifyRepoPrivate } from "./repo.mjs";
 import { readOptionValue } from "../lib/args.mjs";
 
 const LOCK_FILENAME = "sync.lock";
@@ -41,7 +40,6 @@ export async function runTickCommand(args = []) {
     readConfig: () => readSyncConfig(),
     writeConfig: (patch) => writeSyncConfig(patch),
     makeGit: () => createGit({ cwd: aiosPath, accessToken }),
-    verifyRepoPrivate,
     appendEvent: (evt) => appendSyncEvent(aiosPath, evt),
     now: () => Date.now()
   });

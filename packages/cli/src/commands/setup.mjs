@@ -6,6 +6,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
+import { parseJsonlLine } from "../../../core/src/jsonl.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import {
   LIGHTPANDA_VERSION,
@@ -16,7 +17,11 @@ import {
 import { initCommand } from "./init.mjs";
 import { activateCommand } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
-import { emitPilotMetric } from "../lib/pilot-metrics.mjs";
+import {
+  emitPilotMetric,
+  pilotMetricsDir,
+  pilotMetricsFile
+} from "../lib/pilot-metrics.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios setup [options]
@@ -228,25 +233,24 @@ async function runInitWithRecovery(passthrough, aiosPath) {
 
 async function isFailedSetupResidue(aiosPath) {
   const memoryPath = path.join(aiosPath, "memory");
-  const metricsPath = path.join(memoryPath, "metrics");
-  const pilotPath = path.join(metricsPath, "pilot.jsonl");
+  const metricsPath = pilotMetricsDir(aiosPath);
+  const pilotPath = pilotMetricsFile(aiosPath);
 
-  let rootEntries;
-  let memoryEntries;
-  let metricsEntries;
   let contents;
   try {
-    rootEntries = await fs.readdir(aiosPath, { withFileTypes: true });
-    memoryEntries = await fs.readdir(memoryPath, { withFileTypes: true });
-    metricsEntries = await fs.readdir(metricsPath, { withFileTypes: true });
+    const rootEntries = await fs.readdir(aiosPath, { withFileTypes: true });
+    if (rootEntries.length !== 1 || rootEntries[0].name !== "memory" || !rootEntries[0].isDirectory()) return false;
+
+    const memoryEntries = await fs.readdir(memoryPath, { withFileTypes: true });
+    if (memoryEntries.length !== 1 || memoryEntries[0].name !== "metrics" || !memoryEntries[0].isDirectory()) return false;
+
+    const metricsEntries = await fs.readdir(metricsPath, { withFileTypes: true });
+    if (metricsEntries.length !== 1 || metricsEntries[0].name !== "pilot.jsonl" || !metricsEntries[0].isFile()) return false;
+
     contents = await fs.readFile(pilotPath, "utf8");
   } catch {
     return false;
   }
-
-  if (rootEntries.length !== 1 || rootEntries[0].name !== "memory" || !rootEntries[0].isDirectory()) return false;
-  if (memoryEntries.length !== 1 || memoryEntries[0].name !== "metrics" || !memoryEntries[0].isDirectory()) return false;
-  if (metricsEntries.length !== 1 || metricsEntries[0].name !== "pilot.jsonl" || !metricsEntries[0].isFile()) return false;
 
   const lines = contents.split(/\r?\n/);
   if (lines.at(-1) === "") lines.pop();
@@ -254,7 +258,7 @@ async function isFailedSetupResidue(aiosPath) {
 
   let metrics;
   try {
-    metrics = lines.map((line) => JSON.parse(line));
+    metrics = lines.map(parseJsonlLine);
   } catch {
     return false;
   }
