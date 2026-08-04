@@ -8,6 +8,22 @@
 
 const GUMROAD_VERIFY_URL = "https://api.gumroad.com/v2/licenses/verify";
 
+// Gumroad answers `success: true` for any key it ever issued, including one
+// whose money has already gone back. The reversal flags live on the purchase
+// object, so this is the only place to catch them before `addLicense` writes a
+// local entry — the store is verified once and read offline forever after.
+// Subscription lapses are deliberately not handled: the current offer is
+// one-time, and Gumroad's one-shot verify cannot express renewal state.
+function reversalReason(purchase) {
+  if (!purchase || typeof purchase !== "object") return null;
+  if (purchase.refunded === true) return "This purchase was refunded.";
+  if (purchase.chargebacked === true) return "This purchase was charged back.";
+  if (purchase.disputed === true && purchase.dispute_won !== true) {
+    return "This purchase has an open dispute.";
+  }
+  return null;
+}
+
 export async function verifyGumroadLicense({ productId, key, fetchImpl = globalThis.fetch }) {
   if (typeof fetchImpl !== "function") {
     throw new Error("fetch is not available in this Node runtime; upgrade to Node 20+");
@@ -42,6 +58,11 @@ export async function verifyGumroadLicense({ productId, key, fetchImpl = globalT
       success: false,
       message: payload.message || `Gumroad rejected the license (status ${response.status})`
     };
+  }
+
+  const reversal = reversalReason(payload.purchase);
+  if (reversal) {
+    return { success: false, message: reversal };
   }
 
   return {

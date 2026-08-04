@@ -37,6 +37,65 @@ test("verifyGumroadLicense returns the rejection message", async () => {
   assert.match(result.message, /does not exist/);
 });
 
+// Gumroad answers `success: true` for a key that was issued, even after the
+// money went back. Without these checks a buyer could refund and keep the
+// entitlement, because `addLicense` only ever sees the boolean.
+test("verifyGumroadLicense rejects a refunded purchase", async () => {
+  const stubFetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ success: true, uses: 1, purchase: { email: "a@b.com", refunded: true } })
+  });
+  const result = await verifyGumroadLicense({ productId: "p1", key: "k1", fetchImpl: stubFetch });
+  assert.equal(result.success, false);
+  assert.match(result.message, /refunded/i);
+});
+
+test("verifyGumroadLicense rejects a charged-back purchase", async () => {
+  const stubFetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ success: true, uses: 1, purchase: { chargebacked: true } })
+  });
+  const result = await verifyGumroadLicense({ productId: "p1", key: "k1", fetchImpl: stubFetch });
+  assert.equal(result.success, false);
+  assert.match(result.message, /charge/i);
+});
+
+test("verifyGumroadLicense rejects an open dispute but accepts one the seller won", async () => {
+  const respond = (purchase) => async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ success: true, uses: 1, purchase })
+  });
+
+  const open = await verifyGumroadLicense({
+    productId: "p1",
+    key: "k1",
+    fetchImpl: respond({ disputed: true })
+  });
+  assert.equal(open.success, false);
+  assert.match(open.message, /dispute/i);
+
+  const won = await verifyGumroadLicense({
+    productId: "p1",
+    key: "k1",
+    fetchImpl: respond({ disputed: true, dispute_won: true })
+  });
+  assert.equal(won.success, true);
+});
+
+test("verifyGumroadLicense still accepts a purchase with no reversal flags", async () => {
+  const stubFetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ success: true, uses: 2, purchase: { email: "a@b.com" } })
+  });
+  const result = await verifyGumroadLicense({ productId: "p1", key: "k1", fetchImpl: stubFetch });
+  assert.equal(result.success, true);
+  assert.equal(result.uses, 2);
+});
+
 test("verifyGumroadLicense handles network failure gracefully", async () => {
   const stubFetch = async () => {
     throw new Error("getaddrinfo ENOTFOUND");
