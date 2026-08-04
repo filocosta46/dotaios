@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { nestedRepoMessage } from "./git.mjs";
+import { nestedRepoMessage } from "./mirror-content-policy.mjs";
 
 const REPO_DESCRIPTION = "DotAIOS personal memory mirror — synced from local ~/aios/. Auto-managed by dotaios.";
 

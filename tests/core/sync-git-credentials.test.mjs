@@ -158,7 +158,9 @@ for (const rewriteKey of [
 ]) {
   test(`credentialed Git refuses effective ${rewriteKey.split(".").at(-1)} rules before mutation or network`, async () => {
     const { calls, spawnImpl } = recordingSpawn({
-      "config --null --name-only": { stdout: `${rewriteKey}\0` },
+      "config --null --get-regexp": {
+        stdout: `${rewriteKey}\nhttps://github.com/\0`
+      },
       "remote get-url": { stdout: "https://github.com/user/repo.git\n" }
     });
     const git = createGit({
@@ -181,11 +183,30 @@ for (const rewriteKey of [
   });
 }
 
+test("credentialed Git allows an unrelated URL rewrite", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-unrelated-rewrite-"));
+  const repo = path.join(root, "repo");
+  await fs.mkdir(repo);
+  await run("git", ["init", "-q"], { cwd: repo });
+  await run("git", ["config", "url.https://mirror.example/.insteadOf", "https://example.com/"], { cwd: repo });
+
+  const calls = [];
+  const git = createGit({
+    cwd: repo,
+    spawnImpl: localOnlyGitSpawn(calls),
+    accessToken: TOKEN,
+    expectedRepoFullName: "user/repo"
+  });
+
+  await assert.rejects(() => git.push("main"), /test blocked a network operation/);
+  assert.ok(calls.some((args) => args.includes("push")), "unrelated rewrites must reach the network operation");
+});
+
 for (const source of ["local", "global"]) {
   test(`credentialed Git sees and refuses a real ${source} URL rewrite configuration`, async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-url-rewrite-"));
     const repo = path.join(root, "repo");
-    const globalConfig = path.join(root, "global.gitconfig");
+    const globalConfig = path.join(root, ".gitconfig");
     await fs.mkdir(repo);
     await run("git", ["init", "-q"], { cwd: repo });
     const configArgs = source === "local"
@@ -197,7 +218,7 @@ for (const source of ["local", "global"]) {
     const git = createGit({
       cwd: repo,
       spawnImpl: localOnlyGitSpawn(calls),
-      env: { ...process.env, GIT_CONFIG_GLOBAL: globalConfig },
+      env: { ...process.env, HOME: root },
       accessToken: TOKEN,
       expectedRepoFullName: "user/repo"
     });

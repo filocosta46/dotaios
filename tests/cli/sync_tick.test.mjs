@@ -211,6 +211,25 @@ test("a clean tick pushes a commit left ahead of origin by the previous failed p
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test("a clean tick pushes local HEAD to a truly empty remote", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null, last_push_sha: null }),
+      writeConfig: async () => {},
+      makeGit: () => makeGit({ dirty: false, pullResult: "empty", ahead: false, calls }),
+      appendEvent: async () => {},
+      now: () => Date.now()
+    });
+
+    assert.ok(calls.includes("push:main"), "local HEAD must seed a truly empty remote");
+    assert.ok(!calls.includes("ahead:main"), "origin/main is absent, so rev-list must not inspect it");
+    assert.equal(result.pushed, true);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
 test("tick refuses a public repo before mutating git", async () => {
   const { lockPath, dir } = await tmpLock();
   try {

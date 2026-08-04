@@ -143,7 +143,9 @@ export async function runTick({
     }
 
     // 2. Pull by rebasing the local commit(s) on top of origin.
-    const pullResult = await git.pullRebase("main");
+    const pullResult = await git.pullRebase("main", {
+      lastPushSha: cfg.last_push_sha ?? null
+    });
 
     // 3. pullRebase aborts a conflicted rebase before returning. The local sync
     //    commit remains, and no remote push or destructive reset occurs.
@@ -182,7 +184,9 @@ export async function runTick({
 
     const hasUnpushedCommit = pushedSha
       ? true
-      : await git.hasUnpushedCommits("main");
+      : pullResult === "empty"
+        ? true
+        : await git.hasUnpushedCommits("main");
     if (hasUnpushedCommit) {
       // 4. A new local commit, or one left by an earlier failed push, goes up.
       await git.push("main");

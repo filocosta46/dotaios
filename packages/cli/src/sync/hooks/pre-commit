@@ -1,0 +1,28 @@
+#!/usr/bin/env node
+
+import { spawnSync } from "node:child_process";
+
+const inspected = spawnSync("git", ["ls-files", "-s"], {
+  encoding: "utf8",
+  env: process.env,
+  stdio: ["ignore", "pipe", "pipe"]
+});
+
+if (inspected.status !== 0) {
+  process.stderr.write("DotAIOS could not validate the candidate Git index; commit refused.\n");
+  process.exit(1);
+}
+
+const gitlinks = inspected.stdout.split("\n").flatMap((line) => {
+  if (!line.startsWith("160000 ")) return [];
+  const tab = line.indexOf("\t");
+  return tab === -1 ? [] : [line.slice(tab + 1)];
+});
+
+if (gitlinks.length > 0) {
+  process.stderr.write(
+    "DotAIOS refused the commit because its candidate index contains a nested Git repository pointer.\n"
+  );
+  process.stderr.write(gitlinks.map((entry) => `  ${entry}`).join("\n") + "\n");
+  process.exit(1);
+}

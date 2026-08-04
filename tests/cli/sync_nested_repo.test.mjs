@@ -122,7 +122,7 @@ test("a gitlink refusal preserves a pre-existing partially staged index byte-for
   assert.equal(cachedDiffAfter, cachedDiffBefore, "the user's exact staged patch is unchanged");
 });
 
-test("a failing commit hook restores a pre-existing partially staged index byte-for-byte", async () => {
+test("DotAIOS uses its owned validator instead of checkout-local hooks", async () => {
   const aios = await makeAios();
   const notesPath = path.join(aios, "notes.md");
   await fs.writeFile(notesPath, "first: base\nsecond: base\n");
@@ -139,41 +139,28 @@ test("a failing commit hook restores a pre-existing partially staged index byte-
   await fs.chmod(hook, 0o755);
   await git(aios, "config", "core.hooksPath", hooks);
 
-  const indexPath = path.join(aios, ".git", "index");
-  const indexBefore = await fs.readFile(indexPath);
   const client = createGit({ cwd: aios });
-
-  await assert.rejects(() => client.commitAll("sync"), /git commit failed/i);
-  assert.deepEqual(
-    await fs.readFile(indexPath),
-    indexBefore,
-    "a rejected commit restores the exact real index bytes"
-  );
+  await assert.doesNotReject(() => client.commitAll("sync"));
 });
 
-test("a staged-diff inspection error leaves a partially staged index byte-for-byte unchanged", async () => {
+test("the owned pre-commit validator refuses a gitlink introduced after preflight", async () => {
   const aios = await makeAios();
-  const notesPath = path.join(aios, "notes.md");
-  await fs.writeFile(notesPath, "first: base\nsecond: base\n");
-  await git(aios, "add", "notes.md");
-  await git(aios, "commit", "-q", "-m", "add notes");
-  await fs.writeFile(notesPath, "first: staged\nsecond: base\n");
-  await git(aios, "add", "notes.md");
-  await fs.writeFile(notesPath, "first: staged\nsecond: unstaged\n");
+  await fs.mkdir(path.join(aios, "projects"), { recursive: true });
+  await fs.writeFile(path.join(aios, "projects", "seed.md"), "seed\n");
+  let injected = false;
+  const spawnImpl = async (cmd, args, opts) => {
+    if (!injected && args[0] === "add") {
+      injected = true;
+      await nestProject(aios, "projects/raced");
+    }
+    return realGitFailing(aios, () => false, {})(cmd, args, opts);
+  };
 
-  const indexPath = path.join(aios, ".git", "index");
-  const indexBefore = await fs.readFile(indexPath);
-  const client = createGit({
-    cwd: aios,
-    spawnImpl: realGitFailing(
-      aios,
-      (args) => args[0] === "diff" && args.includes("--cached") && args.includes("--quiet"),
-      { code: 2, stderr: "fatal: staged diff inspection failed" }
-    )
-  });
-
-  await assert.rejects(() => client.commitAll("sync"), /staged diff inspection failed/i);
-  assert.deepEqual(await fs.readFile(indexPath), indexBefore);
+  await assert.rejects(
+    () => createGit({ cwd: aios, spawnImpl }).commitAll("sync"),
+    /candidate index contains a nested Git repository pointer/i
+  );
+  assert.match((await git(aios, "ls-files", "-s", "projects/raced")).stdout, /^160000 /);
 });
 
 test("a HEAD rev-parse failure after commit keeps the committed index aligned with the new HEAD", async () => {
@@ -242,6 +229,58 @@ test("ordinary content still commits normally", async () => {
   assert.ok(sha && sha.length >= 7, "a commit was created");
   const { stdout } = await git(aios, "ls-tree", "-r", "HEAD", "--name-only");
   assert.match(stdout, /context\/identity\.md/, "the file is really in the tree");
+});
+
+test("commitAll never overwrites a normal staging operation that completes concurrently", async () => {
+  const aios = await makeAios();
+  await fs.writeFile(path.join(aios, "sync.md"), "sync change\n");
+  let raced = false;
+  const spawnImpl = async (cmd, args, opts) => {
+    const result = await realGitFailing(aios, () => false, {})(cmd, args, opts);
+    if (!raced && args[0] === "add") {
+      raced = true;
+      await fs.writeFile(path.join(aios, "user-staged.md"), "user staging\n");
+      await git(aios, "add", "user-staged.md");
+    }
+    return result;
+  };
+
+  await createGit({ cwd: aios, spawnImpl }).commitAll("sync");
+
+  const { stdout: status } = await git(aios, "status", "--porcelain");
+  assert.doesNotMatch(status, /^\?\? user-staged\.md$/m, "a completed concurrent add cannot be erased");
+  const { stdout: tracked } = await git(aios, "ls-files", "user-staged.md");
+  assert.equal(tracked.trim(), "user-staged.md", "the concurrently staged path remains represented in Git");
+});
+
+test("commitAll cannot be redirected by inherited repository environment", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-env-redirect-"));
+  const intended = path.join(root, "intended");
+  const wrong = path.join(root, "wrong");
+  await makeRepo(intended);
+  await makeRepo(wrong);
+  await fs.writeFile(path.join(intended, "base.md"), "intended\n");
+  await git(intended, "add", "base.md");
+  await git(intended, "commit", "-q", "-m", "base");
+  await fs.writeFile(path.join(wrong, "base.md"), "wrong\n");
+  await git(wrong, "add", "base.md");
+  await git(wrong, "commit", "-q", "-m", "base");
+  await fs.writeFile(path.join(intended, "intended.md"), "safe\n");
+  await fs.writeFile(path.join(wrong, "wrong.md"), "must remain uncommitted\n");
+  const wrongBefore = (await git(wrong, "rev-parse", "HEAD")).stdout.trim();
+
+  await createGit({
+    cwd: intended,
+    env: {
+      ...process.env,
+      GIT_DIR: path.join(wrong, ".git"),
+      GIT_WORK_TREE: wrong,
+      GIT_INDEX_FILE: path.join(wrong, ".git", "index")
+    }
+  }).commitAll("sync");
+
+  assert.equal((await git(wrong, "rev-parse", "HEAD")).stdout.trim(), wrongBefore);
+  assert.match((await git(intended, "ls-tree", "-r", "--name-only", "HEAD")).stdout, /intended\.md/);
 });
 
 test("a plain directory that merely contains a .git FILE is not mistaken for a repo", async () => {
