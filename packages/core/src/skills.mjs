@@ -109,6 +109,20 @@ export async function planTriggerVisibility(aiosPath) {
     }));
 }
 
+// Routing phrases are the user's own words, so the writer has to survive their
+// punctuation. A YAML plain scalar cannot hold ": " or " #", cannot open with an
+// indicator character, and cannot carry leading or trailing space — any of those
+// makes the whole frontmatter unparseable, which drops the skill from the very
+// host listing this field exists to reach. Fall back to a double-quoted scalar;
+// JSON's escape set is a subset of YAML's, and `unquoteScalar` strips the pair
+// back off on read.
+const YAML_PLAIN_UNSAFE_RE = /^[-?:,[\]{}#&*!|>'"%@`]|:\s|\s#|[\n\r\t]/;
+
+function yamlScalar(value) {
+  const unsafe = value === "" || value !== value.trim() || YAML_PLAIN_UNSAFE_RE.test(value);
+  return unsafe ? JSON.stringify(value) : value;
+}
+
 // Apply a plan produced by planTriggerVisibility. Appends one `when_to_use:`
 // line to the frontmatter and touches nothing else — the existing `triggers:`
 // list stays authoritative for DotAIOS's own resolver, and the body is never
@@ -122,9 +136,13 @@ export async function applyTriggerVisibility(aiosPath, plan) {
     if (!frontmatter) continue;
     if (/^when_to_use:/m.test(frontmatter[1])) continue;
 
-    const updated = content.replace(
-      FRONTMATTER_RE,
-      (block) => block.replace(/\r?\n---$/, `\nwhen_to_use: ${entry.whenToUse}\n---`)
+    // Both replacements take a function, not a string: `$&`, `` $` ``, `$'` and
+    // `$$` in a routing phrase would otherwise expand as replacement patterns
+    // and splice the frontmatter into itself. The captured newline is reused so
+    // a CRLF-authored file does not come back with mixed line endings.
+    const line = `when_to_use: ${yamlScalar(entry.whenToUse)}`;
+    const updated = content.replace(FRONTMATTER_RE, (block) =>
+      block.replace(/(\r?\n)---$/, (_match, eol) => `${eol}${line}${eol}---`)
     );
 
     await fs.writeFile(entry.path, updated);

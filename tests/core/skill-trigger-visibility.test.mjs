@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { parse } from "yaml";
 
 import {
   collectSkills,
@@ -98,6 +99,64 @@ test("applyTriggerVisibility is idempotent", async () => {
   const second = await fs.readFile(path.join(root, "skills", "audit", "SKILL.md"), "utf8");
 
   assert.equal(first, second);
+});
+
+// The phrases a person writes are their own words, so the writer has to survive
+// punctuation. A skill whose frontmatter stops parsing disappears from the host
+// listing entirely — the exact opposite of what syncing triggers is for.
+test("applyTriggerVisibility keeps frontmatter parseable when a trigger contains YAML punctuation", async () => {
+  const root = await makeAios([
+    ["deploy", 'name: deploy\ndescription: Ship it.\ntriggers:\n  - "deploy: prod"\n  - rollback'],
+    ["triage", 'name: triage\ndescription: Sort it.\ntriggers:\n  - "tag #urgent"\n  - triage']
+  ]);
+
+  await applyTriggerVisibility(root, await planTriggerVisibility(root));
+
+  for (const dir of ["deploy", "triage"]) {
+    const content = await fs.readFile(path.join(root, "skills", dir, "SKILL.md"), "utf8");
+    const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    assert.ok(frontmatter, `${dir} still has frontmatter`);
+    assert.doesNotThrow(() => parse(frontmatter[1]), `${dir} frontmatter stays valid YAML`);
+  }
+
+  const skills = await collectSkills(root);
+  const deploy = skills.find((skill) => skill.dir === "deploy");
+  assert.deepEqual(deploy.whenToUse, ["deploy: prod", "rollback"]);
+  const triage = skills.find((skill) => skill.dir === "triage");
+  assert.deepEqual(triage.whenToUse, ["tag #urgent", "triage"], "a # comment marker is not truncated away");
+});
+
+test("applyTriggerVisibility treats $ sequences in a trigger as text, not replacement patterns", async () => {
+  const root = await makeAios([
+    ["cash", 'name: cash\ndescription: Money.\ntriggers:\n  - "budget $` report"\n  - "$&"\n  - "how much $$ left"']
+  ]);
+
+  await applyTriggerVisibility(root, await planTriggerVisibility(root));
+
+  const content = await fs.readFile(path.join(root, "skills", "cash", "SKILL.md"), "utf8");
+  const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  assert.doesNotThrow(() => parse(frontmatter[1]), "frontmatter stays valid YAML");
+  assert.equal(content.match(/^name: cash$/gm).length, 1, "the frontmatter is not duplicated into itself");
+
+  const [skill] = await collectSkills(root);
+  assert.deepEqual(skill.whenToUse, ["budget $` report", "$&", "how much $$ left"]);
+});
+
+test("applyTriggerVisibility preserves CRLF line endings", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-triggers-crlf-"));
+  const skillDir = path.join(root, "skills", "crlf");
+  await fs.mkdir(skillDir, { recursive: true });
+  const file = path.join(skillDir, "SKILL.md");
+  await fs.writeFile(
+    file,
+    "---\r\nname: crlf\r\ndescription: Windows.\r\ntriggers: do the thing\r\n---\r\n\r\n# Body\r\n"
+  );
+
+  await applyTriggerVisibility(root, await planTriggerVisibility(root));
+
+  const content = await fs.readFile(file, "utf8");
+  assert.doesNotMatch(content, /(?<!\r)\n/, "no bare LF is introduced into a CRLF file");
+  assert.match(content, /^when_to_use: do the thing\r$/m);
 });
 
 test("applyTriggerVisibility never touches a skill outside the supplied plan", async () => {
