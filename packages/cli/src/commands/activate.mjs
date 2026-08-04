@@ -326,16 +326,16 @@ async function createProjectBridges(aiosPath, projectPath, options) {
     };
   }
   const registry = await loadAgentRegistry(aiosPath);
-  const bridges = await Promise.all([
-    writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
+  const bridges = [
+    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
       ...options,
       projectRoot: projectPath
     }),
-    writeManagedFile(path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), cursorRule(aiosPath, project), {
-      ...options,
-      projectRoot: projectPath
-    })
-  ]);
+    await removeRetiredManagedFile(
+      path.join(projectPath, ".cursor", "rules", "dotaios.mdc"),
+      { ...options, projectRoot: projectPath }
+    )
+  ];
   const skills = await propagateProjectSkills(projectPath, options, registry);
   return [...bridges, skills];
 }
@@ -343,6 +343,7 @@ async function createProjectBridges(aiosPath, projectPath, options) {
 async function propagateProjectSkills(projectPath, options, registry) {
   const skillsDir = path.join(projectPath, "skills");
   const symlinkTargetsForProject = projectSymlinkTargets(registry);
+  const retiredTargetsForProject = retiredSymlinkTargets(registry);
   const hermesTargetsForProject = projectHermesConfigTargets(registry);
   const details = [];
   const sourceSafety = await validateProjectSourcePath({
@@ -354,6 +355,30 @@ async function propagateProjectSkills(projectPath, options, registry) {
   }
   const skillsDirectoryExists = await isDirectory(skillsDir);
   const skills = skillsDirectoryExists ? await collectSkills(projectPath) : [];
+
+  for (const target of retiredTargetsForProject) {
+    const targetDir = path.join(projectPath, target.dir);
+    const safety = await validateProjectPath({ projectRoot: projectPath, targetPath: targetDir });
+    if (!safety.safe) {
+      details.push({
+        action: "project-skills:unsafe-retired-target",
+        path: targetDir,
+        note: safety.reason
+      });
+      continue;
+    }
+    details.push(...await removeManagedSkillLinks({
+      sourceDir: skillsDir,
+      targetDir,
+      dryRun: options.dryRun
+    }));
+    details.push(...await cleanupStaleLinks({
+      sourceDir: skillsDir,
+      targetDir,
+      projectRoot: projectPath,
+      dryRun: options.dryRun
+    }));
+  }
 
   for (const target of symlinkTargetsForProject) {
     const targetDir = path.join(projectPath, target.dir);
@@ -484,6 +509,56 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
   return { action: dryRun ? "would update" : "updated", path: destination };
 }
 
+async function removeRetiredManagedFile(destination, { dryRun = false, projectRoot = null } = {}) {
+  if (projectRoot) {
+    const safety = await validateProjectPath({ projectRoot, targetPath: destination });
+    if (!safety.safe) {
+      return { action: "unsafe-target", path: destination, note: safety.reason };
+    }
+  }
+
+  let stat;
+  try {
+    stat = await fs.lstat(destination);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { action: "absent", path: destination, note: "retired managed file not present" };
+    }
+    throw error;
+  }
+
+  if (!stat.isFile()) {
+    return { action: "kept", path: destination, note: "retired path is not a regular file" };
+  }
+  const current = await fs.readFile(destination, "utf8");
+  const managed = current.includes(managedStart) && current.includes(managedEnd);
+  if (!managed) {
+    return { action: "kept", path: destination, note: "existing unmanaged file" };
+  }
+  const blockStart = current.indexOf(managedStart);
+  const blockEndStart = current.indexOf(managedEnd, blockStart + managedStart.length);
+  if (blockEndStart < 0) {
+    return { action: "kept", path: destination, note: "managed markers are out of order" };
+  }
+  const blockEnd = blockEndStart + managedEnd.length;
+  let remainder = `${current.slice(0, blockStart)}${current.slice(blockEnd)}`;
+  remainder = remainder.replace(
+    /^---\r?\ndescription: DotAIOS personal context\r?\nglobs:\r?\nalwaysApply: true\r?\n---\r?\n*/u,
+    ""
+  );
+
+  if (!remainder.trim()) {
+    if (!dryRun) await fs.unlink(destination);
+    return { action: dryRun ? "would remove" : "removed", path: destination };
+  }
+  if (!dryRun) await fs.writeFile(destination, remainder);
+  return {
+    action: dryRun ? "would update" : "updated",
+    path: destination,
+    note: "removed retired DotAIOS managed block; preserved surrounding content"
+  };
+}
+
 function projectAgentsBridge(aiosPath, project) {
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
@@ -494,25 +569,6 @@ function projectAgentsBridge(aiosPath, project) {
     "",
     "Keep project-specific instructions in this file short. Durable personal context belongs in DotAIOS."
   ]);
-}
-
-function cursorRule(aiosPath, project) {
-  return [
-    "---",
-    "description: DotAIOS personal context",
-    "globs:",
-    "alwaysApply: true",
-    "---",
-    "",
-    managedStart,
-    "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
-    "",
-    `This checkout is project \`${project.slug}\` (id \`${project.id}\`). At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
-    "",
-    `@${path.join(aiosPath, "AGENTS.md")}`,
-    managedEnd,
-    ""
-  ].join("\n");
 }
 
 function bridgeFile(title, lines) {

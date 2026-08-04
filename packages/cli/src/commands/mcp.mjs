@@ -1,11 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { mcpLauncher } from "../lib/mcp-launcher.mjs";
 
-const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-const supportedAgents = new Set(["claude", "codex", "cursor", "gemini"]);
+export const supportedMcpAgents = new Set([
+  "claude",
+  "codex",
+  "cursor",
+  "gemini",
+  "antigravity",
+  "kimi",
+  "opencode"
+]);
 
 export async function mcpCommand(args) {
   if (hasHelpFlag(args)) {
@@ -38,7 +45,7 @@ function printMcpHelp() {
 
 Options:
   --path <dir>      Use a non-default AIOS folder
-  --agent <agent>   claude, codex, cursor, or gemini
+  --agent <agent>   claude, codex, cursor, gemini, antigravity, kimi, or opencode
   --dry-run         Preview install guidance without changing files
   --home <dir>      Use a non-default home path for target hints
 
@@ -71,8 +78,10 @@ function parseOptions(args = []) {
   }
 
   command ||= "status";
-  if (!supportedAgents.has(options.agent)) {
-    throw new Error(`Invalid --agent: ${options.agent}. Use claude, codex, cursor, or gemini.`);
+  if (!supportedMcpAgents.has(options.agent)) {
+    throw new Error(
+      `Invalid --agent: ${options.agent}. Use ${[...supportedMcpAgents].join(", ")}.`
+    );
   }
 
   return { command, options };
@@ -89,7 +98,7 @@ async function assertAiosFolder(target) {
 async function printStatus(target) {
   console.log("DotAIOS optional MCP adapter");
   console.log(`AIOS path: ${target}`);
-  console.log(`[ok] MCP server: ${serverPath()}`);
+  console.log("[ok] MCP server launcher: version-pinned npx package");
   console.log("[info] Transport: stdio");
   console.log("[info] Read-only tools: read_working_context, search_aios, resolve_skill");
   console.log("[next] Run `dotaios mcp install --dry-run --agent claude` to print client config.");
@@ -97,38 +106,81 @@ async function printStatus(target) {
 
 function printInstall(target, options) {
   const homePath = path.resolve(expandHome(options.home || "~"));
-  const config = mcpServerConfig(target);
+  const config = mcpClientConfig(options.agent, target, homePath);
 
   console.log(`DotAIOS MCP ${options.dryRun ? "dry run" : "config"}`);
   console.log(`Agent: ${options.agent}`);
   console.log(`AIOS path: ${target}`);
-  console.log(`Suggested target: ${targetHint(options.agent, homePath)}`);
+  console.log(`Suggested target: ${config.target}`);
+  console.log(`Format: ${config.format}`);
   console.log("");
-  console.log("MCP server config:");
-  console.log(JSON.stringify(config, null, 2));
+  console.log("MCP server config fragment:");
+  console.log(config.text);
   console.log("");
   console.log("DotAIOS does not edit MCP client config automatically yet.");
-  console.log("Copy the config above into your MCP-capable client, then restart that client.");
+  console.log("Merge the fragment into the existing client config, then restart that client.");
 }
 
 function mcpServerConfig(target) {
+  const launcher = mcpLauncher(target);
   return {
     mcpServers: {
       dotaios: {
-        command: process.execPath,
-        args: [serverPath(), "--path", target]
+        command: launcher.command,
+        args: launcher.args
       }
     }
   };
 }
 
-function serverPath() {
-  return path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
-}
+export function mcpClientConfig(agent, target, homePath) {
+  if (!supportedMcpAgents.has(agent)) {
+    throw new Error(`Unsupported MCP agent: ${agent}`);
+  }
 
-function targetHint(agent, homePath) {
-  if (agent === "claude") return path.join(homePath, ".claude", "mcp.json");
-  if (agent === "cursor") return path.join(homePath, ".cursor", "mcp.json");
-  if (agent === "gemini") return path.join(homePath, ".gemini", "mcp.json");
-  return path.join(homePath, ".codex", "mcp.json");
+  const targets = {
+    claude: path.join(homePath, ".claude.json"),
+    codex: path.join(homePath, ".codex", "config.toml"),
+    cursor: path.join(homePath, ".cursor", "mcp.json"),
+    gemini: path.join(homePath, ".gemini", "settings.json"),
+    antigravity: path.join(homePath, ".gemini", "config", "mcp_config.json"),
+    kimi: path.join(homePath, ".kimi-code", "mcp.json"),
+    opencode: path.join(homePath, ".config", "opencode", "opencode.json")
+  };
+
+  if (agent === "codex") {
+    const server = mcpServerConfig(target).mcpServers.dotaios;
+    return {
+      target: targets[agent],
+      format: "TOML",
+      text: [
+        "[mcp_servers.dotaios]",
+        `command = ${JSON.stringify(server.command)}`,
+        `args = ${JSON.stringify(server.args)}`
+      ].join("\n")
+    };
+  }
+
+  if (agent === "opencode") {
+    const server = mcpServerConfig(target).mcpServers.dotaios;
+    return {
+      target: targets[agent],
+      format: "JSON",
+      text: JSON.stringify({
+        mcp: {
+          dotaios: {
+            type: "local",
+            command: [server.command, ...server.args],
+            enabled: true
+          }
+        }
+      }, null, 2)
+    };
+  }
+
+  return {
+    target: targets[agent],
+    format: "JSON",
+    text: JSON.stringify(mcpServerConfig(target), null, 2)
+  };
 }

@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runTick, acquireLock, releaseLock } from "../../packages/cli/src/sync/tick.mjs";
-import { runTickCommand } from "../../packages/cli/src/sync/tick-cmd.mjs";
+import { appendSyncEvent, reportTickResult, runTickCommand } from "../../packages/cli/src/sync/tick-cmd.mjs";
 
 async function tmpLock() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-tick-"));
@@ -223,6 +223,29 @@ test("tick fails closed on a rebase conflict without changing local state", asyn
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test("tick preserves the primary conflict when its event receipt cannot be written", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const written = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", last_tick_at: null }),
+      writeConfig: async (patch) => written.push(patch),
+      makeGit: () => makeGit({ dirty: false, pullResult: "conflict" }),
+      appendEvent: async () => {
+        throw new Error("memory writer lock timed out");
+      },
+      now: () => Date.parse("2026-07-15T10:00:00.000Z")
+    });
+
+    assert.equal(result.conflict, true);
+    assert.equal(result.pulled, "conflict");
+    assert.match(result.error, /local and remote changes overlap/i);
+    assert.equal(result.event_log_error, "memory writer lock timed out");
+    assert.equal(written.length, 1, "the original conflict must still be persisted to sync state");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
 test("tick does NOT branch on a clean rebase even when remote was ahead", async () => {
   const { lockPath, dir } = await tmpLock();
   try {
@@ -342,4 +365,77 @@ test("runTickCommand resolves without throwing when sync not enabled", async () 
   } finally { console.log = origLog; }
   // reaching here = did not throw
   assert.ok(true);
+});
+
+test("sync command reporting returns non-zero for conflicts and event writer failures", () => {
+  const originalExitCode = process.exitCode;
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    process.exitCode = 0;
+    reportTickResult({
+      conflict: true,
+      pulled: "conflict",
+      pushed: false,
+      error: "local and remote changes overlap",
+      event_log_error: "memory writer lock timed out"
+    });
+
+    assert.equal(process.exitCode, 1);
+    assert.match(logs.join("\n"), /memory writer lock timed out/);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = originalExitCode;
+  }
+});
+
+test("sync command reporting returns non-zero when the sync lock is held", () => {
+  const originalExitCode = process.exitCode;
+  const originalLog = console.log;
+  const logs = [];
+  console.log = (...args) => logs.push(args.join(" "));
+  try {
+    process.exitCode = 0;
+    reportTickResult({ skipped: "locked" });
+
+    assert.equal(process.exitCode, 1);
+    assert.match(logs.join("\n"), /another sync is already running/i);
+  } finally {
+    console.log = originalLog;
+    process.exitCode = originalExitCode;
+  }
+});
+
+test("sync event append fails loudly after the shared memory writer lock retry budget", async () => {
+  const aiosPath = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-tick-event-"));
+  const memoryDir = path.join(aiosPath, "memory");
+  const eventsPath = path.join(memoryDir, "events.jsonl");
+  const lockPath = `${eventsPath}.lock`;
+  await fs.mkdir(memoryDir, { recursive: true });
+  await fs.writeFile(eventsPath, "");
+  await fs.writeFile(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }));
+
+  try {
+    const eventInput = {
+      type: "sync-conflict",
+      summary: "preserve the existing sync schema",
+      at: "2026-07-27T12:00:00.000Z"
+    };
+    await assert.rejects(
+      appendSyncEvent(aiosPath, eventInput),
+      /Timed out waiting for memory writer lock/
+    );
+    assert.equal(await fs.readFile(eventsPath, "utf8"), "", "sync must not append around a live writer lock");
+
+    await fs.rm(lockPath);
+    await appendSyncEvent(aiosPath, eventInput);
+
+    const event = JSON.parse((await fs.readFile(eventsPath, "utf8")).trim());
+    assert.equal(event.type, "sync-conflict");
+    assert.equal(event.at, "2026-07-27T12:00:00.000Z");
+    assert.equal("ts" in event, false, "sync events retain their existing at-based schema");
+  } finally {
+    await fs.rm(aiosPath, { recursive: true, force: true });
+  }
 });

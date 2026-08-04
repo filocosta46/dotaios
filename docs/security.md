@@ -39,7 +39,7 @@ Current rule:
 - Use `--dry-run` before install.
 - Do not treat the current plugin system as a public marketplace.
 
-Git URL installs are supported, but they are still trust-based. Prefer known sources, run `npx dotaios install <plugin> --dry-run`, and review permissions and source before install.
+Git URL installs are supported, but they are still trust-based. Prefer known sources, run `npx dotaios@latest install <plugin> --dry-run`, and review permissions and source before install.
 
 ## Integration Safety Lanes
 

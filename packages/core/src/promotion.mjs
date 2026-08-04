@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists, readJson } from "./files.mjs";
-import { formatJsonlEntry, isoDate, readJsonl } from "./memory.mjs";
+import { SIGNAL_RETENTION_DAYS, formatJsonlEntry, isoDate, readJsonl, withEventStoreLock } from "./memory.mjs";
 import { expandHome, isPathWithin, resolveVaultPath } from "./paths.mjs";
 
 export const PROMOTION_DESTINATIONS = [
@@ -203,7 +203,7 @@ export async function consumePromotionPlan(plan) {
  * Apply a previously previewed plan. The source and destination must still
  * match the preview, otherwise the caller must build and show a fresh plan.
  */
-export async function applyPromotion(plan) {
+export async function applyPromotion(plan, options = {}) {
   assertPromotionPlan(plan);
 
   await assertSafeShelfPath(
@@ -212,27 +212,8 @@ export async function applyPromotion(plan) {
     plan.source.absolutePath,
     "captured session"
   );
-  const currentSource = await fs.readFile(plan.source.absolutePath, "utf8");
-  if (contentHash(currentSource) !== plan.source.hash) {
-    throw new Error("The captured session changed after the preview. Preview the promotion again.");
-  }
-
-  let destinationChange = null;
   if (plan.destinationType !== "session-only") {
     await assertSafeDestinationFromPlan(plan);
-    const destinationExists = await pathExists(plan.destinationAbsolutePath);
-    const currentDestination = await readTextIfPresent(plan.destinationAbsolutePath);
-    if (destinationExists !== plan.destinationExists || currentDestination !== plan.before) {
-      throw new Error("The destination changed after the preview. Preview the promotion again.");
-    }
-    destinationChange = {
-      target: plan.destinationAbsolutePath,
-      before: currentDestination,
-      existed: destinationExists,
-      after: plan.destinationAfter ?? (destinationExists
-        ? `${currentDestination}${plan.addition}`
-        : plan.addition.replace(/^\n+/, ""))
-    };
   }
 
   await assertSafeShelfPath(
@@ -241,43 +222,67 @@ export async function applyPromotion(plan) {
     plan.receiptPath,
     "promotion receipt"
   );
-  const receiptBefore = await readTextIfPresent(plan.receiptPath);
-  const receiptExists = await pathExists(plan.receiptPath);
-  const receipt = {
-    ts: new Date().toISOString(),
-    type: "memory-promotion",
-    source: plan.source.relativePath,
-    source_session_id: plan.source.sessionId,
-    destination_type: plan.destinationType,
-    destination_path: plan.destinationPath,
-    operation: plan.operation,
-    ...(plan.matchedContentHash && { matched_content_hash: plan.matchedContentHash }),
-    ...(plan.noop && { no_op: true, reason: "identical promoted content already exists at this destination" }),
-    ...(plan.project && { project: plan.project }),
-    summary: plan.summary,
-    source_hash: plan.source.hash,
-    content_hash: plan.contentHash,
-    actor: "dotaios-cli"
-  };
-  const receiptChange = {
-    target: plan.receiptPath,
-    before: receiptBefore,
-    existed: receiptExists,
-    after: `${receiptBefore}${formatJsonlEntry(receipt)}`
-  };
-  await replaceFilesAtomically([
-    receiptChange,
-    ...(destinationChange ? [destinationChange] : [])
-  ]);
+  return withEventStoreLock(plan.receiptPath, async () => {
+    const currentSource = await fs.readFile(plan.source.absolutePath, "utf8");
+    if (contentHash(currentSource) !== plan.source.hash) {
+      throw new Error("The captured session changed after the preview. Preview the promotion again.");
+    }
 
-  return {
-    applied: true,
-    noop: Boolean(plan.noop),
-    destinationType: plan.destinationType,
-    destinationPath: plan.destinationPath,
-    receiptPath: plan.receiptRelativePath,
-    receipt
-  };
+    let destinationChange = null;
+    if (plan.destinationType !== "session-only") {
+      const destinationExists = await pathExists(plan.destinationAbsolutePath);
+      const currentDestination = await readTextIfPresent(plan.destinationAbsolutePath);
+      if (destinationExists !== plan.destinationExists || currentDestination !== plan.before) {
+        throw new Error("The destination changed after the preview. Preview the promotion again.");
+      }
+      destinationChange = {
+        target: plan.destinationAbsolutePath,
+        before: currentDestination,
+        existed: destinationExists,
+        after: plan.destinationAfter ?? (destinationExists
+          ? `${currentDestination}${plan.addition}`
+          : plan.addition.replace(/^\n+/, ""))
+      };
+    }
+
+    const receiptBefore = await readTextIfPresent(plan.receiptPath);
+    const receiptExists = await pathExists(plan.receiptPath);
+    const receipt = {
+      ts: new Date().toISOString(),
+      type: "memory-promotion",
+      source: plan.source.relativePath,
+      source_session_id: plan.source.sessionId,
+      destination_type: plan.destinationType,
+      destination_path: plan.destinationPath,
+      operation: plan.operation,
+      ...(plan.matchedContentHash && { matched_content_hash: plan.matchedContentHash }),
+      ...(plan.noop && { no_op: true, reason: "identical promoted content already exists at this destination" }),
+      ...(plan.project && { project: plan.project }),
+      summary: plan.summary,
+      source_hash: plan.source.hash,
+      content_hash: plan.contentHash,
+      actor: "dotaios-cli"
+    };
+    const receiptChange = {
+      target: plan.receiptPath,
+      before: receiptBefore,
+      existed: receiptExists,
+      after: `${receiptBefore}${formatJsonlEntry(receipt)}`
+    };
+    await replaceFilesAtomically([
+      receiptChange,
+      ...(destinationChange ? [destinationChange] : [])
+    ]);
+
+    return {
+      applied: true,
+      noop: Boolean(plan.noop),
+      destinationType: plan.destinationType,
+      destinationPath: plan.destinationPath,
+      receiptPath: plan.receiptRelativePath,
+      receipt
+    };
+  }, options);
 }
 
 export function renderPromotionPreview(plan) {
@@ -291,6 +296,15 @@ export function renderPromotionPreview(plan) {
     ...(plan.project ? [`Project: ${plan.project}`] : []),
     `Receipt: ${plan.receiptRelativePath}`,
     ...(plan.planPath ? [`Plan: ${plan.planPath}`] : []),
+    // A signal is the one destination that expires. Say so where the choice is
+    // being made, not in docs the user will never open.
+    ...(plan.destinationType === "signal"
+      ? [
+        "",
+        `Retention: signals are trimmed after ${SIGNAL_RETENTION_DAYS} days (archived, not deleted).`,
+        "For a fact that should last, promote to context, project, or vault instead."
+      ]
+      : []),
     "",
     "Change preview:",
     plan.preview
@@ -728,13 +742,40 @@ function renderPromotionDiff({ destinationPath, destinationType, destinationExis
   if (operation === "add" && destinationType !== "session-only") {
     return renderDiff(destinationPath, addition, destinationType, destinationExists);
   }
-  const removed = before && before !== after
-    ? before.split("\n").filter((line) => line.trim()).slice(-PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `-${line}`)
-    : [];
-  const added = after && before !== after
-    ? after.split("\n").filter((line) => line.trim()).slice(-PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `+${line}`)
-    : [];
-  return [`Operation: ${operation}`, `--- ${destinationPath}`, `+++ ${destinationPath}`, "@@ replace @@", ...removed, ...added].join("\n");
+  // Show what actually changes. This used to print the last N lines of `before`
+  // as removals and the last N of `after` as additions — two unaligned tail
+  // windows, not a diff. A block deleted from the top of a long file showed no
+  // deletion at all, while untouched tail lines showed as both removed and
+  // added. A preview the user is asked to approve has to be true.
+  const beforeLines = before ? before.split("\n") : [];
+  const afterLines = after ? after.split("\n") : [];
+
+  let head = 0;
+  while (head < beforeLines.length && head < afterLines.length && beforeLines[head] === afterLines[head]) head += 1;
+  let tail = 0;
+  while (
+    tail < beforeLines.length - head &&
+    tail < afterLines.length - head &&
+    beforeLines[beforeLines.length - 1 - tail] === afterLines[afterLines.length - 1 - tail]
+  ) tail += 1;
+
+  const removedLines = beforeLines.slice(head, beforeLines.length - tail).filter((line) => line.trim());
+  const addedLines = afterLines.slice(head, afterLines.length - tail).filter((line) => line.trim());
+
+  const clip = (lines, prefix) => {
+    const shown = lines.slice(0, PROMOTION_PREVIEW_LINE_LIMIT).map((line) => `${prefix}${line}`);
+    const hidden = lines.length - shown.length;
+    return hidden > 0 ? [...shown, `${prefix}… ${hidden} more line(s)`] : shown;
+  };
+
+  return [
+    `Operation: ${operation}`,
+    `--- ${destinationPath}`,
+    `+++ ${destinationPath}`,
+    `@@ ${operation} @@`,
+    ...clip(removedLines, "-"),
+    ...clip(addedLines, "+")
+  ].join("\n");
 }
 
 function renderDiff(destinationPath, addition, destinationType, destinationExists) {

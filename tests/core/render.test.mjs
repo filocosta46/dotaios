@@ -109,3 +109,103 @@ test("sync-gitignore.template ships in templates/", async () => {
   assert.ok(content.includes("*.token"));
   assert.ok(content.includes("node_modules/"));
 });
+
+// --- 1.27: the lifecycle instruction and the maintenance skill ---
+
+test("AGENTS.md.hbs routes memory lifecycle work through the maintenance skill", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  const sectionIdx = tpl.indexOf("## Keeping Knowledge True");
+  assert.ok(sectionIdx !== -1, "the router must retain the memory lifecycle boundary");
+
+  const section = tpl.slice(sectionIdx, tpl.indexOf("\n## ", sectionIdx + 1));
+  assert.match(section, /memory-maintenance/);
+  assert.match(section, /durable/i);
+  assert.match(section, /short-lived/i);
+  assert.doesNotMatch(section, /dotaios capture list/);
+  assert.doesNotMatch(section, /dotaios memory promote/);
+  assert.doesNotMatch(section, /--operation supersede/);
+  assert.doesNotMatch(section, /--match/);
+  assert.doesNotMatch(section, /--destination/);
+
+  // The commands belong in the skill; the TRIGGER does not. This release exists
+  // because the lifecycle shipped with nothing telling an agent to use it, and
+  // context rotted for months. An instruction that only fires when the user
+  // asks puts the human back in the loop as the detector — which is the manual
+  // curation the product is trying to replace.
+  assert.match(
+    section,
+    /notice|contradict|your job|not the user's/i,
+    "the router must tell an agent to retire stale claims on its own, not only on request"
+  );
+});
+
+test("AGENTS.md.hbs stays a bounded router instead of embedding skill procedures", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  const lines = tpl.trimEnd().split("\n");
+  const words = tpl.trim().split(/\s+/);
+
+  assert.ok(lines.length <= 116, `expected at most 116 lines, got ${lines.length}`);
+  assert.ok(words.length <= 825, `expected at most 825 words, got ${words.length}`);
+  assert.doesNotMatch(tpl, /git clone <url> \/tmp\/dotaios-plugin/);
+  assert.doesNotMatch(tpl, /npx dotaios install \/tmp\/dotaios-plugin/);
+});
+
+test("AGENTS.md.hbs retains portability, ownership, and durable-write approval boundaries", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+
+  assert.match(tpl, /Repositories stay outside this AIOS\s+folder/);
+  assert.match(tpl, /never store machine-local paths/);
+  assert.match(tpl, /plain text the user owns/);
+  assert.match(tpl, /Never expose secrets/);
+  assert.match(tpl, /Ask before writing durable identity, CRM, or wiki\s+knowledge/);
+});
+
+test("AGENTS.md.hbs routes explicit plugin installs before ordinary URL ingest", async () => {
+  const tpl = await fs.readFile(
+    path.resolve("templates/AGENTS.md.hbs"),
+    "utf8"
+  );
+  const installRule = tpl.indexOf("explicitly asks to install a skill or plugin");
+  const ingestRule = tpl.indexOf("When the user shares a URL");
+
+  assert.ok(installRule !== -1, "the router must retain the explicit plugin-install capability");
+  assert.ok(installRule < ingestRule, "plugin installation must be resolved before the general URL-ingest rule");
+  assert.match(tpl, /docs\/security\.md#plugins/);
+  assert.match(tpl, /docs\/plugin-development\.md/);
+  assert.match(tpl, /--dry-run/);
+});
+
+test("memory-maintenance skill ships in skills/", async () => {
+  const content = await fs.readFile(
+    path.resolve("skills/memory-maintenance/SKILL.md"),
+    "utf8"
+  );
+  assert.match(content, /^---\n/);
+  assert.match(content, /\nname: memory-maintenance\n/);
+  assert.match(content, /\ntriggers: .*\S/);
+  assert.match(content, /\ndescription: .*\S/);
+  assert.match(content, /dotaios memory audit/, "the skill runs on machine-computed staleness, not vibes");
+  assert.match(content, /dotaios capture list/);
+  assert.match(content, /--operation supersede/);
+  assert.match(content, /--match/);
+  assert.match(content, /supersede/);
+  assert.match(content, /never erase|do not erase|non-destructive/i, "the doctrine is supersede, never erase");
+
+  const license = await fs.readFile(path.resolve("skills/memory-maintenance/LICENSE"), "utf8");
+  const reference = await fs.readFile(path.resolve("skills/weekly-review/LICENSE"), "utf8");
+  assert.equal(license, reference, "shipped skills carry the same MIT LICENSE");
+});
+
+test("INSTALL.md offers the memory-maintenance skill to a new user", async () => {
+  const install = await fs.readFile(path.resolve("INSTALL.md"), "utf8");
+  assert.match(install, /\/memory-maintenance/);
+});

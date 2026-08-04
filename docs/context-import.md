@@ -78,13 +78,13 @@ Rules:
 Preview first:
 
 ```bash
-npx dotaios import ./import.json --dry-run
+npx dotaios@latest import ./import.json --dry-run
 ```
 
 Apply only after reviewing the planned writes:
 
 ```bash
-npx dotaios import ./import.json --apply
+npx dotaios@latest import ./import.json --apply
 ```
 
 If the import contains secret-like terms, DotAIOS blocks apply by default. Move real secrets to `~/aios/.env`; use `--allow-sensitive` only after manual review.

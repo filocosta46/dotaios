@@ -28,39 +28,39 @@ Supported cadence values:
 List schedules:
 
 ```bash
-npx dotaios schedule list
+npx dotaios@latest schedule list
 ```
 
 Show schedules due now:
 
 ```bash
-npx dotaios schedule due
+npx dotaios@latest schedule due
 ```
 
 Run every due schedule:
 
 ```bash
-npx dotaios schedule run-due
+npx dotaios@latest schedule run-due
 ```
 
 Run one schedule:
 
 ```bash
-npx dotaios schedule run daily-brief
+npx dotaios@latest schedule run daily-brief
 ```
 
 Check local automation setup:
 
 ```bash
-npx dotaios schedule doctor
+npx dotaios@latest schedule doctor
 ```
 
 Preview an OS scheduler handoff:
 
 ```bash
-npx dotaios schedule install --dry-run --target launchd
-npx dotaios schedule install --dry-run --target cron
-npx dotaios schedule install --dry-run --target task-scheduler
+npx dotaios@latest schedule install --dry-run --target launchd
+npx dotaios@latest schedule install --dry-run --target cron
+npx dotaios@latest schedule install --dry-run --target task-scheduler
 ```
 
 Scheduled commands must start with `dotaios` or `aios`. Use cron, launchd, Task Scheduler, or another local automation tool directly if you want to run arbitrary commands.

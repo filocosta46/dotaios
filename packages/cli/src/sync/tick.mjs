@@ -109,21 +109,33 @@ export async function runTick({
     let pushed = false;
     let pushedHead = null;
     if (pullResult === "conflict") {
-      await appendEvent({
-        type: "sync-conflict",
-        summary: SYNC_CONFLICT_SUMMARY,
-        at: startedIso
-      });
-      await writeConfig({
-        last_tick_at: startedIso,
-        last_error: SYNC_CONFLICT_SUMMARY
-      });
+      let eventLogError = null;
+      let configError = null;
+      try {
+        await appendEvent({
+          type: "sync-conflict",
+          summary: SYNC_CONFLICT_SUMMARY,
+          at: startedIso
+        });
+      } catch (error) {
+        eventLogError = error.message;
+      }
+      try {
+        await writeConfig({
+          last_tick_at: startedIso,
+          last_error: SYNC_CONFLICT_SUMMARY
+        });
+      } catch (error) {
+        configError = error.message;
+      }
       return {
         conflict: true,
         pulled: pullResult,
         pushed: false,
         sha: null,
-        error: SYNC_CONFLICT_SUMMARY
+        error: SYNC_CONFLICT_SUMMARY,
+        ...(eventLogError && { event_log_error: eventLogError }),
+        ...(configError && { config_error: configError })
       };
     }
 

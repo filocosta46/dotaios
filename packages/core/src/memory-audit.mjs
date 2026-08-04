@@ -8,7 +8,19 @@ const DEFAULT_LINE_BUDGET = 200;
 const MAX_QUEUE_CANDIDATES = 25;
 const localClock = () => new Date();
 
-const HOT_MEMORY_FILES = [
+// DotAIOS writes the bridges and the skill indexes in this list; the user (or
+// an agent on their behalf) writes the rest. Only the user-written ones can go
+// stale in a way that matters, so the freshness view is derived here rather
+// than hand-maintained in a second place that would drift.
+const GENERATED_HOT_FILES = new Set([
+  "AGENTS.md",
+  "CLAUDE.md",
+  ".cursorrules",
+  "skills/INDEX.md",
+  "skills/RESOLVER.md"
+]);
+
+export const HOT_MEMORY_FILES = [
   "AGENTS.md",
   "CLAUDE.md",
   ".cursorrules",
@@ -20,6 +32,10 @@ const HOT_MEMORY_FILES = [
   "skills/INDEX.md",
   "skills/RESOLVER.md"
 ];
+
+export const USER_MAINTAINED_CONTEXT_FILES = HOT_MEMORY_FILES.filter(
+  (file) => !GENERATED_HOT_FILES.has(file)
+);
 
 const SKILL_PATCH_RE = /\b(skill[- ]?patch|patch(?:ed|ing)?\s+(?:the\s+)?[a-z0-9-]+\s+skill|into\s+(?:the\s+)?[a-z0-9-]+\s+skill|SKILL\.md)\b/i;
 const LESSON_RE = /\b(lesson|learned|pitfall|failure mode|next time|should|must|requires?|avoid|prefer|use|patched|improvement)\b/i;
@@ -85,7 +101,13 @@ function auditPromotionReceipts(entries) {
   }
 
   const findings = [];
-  for (const group of byDestination.values()) {
+  for (const unordered of byDestination.values()) {
+    // Replay in the order the writes actually happened. Folding in whatever
+    // order the caller supplied means a supersede seen before the block it
+    // replaces leaves that block in the map, and the correction the user was
+    // told to make gets reported back to them as a conflict — with a
+    // recommendation to remove one of the two.
+    const group = [...unordered].sort((a, b) => String(a.ts || "").localeCompare(String(b.ts || "")));
     const destination = group[0].destination_path;
     const hashes = new Map();
     for (const promotion of group) {

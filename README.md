@@ -2,7 +2,9 @@
 
 **Give your AI one place to remember what matters.**
 
-DotAIOS gives the AI assistants you already use the same sense of you: your identity, priorities, projects, notes, and trusted workflows. Set it up once and keep your context in one private place. No DotAIOS account. No hosted memory.
+DotAIOS keeps your identity, priorities, projects, notes, and trusted workflows in one private place, then connects that context to supported local AI agents. No DotAIOS account. No hosted memory.
+
+Current boundary: core context connects automatically to detected Claude Code, Codex, and Gemini CLI installations. Cursor connects per project. Claude Code can auto-save sessions today; other tools use explicit saving or import.
 
 ## Why people use it
 
@@ -10,7 +12,7 @@ If you use more than one AI assistant, DotAIOS helps you:
 
 - stop repeating who you are and what you are working on;
 - keep projects, priorities, and important notes together;
-- carry the same context between Claude Code, Codex, Cursor, Gemini CLI, and other supported assistants.
+- carry the same owned context between supported Claude Code, Codex, Cursor, Gemini CLI, and documented adapter surfaces.
 
 The free core is available now. Paid packs and checkout are not open.
 

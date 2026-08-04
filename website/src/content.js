@@ -64,12 +64,12 @@ export const dictionary = {
     },
     hero: {
       eyebrow: 'Your AI, with context.',
-      titleLine1: 'Stop re‑explaining yourself',
-      titleLine2: 'to every AI.',
-      intro: 'One folder keeps your context ready across supported agents, every session. Copy the prompt and paste it into the AI you already use.',
+      titleLine1: 'Stop starting over',
+      titleLine2: 'when you switch AI tools.',
+      intro: 'One private folder keeps your context ready across supported local agents. Copy the setup prompt into a local AI tool you already use.',
       primary: 'Copy setup prompt',
       secondary: 'See the folder',
-      note: 'Free and open source. Your memory stays on your machine.',
+      note: 'Core context connects to detected Claude Code, Codex, and Gemini CLI. Cursor connects per project. Claude Code can auto-save sessions today; other tools use explicit saving or import.',
       copied: 'Prompt copied',
     },
     folder: {
@@ -82,7 +82,7 @@ export const dictionary = {
         context: {
           ...sharedViews.context,
           lead: 'Who you are and what matters now.',
-          body: 'Every connected agent starts from the same place.',
+          body: 'Supported local agents can start from the context you connect.',
         },
         projects: {
           ...sharedViews.projects,
@@ -104,7 +104,7 @@ export const dictionary = {
     ask: {
       eyebrow: 'The useful part',
       title: 'Ask naturally. Pick up where you left off.',
-      desc: 'The folder makes every conversation start further along.',
+      desc: 'The folder helps supported agents start further along.',
       examples: [
         ['Plan my day', 'Uses your priorities.'],
         ['Save this article', 'Keeps a clean copy.'],
@@ -115,7 +115,7 @@ export const dictionary = {
     packs: {
       eyebrow: 'For the work you want to hand off',
       title: 'Put your AI to work.',
-      desc: 'The free folder gives every connected agent your context. These packs will give it better ways to act, with workflows we find, test, and explain.',
+      desc: 'The free folder gives supported local agents the context you connect. These packs will give them better ways to act, with workflows we find, test, and explain.',
       items: [
         {
           name: 'Better ways to work',

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatJsonlEntry, parseJsonlLine, readJsonl } from "./jsonl.mjs";
@@ -73,6 +74,49 @@ export function readRecentSignals(signalsDir) {
 // --- Write operations ---
 
 /**
+ * Run one event-store mutation while holding the same advisory lock used by
+ * appenders and compaction.
+ */
+export async function withEventStoreLock(eventsPath, callback, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  await fileSystem.mkdir(path.dirname(eventsPath), { recursive: true });
+  const lock = await acquireFileLock(eventsPath, fileSystem, {
+    retryDelaysMs: options.lockRetryDelaysMs,
+    staleMs: options.lockStaleMs,
+    now: options.now
+  });
+  if (!lock) {
+    throw new EventStoreLockError(eventsPath);
+  }
+  try {
+    return await callback(fileSystem);
+  } finally {
+    await lock.release();
+  }
+}
+
+export class EventStoreLockError extends Error {
+  constructor(eventsPath) {
+    super(`Timed out waiting for memory writer lock: ${eventsPath}.lock`);
+    this.name = "EventStoreLockError";
+    this.code = "DOTAIOS_EVENT_STORE_LOCKED";
+  }
+}
+
+/**
+ * Append one already-formed event record under the same lock used by event
+ * compaction. Callers that preserve an existing event schema use this seam;
+ * appendEvent remains the structured convenience API.
+ */
+export async function appendEventRecord(eventsPath, entry, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  await withEventStoreLock(eventsPath, async () => {
+    await fileSystem.appendFile(eventsPath, formatJsonlEntry(entry));
+  }, options);
+  return entry;
+}
+
+/**
  * Append a structured event to events.jsonl.
  * Ensures required fields: ts, type.
  */
@@ -87,8 +131,7 @@ export async function appendEvent(eventsPath, { type, project, domain, summary, 
     ...(source && { source }),
     ...extra
   };
-  await fs.mkdir(path.dirname(eventsPath), { recursive: true });
-  await fs.appendFile(eventsPath, formatJsonlEntry(entry));
+  await appendEventRecord(eventsPath, entry);
   const aiosPath = aiosPathFromEvents(eventsPath);
   await maybeMaintain(aiosPath);
   if (aiosPath && entry.project) {
@@ -155,24 +198,81 @@ function archivePathFor(eventsPath) {
   return eventsPath.replace(/\.jsonl$/, "-archive.jsonl");
 }
 
-function pendingPathFor(eventsPath) {
-  return `${archivePathFor(eventsPath)}.pending`;
+/**
+ * Where trimmed signals go. A SIBLING of memory/signals/, next to
+ * memory/events-archive.jsonl — never inside signals/, because every scanner
+ * in this codebase treats `signals/*.jsonl` as a live daily file and would
+ * re-read, re-audit, and eventually re-trim the archive itself.
+ */
+export function signalsArchivePathFor(signalsDir) {
+  return path.join(path.dirname(path.resolve(signalsDir)), "signals-archive.jsonl");
 }
 
-// Advisory lock next to the file (same pattern as the sync tick lock). Another
-// live holder makes the caller skip; a stale or unreadable lock is taken over.
-async function acquireFileLock(targetPath, fileSystem) {
+function pendingPathFor(archivePath) {
+  return `${archivePath}.pending`;
+}
+
+// Is this pid still running? EPERM means it exists but belongs to another user.
+function pidIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+
+// Take over a lock we judged abandoned. rename() is atomic, so when two
+// processes race to steal the same lock exactly one wins and the loser gets
+// ENOENT — where unlink-then-write would let both delete and both acquire,
+// and this lock now guards the deletion of the user's signals.
+async function stealFileLock(lockPath, fileSystem) {
+  const moved = `${lockPath}.steal.${process.pid}.${Date.now()}`;
+  try {
+    await fileSystem.rename(lockPath, moved);
+  } catch {
+    return; // someone else already stole or released it
+  }
+  try {
+    await fileSystem.unlink(moved);
+  } catch {
+    // Best effort; a leftover .steal file is inert.
+  }
+}
+
+// Advisory lock next to the file (same pattern as the session index lock).
+// A live holder makes the caller skip no matter how long it has been working;
+// only a dead holder — or a lock we cannot read — is taken over.
+async function acquireFileLock(targetPath, fileSystem, options = {}) {
   const lockPath = `${targetPath}.lock`;
+  const retryDelaysMs = options.retryDelaysMs ?? LOCK_RETRY_DELAYS_MS;
+  const staleMs = options.staleMs ?? LOCK_STALE_MS;
+  const now = options.now || (() => Date.now());
   let waits = 0;
   for (let attempt = 0; attempt < LOCK_MAX_ATTEMPTS; attempt++) {
+    const token = crypto.randomUUID();
     try {
-      await fileSystem.writeFile(lockPath, JSON.stringify({ pid: process.pid, ts: Date.now() }), { flag: "wx" });
+      await fileSystem.writeFile(lockPath, JSON.stringify({
+        pid: process.pid,
+        ts: now(),
+        token
+      }), { flag: "wx" });
       return {
         release: async () => {
+          let held;
+          try {
+            held = JSON.parse(await fileSystem.readFile(lockPath, "utf8"));
+          } catch (error) {
+            if (error.code === "ENOENT") return;
+            throw error;
+          }
+          if (held.token !== token) {
+            throw new Error(`Memory writer lock ownership changed before release: ${lockPath}`);
+          }
           try {
             await fileSystem.unlink(lockPath);
-          } catch {
-            // Already gone — releasing twice must stay harmless.
+          } catch (error) {
+            if (error.code !== "ENOENT") throw error;
           }
         }
       };
@@ -181,39 +281,63 @@ async function acquireFileLock(targetPath, fileSystem) {
       let stale = false;
       try {
         const held = JSON.parse(await fileSystem.readFile(lockPath, "utf8"));
-        stale = !held.ts || Date.now() - held.ts > LOCK_STALE_MS;
-      } catch {
-        stale = true;
+        stale = Number.isInteger(held.pid) && held.pid > 0
+          // Liveness beats the stopwatch: a run that legitimately takes longer
+          // than the stale window must not have its lock pulled, and a crashed
+          // holder must not wedge maintenance until the window expires.
+          ? !pidIsAlive(held.pid)
+          : await malformedLockIsStale(lockPath, fileSystem, staleMs, now);
+      } catch (readError) {
+        if (readError.code === "ENOENT") continue;
+        stale = await malformedLockIsStale(lockPath, fileSystem, staleMs, now);
       }
       if (stale) {
-        try {
-          await fileSystem.unlink(lockPath);
-        } catch {
-          // Raced with the holder's own release.
-        }
+        await stealFileLock(lockPath, fileSystem);
         continue;
       }
-      if (waits >= LOCK_RETRY_DELAYS_MS.length) return null;
-      await new Promise((resolve) => setTimeout(resolve, LOCK_RETRY_DELAYS_MS[waits]));
+      if (waits >= retryDelaysMs.length) return null;
+      await new Promise((resolve) => setTimeout(resolve, retryDelaysMs[waits]));
       waits += 1;
     }
   }
   return null;
 }
 
+async function malformedLockIsStale(lockPath, fileSystem, staleMs, now) {
+  try {
+    const lockStat = await fileSystem.stat(lockPath);
+    return now() - lockStat.mtimeMs > staleMs;
+  } catch (error) {
+    if (error.code === "ENOENT") return true;
+    return false;
+  }
+}
+
+async function fsyncFile(fileSystem, filePath) {
+  if (typeof fileSystem.open !== "function") return;
+  try {
+    const handle = await fileSystem.open(filePath, "r+");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    // fsync is best-effort; the commit point below is the atomicity boundary.
+  }
+}
+
 async function writeFileDurable(fileSystem, filePath, content) {
   await fileSystem.writeFile(filePath, content);
-  if (typeof fileSystem.open === "function") {
-    try {
-      const handle = await fileSystem.open(filePath, "r+");
-      try {
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-    } catch {
-      // fsync is best-effort; the rename below is the atomicity boundary.
-    }
+  await fsyncFile(fileSystem, filePath);
+}
+
+async function fileExists(fileSystem, filePath) {
+  try {
+    await fileSystem.stat(filePath);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -221,7 +345,8 @@ async function writeFileDurable(fileSystem, filePath, content) {
 // committed (rename happened → events no longer holds it → finish the flush)
 // or not (events still holds it → the staging file is stale, drop it).
 async function recoverPendingArchive(eventsPath, fileSystem) {
-  const pendingPath = pendingPathFor(eventsPath);
+  const archivePath = archivePathFor(eventsPath);
+  const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
   try {
     pendingContent = await fileSystem.readFile(pendingPath, "utf8");
@@ -247,14 +372,15 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
     await fileSystem.unlink(pendingPath);
     return;
   }
-  await flushPendingArchive(eventsPath, fileSystem);
+  await flushPendingArchive(archivePath, fileSystem);
 }
 
 // Append the staged batch to the archive, line-idempotently: a crashed earlier
-// flush may already have written part or all of it.
-async function flushPendingArchive(eventsPath, fileSystem) {
-  const pendingPath = pendingPathFor(eventsPath);
-  const archivePath = archivePathFor(eventsPath);
+// flush may already have written part or all of it. Returns only after the
+// append is on disk and fsynced, so callers may treat it as the point after
+// which deleting the source is safe.
+async function flushPendingArchive(archivePath, fileSystem) {
+  const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
   try {
     pendingContent = await fileSystem.readFile(pendingPath, "utf8");
@@ -269,13 +395,18 @@ async function flushPendingArchive(eventsPath, fileSystem) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  const tailLines = new Set(archiveContent.slice(-ARCHIVE_TAIL_BYTES).split("\n").filter((line) => line.trim()));
+  // The dedupe window must be at least as long as the batch it checks. A batch
+  // bigger than a fixed window would fail to find its own already-written early
+  // lines on a retry and append them a second time.
+  const windowBytes = Math.max(ARCHIVE_TAIL_BYTES, pendingContent.length + 1024);
+  const tailLines = new Set(archiveContent.slice(-windowBytes).split("\n").filter((line) => line.trim()));
   const missing = pendingLines.filter((line) => !tailLines.has(line));
   if (missing.length > 0) {
     // A torn earlier append can leave the archive without a final newline;
     // start on a fresh line so the fragment stays its own (visible) bad line.
     const prefix = archiveContent.length > 0 && !archiveContent.endsWith("\n") ? "\n" : "";
     await fileSystem.appendFile(archivePath, prefix + missing.map((line) => `${line}\n`).join(""));
+    await fsyncFile(fileSystem, archivePath);
   }
   await fileSystem.unlink(pendingPath);
 }
@@ -295,59 +426,136 @@ async function flushPendingArchive(eventsPath, fileSystem) {
  */
 export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, options = {}) {
   const fileSystem = options.filesystem || fs;
-  const lock = await acquireFileLock(eventsPath, fileSystem);
-  if (!lock) return { archived: 0, kept: 0, skipped: "locked" };
   try {
-    await recoverPendingArchive(eventsPath, fileSystem);
+    return await withEventStoreLock(eventsPath, async () => {
+      await recoverPendingArchive(eventsPath, fileSystem);
 
-    const all = await readJsonl(eventsPath, { filesystem: fileSystem });
-    if (all.length <= limit) {
-      return { archived: 0, kept: all.length };
+      const all = await readJsonl(eventsPath, { filesystem: fileSystem });
+      if (all.length <= limit) {
+        return { archived: 0, kept: all.length };
+      }
+
+      const toArchive = all.slice(0, -limit);
+      const toKeep = all.slice(-limit);
+      const tmpPath = `${eventsPath}.tmp`;
+
+      await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
+      await writeFileDurable(fileSystem, pendingPathFor(archivePathFor(eventsPath)), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
+      await fileSystem.rename(tmpPath, eventsPath);
+      await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
+
+      return { archived: toArchive.length, kept: toKeep.length };
+    }, options);
+  } catch (error) {
+    if (error instanceof EventStoreLockError) {
+      return { archived: 0, kept: 0, skipped: "locked" };
     }
-
-    const toArchive = all.slice(0, -limit);
-    const toKeep = all.slice(-limit);
-    const tmpPath = `${eventsPath}.tmp`;
-
-    await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
-    await writeFileDurable(fileSystem, pendingPathFor(eventsPath), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
-    await fileSystem.rename(tmpPath, eventsPath);
-    await flushPendingArchive(eventsPath, fileSystem);
-
-    return { archived: toArchive.length, kept: toKeep.length };
-  } finally {
-    await lock.release();
+    throw error;
   }
 }
 
 /**
- * Remove signal files older than retentionDays.
- * Returns { removed: number, freedBytes: number }.
+ * Move signal files older than retentionDays out of memory/signals/ and into
+ * memory/signals-archive.jsonl. Retention controls what stays in the routed
+ * daily window — it is not a licence to destroy what the user wrote.
+ *
+ * Crash-safe transaction: the batch is staged and fsynced, appended to the
+ * archive line-idempotently, and only then are the source files unlinked.
+ * The unlink is the commit point, so every crash point leaves a line in both
+ * places (transient duplication the next run collapses) and never in neither.
+ * Staging order is unlink order, so a crash mid-delete leaves a suffix of the
+ * batch, which the sized dedupe window is guaranteed to cover.
+ *
+ * Returns { removed, archived, archivedFiles, freedBytes, archivePath } — or
+ * the same shape with skipped: "locked" when another live process holds the
+ * archive lock. `archived` counts non-empty LINES the archive is now
+ * responsible for; `archivedFiles` counts source files (an empty stale file
+ * archives zero lines but is still fully accounted for).
  */
-export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_DAYS) {
+export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_DAYS, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  const archivePath = options.archivePath || signalsArchivePathFor(signalsDir);
+  const pendingPath = pendingPathFor(archivePath);
+  const nothingToDo = { removed: 0, archived: 0, archivedFiles: 0, freedBytes: 0, archivePath };
+
   let entries;
   try {
-    entries = await fs.readdir(signalsDir);
+    entries = await fileSystem.readdir(signalsDir);
   } catch {
-    return { removed: 0, freedBytes: 0 };
+    return nothingToDo;
   }
 
   const cutoff = isoDate(new Date(Date.now() - retentionDays * 86400000));
-  let removed = 0;
-  let freedBytes = 0;
+  const stale = entries
+    .filter((file) => file.endsWith(".jsonl"))
+    .filter((file) => {
+      const date = signalFileDate(file);
+      return Boolean(date) && date < cutoff;
+    })
+    .sort();
 
-  for (const file of entries.filter((f) => f.endsWith(".jsonl"))) {
-    const date = signalFileDate(file);
-    if (!date || date >= cutoff) continue;
+  // Nothing stale and no crashed batch to finish: stay out of the folder
+  // entirely, so the common maintenance run writes no lock file at all.
+  if (stale.length === 0 && !await fileExists(fileSystem, pendingPath)) return nothingToDo;
 
-    const filePath = path.join(signalsDir, file);
-    const stat = await fs.stat(filePath);
-    freedBytes += stat.size;
-    await fs.unlink(filePath);
-    removed += 1;
+  const lock = await acquireFileLock(archivePath, fileSystem);
+  if (!lock) return { ...nothingToDo, skipped: "locked" };
+  try {
+    // Finish any batch a crashed earlier run staged but never appended. The
+    // append is line-idempotent, so replaying it can only duplicate work the
+    // dedupe collapses — it can never lose a line.
+    await flushPendingArchive(archivePath, fileSystem);
+
+    const sources = [];
+    const staged = [];
+    for (const file of stale) {
+      const filePath = path.join(signalsDir, file);
+      let content;
+      try {
+        content = await fileSystem.readFile(filePath, "utf8");
+      } catch (error) {
+        if (error.code === "ENOENT") continue;
+        throw error;
+      }
+      // A synced folder (iCloud, Dropbox) can remove the file between the read
+      // and here. Its lines are already staged, so losing only the byte count
+      // is harmless — aborting the whole run would not be.
+      let size = 0;
+      try {
+        ({ size } = await fileSystem.stat(filePath));
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+      sources.push({ filePath, size });
+      for (const line of content.split("\n")) {
+        if (line.trim()) staged.push(line);
+      }
+    }
+
+    if (sources.length === 0) return nothingToDo;
+
+    if (staged.length > 0) {
+      await writeFileDurable(fileSystem, pendingPath, staged.map((line) => `${line}\n`).join(""));
+      await flushPendingArchive(archivePath, fileSystem);
+    }
+
+    let removed = 0;
+    let freedBytes = 0;
+    for (const { filePath, size } of sources) {
+      try {
+        await fileSystem.unlink(filePath);
+      } catch (error) {
+        // Already gone is the outcome we wanted; anything else is real.
+        if (error.code !== "ENOENT") throw error;
+      }
+      removed += 1;
+      freedBytes += size;
+    }
+
+    return { removed, archived: staged.length, archivedFiles: removed, freedBytes, archivePath };
+  } finally {
+    await lock.release();
   }
-
-  return { removed, freedBytes };
 }
 
 // --- Opportunistic maintenance ---
@@ -445,13 +653,17 @@ export async function maintainMemory(aiosPath, options = {}) {
     if (compacted.skipped !== "locked") {
       await appendEvent(eventsPath, {
         type: "memory.maintenance",
-        summary: `auto-maintenance: archived ${compacted.archived} event(s), removed ${trimmed.removed} stale signal file(s)`,
+        summary: `auto-maintenance: archived ${compacted.archived} event(s), archived and removed ${trimmed.removed} stale signal file(s)`,
         archived: compacted.archived,
         kept: compacted.kept,
-        signal_files_removed: trimmed.removed
+        signal_files_removed: trimmed.removed,
+        // Per-file proof that the removal was a move, not a delete. `dotaios
+        // doctor` reads these back and warns when removed outruns archived.
+        signal_files_archived: trimmed.archivedFiles,
+        signal_lines_archived: trimmed.archived
       });
     }
-    return { ran: true, archived: compacted.archived, removed: trimmed.removed };
+    return { ran: true, archived: compacted.archived, removed: trimmed.removed, signalLinesArchived: trimmed.archived };
   } finally {
     activeMaintenance.delete(aiosPath);
   }

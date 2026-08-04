@@ -268,6 +268,10 @@ async function createStarterFiles(target, data, writeMode) {
     "README.md": renderTemplate(localReadmeTemplate(), data),
     "memory/events.jsonl": "",
     "memory/errors.jsonl": "",
+    // Every schedule ships disabled. DotAIOS never installs an OS job a user did
+    // not ask for; `dotaios schedule install` is the explicit opt-in. What these
+    // entries guarantee is that when a user does opt in, the checks that fire are
+    // the ones that catch memory going stale — no LLM, no network, no cost.
     "schedules.yml": [
       "schedules:",
       "  - name: daily-brief",
@@ -276,10 +280,14 @@ async function createStarterFiles(target, data, writeMode) {
       "    enabled: false",
       "  - name: weekly-health-check",
       "    cadence: weekly",
-      "    command: \"dotaios skills doctor\"",
+      "    command: \"dotaios doctor\"",
+      "    enabled: false",
+      "  - name: weekly-memory-audit",
+      "    cadence: weekly",
+      "    command: \"dotaios memory audit --all-memory\"",
       "    enabled: false"
     ].join("\n") + "\n",
-    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"
+    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"memory-maintenance\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"
   };
   const results = [];
 

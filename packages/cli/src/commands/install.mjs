@@ -89,11 +89,24 @@ async function runInstall(sourcePath, options) {
   if (isRawSkill) {
     const skillName = path.basename(sourcePath);
     console.log(`Valid Raw Skill detected: ${skillName}`);
+    const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+    // A skill is a set of instructions the agent will follow. Letting an
+    // install quietly replace an existing one — say, a repo whose folder is
+    // named `ingest` — hands a stranger the behaviour of a trusted skill. The
+    // plugin path already refuses this; the raw path used to rm -rf the target.
+    const collision = await pathEntryExists(path.join(target, "skills", skillName));
     if (options.dryRun) {
-      console.log("\nDry run only. Would copy raw skill directory. No permissions required.");
+      console.log(collision
+        ? `\nDry run only. WOULD REPLACE the existing skill "${skillName}" at ${path.join(target, "skills", skillName)}.`
+        : "\nDry run only. Would copy raw skill directory. No permissions required.");
       return;
     }
-    const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+    if (collision) {
+      throw new Error(
+        `Skill "${skillName}" already exists at ${path.join(target, "skills", skillName)}.\n` +
+        "Remove or rename the existing skill first. Installing over it would replace instructions your agents already follow."
+      );
+    }
     await ensureAiosFolder(target);
     await installRawSkill(sourcePath, target, skillName);
     await writeSkillsIndex(target);

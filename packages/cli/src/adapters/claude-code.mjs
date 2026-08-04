@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
@@ -11,7 +12,32 @@ export const level = ADAPTER_LEVELS.FULL_AUTO;
 const CLAUDE_DIR = path.join(os.homedir(), ".claude");
 const PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
 const SETTINGS_PATH = path.join(CLAUDE_DIR, "settings.json");
-const HOOK_COMMAND = `dotaios capture hook claude-code`;
+// The documented install path is npx-only — INSTALL.md never installs dotaios
+// globally — so a bare `dotaios` in the hook would not resolve and every
+// session would fail to capture, silently. Match on the subcommand alone so a
+// hook written by an earlier release is still recognised and never duplicated.
+//
+// Pinned to this exact version, never @latest. @latest would resolve to
+// whatever is newest on npm at the moment the hook fires, so every session end
+// would execute a build the user never installed or reviewed. The pin also
+// makes the npx cache hit deterministic, which is what lets the hook work
+// offline after its first run.
+const HOOK_VERSION = JSON.parse(
+  readFileSync(new URL("../../../../package.json", import.meta.url), "utf8")
+).version;
+const HOOK_COMMAND = `npx -y dotaios@${HOOK_VERSION} capture hook claude-code`;
+const HOOK_MARKER = "capture hook claude-code";
+
+// The command is written into another program's config and run through a
+// shell, so a home directory with a space in it would otherwise word-split and
+// silently break every save.
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+function hookCommandFor(aiosPath) {
+  return `${HOOK_COMMAND} --path ${shellQuote(aiosPath)}`;
+}
 
 // ---------- backfill ----------
 
@@ -170,19 +196,46 @@ export async function enable(aiosPath) {
   try {
     const raw = await fs.readFile(SETTINGS_PATH, "utf8");
     settings = JSON.parse(raw);
-  } catch {
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      // The file exists but we cannot read or parse it. Starting from {} would
+      // write our hook over the user's entire Claude Code configuration.
+      // Refusing is the only safe move; they can fix or move the file.
+      throw new Error(
+        `Cannot read ${SETTINGS_PATH}: ${error.message}\n` +
+        "Fix or move that file, then run this again. Refusing to overwrite it."
+      );
+    }
     settings = {};
   }
 
   if (!settings.hooks) settings.hooks = {};
   if (!settings.hooks.Stop) settings.hooks.Stop = [];
 
+  const wanted = hookCommandFor(aiosPath);
   const existing = settings.hooks.Stop.find(
-    (h) => h.hooks?.some?.((e) => e.command?.includes("dotaios capture hook claude-code"))
+    (h) => h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
   );
 
   if (existing) {
-    console.log("Claude Code auto-save already configured.");
+    const entry = existing.hooks.find((e) => e.command?.includes(HOOK_MARKER));
+    if (entry.command === wanted) {
+      console.log("Claude Code auto-save already configured.");
+      return;
+    }
+    // An earlier release wrote a hook that no longer works — 1.26's bare
+    // `dotaios` never resolves on the npx-only install path, so it failed
+    // silently on every session. Reporting "already configured" would leave
+    // the user permanently broken with no signal.
+    console.log("Updating the Claude Code auto-save hook:");
+    console.log(`  was: ${entry.command}`);
+    console.log(`  now: ${wanted}`);
+    entry.command = wanted;
+    entry.type = "command";
+    if (entry.timeout == null) entry.timeout = 10;
+    await fs.mkdir(CLAUDE_DIR, { recursive: true });
+    await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
+    console.log("Claude Code auto-save repaired.");
     return;
   }
 
@@ -190,13 +243,15 @@ export async function enable(aiosPath) {
     hooks: [
       {
         type: "command",
-        command: `${HOOK_COMMAND} --path ${aiosPath}`,
+        command: wanted,
         timeout: 10,
         statusMessage: "Saving conversation to AIOS..."
       }
     ]
   });
 
+  // A machine that has never run Claude Code has no ~/.claude yet.
+  await fs.mkdir(CLAUDE_DIR, { recursive: true });
   await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
   console.log("Claude Code auto-save enabled.");
   console.log("Future conversations will be saved incrementally after each completed Claude Code response.");
@@ -218,7 +273,7 @@ export async function disable(aiosPath) {
   }
 
   settings.hooks.Stop = settings.hooks.Stop.filter(
-    (h) => !h.hooks?.some?.((e) => e.command?.includes("dotaios capture hook claude-code"))
+    (h) => !h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
   );
 
   if (settings.hooks.Stop.length === 0) delete settings.hooks.Stop;
@@ -233,7 +288,7 @@ export async function isEnabled() {
     const raw = await fs.readFile(SETTINGS_PATH, "utf8");
     const settings = JSON.parse(raw);
     return settings.hooks?.Stop?.some?.(
-      (h) => h.hooks?.some?.((e) => e.command?.includes("dotaios capture hook claude-code"))
+      (h) => h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
     ) ?? false;
   } catch {
     return false;

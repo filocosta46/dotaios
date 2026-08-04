@@ -348,3 +348,192 @@ test("capture enable with --path and no adapter does not parse path as adapter",
   });
   assert.match(result.stdout, /Found on this machine|No supported AI tools detected/i);
 });
+
+// --- 1.27: the capture hook is promoted into the default install path, so it
+// has to resolve on the npx-only flow INSTALL.md actually prescribes. ---
+
+// A real scaffolded folder, on a machine that has never run Claude Code. The
+// AIOS must be genuine or `capture enable` bails before it ever touches the
+// client settings, and these tests would pass for the wrong reason.
+function isolatedHome() {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-home-"));
+  const aios = path.join(home, "aios");
+  const init = spawnSync(process.execPath, [cli, "init", "--yes", "--path", aios], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, USERPROFILE: home }
+  });
+  assert.equal(init.status, 0, init.stderr);
+  fs.rmSync(path.join(home, ".claude"), { recursive: true, force: true });
+  return { home, aios };
+}
+
+function runWithHome(home, args) {
+  return spawnSync(process.execPath, [cli, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, HOME: home, USERPROFILE: home }
+  });
+}
+
+test("the installed hook command resolves without a global install", () => {
+  const { home, aios } = isolatedHome();
+
+  const result = runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const settings = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
+  const command = settings.hooks.Stop[0].hooks[0].command;
+
+  assert.match(command, /npx/, "INSTALL.md never installs dotaios globally, so a bare `dotaios` cannot resolve");
+  assert.match(command, /capture hook claude-code/);
+  // The path is shell-quoted now, so assert it is PRESENT rather than pinning
+  // an unquoted form — quoting is what stops a home dir with a space breaking.
+  assert.ok(command.includes(aios), `hook must carry the AIOS path: ${command}`);
+});
+
+test("enabling capture creates the client directory instead of crashing", () => {
+  const { home, aios } = isolatedHome();
+  assert.equal(fs.existsSync(path.join(home, ".claude")), false, "precondition: a fresh machine has no ~/.claude");
+
+  const result = runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.doesNotMatch(result.stderr, /ENOENT/);
+});
+
+test("an existing hook is recognised even if it predates the npx form", () => {
+  const { home, aios } = isolatedHome();
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".claude", "settings.json"), JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: "command", command: `dotaios capture hook claude-code --path ${aios}` }] }] }
+  }));
+
+  const result = runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+
+  assert.equal(result.status, 0, result.stderr);
+  const settings = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
+  assert.equal(settings.hooks.Stop.length, 1, "a 1.26-era hook must not be duplicated by the 1.27 form");
+});
+
+test("an unreadable settings file is never overwritten", () => {
+  const { home, aios } = isolatedHome();
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  const settingsPath = path.join(home, ".claude", "settings.json");
+  const corrupt = '{"hooks": {"Stop": [ THIS IS NOT JSON';
+  fs.writeFileSync(settingsPath, corrupt);
+
+  const result = runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+
+  assert.notEqual(result.status, 0, "clobbering a user's client settings is worse than failing");
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), corrupt, "the user's file must survive untouched");
+});
+
+// The user must be able to STOP recording. enable/disable/status have to agree
+// on what a DotAIOS hook looks like, or consent becomes one-way.
+
+test("what enable turns on, disable turns off", () => {
+  const { home, aios } = isolatedHome();
+  const settingsPath = path.join(home, ".claude", "settings.json");
+
+  assert.equal(runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]).status, 0);
+  const enabled = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(enabled.hooks.Stop.length, 1, "precondition: the hook is installed");
+
+  const off = runWithHome(home, ["capture", "disable", "claude-code", "--path", aios]);
+  assert.equal(off.status, 0, off.stderr);
+
+  const after = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  const remaining = (after.hooks?.Stop || []).filter(
+    (h) => h.hooks?.some?.((e) => e.command?.includes("capture hook claude-code"))
+  );
+  assert.deepEqual(remaining, [], "printing 'disabled' while still recording is a consent failure");
+});
+
+test("status reports capture as on once it is on", () => {
+  const { home, aios } = isolatedHome();
+  // detect.mjs only claims full-auto once it can prove it can read a transcript,
+  // so a machine that has actually used Claude Code is the case under test.
+  const projectDir = path.join(home, ".claude", "projects", "some-project");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, "session.jsonl"), '{"type":"user","message":{"role":"user"}}\n');
+
+  runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+
+  const status = runWithHome(home, ["capture", "status", "--path", aios]);
+
+  assert.equal(status.status, 0, status.stderr);
+  // "import only" is what status prints when it cannot see a live hook. A user
+  // who just enabled auto-save must not be told their conversations are not
+  // being recorded when they are.
+  const claudeLine = status.stdout.split("\n").find((line) => line.includes("claude-code")) || "";
+  assert.doesNotMatch(claudeLine, /import only/, `status denied a hook it just wrote: ${claudeLine.trim()}`);
+  assert.match(claudeLine, /auto-save/, `status must show auto-save is live: ${claudeLine.trim()}`);
+});
+
+test("a hook written by an earlier release can still be turned off", () => {
+  const { home, aios } = isolatedHome();
+  const settingsPath = path.join(home, ".claude", "settings.json");
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: "command", command: `dotaios capture hook claude-code --path ${aios}` }] }] }
+  }));
+
+  assert.equal(runWithHome(home, ["capture", "disable", "claude-code", "--path", aios]).status, 0);
+
+  const after = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.deepEqual(after.hooks?.Stop || [], [], "upgrading must not strand a 1.26 hook the user cannot remove");
+});
+
+// --- The hook string is written into another program's config and executed by
+// a shell. It has to survive a real home directory and a real upgrade. ---
+
+function hookCommandFor(home) {
+  const settings = JSON.parse(fs.readFileSync(path.join(home, ".claude", "settings.json"), "utf8"));
+  return settings.hooks.Stop[0].hooks[0].command;
+}
+
+test("a path containing a space does not word-split the hook", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios home "));
+  const aios = path.join(home, "my aios");
+  const init = spawnSync(process.execPath, [cli, "init", "--yes", "--path", aios], {
+    encoding: "utf8", env: { ...process.env, HOME: home, USERPROFILE: home }
+  });
+  assert.equal(init.status, 0, init.stderr);
+  fs.rmSync(path.join(home, ".claude"), { recursive: true, force: true });
+
+  assert.equal(runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]).status, 0);
+
+  const command = hookCommandFor(home);
+  // Claude Code runs this through a shell. Unquoted, `--path /a/my aios`
+  // becomes `--path /a/my` and every session silently fails to save.
+  assert.match(command, /--path '.*my aios'|--path ".*my aios"/, `path must be quoted: ${command}`);
+});
+
+test("the hook is pinned to a version, never to whatever is newest on npm", () => {
+  const { home, aios } = isolatedHome();
+  runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+
+  const command = hookCommandFor(home);
+  const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+
+  assert.doesNotMatch(command, /@latest/, "a hook that auto-upgrades runs unreviewed code on every session end");
+  assert.match(command, new RegExp(`dotaios@${pkg.version.replace(/\./g, "\\.")}`), command);
+});
+
+test("enabling over a hook written by an older release repairs it", () => {
+  const { home, aios } = isolatedHome();
+  fs.mkdirSync(path.join(home, ".claude"), { recursive: true });
+  const settingsPath = path.join(home, ".claude", "settings.json");
+  // Exactly what 1.26 wrote: a bare `dotaios` that never resolves on the npx path.
+  fs.writeFileSync(settingsPath, JSON.stringify({
+    hooks: { Stop: [{ hooks: [{ type: "command", command: `dotaios capture hook claude-code --path ${aios}` }] }] }
+  }));
+
+  const result = runWithHome(home, ["capture", "enable", "claude-code", "--path", aios]);
+  assert.equal(result.status, 0, result.stderr);
+
+  const command = hookCommandFor(home);
+  assert.match(command, /npx/, `a broken hook must be repaired, not reported as fine: ${command}`);
+  assert.doesNotMatch(result.stdout, /already configured/, "silently leaving a broken hook is the bug");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(settings.hooks.Stop.length, 1, "repair must not duplicate the hook");
+});

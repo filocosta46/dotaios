@@ -10,11 +10,11 @@ DotAIOS is a local file convention.
 - Codex: `~/.codex/AGENTS.md`
 - Gemini CLI: `~/.gemini/GEMINI.md`
 
-`dotaios attach <project>` writes project-level bridges, including `.cursor/rules/dotaios.mdc` for Cursor. If the checkout owns a `skills/` directory, it also links those project skills into the explicit project-native targets declared in `packages/core/src/agents.json`. The global `~/aios/skills` surface is not replaced or copied into the project. Existing unmanaged files are preserved unless the user passes `--overwrite`.
+`dotaios attach <project>` writes the shared project-level `AGENTS.md` bridge. Cursor reads that root file directly, so DotAIOS does not add a duplicate always-applied Cursor rule. A managed legacy `.cursor/rules/dotaios.mdc` is removed during attachment; unmanaged files are preserved. If the checkout owns a `skills/` directory, DotAIOS also links those project skills into the explicit project-native targets declared in `packages/core/src/agents.json`. The global `~/aios/skills` surface is not replaced or copied into the project. Existing unmanaged files are preserved unless the user passes `--overwrite`.
 
 ## Context
 
-`context/` is loaded every session. It describes identity, active work, priorities, long-term direction, and domain-specific modes.
+`context/` is the durable source for identity, active work, priorities, long-term direction, and domain-specific modes. Managed bridges point supported hosts to it, but a configured path does not prove that every client session loaded it.
 
 ## Projects
 

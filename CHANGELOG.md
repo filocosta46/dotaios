@@ -2,6 +2,81 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [1.27.1] - 2026-07-28
+
+### Fixed
+
+- Antigravity IDE skills now use Google's documented
+  `~/.gemini/antigravity/skills/` global path and `.agents/skills/` workspace
+  path. The previous `.gemini/config/skills` project path was not documented for
+  any current Antigravity surface.
+- `dotaios connect opencode` now writes OpenCode's current `mcp.dotaios` local
+  server schema with a version-pinned `npx --package` command. Native skills use
+  the shared `.agents/skills` target, avoiding duplicate same-name discovery.
+  Recognizable legacy DotAIOS entries migrate safely; foreign or malformed
+  same-name entries fail closed. New files use private permissions and atomic
+  replacement.
+- MCP fragments now use the published package launcher instead of a source path
+  that may live in a disposable npm cache.
+- Invocation receipts now preserve a bounded, redacted client diagnostic when a
+  probe cannot run. A marker counts as produced only when the client exits
+  successfully, and dry runs do not launch a version probe.
+- Project attachment uses root `AGENTS.md` as Cursor's single context bridge and
+  removes only a managed legacy `.cursor/rules/dotaios.mdc`.
+
+### Changed
+
+- Compatibility documentation now names Antigravity IDE specifically, records
+  Kimi Code CLI and OpenCode on the documented shared Agent Skills surface, and
+  keeps Kimi K2, Kimi K3, and Z.ai GLM claims at the model-through-host level.
+- Compatibility receipts now state all four evidence fields explicitly:
+  configured, discoverable, invoked, and produced. Public support requires
+  reproducible `produced=yes`.
+- Client support references were refreshed against official OpenAI, Anthropic,
+  Google, Cursor, Kimi, OpenCode, Moonshot, and Z.ai documentation on
+  2026-07-28.
+- Public launch copy now promises continuity across supported local agents and
+  states the current capture boundary instead of implying every AI or every
+  session is automatically connected.
+
+### Tests
+
+- Added CLI stdout regression coverage for every JSON MCP client alongside the
+  existing Codex TOML coverage.
+- Added regression coverage for Antigravity IDE skill targets, stable user
+  overrides, OpenCode MCP migration, foreign-server preservation, runtime
+  health rows, atomic private config writes, probe false positives, dry-run
+  process isolation, client-version sanitization, and diagnostic redaction.
+
+## [1.27.0] - 2026-07-25
+### Fixed
+- **Stale signals are archived instead of deleted.** `trimSignals` previously `unlink`ed any `memory/signals/*.jsonl` older than 30 days with no archive, and it runs unattended as part of routine maintenance. Every line now lands in `memory/signals-archive.jsonl` before its source file is removed, using the same staged-append, crash-safe, idempotent path as event compaction. Archived signals stay searchable. Covered by crash-injection, idempotency, and lock-contention tests. If you kept your folder outside version control, this is data you were losing silently.
+- **`dotaios doctor` now reports the signal store instead of ignoring it.** The memory-health check reports the live signal-file count, and warns when it finds a maintenance receipt showing signal files removed without an archive. To be precise about what that second part buys you: every receipt 1.27 writes archives what it removes, so in practice this warning detects deletions performed by **1.26 and earlier**. Two further limits, stated plainly: it can only see receipts still present in `memory/events.jsonl`, so once those compact into the archive the warning stops firing; and it only catches losses from the automatic maintenance path, because 1.26's manual `dotaios cleanup` wrote no receipt at all. It is a best-effort upgrade check, not an ongoing integrity guarantee. Previously the check returned `ok` unless a corrupt-line sidecar existed, so unarchived deletion was invisible either way.
+- Event compaction no longer re-archives a batch larger than the dedupe tail window when a crash interrupts the staging cleanup.
+- **The memory lock is judged by process liveness, and taken over atomically.** It previously called a lock stale purely on age, so a maintenance run lasting longer than five minutes could have its lock pulled by another process, and a crashed holder wedged maintenance until the window expired. Taking over was also a delete-then-recreate, which let two processes both claim an abandoned lock — an interleaving that could drop signal lines. Liveness now decides, and the takeover is a single atomic rename, matching the session index lock.
+- Signal trimming survives a file disappearing mid-run. A folder synced by iCloud or Dropbox could remove a file between the read and the delete, throwing an unhandled error that silently aborted the whole maintenance pass and wrote no receipt.
+
+- **The promotion preview shows the real change.** For `replace`, `remove` and `supersede` it printed the last twelve lines of the file before and the last twelve after, as two unaligned tail windows dressed up as a diff. A block removed from the top of a long file produced no visible deletion at all, while untouched lines at the bottom appeared as both removed and added. Since the product's safety model is preview-then-apply, a preview that does not show the change was manufacturing consent. It now diffs the actual edited region and marks any truncation.
+- **Installing a raw skill can no longer replace an existing one.** `dotaios install <repo>` deleted and overwrote any skill whose folder name collided — including a shipped built-in — with no prompt, and `--dry-run` did not mention it. Skills are instructions your agents follow, so replacing `ingest` silently redirects what happens the next time you save a link. It now refuses, as the plugin path already did, and the dry run says so.
+- `dotaios capture enable claude-code` shell-quotes the AIOS path. A home directory containing a space split the hook command, so capture failed on every session with no visible error.
+- `dotaios connect gemini` no longer claims your context is injected automatically. Writing a hook file proves configuration, not invocation, and `docs/client-support.md` records that Gemini CLI could not produce an invocation receipt. The wording now matches the evidence.
+- `dotaios memory audit` no longer reports the documented supersede workflow as a conflict. The check folded promotions in whatever order they arrived, so a supersede seen before the block it replaces produced a phantom conflict and advised removing one of the two — talking a user out of the correction they had just made. It now replays in timestamp order.
+
+### Added
+- **The scaffolded `AGENTS.md` now tells agents to maintain memory.** Agents are directed to promote a fact that should outlive the session, and to supersede a fact they find contradicted, rather than leaving both versions in place. The promotion lifecycle shipped in earlier releases but nothing ever invoked it, so context accumulated and went stale by design.
+- New shipped skill `memory-maintenance`: find stale or contradicted facts in `context/` and `projects/`, propose supersedes, apply only what the user approves.
+- `dotaios doctor` warns when hot context files have not been touched in a long time, using file mtime only — no frontmatter or schema change. Generated files are never reported as stale.
+
+### Changed
+- Every install and run command in the shipped docs is pinned to `dotaios@latest`. Several pages still used a bare `npx dotaios`, which resolves whatever npx has cached — so a reader following them could silently get a pre-1.27 build, including the signal deletion this release exists to fix.
+- The three shipped skills that were missing a `LICENSE` file (`export-okf`, `research`, `skillify`) now carry the same MIT grant as the other twelve.
+- **The capture hook is pinned to the installed version and repairs itself on upgrade.** It resolved `dotaios@latest`, so every session end ran whatever was newest on npm rather than the build you installed and reviewed; it is now pinned, which also makes the npx cache hit deterministic so the hook keeps working offline after its first run. Enabling over a hook written by an earlier release used to print "already configured" and leave it in place — and since 1.26's hook never resolved on the npx install path, upgrading users stayed silently broken. It now rewrites the command and shows you what changed.
+- The shipped `memory-maintenance` skill and weekly schedule call `dotaios memory audit --all-memory`. Plain `audit` defaults to an eight-entry window, where even a genuine conflict returns nothing — the detector was effectively off everywhere the product invoked it.
+- **The Claude Code capture hook now runs through `npx`.** It was written as a bare `dotaios capture hook claude-code`, which does not resolve on the npx-only path the install guide prescribes — so on a machine without a global install, every session silently failed to capture. Hooks written by earlier releases are still recognised and are not duplicated.
+- `dotaios capture enable claude-code` creates `~/.claude` when it does not exist instead of failing with a raw `ENOENT`, and now refuses to run when `settings.json` exists but cannot be parsed, rather than replacing the file with a fresh one. The previous behaviour could overwrite an entire Claude Code configuration.
+- Session capture moved into the main setup flow in `INSTALL.md`. It was previously listed under "optional extras, do not run these during first-time setup" — which left a new user with a folder that recorded nothing unless they ran a command by hand. Capture is Claude Code only today and the docs now say so plainly.
+- `dotaios memory promote` states the 30-day signal retention window in the preview and the help text, lists durable destinations first, and no longer uses `--to signal` as its first worked example. Promoting a durable fact to `signal` previously looked like the default and expired within a month.
+
 ## [1.26.0] - 2026-07-22
 ### Added
 - Opt-in update check surfaced by `dotaios doctor`: tells you when a newer release is published. Foreground only — it runs because you asked for a health check. One plain GET to the npm registry, no request body, no identifiers, no background updater, no telemetry. Fail-open by design: offline, timeout, bad status, malformed payload, or an unreadable local version all degrade to a quiet skip, and an available update is a warning that never sets a non-zero exit code. Disable with `DOTAIOS_NO_UPDATE_CHECK=1`.

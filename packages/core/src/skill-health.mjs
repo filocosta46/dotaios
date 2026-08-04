@@ -26,7 +26,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
   const targets = [];
   for (const target of symlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
-    const active = await isSkillTargetActive(homePath, targetDir);
+    const active = await isSkillTargetActive(homePath, targetDir, registry);
     targets.push(await inspectSkillTarget({
       aiosPath,
       homePath,
@@ -78,7 +78,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
       note: "A path-ready report does not prove that a client discovered or invoked a skill; run a bounded agent-specific smoke test for invocation evidence."
     },
     unsupported: [
-      "Codex, Cursor, and Gemini use the shared .agents/skills target; Antigravity uses its documented global target.",
+      "Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode use the shared .agents/skills target; Antigravity IDE uses its documented global target.",
       "Surfaces without local Agent Skills discovery continue to use the DotAIOS bridge and resolver."
     ],
     issues
@@ -381,13 +381,17 @@ async function inspectHermes({ aiosPath, homePath, registry = [] }) {
   return { available: true, canonical: expected, configs };
 }
 
-async function isSkillTargetActive(homePath, targetDir) {
+async function isSkillTargetActive(homePath, targetDir, registry) {
   if (await pathExists(targetDir)) return true;
   const relative = path.relative(homePath, targetDir);
-  if (relative === ".claude/skills") return pathExists(path.join(homePath, ".claude"));
-  if (relative === ".agents/skills") {
-    const agentHomes = [".codex", ".cursor", ".gemini", ".antigravity", ".vscode", ".warp"];
-    return (await Promise.all(agentHomes.map((dir) => pathExists(path.join(homePath, dir)))).then((values) => values.some(Boolean)));
+  const consumers = registry.filter(
+    (agent) => agent.skills?.mode === "symlink" && agent.skills.dir === relative
+  );
+  if (consumers.length > 0) {
+    const installed = await Promise.all(
+      consumers.map((agent) => isAgentInstalled(homePath, agent))
+    );
+    return installed.some(Boolean);
   }
   return pathExists(path.dirname(targetDir));
 }

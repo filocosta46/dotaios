@@ -69,7 +69,11 @@ test("public context guidance documents only the current MCP tools and one memor
 
   assert.deepEqual(documentedTools, ["read_working_context", "search_aios", "resolve_skill"]);
   assert.equal(retiredToolNames.some((name) => corpus.includes(name)), false);
-  assert.match(agentsTemplate, /Route `memory\/events\.jsonl`, `memory\/signals\/`, and `memory\/sessions\/`/);
+  assert.match(
+    agentsTemplate,
+    /Do not preload `memory\/events\.jsonl`, `memory\/signals\/`, or `memory\/sessions\/`/,
+    "the lean router must still enforce the single bounded memory projection"
+  );
   assert.doesNotMatch(agentsTemplate, /load the last 50|load the single most recent file/i);
 });
 

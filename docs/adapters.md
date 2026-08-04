@@ -35,7 +35,7 @@ dotaios connect gemini
 
 Installs three things in `~/.gemini/`:
 - a `GEMINI.md` bridge pointing Gemini at your `~/aios` folder,
-- a **SessionStart hook** that injects your working-memory digest (`dotaios brief --compact`) at the start of every session, and
+- a **SessionStart hook** configured to inject your working-memory digest (`dotaios brief --compact`) at session start — discovery and invocation remain client-version dependent, and
 - native workflow links shared with supported local agents.
 
 If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses to overwrite a file that is not valid JSON (no partial install).
@@ -46,7 +46,7 @@ If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses 
 dotaios connect opencode
 ```
 
-Installs an MCP server entry in `~/.config/opencode/opencode.json` plus a skill stub per installed skill, so your skills appear as `/skill <name>` in OpenCode. Use `read_working_context` for startup continuity; use `search_aios` only for an explicit lookup and `resolve_skill` to route a workflow.
+Installs a local MCP server entry at `mcp.dotaios` in `~/.config/opencode/opencode.json`. Native skills use the shared `~/.agents/skills` target created by `dotaios activate`. Use `read_working_context` for startup continuity; use `search_aios` only for an explicit lookup and `resolve_skill` to route a workflow.
 
 ### Claude Code, Cursor
 
@@ -57,8 +57,12 @@ Use `dotaios activate` to wire these, see the README. The optional MCP adapter i
 `dotaios activate` also installs your skills so they appear natively in the tools that support the Agent Skills standard. Each `skills/<name>/SKILL.md` is linked into the client paths that are safe for the installed tools:
 
 - `~/.claude/skills/` for Claude Code, and
-- `~/.agents/skills/` as the single shared Agent Skills path for Codex, Cursor, and Gemini CLI, and
-- `~/.gemini/config/skills/` for Antigravity's documented global skill path.
+- `~/.agents/skills/` as the single shared Agent Skills path for Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode, and
+- `~/.gemini/antigravity/skills/` for Antigravity IDE's documented global skill path.
+
+Google documents separate Antigravity IDE, Antigravity CLI, and Antigravity 2.0
+surfaces with different global directories. This adapter names and configures
+the IDE surface specifically.
 
 For Hermes, DotAIOS adds your `~/aios/skills` folder to `skills.external_dirs` in `~/.hermes/config.yaml`.
 
@@ -89,8 +93,8 @@ Configuration is not invocation proof. For a bounded acceptance check, run the
 explicit client probe against a disposable project fixture:
 
 ```bash
-npx dotaios skills probe --client codex --path ~/aios --dry-run
-npx dotaios skills probe --client codex --path ~/aios --run \
+npx dotaios@latest skills probe --client codex --path ~/aios --dry-run
+npx dotaios@latest skills probe --client codex --path ~/aios --run \
   --receipt /tmp/dotaios-codex-invocation.json
 ```
 
@@ -136,8 +140,8 @@ DotAIOS has two deliberately separate skill scopes:
 The bundled project targets are:
 
 - `<project>/.claude/skills/` for Claude Code;
-- `<project>/.agents/skills/` for Codex, Cursor, and Gemini CLI;
-- `<project>/.gemini/config/skills/` for Antigravity; and
+- `<project>/.agents/skills/` for Codex, Cursor, Gemini CLI, Kimi Code CLI,
+  OpenCode, and Antigravity IDE; and
 - `<project>/.hermes/config.yaml` with `<project>/skills` in
   `skills.external_dirs` for Hermes.
 
@@ -152,8 +156,8 @@ registry's declared `key` rather than assuming `skills.external_dirs`.
 Projects without a readable `skills/` directory are a no-op for this layer.
 
 ```bash
-npx dotaios attach /path/to/project --path ~/aios
-npx dotaios attach /path/to/project --path ~/aios --dry-run
+npx dotaios@latest attach /path/to/project --path ~/aios
+npx dotaios@latest attach /path/to/project --path ~/aios --dry-run
 ```
 
 This proves filesystem/configuration propagation. It does not claim that every
@@ -223,7 +227,9 @@ dotaios capture import claude-code --all
 
 **Status:** paste/import only
 
-Gemini CLI is installed but does not store conversation transcripts in a format DotAIOS can read automatically.
+Gemini CLI stores local sessions under `~/.gemini/tmp/<project_hash>/chats/`,
+but DotAIOS does not currently import or capture those session files
+automatically.
 
 To save a Gemini conversation:
 1. Copy the conversation from the terminal.

@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { randomUUID } from "node:crypto";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { mcpLauncher } from "../lib/mcp-launcher.mjs";
 import {
   GWS_READ_ONLY_SCOPES,
   GWS_READ_ONLY_SERVICES,
@@ -22,7 +23,6 @@ import {
 const googleAliases = new Set(["google", "gmail", "gws"]);
 const geminiAliases = new Set(["gemini", "gemini-cli"]);
 const opencodeAliases = new Set(["opencode"]);
-const mcpServerPath = fileURLToPath(new URL("../../../mcp/src/server.mjs", import.meta.url));
 
 export async function connectCommand(args) {
   if (hasHelpFlag(args)) {
@@ -33,6 +33,9 @@ export async function connectCommand(args) {
   const { service, options } = parseOptions(args);
   if (!service) {
     throw new Error("Usage: dotaios connect google [--dry-run|--status]");
+  }
+  if (options.status && !googleAliases.has(service)) {
+    throw new Error("The --status option is supported only for `dotaios connect google`.");
   }
 
   if (geminiAliases.has(service)) {
@@ -131,7 +134,7 @@ function printConnectHelp() {
 Services:
   google      Connect optional Google Workspace reads via gws
   gemini      Connect Gemini CLI with GEMINI.md and a SessionStart hook
-  opencode    Connect OpenCode — installs MCP and skill stubs
+  opencode    Connect OpenCode MCP
 
 Options:
   --path <dir>     Use a non-default AIOS folder
@@ -399,7 +402,12 @@ async function connectGemini(aiosPath, options) {
   });
 
   console.log("\nGemini CLI connected.");
-  console.log("Every session start will inject your DotAIOS working context automatically.");
+  // docs/client-support.md records that Gemini CLI could not produce an
+  // invocation receipt in the bounded probe. Writing a hook file proves the
+  // configuration, never that the client runs it — claiming otherwise is the
+  // exact overclaim this project refuses to make about every other client.
+  console.log("A SessionStart hook is installed. Whether your Gemini version runs it is client-side behaviour —");
+  console.log("check the start of your next session to confirm your context arrives.");
 }
 
 async function writeGeminiBridge(filePath, aiosPath) {
@@ -490,7 +498,7 @@ async function connectOpenCode(aiosPath, options) {
   if (options.dryRun) {
     console.log("\nWould write:");
     console.log("  ~/.config/opencode/opencode.json  — MCP server entry");
-    console.log("  ~/.config/opencode/skills/<name>.md  — skill stubs for each installed skill");
+    console.log("Native skills remain in ~/.agents/skills, managed by `dotaios activate`.");
     return;
   }
 
@@ -501,23 +509,16 @@ async function connectOpenCode(aiosPath, options) {
   await mergeOpenCodeSettings(opencodeJsonPath, aiosPath);
   console.log("[ok] ~/.config/opencode/opencode.json (MCP server entry)");
 
-  // Write skill stubs
-  const skillsDir = path.join(aiosPath, "skills");
-  const stubsDir = path.join(opencodeConfigDir, "skills");
-  await fs.mkdir(stubsDir, { recursive: true });
-  const count = await writeOpenCodeSkillStubs(skillsDir, stubsDir, aiosPath);
-  console.log(`[ok] ~/.config/opencode/skills/ (${count} skill stub(s))`);
-
   await appendEvent(path.join(aiosPath, "memory", "events.jsonl"), {
     type: "connection",
-    summary: "Connected OpenCode via MCP and skill stubs",
+    summary: "Configured OpenCode MCP",
     source: "dotaios connect opencode",
     connection: "opencode"
   });
 
-  console.log("\nOpenCode connected.");
+  console.log("\nOpenCode configured.");
   console.log("Read-only MCP tools available: read_working_context, search_aios, resolve_skill");
-  console.log("Skills accessible via /skill <name> in OpenCode.");
+  console.log("Native skills use the shared ~/.agents/skills target from `dotaios activate`.");
 }
 
 export async function mergeOpenCodeSettings(settingsPath, aiosPath) {
@@ -525,8 +526,12 @@ export async function mergeOpenCodeSettings(settingsPath, aiosPath) {
   let raw = null;
   try {
     raw = await fs.readFile(settingsPath, "utf8");
-  } catch {
-    raw = null;
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(
+        `Could not read existing ${settingsPath} (${error?.code || "read error"}). Refusing to overwrite it.`
+      );
+    }
   }
   if (raw !== null) {
     try {
@@ -536,52 +541,156 @@ export async function mergeOpenCodeSettings(settingsPath, aiosPath) {
     }
   }
 
+  if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+    throw new Error(`Existing ${settingsPath} must contain a JSON object. Fix it, then retry — refusing to overwrite it.`);
+  }
+  if (
+    settings.mcp != null
+    && (typeof settings.mcp !== "object" || Array.isArray(settings.mcp))
+  ) {
+    throw new Error(`Existing ${settingsPath} mcp field must contain a JSON object. Fix it, then retry — refusing to overwrite it.`);
+  }
+
   if (!settings.mcp) settings.mcp = {};
-  if (!settings.mcp.servers) settings.mcp.servers = {};
-  settings.mcp.servers["dotaios"] = {
+  const legacyServers = settings.mcp.servers;
+  if (
+    legacyServers != null
+    && (typeof legacyServers !== "object" || Array.isArray(legacyServers))
+  ) {
+    throw new Error(
+      `Existing ${settingsPath} has an invalid legacy mcp.servers value. Fix or remove it, then retry; refusing to write an invalid OpenCode configuration.`
+    );
+  }
+  const legacyEntry = legacyServers?.dotaios;
+  if (legacyEntry != null) {
+    const foreignNames = Object.keys(legacyServers).filter((name) => name !== "dotaios");
+    if (foreignNames.length > 0) {
+      throw new Error(
+        `Existing ${settingsPath} uses legacy mcp.servers entries (${foreignNames.join(", ")}). Move them to current mcp.<name> entries, then retry; refusing to write an invalid OpenCode configuration.`
+      );
+    }
+    if (!isManagedLegacyOpenCodeEntry(legacyEntry)) {
+      throw new Error(
+        `Existing ${settingsPath} has an unrecognized legacy mcp.servers.dotaios entry. Move or remove it, then retry; refusing to overwrite it.`
+      );
+    }
+    delete settings.mcp.servers;
+  } else if (
+    legacyServers
+    && typeof legacyServers === "object"
+    && !Array.isArray(legacyServers)
+    && Object.keys(legacyServers).length === 0
+  ) {
+    delete settings.mcp.servers;
+  } else if (legacyServers != null) {
+    throw new Error(
+      `Existing ${settingsPath} uses legacy mcp.servers entries (${Object.keys(legacyServers).join(", ")}). Move them to current mcp.<name> entries, then retry; refusing to write an invalid OpenCode configuration.`
+    );
+  }
+
+  if (
+    settings.mcp.dotaios != null
+    && !isManagedCurrentOpenCodeEntry(settings.mcp.dotaios)
+  ) {
+    throw new Error(
+      `Existing ${settingsPath} has an unrecognized mcp.dotaios entry. Move or remove it, then retry; refusing to overwrite it.`
+    );
+  }
+  const launcher = mcpLauncher(aiosPath);
+  settings.mcp.dotaios = {
     type: "local",
-    command: process.execPath,
-    args: [mcpServerPath, "--path", aiosPath]
+    command: [launcher.command, ...launcher.args],
+    enabled: true
   };
 
-  await fs.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  await writePrivateJsonAtomic(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
-async function writeOpenCodeSkillStubs(skillsDir, stubsDir, aiosPath) {
-  let entries;
+function isManagedLegacyOpenCodeEntry(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  if (!hasOnlyKeys(entry, new Set(["type", "command", "args", "enabled"]))) return false;
+  if (entry.type !== "local" || typeof entry.command !== "string" || !Array.isArray(entry.args)) {
+    return false;
+  }
+  return (
+    (
+      isNodeExecutable(entry.command)
+      && entry.args.length === 3
+      && typeof entry.args[0] === "string"
+      && /packages[\\/]mcp[\\/]src[\\/]server\.mjs$/.test(entry.args[0])
+      && entry.args[1] === "--path"
+      && typeof entry.args[2] === "string"
+    )
+    || isPinnedDotaiosLauncher([entry.command, ...entry.args])
+  );
+}
+
+function isManagedCurrentOpenCodeEntry(entry) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+  if (!hasOnlyKeys(entry, new Set(["type", "command", "enabled"]))) return false;
+  if (entry.type !== "local" || !Array.isArray(entry.command)) return false;
+  if (isPinnedDotaiosLauncher(entry.command)) return true;
+  return (
+    entry.command.length === 4
+    && isNodeExecutable(entry.command[0])
+    && typeof entry.command[1] === "string"
+    && /packages[\\/]mcp[\\/]src[\\/]server\.mjs$/.test(entry.command[1])
+    && entry.command[2] === "--path"
+    && typeof entry.command[3] === "string"
+  );
+}
+
+function isPinnedDotaiosLauncher(command) {
+  if (!Array.isArray(command) || command.length !== 7) return false;
+  return (
+    command[0] === "npx"
+    && command[1] === "--yes"
+    && command[2] === "--package"
+    && /^dotaios@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(command[3] || "")
+    && command[4] === "dotaios-mcp"
+    && command[5] === "--path"
+    && typeof command[6] === "string"
+  );
+}
+
+function isNodeExecutable(command) {
+  return typeof command === "string" && /^node(?:\.exe)?$/i.test(path.basename(command));
+}
+
+function hasOnlyKeys(value, allowed) {
+  return Object.keys(value).every((key) => allowed.has(key));
+}
+
+async function writePrivateJsonAtomic(settingsPath, content) {
+  let mode = 0o600;
   try {
-    entries = await fs.readdir(skillsDir, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-
-  let count = 0;
-  for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
-    const skillMdPath = path.join(skillsDir, entry.name, "SKILL.md");
-    let skillMd;
-    try {
-      skillMd = await fs.readFile(skillMdPath, "utf8");
-    } catch {
-      continue;
+    const stat = await fs.lstat(settingsPath);
+    if (!stat.isFile()) {
+      throw new Error(`Existing ${settingsPath} is not a regular file. Refusing to overwrite it.`);
     }
-
-    const nameMatch = skillMd.match(/^name:\s*(.+)$/m);
-    const descMatch = skillMd.match(/^description:\s*(.+)$/m);
-    const name = nameMatch ? nameMatch[1].trim().replace(/^["']|["']$/g, "") : entry.name;
-    const description = descMatch ? descMatch[1].trim().replace(/^["']|["']$/g, "") : `Run the ${entry.name} skill`;
-
-    const stub = `---
-name: ${name}
-description: ${description}
----
-
-Read \`${aiosPath}/skills/${entry.name}/SKILL.md\` and follow the steps exactly.
-`;
-    await fs.writeFile(path.join(stubsDir, `${entry.name}.md`), stub, "utf8");
-    count++;
+    mode = stat.mode & 0o777;
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
   }
-  return count;
+
+  await fs.mkdir(path.dirname(settingsPath), { recursive: true });
+  const tempPath = path.join(
+    path.dirname(settingsPath),
+    `.${path.basename(settingsPath)}.${process.pid}.${randomUUID()}.tmp`
+  );
+  let handle = null;
+  try {
+    handle = await fs.open(tempPath, "wx", mode);
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fs.chmod(tempPath, mode);
+    await fs.rename(tempPath, settingsPath);
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await fs.rm(tempPath, { force: true }).catch(() => {});
+  }
 }
 
 async function dirExists(dirPath) {

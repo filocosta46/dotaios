@@ -1,6 +1,6 @@
 {
   "name": "dotaios",
-  "version": "1.26.0",
+  "version": "1.27.1",
   "description": "One local folder shared across your agents. For builders already using Claude Code, Codex, Cursor, and local agents.",
   "type": "module",
   "packageManager": "pnpm@10.33.4",
@@ -28,6 +28,7 @@
     "docs/architecture.md",
     "docs/beta-testing.md",
     "docs/client-support.md",
+    "docs/compatibility-acceptance.md",
     "docs/context-import.md",
     "docs/friend-setup.md",
     "docs/getting-started.md",

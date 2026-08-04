@@ -22,7 +22,11 @@ Subcommands:
   promote   Preview or apply one captured session fact to one destination
 
 Promotion destinations:
-  signal | context | project | vault | skill | session-only
+  context | project | vault | skill | signal | session-only
+
+  Durable: context, project, vault, skill. Use these for anything worth keeping.
+  Temporary: signal is trimmed after 30 days (archived, not lost). Use it only
+  for a short-lived note. session-only writes no knowledge file.
 
 Options:
   --path <dir>       Use an AIOS folder other than ~/aios
@@ -46,9 +50,11 @@ Promotion options:
   --apply               Write after showing the preview (default: preview only)
 
 Examples:
-  dotaios memory promote a1b2c3d4 --to signal --summary "Waiting for design review"
   dotaios memory promote a1b2c3d4 --to context --destination context/work.md \\
     --summary "Prefers written handoffs" --apply
+  dotaios memory promote a1b2c3d4 --to context --destination context/work.md \\
+    --operation supersede --match "Prefers written handoffs" \\
+    --summary "Prefers a short call, then written notes" --apply
   dotaios memory promote a1b2c3d4 --to project --project atlas \\
     --summary "The beta ships Friday" --apply
 `;

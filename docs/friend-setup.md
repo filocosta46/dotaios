@@ -27,7 +27,7 @@ A small black-and-white window opens. Every command in this guide is pasted into
 ## The fast path (one command)
 
 ```bash
-npx dotaios setup
+npx dotaios@latest setup
 ```
 
 This runs the three steps below in sequence and opens your new folder when finished. If you want to understand each step or troubleshoot, follow the manual path instead.
@@ -39,14 +39,14 @@ This runs the three steps below in sequence and opens your new folder when finis
 In the Terminal you just opened, run:
 
 ```bash
-npx dotaios init
+npx dotaios@latest init
 ```
 
 It asks five short questions: your name, what you do, what you're working on right now, what matters most this week, and which AI tools you use. To link an external Markdown vault, pass `--vault-path /path/to/vault` (or skip, DotAIOS creates one inside `~/aios/` by default).
 
 When it finishes, your context lives in `~/aios/`. Open it in Finder or any text editor, every file is plain Markdown you can read and edit.
 
-Later, when your work or priorities change, you do not need to hunt through files. Run `npx dotaios interview --review` and answer a few short questions. DotAIOS previews the updates before saving them.
+Later, when your work or priorities change, you do not need to hunt through files. Run `npx dotaios@latest interview --review` and answer a few short questions. DotAIOS previews the updates before saving them.
 
 **Expected output:**
 
@@ -58,16 +58,16 @@ Files: 27 created, 0 updated, 0 kept
 
 Next steps:
 1. Read FIRST_SESSION.md
-2. Run `npx dotaios activate` to connect DotAIOS to your agent tools
-3. Optional: run `npx dotaios connect google --dry-run` for Gmail/Calendar beta setup
+2. Run `npx dotaios@latest activate` to connect DotAIOS to your agent tools
+3. Optional: run `npx dotaios@latest connect google --dry-run` for Gmail/Calendar beta setup
 4. Open Claude Code, Codex, Gemini, Cursor, or another agent-aware tool
-5. Run `npx dotaios context` whenever you want to inspect what agents see
+5. Run `npx dotaios@latest context` whenever you want to inspect what agents see
 ```
 
 ### Step 2: Connect it to your AI tools
 
 ```bash
-npx dotaios activate
+npx dotaios@latest activate
 ```
 
 This creates small bridge files where each tool actually looks for memory (e.g. `~/.claude/CLAUDE.md`). It does not log into any service. It does not send anything anywhere.
@@ -88,7 +88,7 @@ If a tool's memory file already existed before, you'll see `[kept]` instead of `
 ### Step 3: Build your index
 
 ```bash
-npx dotaios index
+npx dotaios@latest index
 ```
 
 This generates `~/aios/_index.md`, a table of contents your agents can use to find the right file fast. Run it whenever you add new notes.
@@ -105,13 +105,13 @@ Wrote /Users/you/aios/_index.md
 ### Step 4: Verify it works
 
 ```bash
-npx dotaios status
+npx dotaios@latest status
 ```
 
 You should see green checks and your name from Step 1. Then run a search:
 
 ```bash
-npx dotaios search "your name"
+npx dotaios@latest search "your name"
 ```
 
 You should see results from your `~/aios/context/` files.
@@ -131,37 +131,37 @@ It should answer using the work description you typed in Step 1. If it does, Dot
 After all 5 steps, you have:
 
 1. A folder at `~/aios/` with small Markdown files for context, memory, vault notes, and skill folders. You can open them. You can edit them. You own them.
-2. Your AI tool answers personal questions correctly without you re-introducing yourself every session.
+2. The AI tool you connected answers personal questions correctly after you verify that it loaded the DotAIOS context.
 3. A `_index.md` your agents can scan to find specific files.
 4. Skill folders in `~/aios/skills/` that explain what each skill does, what it does not do, and how to trigger it.
 
-Each morning you can run `npx dotaios brief` to get a local summary of today's priorities, open loops, and carry-over from yesterday, written directly into `memory/daily/`. Your `~/aios/schedules.yml` has a pre-wired daily schedule you can enable whenever you're ready.
+Each morning you can run `npx dotaios@latest brief` to get a local summary of today's priorities, open loops, and carry-over from yesterday, written directly into `memory/daily/`. Your `~/aios/schedules.yml` has a pre-wired daily schedule you can enable whenever you're ready.
 
 ## Optional: save your AI conversations
 
-If you use Claude Code, you can enable automatic saving so every session is remembered across tools:
+If you use Claude Code, you can enable automatic saving so those conversations become local files that other capable agents can search:
 
 ```bash
-npx dotaios capture enable claude-code
+npx dotaios@latest capture enable claude-code
 ```
 
 After this, every Claude Code conversation is saved to `~/aios/memory/sessions/` as a plain Markdown file you can open and search. To bring in past sessions:
 
 ```bash
-npx dotaios capture import claude-code    # last 30 days
-npx dotaios capture import claude-code --all   # everything
+npx dotaios@latest capture import claude-code    # last 30 days
+npx dotaios@latest capture import claude-code --all   # everything
 ```
 
 Search across all saved conversations:
 
 ```bash
-npx dotaios search "topic you discussed"
+npx dotaios@latest search "topic you discussed"
 ```
 
 For other tools (Cursor, Gemini, ChatGPT), paste any conversation manually:
 
 ```bash
-npx dotaios capture import paste
+npx dotaios@latest capture import paste
 ```
 
 You can stop here. Everything below is optional.
@@ -171,7 +171,7 @@ You can stop here. Everything below is optional.
 If you use Cursor on a specific repo, give that project access to your context:
 
 ```bash
-npx dotaios attach /path/to/your/project
+npx dotaios@latest attach /path/to/your/project
 ```
 
 ## Optional: Google Workspace (experimental)
@@ -183,7 +183,7 @@ This is a separate, harder setup that requires installing the Google Workspace C
 Run this first, it tells you what is missing in one screen:
 
 ```bash
-npx dotaios doctor
+npx dotaios@latest doctor
 ```
 
 Common issues:
@@ -192,8 +192,8 @@ Common issues:
 - **`npx: command not found`**, Install Node.js first from [nodejs.org](https://nodejs.org/).
 - **`Unknown command`**, Type the command exactly as shown. They are case-sensitive.
 - **`interactive terminal required`**, Same fix as the first item. Use the real Terminal app.
-- **Agent doesn't seem to know your context**, Restart the agent app after running `npx dotaios activate`. Most tools only re-read their config on launch.
-- **You want to change something you typed in Step 1**, Run `npx dotaios interview --review`. It asks the important questions again and shows the file updates before saving. If you prefer editing by hand, open `~/aios/context/work.md` or another file in `context/`, save it, then run `npx dotaios context --refresh --review`.
+- **Agent doesn't seem to know your context**, Restart the agent app after running `npx dotaios@latest activate`. Most tools only re-read their config on launch.
+- **You want to change something you typed in Step 1**, Run `npx dotaios@latest interview --review`. It asks the important questions again and shows the file updates before saving. If you prefer editing by hand, open `~/aios/context/work.md` or another file in `context/`, save it, then run `npx dotaios@latest context --refresh --review`.
 
 ## Optional: advanced local adapter
 

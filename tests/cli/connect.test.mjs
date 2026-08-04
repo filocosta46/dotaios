@@ -11,6 +11,7 @@ import {
   mergeGeminiSettings,
   mergeOpenCodeSettings
 } from "../../packages/cli/src/commands/connect.mjs";
+import { DOTAIOS_PACKAGE_VERSION } from "../../packages/cli/src/lib/mcp-launcher.mjs";
 
 function tmp() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-connect-test-"));
@@ -61,6 +62,19 @@ test("mergeOpenCodeSettings refuses to overwrite a malformed opencode.json", asy
   assert.equal(fs.readFileSync(settingsPath, "utf8"), original); // left untouched
 });
 
+test("mergeOpenCodeSettings refuses non-object OpenCode configuration", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  const original = JSON.stringify({ mcp: [] });
+  fs.writeFileSync(settingsPath, original);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /must contain a JSON object/
+  );
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+});
+
 test("mergeGeminiSettings writes a SessionStart hook into a fresh config", async () => {
   const dir = tmp();
   const settingsPath = path.join(dir, "settings.json");
@@ -93,17 +107,295 @@ test("mergeGeminiSettings removes only the legacy DotAIOS MCP entry", async () =
   assert.equal(written.mcp.servers.custom.command, "custom-server");
 });
 
-test("mergeOpenCodeSettings uses the packaged server directly", async () => {
+test("mergeOpenCodeSettings writes OpenCode's documented local MCP shape", async () => {
   const dir = tmp();
   const settingsPath = path.join(dir, "opencode.json");
 
   await mergeOpenCodeSettings(settingsPath, "/home/u/aios");
 
   const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-  const entry = written.mcp.servers.dotaios;
-  assert.equal(entry.command, process.execPath);
-  assert.match(entry.args[0], /packages[\\/]mcp[\\/]src[\\/]server\.mjs$/);
-  assert.deepEqual(entry.args.slice(1), ["--path", "/home/u/aios"]);
+  const entry = written.mcp.dotaios;
+  assert.equal(entry.type, "local");
+  assert.deepEqual(entry.command, [
+    "npx",
+    "--yes",
+    "--package",
+    `dotaios@${DOTAIOS_PACKAGE_VERSION}`,
+    "dotaios-mcp",
+    "--path",
+    "/home/u/aios"
+  ]);
+  assert.equal(entry.enabled, true);
+  assert.equal(written.mcp.servers, undefined);
+  assert.equal(fs.statSync(settingsPath).mode & 0o777, 0o600);
+  assert.doesNotMatch(fs.readFileSync(settingsPath, "utf8"), /_npx|packages[\\/]mcp[\\/]src/);
+});
+
+test("mergeOpenCodeSettings preserves foreign MCP servers", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  fs.writeFileSync(
+    settingsPath,
+    JSON.stringify({
+      mcp: {
+        custom: {
+          type: "remote",
+          url: "https://example.test/mcp"
+        }
+      }
+    })
+  );
+
+  await mergeOpenCodeSettings(settingsPath, "/home/u/aios");
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.deepEqual(written.mcp.custom, {
+    type: "remote",
+    url: "https://example.test/mcp"
+  });
+  assert.equal(written.mcp.dotaios.type, "local");
+});
+
+test("mergeOpenCodeSettings refuses to overwrite a foreign current mcp.dotaios entry", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  const original = JSON.stringify({
+    mcp: {
+      dotaios: {
+        type: "remote",
+        url: "https://foreign.example/mcp"
+      }
+    }
+  });
+  fs.writeFileSync(settingsPath, original);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /unrecognized mcp\.dotaios.*refusing to overwrite/i
+  );
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+});
+
+test("mergeOpenCodeSettings requires an exact managed current launcher shape", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  const original = JSON.stringify({
+    mcp: {
+      dotaios: {
+        type: "local",
+        command: [
+          "npx",
+          "foreign-prelude",
+          "--package",
+          `dotaios@${DOTAIOS_PACKAGE_VERSION}`,
+          "foreign-middle",
+          "dotaios-mcp",
+          "--foreign-flag",
+          "--path",
+          "/foreign-aios",
+          "--tail"
+        ]
+      }
+    }
+  });
+  fs.writeFileSync(settingsPath, original);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /unrecognized mcp\.dotaios/i
+  );
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+});
+
+test("mergeOpenCodeSettings refuses extra fields on an otherwise managed launcher", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  const original = JSON.stringify({
+    mcp: {
+      dotaios: {
+        type: "local",
+        command: [
+          "npx",
+          "--yes",
+          "--package",
+          `dotaios@${DOTAIOS_PACKAGE_VERSION}`,
+          "dotaios-mcp",
+          "--path",
+          "/foreign-aios"
+        ],
+        url: "https://foreign.example/mcp"
+      }
+    }
+  });
+  fs.writeFileSync(settingsPath, original);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /unrecognized mcp\.dotaios/i
+  );
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+});
+
+test("mergeOpenCodeSettings fails closed on malformed legacy mcp.servers values", async () => {
+  for (const value of ["wrong", [], 42]) {
+    const dir = tmp();
+    const settingsPath = path.join(dir, "opencode.json");
+    const original = JSON.stringify({ mcp: { servers: value } });
+    fs.writeFileSync(settingsPath, original);
+
+    await assert.rejects(
+      () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+      /invalid legacy mcp\.servers/i
+    );
+    assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+  }
+});
+
+test("mergeOpenCodeSettings refuses foreign-only legacy mcp.servers entries", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  const original = JSON.stringify({
+    mcp: {
+      servers: {
+        custom: { command: "custom-server" }
+      }
+    }
+  });
+  fs.writeFileSync(settingsPath, original);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /legacy mcp\.servers entries \(custom\)/i
+  );
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+});
+
+test("mergeOpenCodeSettings preserves an existing config file mode", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  fs.writeFileSync(settingsPath, JSON.stringify({ mcp: {} }), { mode: 0o640 });
+  fs.chmodSync(settingsPath, 0o640);
+
+  await mergeOpenCodeSettings(settingsPath, "/home/u/aios");
+
+  assert.equal(fs.statSync(settingsPath).mode & 0o777, 0o640);
+});
+
+test("mergeOpenCodeSettings treats read errors as errors, not missing files", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  fs.mkdirSync(settingsPath);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /Could not read existing.*refusing to overwrite/i
+  );
+  assert.equal(fs.statSync(settingsPath).isDirectory(), true);
+});
+
+test("mergeOpenCodeSettings refuses to replace a symlinked config", async () => {
+  const dir = tmp();
+  const targetPath = path.join(dir, "shared-opencode.json");
+  const settingsPath = path.join(dir, "opencode.json");
+  const original = JSON.stringify({ mcp: {} });
+  fs.writeFileSync(targetPath, original);
+  fs.symlinkSync(targetPath, settingsPath);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /not a regular file.*refusing to overwrite/i
+  );
+  assert.equal(fs.lstatSync(settingsPath).isSymbolicLink(), true);
+  assert.equal(fs.readFileSync(targetPath, "utf8"), original);
+});
+
+test("mergeOpenCodeSettings refuses ambiguous legacy foreign MCP entries", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  fs.writeFileSync(
+    settingsPath,
+    JSON.stringify({
+      mcp: {
+        servers: {
+          dotaios: {
+            type: "local",
+            command: process.execPath,
+            args: ["/old/node_modules/dotaios/packages/mcp/src/server.mjs", "--path", "/old/aios"]
+          },
+          custom: {
+            command: "custom-server"
+          }
+        }
+      }
+    })
+  );
+
+  const original = fs.readFileSync(settingsPath, "utf8");
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /legacy mcp\.servers.*custom/i
+  );
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+});
+
+test("mergeOpenCodeSettings requires an exact managed legacy launcher shape", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  const original = JSON.stringify({
+    mcp: {
+      servers: {
+        dotaios: {
+          type: "local",
+          command: "python3",
+          args: ["/tmp/foreign/packages/mcp/src/server.mjs", "--path", "/foreign-aios"]
+        }
+      }
+    }
+  });
+  fs.writeFileSync(settingsPath, original);
+
+  await assert.rejects(
+    () => mergeOpenCodeSettings(settingsPath, "/home/u/aios"),
+    /unrecognized legacy mcp\.servers\.dotaios/i
+  );
+  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+});
+
+test("mergeOpenCodeSettings migrates a recognizable legacy DotAIOS-only container", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "opencode.json");
+  fs.writeFileSync(
+    settingsPath,
+    JSON.stringify({
+      mcp: {
+        servers: {
+          dotaios: {
+            type: "local",
+            command: process.execPath,
+            args: ["/old/node_modules/dotaios/packages/mcp/src/server.mjs", "--path", "/old/aios"]
+          }
+        }
+      }
+    })
+  );
+
+  await mergeOpenCodeSettings(settingsPath, "/home/u/aios");
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(written.mcp.servers, undefined);
+  assert.equal(written.mcp.dotaios.type, "local");
+  assert.equal(written.mcp.dotaios.command[0], "npx");
+});
+
+test("connect rejects --status for non-Google services before any mutation", async () => {
+  await assert.rejects(
+    () => connectCommand(["gemini", "--status"]),
+    /--status option is supported only/
+  );
+  await assert.rejects(
+    () => connectCommand(["opencode", "--status"]),
+    /--status option is supported only/
+  );
 });
 
 test("Google connection records redact binary paths and untrusted version output", async () => {

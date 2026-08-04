@@ -51,8 +51,7 @@ function setupProject({ withSkills = true } = {}) {
 function addForeignEntries(projectPath) {
   for (const relative of [
     ".claude/skills/foreign-skill",
-    ".agents/skills/foreign-skill",
-    ".gemini/config/skills/foreign-skill"
+    ".agents/skills/foreign-skill"
   ]) {
     const foreignPath = path.join(projectPath, relative);
     fs.mkdirSync(foreignPath, { recursive: true });
@@ -101,8 +100,7 @@ function assertProjectSkillLinks(projectPath) {
   const source = path.join(projectPath, "skills", "project-skill");
   for (const targetDir of [
     ".claude/skills",
-    ".agents/skills",
-    ".gemini/config/skills"
+    ".agents/skills"
   ]) {
     const link = path.join(projectPath, targetDir, "project-skill");
     assert.equal(fs.lstatSync(link).isSymbolicLink(), true, `${targetDir} should be a symlink`);
@@ -113,8 +111,7 @@ function assertProjectSkillLinks(projectPath) {
 function assertForeignEntriesPreserved(projectPath) {
   for (const relative of [
     ".claude/skills/foreign-skill/SKILL.md",
-    ".agents/skills/foreign-skill/SKILL.md",
-    ".gemini/config/skills/foreign-skill/SKILL.md"
+    ".agents/skills/foreign-skill/SKILL.md"
   ]) {
     assert.equal(fs.readFileSync(path.join(projectPath, relative), "utf8"), "foreign project skill\n");
   }
@@ -155,6 +152,156 @@ test("activate --project and attach expose project skills natively and preserve 
   }
 });
 
+test("attach removes only DotAIOS-owned links from retired Antigravity project target", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const source = path.join(projectPath, "skills", "project-skill");
+  const retiredDir = path.join(projectPath, ".gemini", "config", "skills");
+  const managedLink = path.join(retiredDir, "project-skill");
+  const foreignDir = path.join(retiredDir, "foreign-skill");
+  fs.mkdirSync(retiredDir, { recursive: true });
+  fs.symlinkSync(source, managedLink, "dir");
+  fs.mkdirSync(foreignDir, { recursive: true });
+  fs.writeFileSync(path.join(foreignDir, "SKILL.md"), "foreign project skill\n");
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.equal(fs.existsSync(managedLink), false);
+    assert.equal(
+      fs.readFileSync(path.join(foreignDir, "SKILL.md"), "utf8"),
+      "foreign project skill\n"
+    );
+    assert.equal(
+      fs.realpathSync(path.join(projectPath, ".agents", "skills", "project-skill")),
+      fs.realpathSync(source)
+    );
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach removes only a managed legacy Cursor rule", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const rulePath = path.join(projectPath, ".cursor", "rules", "dotaios.mdc");
+  fs.mkdirSync(path.dirname(rulePath), { recursive: true });
+  fs.writeFileSync(
+    rulePath,
+    [
+      "---",
+      "description: DotAIOS personal context",
+      "globs:",
+      "alwaysApply: true",
+      "---",
+      "<!-- dotaios-managed:start -->",
+      "legacy DotAIOS Cursor bridge",
+      "<!-- dotaios-managed:end -->",
+      ""
+    ].join("\n")
+  );
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.equal(fs.existsSync(rulePath), false);
+    assert.match(fs.readFileSync(path.join(projectPath, "AGENTS.md"), "utf8"), /DotAIOS Project Bridge/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach removes the retired Cursor block and preserves surrounding content", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const rulePath = path.join(projectPath, ".cursor", "rules", "dotaios.mdc");
+  fs.mkdirSync(path.dirname(rulePath), { recursive: true });
+  fs.writeFileSync(
+    rulePath,
+    [
+      "user content before",
+      "<!-- dotaios-managed:start -->",
+      "legacy DotAIOS Cursor bridge",
+      "<!-- dotaios-managed:end -->",
+      "user content after",
+      ""
+    ].join("\n")
+  );
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+
+    const current = fs.readFileSync(rulePath, "utf8");
+    assert.match(current, /user content before/);
+    assert.match(current, /user content after/);
+    assert.doesNotMatch(current, /legacy DotAIOS Cursor bridge|dotaios-managed/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach dry-run previews legacy Cursor cleanup without changing the file", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const rulePath = path.join(projectPath, ".cursor", "rules", "dotaios.mdc");
+  const original = [
+    "---",
+    "description: DotAIOS personal context",
+    "globs:",
+    "alwaysApply: true",
+    "---",
+    "<!-- dotaios-managed:start -->",
+    "legacy DotAIOS Cursor bridge",
+    "<!-- dotaios-managed:end -->",
+    ""
+  ].join("\n");
+  fs.mkdirSync(path.dirname(rulePath), { recursive: true });
+  fs.writeFileSync(rulePath, original);
+
+  try {
+    const output = run(["attach", projectPath, "--path", aiosPath, "--dry-run"]);
+
+    assert.match(output, /would remove/i);
+    assert.equal(fs.readFileSync(rulePath, "utf8"), original);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach preserves an unmanaged legacy Cursor rule", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const rulePath = path.join(projectPath, ".cursor", "rules", "dotaios.mdc");
+  const original = "foreign Cursor rule\n";
+  fs.mkdirSync(path.dirname(rulePath), { recursive: true });
+  fs.writeFileSync(rulePath, original);
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.equal(fs.readFileSync(rulePath, "utf8"), original);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach preserves a Cursor rule with reversed managed markers", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const rulePath = path.join(projectPath, ".cursor", "rules", "dotaios.mdc");
+  const original = [
+    "user content",
+    "<!-- dotaios-managed:end -->",
+    "more user content",
+    "<!-- dotaios-managed:start -->",
+    ""
+  ].join("\n");
+  fs.mkdirSync(path.dirname(rulePath), { recursive: true });
+  fs.writeFileSync(rulePath, original);
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.equal(fs.readFileSync(rulePath, "utf8"), original);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("attach --dry-run previews project-local skill wiring without changing files", () => {
   const { tempRoot, aiosPath, projectPath } = setupProject();
   addForeignEntries(projectPath);
@@ -168,8 +315,7 @@ test("attach --dry-run previews project-local skill wiring without changing file
     assert.match(output, /Hermes config action/i);
     for (const targetDir of [
       ".claude/skills",
-      ".agents/skills",
-      ".gemini/config/skills"
+      ".agents/skills"
     ]) {
       assert.equal(fs.existsSync(path.join(projectPath, targetDir, "project-skill")), false);
     }
@@ -194,8 +340,7 @@ test("attach does not create project-local skill targets when skills/ is absent"
     assert.equal(fs.existsSync(path.join(projectPath, "skills")), false);
     for (const targetDir of [
       ".claude/skills",
-      ".agents/skills",
-      ".gemini/config/skills"
+      ".agents/skills"
     ]) {
       assert.equal(fs.existsSync(path.join(projectPath, targetDir)), false, `${targetDir} should not be created`);
     }
@@ -239,10 +384,9 @@ test("attach refuses a project skills root that resolves outside the project", (
     assert.match(output, /unsafe.*source|source.*unsafe/i);
     assert.equal(fs.lstatSync(path.join(projectPath, "skills")).isSymbolicLink(), true);
     assert.equal(fs.existsSync(path.join(outside, "external-skill", "external-skill")), false);
-    for (const targetDir of [
-      ".claude/skills",
-      ".agents/skills",
-      ".gemini/config/skills"
+      for (const targetDir of [
+        ".claude/skills",
+        ".agents/skills"
     ]) {
       assert.equal(
         fs.existsSync(path.join(projectPath, targetDir, "external-skill")),
@@ -351,8 +495,7 @@ test("attach cleans owned dangling project links after skills are removed", () =
     run(["attach", projectPath, "--path", aiosPath]);
     for (const targetDir of [
       ".claude/skills",
-      ".agents/skills",
-      ".gemini/config/skills"
+      ".agents/skills"
     ]) {
       assert.equal(fs.existsSync(path.join(projectPath, targetDir, "project-skill")), false);
     }

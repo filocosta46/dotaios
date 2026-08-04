@@ -189,6 +189,7 @@ export async function searchMemoryDir(memoryDir, query, { limit = DEFAULT_LIMIT 
   const sources = [
     { filePath: path.join(memoryDir, "events.jsonl"), source: "memory/events.jsonl" },
     { filePath: path.join(memoryDir, "events-archive.jsonl"), source: "memory/events-archive.jsonl" },
+    { filePath: path.join(memoryDir, "signals-archive.jsonl"), source: "memory/signals-archive.jsonl" },
     ...await listSignalSources(path.join(memoryDir, "signals"))
   ];
 

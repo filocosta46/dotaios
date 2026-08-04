@@ -1,5 +1,5 @@
 import path from "node:path";
-import fs from "node:fs/promises";
+import { appendEventRecord } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, expandHome, syncConfigPath } from "../../../core/src/paths.mjs";
 import { readSyncConfig, writeSyncConfig } from "../../../core/src/sync-config.mjs";
 import { createGit } from "./git.mjs";
@@ -17,17 +17,12 @@ function readPathOption(args) {
   return readOptionValue(args, index, "--path");
 }
 
-async function appendEvent(aiosPath, evt) {
+export async function appendSyncEvent(aiosPath, evt) {
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
-  try {
-    await fs.mkdir(path.dirname(eventsPath), { recursive: true });
-    await fs.appendFile(
-      eventsPath,
-      JSON.stringify({ ...evt, at: evt.at ?? new Date().toISOString() }) + "\n"
-    );
-  } catch {
-    // events log is best-effort — never let it break a tick
-  }
+  return appendEventRecord(eventsPath, {
+    ...evt,
+    at: evt.at ?? new Date().toISOString()
+  });
 }
 
 export async function runTickCommand(args = []) {
@@ -45,13 +40,22 @@ export async function runTickCommand(args = []) {
     readConfig: () => readSyncConfig(),
     writeConfig: (patch) => writeSyncConfig(patch),
     makeGit: () => createGit({ cwd: aiosPath, accessToken }),
-    appendEvent: (evt) => appendEvent(aiosPath, evt),
+    appendEvent: (evt) => appendSyncEvent(aiosPath, evt),
     now: () => Date.now()
   });
 
+  reportTickResult(result, args);
+  return result;
+}
+
+export function reportTickResult(result, args = []) {
+  if (result.conflict || result.error || result.skipped === "locked") {
+    process.exitCode = 1;
+  }
+
   if (args.includes("--json") || args.includes("--verbose")) {
     console.log(JSON.stringify(result));
-    return result;
+    return;
   }
 
   if (result.pushed) {
@@ -59,7 +63,16 @@ export async function runTickCommand(args = []) {
   } else if (result.conflict || result.error) {
     console.log("Sync stopped safely. Your pre-existing edits were preserved.");
     console.log(`Reason: ${result.error || "local and remote changes overlap"}`);
+    if (result.event_log_error) {
+      console.log(`Event log warning: ${result.event_log_error}`);
+    }
+    if (result.config_error) {
+      console.log(`Sync state warning: ${result.config_error}`);
+    }
     console.log("Resolve the Git conflict, then run `dotaios sync now` again.");
+  } else if (result.skipped === "locked") {
+    console.log("Sync did not run because another sync is already running.");
+    console.log("Wait for it to finish, then run `dotaios sync now` again.");
   } else if (result.skipped === "no-token") {
     console.log("Sync is not set up. Run `dotaios sync setup` when you want it.");
   } else if (result.skipped === "not-main-branch") {
@@ -67,5 +80,4 @@ export async function runTickCommand(args = []) {
   } else {
     console.log("DotAIOS is already up to date.");
   }
-  return result;
 }

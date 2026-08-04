@@ -147,6 +147,9 @@ test("trimSignals removes files older than retention period", async () => {
   assert.ok(result.freedBytes > 0);
   assert.equal(fs.existsSync(path.join(signalsDir, `${oldDate}.jsonl`)), false);
   assert.equal(fs.existsSync(path.join(signalsDir, `${recentDate}.jsonl`)), true);
+
+  const archived = await readJsonl(path.join(dir, "signals-archive.jsonl"));
+  assert.deepEqual(archived, [{ type: "old" }], "a trimmed signal is moved to the archive, never dropped");
 });
 
 test("searchMemory returns matches by timestamp across events archives and signals", async () => {

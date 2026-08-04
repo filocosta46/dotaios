@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -10,6 +11,7 @@ import {
   PROMOTION_OPERATIONS
 } from "../../packages/core/src/promotion.mjs";
 import { auditMemory } from "../../packages/core/src/memory-audit.mjs";
+import { compactEvents } from "../../packages/core/src/memory.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -287,6 +289,82 @@ test("receipt failure leaves an existing promotion destination byte-identical", 
   assert.deepEqual(fs.readFileSync(contextPath), before);
 });
 
+test("promotion and compaction share one writer lock without losing the receipt", async (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
+  const archivePath = path.join(aiosPath, "memory", "events-archive.jsonl");
+  const lockPath = `${eventsPath}.lock`;
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "Original context.\n");
+  fs.writeFileSync(
+    eventsPath,
+    Array.from({ length: 30 }, (_, index) => JSON.stringify({
+      ts: `2026-07-27T12:00:${String(index).padStart(2, "0")}.000Z`,
+      type: "seed",
+      index
+    })).join("\n") + "\n"
+  );
+  const plan = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "Concurrent promotion receipt survives."
+  });
+
+  let releaseRename;
+  let renameStarted;
+  const allowRename = new Promise((resolve) => {
+    releaseRename = resolve;
+  });
+  const atRename = new Promise((resolve) => {
+    renameStarted = resolve;
+  });
+  const compactionFilesystem = {
+    ...fsp,
+    async rename(source, destination) {
+      if (source === `${eventsPath}.tmp` && destination === eventsPath) {
+        renameStarted();
+        await allowRename;
+      }
+      return fsp.rename(source, destination);
+    }
+  };
+
+  let lockAttempted;
+  const atLockAttempt = new Promise((resolve) => {
+    lockAttempted = resolve;
+  });
+  const promotionFilesystem = {
+    ...fsp,
+    async writeFile(filePath, content, options) {
+      if (filePath === lockPath && options?.flag === "wx") {
+        lockAttempted();
+      }
+      return fsp.writeFile(filePath, content, options);
+    }
+  };
+
+  const compaction = compactEvents(eventsPath, 10, { filesystem: compactionFilesystem });
+  await atRename;
+  const promotion = applyPromotion(plan, { filesystem: promotionFilesystem });
+  const first = await Promise.race([
+    atLockAttempt.then(() => "lock-attempt"),
+    promotion.then(() => "promotion-completed")
+  ]);
+  releaseRename();
+  await Promise.all([compaction, promotion]);
+
+  assert.equal(first, "lock-attempt", "promotion must join the event writer protocol before applying");
+  const allEvents = [
+    ...fs.readFileSync(archivePath, "utf8").trim().split("\n"),
+    ...fs.readFileSync(eventsPath, "utf8").trim().split("\n")
+  ].filter(Boolean).map((line) => JSON.parse(line));
+  assert.equal(allEvents.length, 31);
+  assert.equal(allEvents.filter((event) => event.type === "memory-promotion").length, 1);
+  assert.match(fs.readFileSync(contextPath, "utf8"), /Concurrent promotion receipt survives/);
+});
+
 test("promotion uses the canonical local ISO date for signal and Markdown destinations", async (t) => {
   const { aiosPath } = setupAios(t);
   const previousTimezone = process.env.TZ;
@@ -473,4 +551,44 @@ test("promotion rejects a dangling symlink before creating its target", (t) => {
   assert.match(result.stderr, /symlink points outside.*or cannot be resolved/i);
   assert.equal(fs.existsSync(outsideTarget), false);
   assert.deepEqual(readEvents(aiosPath), []);
+});
+
+test("a promotion to signal says out loud that signals are trimmed after 30 days", (t) => {
+  const { aiosPath } = setupAios(t);
+
+  const result = run(promoteArgs(aiosPath, "signal", "Waiting for design review."));
+
+  assert.match(result.stdout, /30 days/, "the retention window must appear where the choice is made");
+  assert.match(result.stdout, /context.*project.*vault|context, project, or vault/i, "the durable destinations must be named");
+});
+
+test("a promotion to a durable destination carries no retention warning", (t) => {
+  const { aiosPath } = setupAios(t);
+  const contextPath = path.join(aiosPath, "context", "work.md");
+  fs.mkdirSync(path.dirname(contextPath), { recursive: true });
+  fs.writeFileSync(contextPath, "Original context stays here.\n");
+
+  const result = run(promoteArgs(
+    aiosPath,
+    "context",
+    "Prefers written handoffs.",
+    ["--destination", "context/work.md"]
+  ));
+
+  assert.doesNotMatch(result.stdout, /30 days/, "the warning must be specific to signals, not boilerplate");
+});
+
+test("memory help does not present signal as the default-looking destination", () => {
+  const result = run(["memory", "--help"]);
+
+  const destinationsIdx = result.stdout.indexOf("Promotion destinations:");
+  assert.ok(destinationsIdx !== -1);
+  const durableIdx = result.stdout.indexOf("context", destinationsIdx);
+  const signalIdx = result.stdout.indexOf("signal", destinationsIdx);
+  assert.ok(durableIdx < signalIdx, "durable destinations must be listed before the 30-day one");
+  assert.match(result.stdout, /30 days/, "help must state the signal retention window");
+
+  const examplesIdx = result.stdout.indexOf("Examples:");
+  const firstExample = result.stdout.slice(examplesIdx, result.stdout.indexOf("\n", result.stdout.indexOf("promote", examplesIdx)));
+  assert.doesNotMatch(firstExample, /--to signal/, "the first worked example must not be the trimmed store");
 });

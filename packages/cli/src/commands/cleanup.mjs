@@ -1,6 +1,6 @@
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { compactEvents, trimSignals, signalFileDate, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "../../../core/src/memory.mjs";
+import { compactEvents, trimSignals, signalFileDate, signalsArchivePathFor, RECENT_EVENT_LIMIT, SIGNAL_RETENTION_DAYS, isoDate } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 export async function cleanupCommand(args) {
@@ -33,7 +33,9 @@ export async function cleanupCommand(args) {
     }
   } else {
     const result = await compactEvents(eventsPath);
-    if (result.archived > 0) {
+    if (result.skipped === "locked") {
+      throw new Error(`Cleanup stopped because the memory writer lock is held: ${eventsPath}.lock`);
+    } else if (result.archived > 0) {
       console.log(`[events] Archived ${result.archived} entries, kept ${result.kept}`);
     } else {
       console.log(`[events] ${result.kept} entries — nothing to compact`);
@@ -55,14 +57,27 @@ export async function cleanupCommand(args) {
       return date && date < cutoff;
     });
     if (stale.length > 0) {
-      console.log(`[signals] Would remove ${stale.length} signal file(s) older than ${SIGNAL_RETENTION_DAYS} days`);
+      let lines = 0;
+      for (const file of stale) {
+        try {
+          const content = await fs.readFile(path.join(signalsDir, file), "utf8");
+          lines += content.split("\n").filter((line) => line.trim()).length;
+        } catch {
+          // Unreadable file — it still gets archived, just not counted here.
+        }
+      }
+      console.log(`[signals] Would archive ${lines} line(s) from ${stale.length} file(s) older than ${SIGNAL_RETENTION_DAYS} days, then remove the files`);
+      console.log(`[signals] Archive: ${signalsArchivePathFor(signalsDir)}`);
     } else {
       console.log(`[signals] ${signalFiles.length} file(s) — none older than ${SIGNAL_RETENTION_DAYS} days`);
     }
   } else {
     const result = await trimSignals(signalsDir);
-    if (result.removed > 0) {
-      console.log(`[signals] Removed ${result.removed} file(s), freed ${formatBytes(result.freedBytes)}`);
+    if (result.skipped === "locked") {
+      console.log(`[signals] Skipped — another process is writing the signals archive`);
+    } else if (result.removed > 0) {
+      console.log(`[signals] Archived ${result.archived} line(s) from ${result.removed} file(s), freed ${formatBytes(result.freedBytes)}`);
+      console.log(`[signals] Archive: ${result.archivePath}`);
     } else {
       console.log(`[signals] Nothing to trim`);
     }
@@ -89,8 +104,10 @@ function printCleanupHelp() {
   console.log(`Usage:
   dotaios cleanup [options]
 
-Trims stale signals (>30 days) and compacts events.jsonl (archives entries
-beyond the most recent 50).
+Moves stale signals (>30 days) out of memory/signals/ and into
+memory/signals-archive.jsonl, and compacts events.jsonl (archives entries
+beyond the most recent 50). Nothing is deleted — both stores are archived
+first and stay searchable with \`dotaios search\`.
 
 Options:
   --path <dir>  Use an AIOS folder other than ~/aios
