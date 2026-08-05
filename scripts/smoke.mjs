@@ -48,48 +48,6 @@ run(["cleanup", "--path", aiosPath, "--dry-run"]);
 run(["doctor", "--path", aiosPath, "--home", homePath]);
 run(["skill", "list", "--path", aiosPath]);
 
-const draftRegistryUrl = `file://${path.join(repoRoot, "tests", "fixtures", "market-registry-draft.json")}`;
-run(["market", "list"], { ...process.env, DOTAIOS_REGISTRY_URL: draftRegistryUrl });
-
-const fixtureRegistryUrl = `file://${path.join(repoRoot, "tests", "fixtures", "registry-sample.json")}`;
-const marketEnv = { ...process.env, DOTAIOS_REGISTRY_URL: fixtureRegistryUrl };
-run(["market", "list"], marketEnv);
-run(["market", "info", "hello-memory"], marketEnv);
-
-const licenseDir = path.join(tempRoot, "licenses");
-const licenseEnv = { ...process.env, DOTAIOS_LICENSE_DIR: licenseDir };
-run(["license", "list"], licenseEnv);
-
-const paidPluginRoot = path.join(tempRoot, "paid-plugin");
-fs.mkdirSync(paidPluginRoot, { recursive: true });
-fs.writeFileSync(path.join(paidPluginRoot, "manifest.json"), JSON.stringify({
-  name: "paid-pack",
-  version: "0.1.0",
-  description: "Smoke fixture for paid manifest rejection.",
-  license: "Proprietary",
-  aios_version: ">=1.9.0",
-  requires: { connections: [], context: [] },
-  provides: { skills: ["paid-pack"], memory_writers: [], scheduled_tasks: [] },
-  permissions: { read: [], write: [], write_with_approval: [], connections: [] },
-  paid: true,
-  vendor: "filocosta",
-  product_id: "paid-pack"
-}, null, 2));
-const paidAttempt = spawnSync(process.execPath, [cli, "install", paidPluginRoot, "--path", aiosPath], {
-  cwd: repoRoot,
-  encoding: "utf8",
-  env: licenseEnv
-});
-if (paidAttempt.status === 0) {
-  console.error("Expected install to fail on missing license, but it succeeded.");
-  process.exit(1);
-}
-if (!/license/i.test(`${paidAttempt.stdout}${paidAttempt.stderr}`)) {
-  console.error("Expected license-missing error, got something else.");
-  console.error(paidAttempt.stderr);
-  process.exit(1);
-}
-
 const setupPath = path.join(tempRoot, "setup-aios");
 const setupVault = path.join(tempRoot, "setup-vault");
 const setupHome = path.join(tempRoot, "setup-home");

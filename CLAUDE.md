@@ -15,8 +15,8 @@ term-frequency text match (not semantic).
 Claude Code, Codex, Cursor, Gemini, and other assistants. Lead public copy with
 the user outcome, not developer terminology. The current setup still needs
 Node/`npx` or a local assistant that can run it, so do not claim zero-setup
-consumer onboarding until a simpler installer exists. Checkout and packs stay
-closed. Keep language direct. No cloud requirements, no heavy deps, no vector DB.
+consumer onboarding until a simpler installer exists. Keep language direct. No
+cloud requirements, no heavy deps, no vector DB.
 
 ## Monorepo layout
 
@@ -114,7 +114,7 @@ Windows (`lightpanda.exe` path).
 Notable CLI commands: `project.mjs` (portable catalog + local checkout mapping),
 `memory.mjs` (preview-first promotion), `brief.mjs` (working-context consumer),
 `sync/` (manual private-GitHub reconciliation), `capture.mjs` + `adapters/`
-(session evidence), `install.mjs` + `market.mjs` (plugins/skills).
+(session evidence), and `install.mjs` (plugins/skills).
 
 ## Known gotchas
 

@@ -6,7 +6,7 @@ import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src
 import { writeSession, filterSessions, deleteSession } from "../../../core/src/sessions.mjs";
 import { parseRawText } from "../adapters/manual.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { emitPilotMetric } from "../lib/pilot-metrics.mjs";
+import { emitReliabilityMetric } from "../lib/reliability-metrics.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
 const HELP_TEXT = `Usage:
@@ -116,14 +116,14 @@ async function runImportFile(args) {
 
   if (result.skipped) {
     console.log("Already saved (no changes).");
-    await emitPilotMetric(aiosPath, { type: "capture_saved", source: "file", outcome: "skipped" });
+    await emitReliabilityMetric(aiosPath, { type: "capture_saved", source: "file", outcome: "skipped" });
     return;
   }
 
   console.log(`Saved: ${result.relativePath}`);
   if (session.title) console.log(`Title: ${session.title}`);
   console.log(`Turns: ${session.turns.length}  ID: ${session.session_id}`);
-  await emitPilotMetric(aiosPath, { type: "capture_saved", source: "file", outcome: "ok" });
+  await emitReliabilityMetric(aiosPath, { type: "capture_saved", source: "file", outcome: "ok" });
 }
 
 async function runImportPaste(args) {
@@ -140,7 +140,7 @@ async function runImportPaste(args) {
 
   if (!text.trim()) {
     console.log("Nothing saved (empty input).");
-    await emitPilotMetric(aiosPath, { type: "capture_saved", source: "paste", outcome: "empty" });
+    await emitReliabilityMetric(aiosPath, { type: "capture_saved", source: "paste", outcome: "empty" });
     return;
   }
 
@@ -158,14 +158,14 @@ async function runImportPaste(args) {
 
   if (result.skipped) {
     console.log("Already saved (no changes).");
-    await emitPilotMetric(aiosPath, { type: "capture_saved", source: "paste", outcome: "skipped" });
+    await emitReliabilityMetric(aiosPath, { type: "capture_saved", source: "paste", outcome: "skipped" });
     return;
   }
 
   console.log(`Saved: ${result.relativePath}`);
   if (session.title) console.log(`Title: ${session.title}`);
   console.log(`Turns: ${session.turns.length}  ID: ${session.session_id}`);
-  await emitPilotMetric(aiosPath, { type: "capture_saved", source: "paste", outcome: "ok" });
+  await emitReliabilityMetric(aiosPath, { type: "capture_saved", source: "paste", outcome: "ok" });
 }
 
 async function runImportClaudeCode(args) {
@@ -186,9 +186,9 @@ async function runImportClaudeCode(args) {
       project: project?.slug,
       projectId: project?.id,
     });
-    await emitPilotMetric(aiosPath, { type: "capture_saved", source: "claude-code", outcome: "ok" });
+    await emitReliabilityMetric(aiosPath, { type: "capture_saved", source: "claude-code", outcome: "ok" });
   } catch (error) {
-    await emitPilotMetric(aiosPath, { type: "capture_saved", source: "claude-code", outcome: "fail" });
+    await emitReliabilityMetric(aiosPath, { type: "capture_saved", source: "claude-code", outcome: "fail" });
     throw error;
   }
 }
@@ -267,7 +267,7 @@ async function runDelete(args) {
   const deleted = await deleteSession(aiosPath, sessionId);
   console.log(`Deleted session ${deleted.session_id}`);
   if (deleted.title) console.log(`  ${deleted.title}`);
-  await emitPilotMetric(aiosPath, { type: "capture_deleted", outcome: "ok" });
+  await emitReliabilityMetric(aiosPath, { type: "capture_deleted", outcome: "ok" });
 }
 
 // ---------- status ----------

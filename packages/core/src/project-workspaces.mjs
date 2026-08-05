@@ -750,6 +750,11 @@ async function recoverOwnedRestoreTransaction(options) {
         readRepositoryHead: options.readRepositoryHead,
         readRepositoryRemote: options.readRepositoryRemote
       });
+      // Without a persisted inode claim, an empty destination is ambiguous.
+      // Keep the verified checkout so a later retry can publish it safely.
+      if (!transaction.destinationClaim && winner.state === "empty-directory") {
+        return { raced: winner };
+      }
       await cleanupRestoreTransaction(fileSystem, transaction);
       if (winner.state !== "existing-match") return { raced: winner };
       return { verification: winner };

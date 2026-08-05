@@ -155,7 +155,7 @@ test("activation covers detected native clients and every Hermes profile without
   const canonicalSkills = path.join(aiosPath, "skills");
   const profilePath = path.join(homePath, ".hermes", "profiles", "bill", "config.yaml");
 
-  for (const dir of [".claude", ".codex", ".gemini", ".cursor", ".antigravity"]) {
+  for (const dir of [".claude", ".codex", ".gemini", ".cursor", ".gemini/antigravity"]) {
     fs.mkdirSync(path.join(homePath, dir), { recursive: true });
   }
   fs.mkdirSync(path.join(homePath, ".hermes", "profiles", "bill"), { recursive: true });

@@ -1,6 +1,6 @@
 # Optional Google Workspace Connection
 
-DotAIOS uses the local Google Workspace CLI (`gws`) for explicit Gmail, Calendar, and Drive reads. The connection is optional and does not require a paid DotAIOS package.
+DotAIOS uses the local Google Workspace CLI (`gws`) for explicit Gmail, Calendar, and Drive reads. The connection is optional; Google is not required for DotAIOS.
 
 DotAIOS does not implement Google OAuth or store Google credentials. OAuth setup, tokens, and refresh are owned by `gws`. Google and `gws` process the Workspace data requested by these commands; DotAIOS invokes the local CLI and returns its output.
 

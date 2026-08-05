@@ -7,10 +7,9 @@ import assert from "node:assert/strict";
 // CLAUDE.md hard rule 6: "Local-first. Core logic makes no external network
 // calls. Network belongs in ingest/adapters/plugins, never in packages/core."
 //
-// licenses.mjs shipped a live POST to api.gumroad.com straight out of core, and
-// addLicense defaulted to it — so the free, local-first core reached a
-// commercial endpoint on its own. This guard makes that class of regression a
-// failing test rather than a code review someone has to remember to do.
+// A past adapter regression let the free, local-first core reach an external
+// service on its own. This guard makes that class of regression a failing test
+// rather than a code review someone has to remember to do.
 
 const coreSrc = fileURLToPath(new URL("../../packages/core/src", import.meta.url));
 

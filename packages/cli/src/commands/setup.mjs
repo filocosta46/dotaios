@@ -21,10 +21,10 @@ import { initCommand } from "./init.mjs";
 import { activateCommand, plannedActivationConfigPatch } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
 import {
-  emitPilotMetric,
-  pilotMetricsDir,
-  pilotMetricsFile
-} from "../lib/pilot-metrics.mjs";
+  emitReliabilityMetric,
+  reliabilityMetricsDir,
+  reliabilityMetricsFile
+} from "../lib/reliability-metrics.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios setup [options]
@@ -69,9 +69,9 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
     setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle);
-    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
-    await emitPilotMetric(aiosPath, { type: "install_start", command: "setup", run_id: runId });
+    await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
+    await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
+    await emitReliabilityMetric(aiosPath, { type: "install_start", command: "setup", run_id: runId });
     await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
   } catch (err) {
     // createAios: false — a metric must never be the thing that creates the
@@ -79,9 +79,9 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     // recommends trips over the wreckage of the attempt that printed it.
     if (err.code !== "SETUP_ACTIVE") {
       const dropIfMissing = { createAios: false };
-      await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
-      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
-      await emitPilotMetric(aiosPath, {
+      await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
+      await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
+      await emitReliabilityMetric(aiosPath, {
         type: "install_end",
         command: "setup",
         outcome: "fail",
@@ -104,16 +104,16 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
   console.log("");
-  await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "activate", run_id: runId });
+  await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "activate", run_id: runId });
   try {
     const activation = await activateCommand(passthrough, { lifecycle: lifecycle.activation });
     configuredContextCount = activation.configuredContextCount;
     const outcome = configuredContextCount > 0 ? "ok" : "warn";
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome });
+    await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome });
   } catch (err) {
     activateOk = false;
     process.exitCode = 1;
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
+    await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
     console.error(`Step 2 failed: ${err.message}`);
     console.error("Re-run: dotaios activate to retry connecting your tools.");
     console.error("");
@@ -128,20 +128,20 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   }
 
   // Step 3: reveal (best-effort, never blocks)
-  await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "reveal", run_id: runId });
+  await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "reveal", run_id: runId });
   if (!skipReveal) {
     console.log("");
     console.log("DotAIOS setup — step 3 of 3: open the folder");
     console.log("");
     try {
       await revealCommand(passthrough);
-      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "ok" });
+      await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "ok" });
     } catch (error) {
-      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "fail" });
+      await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "fail" });
       console.error(`(skipped reveal: ${error.message})`);
     }
   } else {
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "skipped" });
+    await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "skipped" });
   }
 
   // GitHub cross-device sync prompt — skip in non-interactive or non-TTY mode
@@ -226,7 +226,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log("  2. Open the ~/aios folder or make it your working directory.");
   console.log('  3. Ask: "Read my context and tell me what I am working on."');
   console.log("  4. Update context any time: dotaios interview --review");
-  await emitPilotMetric(aiosPath, {
+  await emitReliabilityMetric(aiosPath, {
     type: "install_end",
     command: "setup",
     outcome: activateOk ? (configuredContextCount > 0 ? "ok" : "warn") : "fail",
@@ -525,13 +525,13 @@ async function unlinkSetupMarkerTempIfSameFile(candidate, expectedStats) {
 
 async function isRecoverableSetupMetrics(aiosPath, extraEntries) {
   if (extraEntries.length === 0) return true;
-  const allowed = new Set(["memory/metrics", "memory/metrics/pilot.jsonl"]);
+  const allowed = new Set(["memory/metrics", "memory/metrics/reliability.jsonl"]);
   if (extraEntries.some((entry) => !allowed.has(entry.path))) return false;
-  if (!extraEntries.some((entry) => entry.path === "memory/metrics/pilot.jsonl" && entry.type === "file")) return false;
+  if (!extraEntries.some((entry) => entry.path === "memory/metrics/reliability.jsonl" && entry.type === "file")) return false;
 
   let lines;
   try {
-    lines = (await fs.readFile(pilotMetricsFile(aiosPath), "utf8")).trim().split(/\r?\n/).filter(Boolean);
+    lines = (await fs.readFile(reliabilityMetricsFile(aiosPath), "utf8")).trim().split(/\r?\n/).filter(Boolean);
   } catch {
     return false;
   }
@@ -727,8 +727,8 @@ async function treeManifest(root, { ignoreRoot = null } = {}) {
 
 async function isFailedSetupResidue(aiosPath) {
   const memoryPath = path.join(aiosPath, "memory");
-  const metricsPath = pilotMetricsDir(aiosPath);
-  const pilotPath = pilotMetricsFile(aiosPath);
+  const metricsPath = reliabilityMetricsDir(aiosPath);
+  const legacyMetricsPath = path.join(metricsPath, "pilot.jsonl");
 
   let contents;
   try {
@@ -741,7 +741,7 @@ async function isFailedSetupResidue(aiosPath) {
     const metricsEntries = await fs.readdir(metricsPath, { withFileTypes: true });
     if (metricsEntries.length !== 1 || metricsEntries[0].name !== "pilot.jsonl" || !metricsEntries[0].isFile()) return false;
 
-    contents = await fs.readFile(pilotPath, "utf8");
+    contents = await fs.readFile(legacyMetricsPath, "utf8");
   } catch {
     return false;
   }

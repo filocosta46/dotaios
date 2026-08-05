@@ -7,6 +7,7 @@ const pkg = JSON.parse(
   readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
 );
 const VERSION = pkg.version;
+const retiredCommands = new Set(["license", "market"]);
 
 const commands = {
   activate: "./commands/activate.mjs",
@@ -25,15 +26,11 @@ const commands = {
   ingest: "./commands/ingest.mjs",
   install: "./commands/install.mjs",
   interview: "./commands/interview.mjs",
-  license: "./commands/license.mjs",
-  market: "./commands/market.mjs",
   memory: "./commands/memory.mjs",
   migrate: "./commands/migrate.mjs",
   mcp: "./commands/mcp.mjs",
   plan: "./commands/plan.mjs",
   project: "./commands/project.mjs",
-  "pilot-report": "./commands/pilot-report.mjs",
-  "pilot-score": "./commands/pilot-score.mjs",
   reveal: "./commands/reveal.mjs",
   schedule: "./commands/schedule.mjs",
   search: "./commands/search.mjs",
@@ -69,8 +66,6 @@ Commands:
   ingest <input>    Copy material into vault/raw and log an event
   install <path>    Validate and install a local plugin directory
   interview         Update your context by answering a few short questions
-  license <cmd>     Add, list, or remove license keys for paid packages
-  market <cmd>      Browse outcome packages in the public catalog
   memory <cmd>      Audit recent memory or promote captured evidence explicitly
   migrate           Preview, apply, or recover a versioned folder migration
   plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
@@ -112,6 +107,11 @@ async function main(argv) {
 
   const commandPath = commands[commandName];
   if (!commandPath) {
+    if (retiredCommands.has(commandName)) {
+      console.error(`Command "${commandName}" was removed from the free core in 1.28.0; no action was taken.`);
+      process.exitCode = 1;
+      return;
+    }
     console.error(`Unknown command: ${commandName}`);
     printHelp();
     process.exitCode = 1;

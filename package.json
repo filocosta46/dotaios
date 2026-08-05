@@ -28,7 +28,6 @@
     "docs/adr/0001-versioned-aios-folder-migrations.md",
     "docs/adr/0002-managed-project-workspaces.md",
     "docs/architecture.md",
-    "docs/beta-testing.md",
     "docs/client-support.md",
     "docs/compatibility-acceptance.md",
     "docs/context-import.md",
@@ -36,7 +35,6 @@
     "docs/getting-started.md",
     "docs/gitsync-mobile.md",
     "docs/google-workspace.md",
-    "docs/marketplace.md",
     "docs/mcp.md",
     "docs/okf.md",
     "docs/plugin-development.md",
@@ -47,7 +45,6 @@
     "docs/sessions.md",
     "INSTALL.md",
     "README.md",
-    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

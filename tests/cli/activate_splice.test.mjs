@@ -27,14 +27,14 @@ async function makeTmpDirs() {
   return { base, aiosPath, homePath };
 }
 
-async function activate(args) {
+async function activate(args, commandOptions) {
   const { activateCommand } = await import(
     path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
   );
   const originalLog = console.log;
   console.log = () => {};
   try {
-    return await activateCommand(args);
+    return await activateCommand(args, commandOptions);
   } finally {
     console.log = originalLog;
   }
@@ -137,6 +137,160 @@ describe("activate — managed block splicing", () => {
     }
   });
 
+  it("leaves a concurrent bridge edit untouched when it lands before replacement", async () => {
+    const dirs = await makeTmpDirs();
+    try {
+      const { bridge, original, backup } = await seedManagedBridge(dirs.homePath);
+      const concurrent = `${original}\nConcurrent edit made during activation.\n`;
+      let edited = false;
+
+      const activation = await activate(
+        ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
+        {
+          lifecycle: {
+            beforeBridgeReplace: async ({ destination }) => {
+              if (destination !== bridge || edited) return;
+              edited = true;
+              await fs.writeFile(bridge, concurrent);
+            }
+          }
+        }
+      );
+      const result = activation.results.find((entry) => entry.path === bridge);
+
+      assert.equal(edited, true, "the test must exercise the read-to-replacement race");
+      assert.equal(result?.action, "conflict");
+      assert.match(result?.note ?? "", /changed during activation/i);
+      assert.equal(await fs.readFile(bridge, "utf8"), concurrent);
+      assert.equal(await exists(backup), false, "a rejected replacement must not create a backup");
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps the live bridge visible when activation stops after staging", async () => {
+    const dirs = await makeTmpDirs();
+    try {
+      const { bridge, original, backup } = await seedManagedBridge(dirs.homePath);
+      let observedStagedState = false;
+
+      await assert.rejects(
+        activate(
+          ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
+          {
+            lifecycle: {
+              beforeBridgePublish: async ({ destination, staged }) => {
+                if (destination !== bridge) return;
+                observedStagedState = true;
+                assert.equal(await fs.readFile(bridge, "utf8"), original);
+                assert.equal(await exists(staged), true, "the replacement must already be staged");
+                throw new Error("simulated interruption after staging");
+              }
+            }
+          }
+        ),
+        /simulated interruption after staging/
+      );
+
+      assert.equal(observedStagedState, true, "the test must stop at the staged pre-publication state");
+      assert.equal(await fs.readFile(bridge, "utf8"), original);
+      assert.equal(await exists(backup), false, "an interrupted replacement must not create a backup");
+      assert.deepEqual(
+        (await fs.readdir(path.dirname(bridge))).filter((name) => name.includes(".dotaios-") && name.endsWith(".next")),
+        [],
+        "a handled interruption must clean its staged sibling"
+      );
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
+  it("never overwrites a concurrent edit recreated at the publication boundary", async () => {
+    const dirs = await makeTmpDirs();
+    try {
+      const { bridge, original } = await seedManagedBridge(dirs.homePath);
+      const concurrent = `${original}\nConcurrent replacement at commit.\n`;
+      let raced = false;
+
+      const activation = await activate(
+        ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
+        {
+          lifecycle: {
+            beforeBridgeCommit: async ({ destination }) => {
+              if (destination !== bridge || raced) return;
+              raced = true;
+              await fs.writeFile(destination, concurrent);
+            }
+          }
+        }
+      );
+      const result = activation.results.find((entry) => entry.path === bridge);
+
+      assert.equal(raced, true, "the test must race the no-clobber publication boundary");
+      assert.equal(result?.action, "conflict");
+      assert.equal(await fs.readFile(bridge, "utf8"), concurrent);
+      const preserved = (await fs.readdir(path.dirname(bridge)))
+        .filter((name) => name.startsWith("CLAUDE.md.dotaios-backup-"));
+      assert.equal(preserved.length, 1);
+      assert.equal(await fs.readFile(path.join(path.dirname(bridge), preserved[0]), "utf8"), original);
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
+  it("restores the original bridge when activation stops after claiming it", async () => {
+    const dirs = await makeTmpDirs();
+    try {
+      const { bridge, original } = await seedManagedBridge(dirs.homePath);
+      let claimed = false;
+
+      await assert.rejects(
+        activate(
+          ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
+          {
+            lifecycle: {
+              beforeBridgeCommit: async ({ destination, preservedPath }) => {
+                if (destination !== bridge) return;
+                claimed = true;
+                assert.equal(await exists(destination), false);
+                assert.equal(await fs.readFile(preservedPath, "utf8"), original);
+                throw new Error("simulated interruption after claim");
+              }
+            }
+          }
+        ),
+        /simulated interruption after claim/
+      );
+
+      assert.equal(claimed, true, "the test must stop after the old inode is preserved");
+      assert.equal(await fs.readFile(bridge, "utf8"), original);
+      const preserved = (await fs.readdir(path.dirname(bridge)))
+        .filter((name) => name.startsWith("CLAUDE.md.dotaios-backup-"));
+      assert.equal(preserved.length, 1);
+      assert.equal(await fs.readFile(path.join(path.dirname(bridge), preserved[0]), "utf8"), original);
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
+  it("reports current managed bridges as unchanged and configured", async () => {
+    const dirs = await makeTmpDirs();
+    try {
+      const { bridge } = await seedManagedBridge(dirs.homePath);
+      await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
+
+      const activation = await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
+      const result = activation.results.find((entry) => entry.path === bridge);
+
+      assert.equal(result?.action, "unchanged");
+      const unchangedBridges = activation.results.filter((entry) => entry.action === "unchanged");
+      assert.ok(unchangedBridges.length > 0);
+      assert.equal(activation.configuredContextCount, unchangedBridges.length);
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
   it("keeps a file without markers untouched when overwrite is false", async () => {
     const dirs = await makeTmpDirs();
     try {
@@ -157,13 +311,18 @@ describe("activate — managed block splicing", () => {
   it("writes the backup exactly once and never overwrites it", async () => {
     const dirs = await makeTmpDirs();
     try {
-      const { bridge, original, backup } = await seedManagedBridge(dirs.homePath);
+      const { bridge, original } = await seedManagedBridge(dirs.homePath);
       await fs.chmod(bridge, 0o600);
 
       await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
+      const backups = (await fs.readdir(path.dirname(bridge)))
+        .filter((name) => name.startsWith("CLAUDE.md.dotaios-backup-"));
+      assert.equal(backups.length, 1, "the update must preserve exactly one prior bridge");
+      const backup = path.join(path.dirname(bridge), backups[0]);
       assert.equal(await fs.readFile(backup, "utf8"), original, "the first spliced write backs up the pre-existing file");
       const firstStat = await fs.stat(backup);
       assert.equal(firstStat.mode & 0o777, 0o600, "the backup preserves the bridge file mode");
+      assert.equal((await fs.stat(bridge)).mode & 0o777, 0o600, "the replacement preserves the bridge file mode");
       const filesAfterFirstRun = (await fs.readdir(path.dirname(bridge))).sort();
 
       await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
@@ -180,7 +339,12 @@ describe("activate — managed block splicing", () => {
         "later runs must not replace the backup with the already-spliced file"
       );
       assert.equal((await fs.stat(backup)).mtimeMs, firstStat.mtimeMs, "the backup must be written only once");
-      assert.equal(await exists(`${backup}.dotaios-backup`), false, "the backup is never itself backed up");
+      assert.equal(
+        (await fs.readdir(path.dirname(bridge)))
+          .filter((name) => name.startsWith(`${path.basename(backup)}.dotaios-backup-`)).length,
+        0,
+        "the backup is never itself backed up"
+      );
       assert.notEqual(await fs.readFile(bridge, "utf8"), original);
     } finally {
       await fs.rm(dirs.base, { recursive: true, force: true });

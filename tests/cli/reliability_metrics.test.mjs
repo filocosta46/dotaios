@@ -20,8 +20,8 @@ function run(args, opts = {}) {
   return result;
 }
 
-test("setup/search/capture emit pilot metrics jsonl", () => {
-  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-pilot-metrics-"));
+test("setup/search/capture emit local reliability metrics jsonl", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-reliability-metrics-"));
   const aiosPath = path.join(tempRoot, "aios");
   const processHomePath = path.join(tempRoot, "process-home");
   const activationHomePath = path.join(tempRoot, "activation-home");
@@ -35,8 +35,8 @@ test("setup/search/capture emit pilot metrics jsonl", () => {
   run(["search", "hello", "--path", aiosPath]);
   run(["capture", "import", "file", convFile, "--path", aiosPath]);
 
-  const metricsFile = path.join(aiosPath, "memory", "metrics", "pilot.jsonl");
-  assert.ok(fs.existsSync(metricsFile), "pilot metrics file should exist");
+  const metricsFile = path.join(aiosPath, "memory", "metrics", "reliability.jsonl");
+  assert.ok(fs.existsSync(metricsFile), "reliability metrics file should exist");
   const lines = fs.readFileSync(metricsFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   const types = new Set(lines.map((line) => line.type));
 
@@ -60,7 +60,7 @@ test("setup emits phase start/end events with stable run_id", () => {
     env: { ...process.env, HOME: processHomePath, DOTAIOS_SKIP_LIGHTPANDA_DOWNLOAD: "1" }
   });
 
-  const metricsFile = path.join(aiosPath, "memory", "metrics", "pilot.jsonl");
+  const metricsFile = path.join(aiosPath, "memory", "metrics", "reliability.jsonl");
   const rows = fs.readFileSync(metricsFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   const phaseRows = rows.filter((row) => row.type === "setup_phase_start" || row.type === "setup_phase_end");
   assert.ok(phaseRows.length >= 6, "expected start/end events for init, activate, reveal");

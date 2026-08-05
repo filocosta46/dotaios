@@ -277,6 +277,7 @@ function buildPreview(configState, migrationState = null) {
   const modes = migrationState?.modes || new Map([["aios.json", configState.mode]]);
   const originalFiles = new Map(files);
   const summaries = new Map();
+  const ownerships = new Map();
 
   for (const migration of chain) {
     for (const change of migration.migrate(files)) {
@@ -285,6 +286,7 @@ function buildPreview(configState, migrationState = null) {
         throw new MigrationError("INVALID_REGISTRY", `${migration.id} did not produce bytes for ${change.path}.`);
       }
       files.set(change.path, change.after);
+      ownerships.set(change.path, change.ownership);
       const previous = summaries.get(change.path) || [];
       previous.push(change.summary);
       summaries.set(change.path, previous);
@@ -301,7 +303,7 @@ function buildPreview(configState, migrationState = null) {
       after,
       before_mode: modes.get(relativePath) ?? null,
       after_mode: modes.get(relativePath) ?? 0o644,
-      ownership: "DotAIOS compatibility metadata",
+      ownership: ownerships.get(relativePath),
       summary: (summaries.get(relativePath) || []).join(" ")
     });
   }

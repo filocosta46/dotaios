@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { appendMetric } from "../../packages/core/src/metrics.mjs";
 
 // `dotaios setup` is the one command a brand-new user runs, and in 1.27.1 it
 // lied to its caller three ways when step 1 failed:
@@ -152,7 +153,7 @@ test("an activation failure exits non-zero and records a failed install", () => 
   assert.notEqual(result.status, 0, "an activation failure must be observable to the caller");
 
   const rows = fs.readFileSync(
-    path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl"),
+    path.join(sandbox.aiosPath, "memory", "metrics", "reliability.jsonl"),
     "utf8"
   ).trim().split("\n").map((line) => JSON.parse(line));
   const installEnd = rows.findLast((row) => row.type === "install_end");
@@ -260,7 +261,7 @@ test("the identical setup command recovers an interruption after the base tree i
     "setup must record ownership before createBaseTree mutates the target"
   );
   const metrics = fs.readFileSync(
-    path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl"),
+    path.join(sandbox.aiosPath, "memory", "metrics", "reliability.jsonl"),
     "utf8"
   );
   assert.match(metrics, /"setup_phase_end".*"init".*"fail"/, "mid-scaffold failure remains visible in metrics");
@@ -534,10 +535,10 @@ test("setup publishes its recovery marker without clobbering a raced destination
   assert.equal(fs.readFileSync(marker, "utf8"), "foreign marker bytes\n", "exclusive publication must not replace the raced file");
   assert.deepEqual(listTree(sandbox.aiosPath), [
     ".dotaios-setup-transaction.json",
-    "memory/metrics/pilot.jsonl"
+    "memory/metrics/reliability.jsonl"
   ]);
   const rows = fs.readFileSync(
-    path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl"),
+    path.join(sandbox.aiosPath, "memory", "metrics", "reliability.jsonl"),
     "utf8"
   ).trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(rows.findLast((row) => row.type === "setup_phase_end")?.outcome, "fail");
@@ -625,7 +626,7 @@ test("setup transaction recovery rejects reordered, cross-run, or widened metric
       DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE: "1"
     });
     assert.notEqual(first.status, 0);
-    const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl");
+    const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "reliability.jsonl");
     const rows = fs.readFileSync(metricsFile, "utf8").trim().split("\n").map((line) => JSON.parse(line));
     fs.writeFileSync(metricsFile, `${mutate(rows).map((row) => JSON.stringify(row)).join("\n")}\n`);
 
@@ -718,28 +719,14 @@ test("a folder needing migration surfaces the migration error, not the retry", (
   );
 });
 
-test("pilot-score still creates its metrics directory", () => {
+test("the local metrics writer still creates its metrics directory", async () => {
   // appendMetric has callers that legitimately depend on the mkdir. Making
   // setup's failure path non-creating must not take that away from them.
   const sandbox = makeSandbox("setup-metrics-caller");
   fs.mkdirSync(sandbox.aiosPath, { recursive: true });
 
-  const result = spawnSync(process.execPath, [
-    cli, "pilot-score",
-    "--path", sandbox.aiosPath,
-    "--first-recall-min", "3",
-    "--p-at-5", "0.8",
-    "--scorer-id", "tester",
-    "--method-version", "1"
-  ], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin" }
-  });
-
-  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-  const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "pilot.jsonl");
-  assert.ok(fs.existsSync(metricsFile), "pilot-score must still create memory/metrics/ on its own");
-  assert.match(fs.readFileSync(metricsFile, "utf8"), /"type":"pilot_score"/);
+  const metricsFile = path.join(sandbox.aiosPath, "memory", "metrics", "reliability.jsonl");
+  await appendMetric(metricsFile, { type: "setup_probe", outcome: "ok" });
+  assert.ok(fs.existsSync(metricsFile), "metrics writers must create memory/metrics/ on their own");
+  assert.match(fs.readFileSync(metricsFile, "utf8"), /"type":"setup_probe"/);
 });

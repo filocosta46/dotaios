@@ -50,7 +50,11 @@ test("inspectSkillHealth reports complete native coverage and fresh catalogs", a
     await installSymlinkSkills({ aiosPath, targetDir });
   }
 
-  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const report = await inspectSkillHealth({
+    aiosPath,
+    homePath,
+    detection: { env: { PATH: "" } }
+  });
   assert.equal(report.source.count, 1);
   assert.equal(report.catalogs.index.current, true);
   assert.equal(report.catalogs.resolver.current, true);
@@ -102,7 +106,11 @@ test("inspectSkillHealth does not fail for agents and Hermes that are not instal
   const { aiosPath, homePath } = await makeAios();
   await fs.rm(path.join(homePath, ".hermes"), { recursive: true, force: true });
 
-  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const report = await inspectSkillHealth({
+    aiosPath,
+    homePath,
+    detection: { env: { PATH: "" } }
+  });
   assert.equal(report.healthy, true);
   assert.ok(report.targets.every((target) => target.status === "not-detected"));
   assert.ok(report.targets.every((target) => target.canonicalPresent === null));
@@ -185,7 +193,7 @@ test("inspectSkillHealth separates configured and discoverable from unverified i
         name: "Probe Agent",
         detect: ".probe-agent",
         bridge: null,
-        command: "node",
+        command: process.execPath,
         skills: { mode: "symlink", dir: ".agents/skills" }
       }]
     })
@@ -193,7 +201,11 @@ test("inspectSkillHealth separates configured and discoverable from unverified i
   await fs.mkdir(path.join(homePath, ".probe-agent"), { recursive: true });
   await installSymlinkSkills({ aiosPath, targetDir: path.join(homePath, ".agents", "skills") });
 
-  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const report = await inspectSkillHealth({
+    aiosPath,
+    homePath,
+    detection: { env: { PATH: "" } }
+  });
   const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
 
   assert.deepEqual(runtime.capabilities, {
@@ -295,7 +307,11 @@ test("inspectSkillHealth keeps configured paths separate from runtime installati
   );
   await installSymlinkSkills({ aiosPath, targetDir: path.join(homePath, ".agents", "skills") });
 
-  const report = await inspectSkillHealth({ aiosPath, homePath });
+  const report = await inspectSkillHealth({
+    aiosPath,
+    homePath,
+    detection: { env: { PATH: "" } }
+  });
   const runtime = report.runtimes.find((entry) => entry.name === "Uninstalled Probe Agent");
 
   assert.equal(runtime.installed, false);

@@ -7,7 +7,7 @@ import { detectMarker } from "../ingest/pdf.mjs";
 import { parsePathHomeOptions } from "../lib/args.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
-import { pilotMetricsSummary } from "../lib/pilot-metrics.mjs";
+import { reliabilityMetricsSummary } from "../lib/reliability-metrics.mjs";
 
 export async function statusCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
@@ -87,10 +87,10 @@ Options:
   console.log("\nMemory");
   console.log(`[info] events: ${await countLines(path.join(target, "memory", "events.jsonl"))}`);
   console.log(`[info] errors: ${await countLines(path.join(target, "memory", "errors.jsonl"))}`);
-  const pilotSummary = await pilotMetricsSummary(target);
-  console.log(`[info] pilot metrics: ${pilotSummary.total}`);
+  const reliabilitySummary = await reliabilityMetricsSummary(target);
+  console.log(`[info] local reliability events: ${reliabilitySummary.total}`);
 
-  console.log("\nPilot health");
+  console.log("\nLocal reliability");
   const { probeAdapterLiveness } = await import("../adapters/detect.mjs");
   const probe = await probeAdapterLiveness();
   const backendState = probe.anyLive
@@ -99,10 +99,10 @@ Options:
       ? "adapter-detected-not-live (fallback-active)"
       : "fallback-only";
   console.log(`[info] backend state: ${backendState}`);
-  if (pilotSummary.installSuccessRate === null) {
+  if (reliabilitySummary.installSuccessRate === null) {
     console.log("[info] install success rate: n/a");
   } else {
-    console.log(`[info] install success rate: ${(pilotSummary.installSuccessRate * 100).toFixed(1)}%`);
+    console.log(`[info] install success rate: ${(reliabilitySummary.installSuccessRate * 100).toFixed(1)}%`);
   }
 
   console.log("\nSkills");
