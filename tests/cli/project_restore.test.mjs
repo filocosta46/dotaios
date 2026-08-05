@@ -107,6 +107,24 @@ test("project restore dry-run previews unavailable projects with zero writes", a
   assert.equal(json.machine_local.results[0].destination, path.join(aiosPath, "workspaces", "missing"));
 });
 
+test("project restore refuses an ignore rule canceled later in the same file", async (t) => {
+  const { aiosPath, homePath, statePath } = await fixture(t);
+  await writeProject(aiosPath, "missing");
+  await fs.writeFile(path.join(aiosPath, ".gitignore"), "/workspaces/\n!/workspaces/\n");
+
+  await assert.rejects(
+    projectCommand([
+      "restore", "missing",
+      "--path", aiosPath,
+      "--home", homePath,
+      "--state-path", statePath,
+      "--dry-run"
+    ], { output: outputCapture().output, projectGit: refusingGit() }),
+    /later ignore rule cancels.*privacy boundary/i
+  );
+  await assert.rejects(fs.access(path.join(aiosPath, "workspaces")), { code: "ENOENT" });
+});
+
 test("explicit restore accepts a valid external mapping without Git or writes", async (t) => {
   const { root, aiosPath, homePath, statePath } = await fixture(t);
   const project = await writeProject(aiosPath, "external");
@@ -151,12 +169,12 @@ test("project restore continues after clone failure and maps only verified succe
   const projectGit = refusingGit({
     cloneRepository: async ({ url, destination }) => {
       cloneCalls.push({ url, destination });
-      if (destination.endsWith(`${path.sep}bad`)) throw new Error("network unavailable");
+      if (url.endsWith("/bad.git")) throw new Error("network unavailable");
       await fs.mkdir(path.join(destination, ".git"));
+      await fs.writeFile(path.join(destination, ".remote"), url);
       await fs.writeFile(path.join(destination, "README.md"), "# checkout\n");
     },
-    readRepositoryRemote: async (destination) =>
-      `https://github.com/acme/${path.basename(destination)}.git`,
+    readRepositoryRemote: async (destination) => fs.readFile(path.join(destination, ".remote"), "utf8"),
     readRepositoryHead: async () => HEAD
   });
 

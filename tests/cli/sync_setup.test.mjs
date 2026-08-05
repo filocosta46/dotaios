@@ -6,12 +6,14 @@ import path from "node:path";
 import {
   completeInitialMirror,
   orchestrateSetup,
+  preflightSetupBranch,
   runSetup,
   verifyInitialMirror,
   withSetupLock
 } from "../../packages/cli/src/sync/setup-flow.mjs";
 import { runTick as runTickImpl } from "../../packages/cli/src/sync/tick.mjs";
 import { readSyncConfig, writeSyncConfig } from "../../packages/core/src/sync-config.mjs";
+import { createGit } from "../../packages/cli/src/sync/git.mjs";
 
 const verifiedUpload = async () => true;
 const RECEIPT = "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1";
@@ -192,6 +194,119 @@ test("orchestrateSetup refuses a non-main branch before requesting a token", asy
   assert.equal(tokenRequested, false);
 });
 
+test("setup preflight refuses a symlinked root .git marker before creating a Git client", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-setup-git-link-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  const externalGit = path.join(root, "external-git");
+  await fs.mkdir(aiosPath);
+  await fs.mkdir(externalGit);
+  await fs.symlink(externalGit, path.join(aiosPath, ".git"));
+
+  let gitCreated = false;
+  await assert.rejects(
+    preflightSetupBranch({
+      aiosPath,
+      createGitImpl: () => {
+        gitCreated = true;
+        return { currentBranch: async () => "main" };
+      }
+    }),
+    /root \.git.*symbolic link.*changed nothing/i
+  );
+  assert.equal(gitCreated, false);
+});
+
+test("setup preflight refuses a regular gitfile that redirects into an external repository", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-setup-git-file-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const external = path.join(root, "external");
+  const aiosPath = path.join(root, "aios");
+  await fs.mkdir(external);
+  await fs.mkdir(aiosPath);
+  const externalGit = createGit({ cwd: external });
+  await externalGit.init();
+  await externalGit.addRemote("https://github.com/example/external.git");
+  await fs.writeFile(path.join(aiosPath, ".git"), `gitdir: ${path.join(external, ".git")}\n`);
+
+  await assert.rejects(
+    preflightSetupBranch({ aiosPath }),
+    /worktree back-pointer|does not belong|registered worktree/i
+  );
+  assert.equal(await externalGit.originUrl(), "https://github.com/example/external.git");
+});
+
+test("setup preflight accepts a real registered linked worktree", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-setup-real-worktree-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const primary = path.join(root, "primary");
+  const linked = path.join(root, "aios");
+  await fs.mkdir(primary);
+  const git = createGit({ cwd: primary });
+  await git.init();
+  await git.raw(["config", "user.email", "test@example.com"]);
+  await git.raw(["config", "user.name", "Test"]);
+  await fs.writeFile(path.join(primary, "README.md"), "base\n");
+  await git.raw(["add", "README.md"]);
+  await git.raw(["commit", "-m", "base"]);
+  await git.raw(["branch", "holding"]);
+  await git.raw(["switch", "-q", "holding"]);
+  const added = await git.raw(["worktree", "add", "-q", linked, "main"]);
+  assert.equal(added.code, 0, added.stderr);
+
+  await preflightSetupBranch({ aiosPath: linked });
+});
+
+for (const kind of ["symlink", "hardlink"]) {
+  test(`setup preflight refuses a ${kind}ed common Git config`, async (t) => {
+    if (kind === "symlink" && process.platform === "win32") {
+      t.skip("symlink permissions are platform-specific");
+      return;
+    }
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), `dotaios-setup-config-${kind}-`));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const aiosPath = path.join(root, "aios");
+    const externalConfig = path.join(root, "external-config");
+    await fs.mkdir(aiosPath);
+    const git = createGit({ cwd: aiosPath });
+    await git.init();
+    const configPath = path.join(aiosPath, ".git", "config");
+    const original = await fs.readFile(configPath, "utf8");
+    await fs.writeFile(externalConfig, original);
+    await fs.rm(configPath);
+    if (kind === "symlink") await fs.symlink(externalConfig, configPath);
+    else await fs.link(externalConfig, configPath);
+
+    await assert.rejects(
+      preflightSetupBranch({ aiosPath }),
+      /common config.*not a private regular file/i
+    );
+    assert.equal(await fs.readFile(externalConfig, "utf8"), original);
+  });
+}
+
+test("setup preflight refuses a special root .git marker before creating a Git client", async () => {
+  let gitCreated = false;
+  await assert.rejects(
+    preflightSetupBranch({
+      aiosPath: "/tmp/aios-special-git-marker",
+      filesystem: {
+        lstat: async () => ({
+          isSymbolicLink: () => false,
+          isDirectory: () => false,
+          isFile: () => false
+        })
+      },
+      createGitImpl: () => {
+        gitCreated = true;
+        return { currentBranch: async () => "main" };
+      }
+    }),
+    /root \.git.*special file.*changed nothing/i
+  );
+  assert.equal(gitCreated, false);
+});
+
 test("orchestrateSetup checks origin immediately after username lookup and before persistence or repo creation", async () => {
   const calls = [];
   await assert.rejects(orchestrateSetup({
@@ -241,6 +356,7 @@ test("completeInitialMirror adopts only the receipt-matching populated main", as
       lstat: async () => ({}),
       realpath: async () => "/tmp/existing-aios"
     },
+    assertBindingImpl: async () => ({ kind: "primary" }),
     createGitImpl: (options) => options.accessToken ? credentialedGit : inspectionGit,
     readConfig: async () => ({
       setup_intended_push: {
@@ -289,6 +405,7 @@ for (const [label, inspectionGit, message] of [
           lstat: async () => ({}),
           realpath: async () => "/tmp/existing-aios"
         },
+        assertBindingImpl: async () => ({ kind: "primary" }),
         createGitImpl: () => inspectionGit,
         writeConfig: async () => { mutated = true; },
         initialMirrorPushImpl: async () => { mutated = true; }
@@ -312,6 +429,7 @@ test("completeInitialMirror refuses a populated mirror without its intended-uplo
         lstat: async () => ({}),
         realpath: async () => "/tmp/existing-aios"
       },
+      assertBindingImpl: async () => ({ kind: "primary" }),
       createGitImpl: () => ({
         currentBranch: async () => "main",
         originUrl: async () => "https://github.com/alice/alice-aios.git"
@@ -348,6 +466,7 @@ test("completeInitialMirror scopes adoption receipts to path, repository, and ma
         lstat: async () => ({}),
         realpath: async () => "/tmp/existing-aios"
       },
+      assertBindingImpl: async () => ({ kind: "primary" }),
       createGitImpl: () => ({
         currentBranch: async () => "main",
         originUrl: async () => "https://github.com/alice/alice-aios.git"
@@ -369,6 +488,7 @@ test("completeInitialMirror preserves a matching existing origin during an empty
       lstat: async () => ({}),
       realpath: async () => "/tmp/existing-aios"
     },
+    assertBindingImpl: async () => ({ kind: "primary" }),
     createGitImpl: () => ({
       currentBranch: async () => "main",
       originUrl: async () => "https://github.com/alice/alice-aios.git"

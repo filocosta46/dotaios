@@ -1,9 +1,16 @@
+import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { isPathWithinLexically } from "./paths.mjs";
+import { processBirthToken, processRecordIsAlive } from "./process-identity.mjs";
 
 const SAFE_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
+const RESTORE_TRANSACTION_SCHEMA = "dotaios.project-restore-transaction.v1";
+const RESTORE_TRANSACTION_MARKER = "transaction.json";
+const RESTORE_CHECKOUT_DIRECTORY = "checkout";
+const RESTORE_DESTINATION_CLAIM_SCHEMA = "dotaios.project-restore-destination-claim.v1";
+const RESTORE_DESTINATION_CLAIM_MARKER = "destination-claim.json";
 
 class ProjectRemoteError extends Error {
   constructor(reason, message) {
@@ -60,7 +67,35 @@ export function classifyProjectRemote(value) {
 export function projectRemotesMatch(left, right) {
   const expected = classifyProjectRemote(left);
   const actual = classifyProjectRemote(right);
-  return expected.safe && actual.safe && expected.identity === actual.identity;
+  return expected.safe && actual.safe && parsedProjectRemotesMatch(expected, actual);
+}
+
+function parsedProjectRemotesMatch(expected, actual) {
+  const expectedSsh = expected.transport === "ssh" || expected.transport === "scp";
+  const actualSsh = actual.transport === "ssh" || actual.transport === "scp";
+  if (expected.transport === "https" && actual.transport === "https") {
+    return expected.identity === actual.identity;
+  }
+  if (expectedSsh && actualSsh) {
+    return expected.identity === actual.identity;
+  }
+
+  // Major hosted forges deliberately present one repository through HTTPS and
+  // the fixed `git` SSH principal. Keep that common transport switch portable,
+  // but never accept an omitted or arbitrary SSH username: it can select a
+  // different repository namespace even when host/path text is identical.
+  const https = expected.transport === "https"
+    ? expected
+    : actual.transport === "https"
+      ? actual
+      : null;
+  const ssh = expected.transport === "https" ? actual : expected;
+  if (!https || (ssh.transport !== "ssh" && ssh.transport !== "scp")) return false;
+  const fixedGitHosts = new Set(["github.com", "gitlab.com", "bitbucket.org"]);
+  const host = https.identity.split("/", 1)[0];
+  return fixedGitHosts.has(host)
+    && ssh.identity.startsWith(`git@${host}/`)
+    && https.identity === ssh.identity.slice("git@".length);
 }
 
 /** Return the reserved root for managed project checkouts. */
@@ -161,6 +196,9 @@ export async function classifyRestoreDestination(options = {}) {
       expectedRemote: expected
     };
   }
+  if (gitMarker.isSymbolicLink() || (!gitMarker.isDirectory() && !gitMarker.isFile())) {
+    return { state: "unsafe-git-marker", destination, expectedRemote: expected };
+  }
 
   let actualValue;
   try {
@@ -177,7 +215,7 @@ export async function classifyRestoreDestination(options = {}) {
       actualRemote: actual
     };
   }
-  if (actual.identity !== expected.identity) {
+  if (!parsedProjectRemotesMatch(expected, actual)) {
     return { state: "remote-mismatch", destination, expectedRemote: expected, actualRemote: actual };
   }
   if (typeof options.readRepositoryHead !== "function") {
@@ -333,6 +371,23 @@ async function restoreManagedProject(options) {
       return restoreFailure(project, destination, "missing-mapping-writer", "Project mapping writer is unavailable.");
     }
     try {
+      // A process can exit after atomically publishing the checkout but before
+      // removing its sibling transaction or saving the local mapping. Clean
+      // only a dead, exact owner record; a live publisher will clean itself.
+      await recoverOwnedRestoreTransaction({
+        aiosPath,
+        destination,
+        fileSystem,
+        project,
+        readRepositoryHead: options.readRepositoryHead,
+        readRepositoryRemote: options.readRepositoryRemote,
+        remote
+      });
+    } catch (error) {
+      const reason = error.code === "RESTORE_CLEANUP_REQUIRED" ? "cleanup-required" : "recovery-failed";
+      return restoreFailure(project, destination, reason, safeOperationMessage("Published restore cleanup failed", error));
+    }
+    try {
       await options.updateMapping(mappingRequest(project, destination, classification));
     } catch (error) {
       return restoreFailure(project, destination, "mapping-failed", safeOperationMessage("Mapping update failed", error), {
@@ -340,6 +395,53 @@ async function restoreManagedProject(options) {
       });
     }
     return restoreSuccess(project, destination, remote, classification.state, "mapping-repaired", true);
+  }
+
+  if (classification.state === "empty-directory" && !dryRun
+    && typeof options.updateMapping === "function") {
+    try {
+      await ensureManagedWorkspaceRoot(fileSystem, aiosPath);
+      const recovered = await recoverOwnedRestoreTransaction({
+        aiosPath,
+        destination,
+        fileSystem,
+        project,
+        readRepositoryHead: options.readRepositoryHead,
+        readRepositoryRemote: options.readRepositoryRemote,
+        remote
+      });
+      if (recovered?.busy) {
+        return restoreFailure(
+          project,
+          destination,
+          "restore-busy",
+          "Another live restore transaction already owns this project staging operation.",
+          { state: "staged" }
+        );
+      }
+      if (recovered?.raced) {
+        return restoreFailure(
+          project,
+          destination,
+          "destination-raced",
+          `Managed destination changed during interrupted restore recovery (${recovered.raced.state}).`,
+          { state: recovered.raced.state }
+        );
+      }
+      if (recovered?.verification) {
+        try {
+          await options.updateMapping(mappingRequest(project, destination, recovered.verification));
+        } catch (error) {
+          return restoreFailure(project, destination, "mapping-failed", safeOperationMessage("Mapping update failed", error), {
+            state: "existing-match"
+          });
+        }
+        return restoreSuccess(project, destination, remote, "missing", "cloned", true);
+      }
+    } catch (error) {
+      const reason = error.code === "RESTORE_CLEANUP_REQUIRED" ? "cleanup-required" : "recovery-failed";
+      return restoreFailure(project, destination, reason, safeOperationMessage("Restore destination-claim recovery failed", error));
+    }
   }
 
   if (classification.state !== "missing") {
@@ -363,37 +465,172 @@ async function restoreManagedProject(options) {
 
   try {
     await ensureManagedWorkspaceRoot(fileSystem, aiosPath);
-    await fileSystem.mkdir(destination, { recursive: false, mode: 0o700 });
   } catch (error) {
-    const reason = error.code === "EEXIST" ? "destination-raced" : "claim-failed";
-    return restoreFailure(project, destination, reason, safeOperationMessage("Destination claim failed", error));
+    return restoreFailure(project, destination, "claim-failed", safeOperationMessage("Managed workspace preparation failed", error));
   }
 
+  let recovered;
   try {
-    await options.cloneRepository({ url: remote.canonicalUrl, destination });
+    recovered = await recoverOwnedRestoreTransaction({
+      aiosPath,
+      destination,
+      fileSystem,
+      project,
+      readRepositoryHead: options.readRepositoryHead,
+      readRepositoryRemote: options.readRepositoryRemote,
+      remote
+    });
   } catch (error) {
+    const reason = error.code === "RESTORE_CLEANUP_REQUIRED" ? "cleanup-required" : "recovery-failed";
+    return restoreFailure(project, destination, reason, safeOperationMessage("Restore transaction recovery failed", error));
+  }
+  if (recovered?.busy) {
+    return restoreFailure(
+      project,
+      destination,
+      "restore-busy",
+      "Another live restore transaction already owns this project staging operation.",
+      { state: "staged" }
+    );
+  }
+  if (recovered?.raced) {
+    return restoreFailure(
+      project,
+      destination,
+      "destination-raced",
+      `Managed destination changed during interrupted restore recovery (${recovered.raced.state}).`,
+      { state: recovered.raced.state }
+    );
+  }
+  if (recovered?.verification) {
+    try {
+      await options.updateMapping(mappingRequest(project, destination, recovered.verification));
+    } catch (error) {
+      return restoreFailure(project, destination, "mapping-failed", safeOperationMessage("Mapping update failed", error), {
+        state: "existing-match"
+      });
+    }
+    return restoreSuccess(project, destination, remote, "missing", "cloned", true);
+  }
+
+  const destinationAfterRecovery = await classifyRestoreDestination({
+    destination,
+    expectedRemote: remote.canonicalUrl,
+    fileSystem,
+    readRepositoryHead: options.readRepositoryHead,
+    readRepositoryRemote: options.readRepositoryRemote
+  });
+  if (destinationAfterRecovery.state !== "missing") {
+    return restoreFailure(
+      project,
+      destination,
+      "destination-raced",
+      `Managed destination changed before restore (${destinationAfterRecovery.state}).`,
+      { state: destinationAfterRecovery.state }
+    );
+  }
+
+  let transaction;
+  try {
+    transaction = await createRestoreTransaction({
+      aiosPath,
+      destination,
+      fileSystem,
+      project,
+      remote
+    });
+  } catch (error) {
+    const reason = error.code === "RESTORE_CLEANUP_REQUIRED" ? "cleanup-required" : "claim-failed";
+    return restoreFailure(project, destination, reason, safeOperationMessage("Restore transaction claim failed", error));
+  }
+  try {
+    await options.cloneRepository({ url: remote.canonicalUrl, destination: transaction.checkout });
+  } catch (error) {
+    try {
+      await cleanupRestoreTransaction(fileSystem, transaction);
+    } catch (cleanupError) {
+      return restoreFailure(
+        project,
+        destination,
+        "cleanup-required",
+        safeOperationMessage("Clone failed and its owned staging transaction could not be cleaned", cleanupError),
+        { state: "staged" }
+      );
+    }
     return restoreFailure(project, destination, "clone-failed", safeOperationMessage("Clone failed", error), {
-      state: "claimed"
+      state: "staged"
     });
   }
 
   let verified;
   try {
     verified = await classifyRestoreDestination({
-      destination,
+      destination: transaction.checkout,
       expectedRemote: remote.canonicalUrl,
       fileSystem,
       readRepositoryHead: options.readRepositoryHead,
       readRepositoryRemote: options.readRepositoryRemote
     });
   } catch (error) {
+    try {
+      await cleanupRestoreTransaction(fileSystem, transaction);
+    } catch (cleanupError) {
+      return restoreFailure(project, destination, "cleanup-required", safeOperationMessage("Unverified staging could not be cleaned", cleanupError), {
+        state: "staged"
+      });
+    }
     return restoreFailure(project, destination, "verification-failed", safeOperationMessage("Verification failed", error), {
-      state: "claimed"
+      state: "staged"
     });
   }
   if (verified.state !== "existing-match") {
+    try {
+      await cleanupRestoreTransaction(fileSystem, transaction);
+    } catch (cleanupError) {
+      return restoreFailure(project, destination, "cleanup-required", safeOperationMessage("Unverified staging could not be cleaned", cleanupError), {
+        state: verified.state
+      });
+    }
     return restoreFailure(project, destination, "verification-failed", `Cloned repository did not verify (${verified.state}).`, {
       state: verified.state
+    });
+  }
+
+  try {
+    await publishRestoreTransaction(fileSystem, transaction);
+  } catch (error) {
+    if (error.code === "RESTORE_CLEANUP_REQUIRED") {
+      return restoreFailure(project, destination, "cleanup-required", safeOperationMessage("Restore publication cleanup failed", error), {
+        state: "staged"
+      });
+    }
+    const winner = await classifyRestoreDestination({
+      destination,
+      expectedRemote: remote.canonicalUrl,
+      fileSystem,
+      readRepositoryHead: options.readRepositoryHead,
+      readRepositoryRemote: options.readRepositoryRemote
+    });
+    try {
+      await cleanupRestoreTransaction(fileSystem, transaction);
+    } catch (cleanupError) {
+      return restoreFailure(project, destination, "cleanup-required", safeOperationMessage("Losing staging transaction could not be cleaned", cleanupError), {
+        state: winner.state
+      });
+    }
+    if (winner.state !== "existing-match") {
+      return restoreFailure(project, destination, "destination-raced", safeOperationMessage("Restore publication failed", error), {
+        state: winner.state
+      });
+    }
+    verified = winner;
+  }
+
+  try {
+    await cleanupRestoreTransaction(fileSystem, transaction);
+  } catch (cleanupError) {
+    return restoreFailure(project, destination, "cleanup-required", safeOperationMessage("Published restore transaction could not be cleaned", cleanupError), {
+      state: "existing-match"
     });
   }
 
@@ -405,6 +642,397 @@ async function restoreManagedProject(options) {
     });
   }
   return restoreSuccess(project, destination, remote, "missing", "cloned", true);
+}
+
+async function createRestoreTransaction({ aiosPath, destination, fileSystem, project, remote }) {
+  const root = managedWorkspaceRoot(aiosPath);
+  const slug = project.slug || project.project;
+  const owner = randomUUID();
+  const transactionRoot = path.join(root, `.dotaios-restore-${slug}-${owner}`);
+  const checkout = path.join(transactionRoot, RESTORE_CHECKOUT_DIRECTORY);
+  const processStartedAt = processBirthToken(process.pid);
+  const marker = {
+    schema: RESTORE_TRANSACTION_SCHEMA,
+    project_id: project.id.trim(),
+    slug,
+    remote_url: remote.canonicalUrl,
+    destination,
+    checkout: RESTORE_CHECKOUT_DIRECTORY,
+    pid: process.pid,
+    owner,
+    created_at: new Date().toISOString(),
+    ...(processStartedAt && { process_started_at: processStartedAt })
+  };
+  const markerContent = `${JSON.stringify(marker, null, 2)}\n`;
+  await fileSystem.mkdir(transactionRoot, { recursive: false, mode: 0o700 });
+  try {
+    const rootStats = await fileSystem.lstat(transactionRoot);
+    await fileSystem.writeFile(path.join(transactionRoot, RESTORE_TRANSACTION_MARKER), markerContent, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600
+    });
+    await fileSystem.mkdir(checkout, { recursive: false, mode: 0o700 });
+    return { root: transactionRoot, checkout, marker, markerContent, rootStats };
+  } catch (error) {
+    try {
+      await fileSystem.rm(transactionRoot, { recursive: true, force: true });
+    } catch (cleanupError) {
+      const failure = new AggregateError(
+        [error, cleanupError],
+        "Restore transaction setup failed and its private staging directory could not be cleaned."
+      );
+      failure.code = "RESTORE_CLEANUP_REQUIRED";
+      throw failure;
+    }
+    throw error;
+  }
+}
+
+async function recoverOwnedRestoreTransaction(options) {
+  const { aiosPath, destination, fileSystem, project, remote } = options;
+  const root = managedWorkspaceRoot(aiosPath);
+  const prefix = `.dotaios-restore-${project.slug || project.project}-`;
+  const entries = await fileSystem.readdir(root, { withFileTypes: true });
+  const transactions = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.name.startsWith(prefix)) continue;
+    const transaction = await readOwnedRestoreTransaction({
+      destination,
+      fileSystem,
+      name: entry.name,
+      project,
+      remote,
+      root
+    });
+    if (transaction) transactions.push(transaction);
+  }
+  if (transactions.some((transaction) => processRecordIsAlive(transaction.marker))) {
+    return { busy: true };
+  }
+
+  for (const transaction of transactions) {
+    const staged = await classifyRestoreDestination({
+      destination: transaction.checkout,
+      expectedRemote: remote.canonicalUrl,
+      fileSystem,
+      readRepositoryHead: options.readRepositoryHead,
+      readRepositoryRemote: options.readRepositoryRemote
+    });
+    if (staged.state === "missing") {
+      const published = await classifyRestoreDestination({
+        destination,
+        expectedRemote: remote.canonicalUrl,
+        fileSystem,
+        readRepositoryHead: options.readRepositoryHead,
+        readRepositoryRemote: options.readRepositoryRemote
+      });
+      if (published.state !== "existing-match") {
+        throw restoreCleanupError("Owned restore checkout disappeared without a verified published destination.");
+      }
+      transaction.published = true;
+      await cleanupRestoreTransaction(fileSystem, transaction);
+      return { verification: published };
+    }
+    if (staged.state !== "existing-match") {
+      await cleanupRestoreTransaction(fileSystem, transaction);
+      continue;
+    }
+
+    try {
+      await publishRestoreTransaction(fileSystem, transaction);
+    } catch (error) {
+      if (error.code === "RESTORE_CLEANUP_REQUIRED") throw error;
+      const winner = await classifyRestoreDestination({
+        destination,
+        expectedRemote: remote.canonicalUrl,
+        fileSystem,
+        readRepositoryHead: options.readRepositoryHead,
+        readRepositoryRemote: options.readRepositoryRemote
+      });
+      await cleanupRestoreTransaction(fileSystem, transaction);
+      if (winner.state !== "existing-match") return { raced: winner };
+      return { verification: winner };
+    }
+    await cleanupRestoreTransaction(fileSystem, transaction);
+    const published = await classifyRestoreDestination({
+      destination,
+      expectedRemote: remote.canonicalUrl,
+      fileSystem,
+      readRepositoryHead: options.readRepositoryHead,
+      readRepositoryRemote: options.readRepositoryRemote
+    });
+    if (published.state === "existing-match") return { verification: published };
+  }
+  return null;
+}
+
+async function readOwnedRestoreTransaction({ destination, fileSystem, name, project, remote, root }) {
+  const transactionRoot = path.join(root, name);
+  const rootStats = await lstatIfPresent(fileSystem, transactionRoot);
+  if (!rootStats?.isDirectory() || rootStats.isSymbolicLink()) return null;
+  const markerPath = path.join(transactionRoot, RESTORE_TRANSACTION_MARKER);
+  const markerStats = await lstatIfPresent(fileSystem, markerPath);
+  if (!markerStats?.isFile() || markerStats.isSymbolicLink() || markerStats.size > 4_096) return null;
+  let markerContent;
+  let marker;
+  try {
+    markerContent = await fileSystem.readFile(markerPath, "utf8");
+    marker = JSON.parse(markerContent);
+  } catch {
+    return null;
+  }
+  if (!restoreMarkerMatches(marker, { destination, name, project, remote })) return null;
+  const destinationClaim = await readRestoreDestinationClaim({
+    fileSystem,
+    marker,
+    transactionRoot
+  });
+  if (destinationClaim === false) return null;
+  return {
+    root: transactionRoot,
+    checkout: path.join(transactionRoot, RESTORE_CHECKOUT_DIRECTORY),
+    marker,
+    markerContent,
+    rootStats,
+    ...(destinationClaim && { destinationClaim })
+  };
+}
+
+async function readRestoreDestinationClaim({ fileSystem, marker, transactionRoot }) {
+  const claimPath = path.join(transactionRoot, RESTORE_DESTINATION_CLAIM_MARKER);
+  const stats = await lstatIfPresent(fileSystem, claimPath);
+  if (!stats) return null;
+  if (!stats.isFile() || stats.isSymbolicLink() || stats.size > 2_048) return false;
+  let content;
+  let record;
+  try {
+    content = await fileSystem.readFile(claimPath, "utf8");
+    record = JSON.parse(content);
+  } catch {
+    return false;
+  }
+  const keys = ["destination", "dev", "ino", "owner", "schema"];
+  if (!record || typeof record !== "object" || Array.isArray(record)
+    || JSON.stringify(Object.keys(record).sort()) !== JSON.stringify(keys)) return false;
+  if (record.schema !== RESTORE_DESTINATION_CLAIM_SCHEMA
+    || record.owner !== marker.owner
+    || record.destination !== marker.destination
+    || typeof record.dev !== "string" || !/^\d+$/.test(record.dev)
+    || typeof record.ino !== "string" || !/^\d+$/.test(record.ino)) return false;
+  return { path: claimPath, content, record };
+}
+
+function restoreMarkerMatches(marker, { destination, name, project, remote }) {
+  if (!marker || typeof marker !== "object" || Array.isArray(marker)) return false;
+  const requiredKeys = [
+    "checkout",
+    "created_at",
+    "destination",
+    "owner",
+    "pid",
+    "project_id",
+    "remote_url",
+    "schema",
+    "slug"
+  ];
+  const allowedKeys = typeof marker.process_started_at === "string"
+    ? [...requiredKeys, "process_started_at"]
+    : requiredKeys;
+  if (JSON.stringify(Object.keys(marker).sort()) !== JSON.stringify(allowedKeys.sort())) return false;
+  const createdAtIsCanonical = isCanonicalIsoTimestamp(marker.created_at);
+  const ownerIsCanonicalUuid = typeof marker.owner === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(marker.owner);
+  const processTokenIsBounded = marker.process_started_at === undefined
+    || (marker.process_started_at.length > 0 && marker.process_started_at.length <= 256);
+  return marker.schema === RESTORE_TRANSACTION_SCHEMA
+    && marker.project_id === project.id.trim()
+    && marker.slug === (project.slug || project.project)
+    && marker.remote_url === remote.canonicalUrl
+    && marker.destination === destination
+    && marker.checkout === RESTORE_CHECKOUT_DIRECTORY
+    && Number.isSafeInteger(marker.pid)
+    && marker.pid > 0
+    && ownerIsCanonicalUuid
+    && createdAtIsCanonical
+    && processTokenIsBounded
+    && name === `.dotaios-restore-${marker.slug}-${marker.owner}`;
+}
+
+async function publishRestoreTransaction(fileSystem, transaction) {
+  const destination = transaction.marker.destination;
+  if (process.platform === "win32") {
+    if (await lstatIfPresent(fileSystem, destination)) throw destinationExistsError();
+    await fileSystem.rename(transaction.checkout, destination);
+    transaction.published = true;
+    return;
+  }
+
+  // POSIX rename can silently replace an unowned empty directory. Claim the
+  // final name with an exclusive mkdir first, then replace only that exact,
+  // still-empty inode with the verified checkout. Windows rename already
+  // refuses an existing directory and therefore uses the direct path above.
+  let claimStats;
+  if (transaction.destinationClaim) {
+    claimStats = await lstatIfPresent(fileSystem, destination);
+    if (!claimStats) {
+      await clearRestoreDestinationClaim(fileSystem, transaction);
+    } else if (String(claimStats.dev) !== transaction.destinationClaim.record.dev
+      || String(claimStats.ino) !== transaction.destinationClaim.record.ino) {
+      throw destinationExistsError();
+    }
+  }
+  if (!transaction.destinationClaim) {
+    try {
+      await fileSystem.mkdir(destination, { recursive: false, mode: 0o700 });
+    } catch (error) {
+      if (error.code === "EEXIST") throw destinationExistsError();
+      throw error;
+    }
+    claimStats = await fileSystem.lstat(destination);
+    if (!claimStats.isDirectory() || claimStats.isSymbolicLink()) {
+      throw destinationExistsError();
+    }
+    try {
+      transaction.destinationClaim = await writeRestoreDestinationClaim(fileSystem, transaction, claimStats);
+    } catch (error) {
+      try {
+        await removeOwnedEmptyDestinationClaim(fileSystem, destination, claimStats);
+      } catch (cleanupError) {
+        throw restoreCleanupError(safeOperationMessage("Unrecorded destination claim removal failed", cleanupError));
+      }
+      throw error;
+    }
+  }
+  try {
+    const currentClaim = await fileSystem.lstat(destination);
+    if (!currentClaim.isDirectory() || currentClaim.isSymbolicLink()
+      || currentClaim.dev !== claimStats.dev || currentClaim.ino !== claimStats.ino
+      || (await fileSystem.readdir(destination)).length !== 0) {
+      throw destinationExistsError();
+    }
+    await fileSystem.rename(transaction.checkout, destination);
+    transaction.published = true;
+  } catch (error) {
+    try {
+      await removeOwnedEmptyDestinationClaim(fileSystem, destination, claimStats);
+    } catch (cleanupError) {
+      throw restoreCleanupError(safeOperationMessage("Owned destination claim removal failed", cleanupError));
+    }
+    throw error;
+  }
+}
+
+async function clearRestoreDestinationClaim(fileSystem, transaction) {
+  const claim = transaction.destinationClaim;
+  const stats = await lstatIfPresent(fileSystem, claim.path);
+  if (!stats?.isFile() || stats.isSymbolicLink() || stats.size > 2_048) {
+    throw restoreCleanupError("Restore destination claim changed; refusing replacement.");
+  }
+  if (await fileSystem.readFile(claim.path, "utf8") !== claim.content) {
+    throw restoreCleanupError("Restore destination claim changed; refusing replacement.");
+  }
+  try {
+    await fileSystem.rm(claim.path);
+  } catch (error) {
+    throw restoreCleanupError(safeOperationMessage("Stale destination claim removal failed", error));
+  }
+  transaction.destinationClaim = null;
+}
+
+async function writeRestoreDestinationClaim(fileSystem, transaction, claimStats) {
+  const claimPath = path.join(transaction.root, RESTORE_DESTINATION_CLAIM_MARKER);
+  const record = {
+    schema: RESTORE_DESTINATION_CLAIM_SCHEMA,
+    owner: transaction.marker.owner,
+    destination: transaction.marker.destination,
+    dev: String(claimStats.dev),
+    ino: String(claimStats.ino)
+  };
+  const content = `${JSON.stringify(record, null, 2)}\n`;
+  await fileSystem.writeFile(claimPath, content, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600
+  });
+  return { path: claimPath, content, record };
+}
+
+async function removeOwnedEmptyDestinationClaim(fileSystem, destination, claimStats) {
+  const current = await lstatIfPresent(fileSystem, destination);
+  if (!current || !current.isDirectory() || current.isSymbolicLink()
+    || current.dev !== claimStats.dev || current.ino !== claimStats.ino) return;
+  if ((await fileSystem.readdir(destination)).length !== 0) return;
+  await fileSystem.rmdir(destination);
+}
+
+function destinationExistsError() {
+  const error = new Error("Managed destination already exists.");
+  error.code = "EEXIST";
+  return error;
+}
+
+async function cleanupRestoreTransaction(fileSystem, transaction) {
+  const rootStats = await lstatIfPresent(fileSystem, transaction.root);
+  if (!rootStats) return;
+  if (!rootStats.isDirectory() || rootStats.isSymbolicLink()
+    || rootStats.dev !== transaction.rootStats.dev
+    || rootStats.ino !== transaction.rootStats.ino) {
+    throw restoreCleanupError("Restore transaction ownership changed; refusing cleanup.");
+  }
+  const markerPath = path.join(transaction.root, RESTORE_TRANSACTION_MARKER);
+  const markerStats = await lstatIfPresent(fileSystem, markerPath);
+  if (!markerStats?.isFile() || markerStats.isSymbolicLink() || markerStats.size > 4_096) {
+    throw restoreCleanupError("Restore transaction marker changed; refusing cleanup.");
+  }
+  const currentMarker = await fileSystem.readFile(markerPath, "utf8");
+  if (currentMarker !== transaction.markerContent) {
+    throw restoreCleanupError("Restore transaction marker changed; refusing cleanup.");
+  }
+  if (transaction.destinationClaim) {
+    const claimStats = await lstatIfPresent(fileSystem, transaction.destinationClaim.path);
+    if (!claimStats?.isFile() || claimStats.isSymbolicLink() || claimStats.size > 2_048) {
+      throw restoreCleanupError("Restore destination claim changed; refusing cleanup.");
+    }
+    const currentClaim = await fileSystem.readFile(transaction.destinationClaim.path, "utf8");
+    if (currentClaim !== transaction.destinationClaim.content) {
+      throw restoreCleanupError("Restore destination claim changed; refusing cleanup.");
+    }
+  }
+  const checkoutStats = await lstatIfPresent(fileSystem, transaction.checkout);
+  if (checkoutStats) {
+    if (!checkoutStats.isDirectory() || checkoutStats.isSymbolicLink()) {
+      throw restoreCleanupError("Restore transaction checkout changed type; refusing cleanup.");
+    }
+    const canonicalRoot = await fileSystem.realpath(transaction.root);
+    if (await fileSystem.realpath(transaction.checkout) !== path.join(canonicalRoot, RESTORE_CHECKOUT_DIRECTORY)) {
+      throw restoreCleanupError("Restore transaction checkout resolves outside staging; refusing cleanup.");
+    }
+  } else if (!transaction.published) {
+    throw restoreCleanupError("Restore transaction checkout disappeared before publication; refusing cleanup.");
+  }
+  try {
+    await fileSystem.rm(transaction.root, { recursive: true });
+  } catch (error) {
+    throw restoreCleanupError(safeOperationMessage("Restore transaction removal failed", error));
+  }
+}
+
+function isCanonicalIsoTimestamp(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) return false;
+  const timestamp = Date.parse(value);
+  if (!Number.isFinite(timestamp)) return false;
+  try {
+    return new Date(timestamp).toISOString() === value;
+  } catch {
+    return false;
+  }
+}
+
+function restoreCleanupError(message) {
+  const error = new Error(message);
+  error.code = "RESTORE_CLEANUP_REQUIRED";
+  return error;
 }
 
 function selectRestoreProjects(projects, reference) {
@@ -524,7 +1152,7 @@ function parseRemoteUrl(remote) {
   return {
     transport: "ssh",
     canonicalUrl: `ssh://${user}${hostAndPort}/${repoPath}.git`,
-    identity: `${identityHost}/${repoPath}`
+    identity: `${parsed.username ? `${parsed.username}@` : ""}${identityHost}/${repoPath}`
   };
 }
 
@@ -542,7 +1170,7 @@ function parseScpRemote(remote) {
   return {
     transport: "scp",
     canonicalUrl: `${user ? `${user}@` : ""}${host}:${repoPath}.git`,
-    identity: `${host}/${repoPath}`
+    identity: `${user ? `${user}@` : ""}${host}/${repoPath}`
   };
 }
 

@@ -11,12 +11,15 @@ import { initialMirrorPush } from "../../packages/cli/src/sync/repo.mjs";
 
 const run = promisify(execFile);
 
-test("the managed sync ignore template anchors the local workspace root", async () => {
+test("the managed sync ignore template carries the portable privacy contract", async () => {
   const template = await fs.readFile(
     new URL("../../templates/sync-gitignore.template", import.meta.url),
     "utf8"
   );
   assert.match(template, /^\/workspaces\/$/m);
+  assert.match(template, /^credentials\.\*$/m);
+  assert.match(template, /^token\.\*$/m);
+  assert.match(template, /^!\.env\.example$/m);
 });
 
 async function git(cwd, ...args) {
@@ -31,6 +34,7 @@ async function makeAios(t, { gitignore = "" } = {}) {
   await git(aios, "config", "user.email", "t@example.com");
   await git(aios, "config", "user.name", "Test");
   await fs.writeFile(path.join(aios, ".gitignore"), gitignore);
+  await fs.writeFile(path.join(aios, "aios.json"), '{"schema_version":"1.2.0"}\n');
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return aios;
 }
@@ -84,6 +88,409 @@ test("mirror validation refuses every outer-index entry under workspaces", async
     (error) => /outer Git index/i.test(error.message)
       && /workspaces\/alpha\/tracked\.txt/i.test(error.message)
   );
+});
+
+test("mirror validation refuses sensitive files even when ignore rules were weakened", async (t) => {
+  const aios = await makeAios(t, { gitignore: "/workspaces/\n" });
+  await fs.writeFile(path.join(aios, ".env"), "SECRET=must-not-sync\n");
+
+  const syncGit = createGit({
+    cwd: aios,
+    env: { ...process.env, HOME: path.dirname(aios) }
+  });
+  await assert.rejects(
+    () => syncGit.commitAll("must refuse secret"),
+    (error) => /private or regenerable local files/i.test(error.message)
+      && error.message.includes(".env")
+  );
+
+  const indexed = (await git(aios, "ls-files", "--", ".env")).stdout;
+  assert.equal(indexed, "", "the sensitive path must be refused before git add");
+});
+
+test("commitAll refuses credentials.* and token.* aliases without changing HEAD, index, or files", async (t) => {
+  for (const relative of [
+    "credentials.json",
+    "token.json",
+    "connections/custom/Credentials.backup",
+    "vault/private/TOKEN.production"
+  ]) {
+    await t.test(relative, async (t) => {
+      const aios = await makeAios(t, { gitignore: "/workspaces/\n" });
+      await git(aios, "add", ".gitignore", "aios.json");
+      await git(aios, "commit", "-q", "-m", "safe mirror");
+      const secretPath = path.join(aios, ...relative.split("/"));
+      await fs.mkdir(path.dirname(secretPath), { recursive: true });
+      await fs.writeFile(secretPath, "private-secret\n");
+      const beforeHead = (await git(aios, "rev-parse", "HEAD")).stdout.trim();
+      const indexPath = path.join(aios, ".git", "index");
+      const beforeIndex = await fs.readFile(indexPath);
+
+      await assert.rejects(
+        createGit({ cwd: aios }).commitAll("must refuse secret prefix"),
+        (error) => /private or regenerable local files/i.test(error.message)
+          && error.message.includes(relative)
+      );
+
+      assert.equal((await git(aios, "rev-parse", "HEAD")).stdout.trim(), beforeHead);
+      assert.deepEqual(await fs.readFile(indexPath), beforeIndex);
+      assert.equal(await fs.readFile(secretPath, "utf8"), "private-secret\n");
+      assert.equal((await git(aios, "ls-files", "--", relative)).stdout.trim(), "");
+    });
+  }
+});
+
+test("mirror validation refuses transient migration state", async (t) => {
+  const aios = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const transient = path.join(aios, ".dotaios", "migrations", "transactions", "plan", "journal.json");
+  await fs.mkdir(path.dirname(transient), { recursive: true });
+  await fs.writeFile(transient, '{"status":"prepared"}\n');
+
+  await assert.rejects(
+    () => createGit({ cwd: aios }).commitAll("must refuse transaction state"),
+    (error) => /private or regenerable local files/i.test(error.message)
+      && error.message.includes(".dotaios/migrations/transactions")
+  );
+  assert.equal(
+    (await git(aios, "ls-files", "--", ".dotaios/migrations/transactions")).stdout,
+    ""
+  );
+});
+
+test("fresh scaffold .env.example is safe to mirror", async (t) => {
+  const aios = await makeAios(t, { gitignore: "/workspaces/\n!.env.example\n" });
+  await fs.writeFile(path.join(aios, ".env.example"), "OPTIONAL_TOKEN=\n");
+  const sha = await createGit({ cwd: aios }).commitAll("initial mirror");
+  assert.match(sha, /^[0-9a-f]{40}$/);
+  assert.equal((await git(aios, "show", "HEAD:.env.example")).stdout, "OPTIONAL_TOKEN=\n");
+});
+
+test("pullRebase refuses remote token aliases before changing HEAD, index, or worktree", async (t) => {
+  const seed = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "secret-prefix-mirror.git");
+  const victim = path.join(root, "secret-prefix-victim");
+  const attacker = path.join(root, "secret-prefix-attacker");
+  await fs.writeFile(path.join(seed, "README.md"), "safe base\n");
+  await git(seed, "add", ".gitignore", "aios.json", "README.md");
+  await git(seed, "commit", "-q", "-m", "safe mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(root, "clone", "-q", remote, attacker);
+  await git(attacker, "config", "user.email", "attacker@example.com");
+  await git(attacker, "config", "user.name", "Attacker");
+  await fs.writeFile(path.join(attacker, "TOKEN.json"), "remote-secret\n");
+  await git(attacker, "add", "TOKEN.json");
+  await git(attacker, "commit", "-q", "-m", "poison mirror with token");
+  await git(attacker, "push", "-q", "origin", "main");
+
+  const victimNote = path.join(victim, "victim-only.md");
+  await fs.writeFile(victimNote, "victim-owned\n");
+  const beforeHead = (await git(victim, "rev-parse", "HEAD")).stdout.trim();
+  const indexPath = path.join(victim, ".git", "index");
+  const beforeIndex = await fs.readFile(indexPath);
+
+  await assert.rejects(
+    createGit({ cwd: victim }).pullRebase("main"),
+    /private or regenerable local files.*TOKEN\.json/i
+  );
+
+  assert.equal((await git(victim, "rev-parse", "HEAD")).stdout.trim(), beforeHead);
+  assert.deepEqual(await fs.readFile(indexPath), beforeIndex);
+  assert.equal(await fs.readFile(victimNote, "utf8"), "victim-owned\n");
+  await assert.rejects(fs.lstat(path.join(victim, "TOKEN.json")), { code: "ENOENT" });
+});
+
+test("pullRebase refuses a poisoned remote before it can overwrite an ignored workspace", async (t) => {
+  const seed = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "mirror.git");
+  const victim = path.join(root, "victim");
+  const attacker = path.join(root, "attacker");
+
+  await fs.writeFile(path.join(seed, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "safe mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(root, "clone", "-q", remote, attacker);
+  await git(attacker, "config", "user.email", "attacker@example.com");
+  await git(attacker, "config", "user.name", "Attacker");
+
+  const victimPrivate = path.join(victim, "workspaces", "widget", "private.txt");
+  await fs.mkdir(path.dirname(victimPrivate), { recursive: true });
+  await fs.writeFile(victimPrivate, "victim-owned\n");
+  const attackerPath = path.join(attacker, "workspaces", "widget", "private.txt");
+  await fs.mkdir(path.dirname(attackerPath), { recursive: true });
+  await fs.writeFile(attackerPath, "remote-poison\n");
+  await git(attacker, "add", "-f", "workspaces/widget/private.txt");
+  await git(attacker, "commit", "-q", "-m", "poison ignored workspace");
+  await git(attacker, "push", "-q", "origin", "main");
+
+  const beforeHead = (await git(victim, "rev-parse", "HEAD")).stdout.trim();
+  await assert.rejects(
+    createGit({ cwd: victim }).pullRebase("main"),
+    /tracked local-workspace path/i
+  );
+  assert.equal(await fs.readFile(victimPrivate, "utf8"), "victim-owned\n");
+  assert.equal((await git(victim, "rev-parse", "HEAD")).stdout.trim(), beforeHead);
+});
+
+test("pullRebase refuses a remote symlink before changing HEAD or the worktree", async (t) => {
+  const seed = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "symlink-mirror.git");
+  const victim = path.join(root, "symlink-victim");
+  const attacker = path.join(root, "symlink-attacker");
+
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "safe mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(root, "clone", "-q", remote, attacker);
+  await git(attacker, "config", "user.email", "attacker@example.com");
+  await git(attacker, "config", "user.name", "Attacker");
+
+  const remoteLink = path.join(attacker, "memory", "events.jsonl");
+  await fs.mkdir(path.dirname(remoteLink), { recursive: true });
+  await fs.symlink("../../../outside-target", remoteLink);
+  await git(attacker, "add", "memory/events.jsonl");
+  await git(attacker, "commit", "-q", "-m", "install remote symlink");
+  await git(attacker, "push", "-q", "origin", "main");
+
+  const beforeHead = (await git(victim, "rev-parse", "HEAD")).stdout.trim();
+  await assert.rejects(
+    createGit({ cwd: victim }).pullRebase("main"),
+    /symbolic link.*memory\/events\.jsonl/i
+  );
+  assert.equal((await git(victim, "rev-parse", "HEAD")).stdout.trim(), beforeHead);
+  await assert.rejects(fs.lstat(path.join(victim, "memory", "events.jsonl")), { code: "ENOENT" });
+});
+
+test("pullRebase stays bound to the validated fetched commit if origin/main moves concurrently", async (t) => {
+  const seed = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "moving-ref-mirror.git");
+  const victim = path.join(root, "moving-ref-victim");
+  const peer = path.join(root, "moving-ref-peer");
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "safe base");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(root, "clone", "-q", remote, peer);
+  await git(peer, "config", "user.email", "peer@example.com");
+  await git(peer, "config", "user.name", "Peer");
+
+  await fs.writeFile(path.join(peer, "safe-peer.md"), "validated peer change\n");
+  await git(peer, "add", "safe-peer.md");
+  await git(peer, "commit", "-q", "-m", "safe peer change");
+  await git(peer, "push", "-q", "origin", "main");
+
+  await git(peer, "checkout", "-q", "-b", "unsafe", "HEAD~1");
+  const unsafePath = path.join(peer, "memory", "events.jsonl");
+  await fs.mkdir(path.dirname(unsafePath), { recursive: true });
+  await fs.symlink("../../../outside-events.jsonl", unsafePath);
+  await git(peer, "add", "memory/events.jsonl");
+  await git(peer, "commit", "-q", "-m", "unsafe alternate commit");
+  await git(peer, "push", "-q", "origin", "unsafe");
+  const unsafeSha = (await git(peer, "rev-parse", "HEAD")).stdout.trim();
+  await git(victim, "fetch", "-q", "origin", "unsafe:refs/remotes/origin/unsafe");
+
+  let moved = false;
+  const spawnImpl = async (cmd, args, options) => {
+    if (!moved && args[0] === "rebase") {
+      moved = true;
+      await git(victim, "update-ref", "refs/remotes/origin/main", unsafeSha);
+    }
+    try {
+      const { stdout, stderr } = await run(cmd, args, { cwd: victim, env: options.env });
+      return { stdout, stderr, code: 0 };
+    } catch (error) {
+      return {
+        stdout: error.stdout || "",
+        stderr: error.stderr || error.message,
+        code: Number.isInteger(error.code) ? error.code : 1
+      };
+    }
+  };
+
+  assert.equal(await createGit({ cwd: victim, spawnImpl }).pullRebase("main"), "rebased");
+  assert.equal(moved, true, "the regression must move the symbolic tracking ref before rebase");
+  assert.equal(await fs.readFile(path.join(victim, "safe-peer.md"), "utf8"), "validated peer change\n");
+  await assert.rejects(fs.lstat(path.join(victim, "memory", "events.jsonl")), { code: "ENOENT" });
+});
+
+test("pullRebase refuses a remote that negates the workspace boundary before rebase", async (t) => {
+  const seed = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "mirror.git");
+  const victim = path.join(root, "victim");
+  const attacker = path.join(root, "attacker");
+
+  await fs.writeFile(path.join(seed, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "safe mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(root, "clone", "-q", remote, attacker);
+  await git(attacker, "config", "user.email", "attacker@example.com");
+  await git(attacker, "config", "user.name", "Attacker");
+  await fs.writeFile(path.join(attacker, ".gitignore"), "/workspaces/\n!/workspaces/\n");
+  await git(attacker, "add", ".gitignore");
+  await git(attacker, "commit", "-q", "-m", "negate workspace privacy boundary");
+  await git(attacker, "push", "-q", "origin", "main");
+
+  const beforeHead = (await git(victim, "rev-parse", "HEAD")).stdout.trim();
+  await assert.rejects(
+    createGit({ cwd: victim }).pullRebase("main"),
+    /does not effectively ignore \/workspaces\//i
+  );
+  assert.equal((await fs.readFile(path.join(victim, ".gitignore"), "utf8")), "/workspaces/\n");
+  assert.equal((await git(victim, "rev-parse", "HEAD")).stdout.trim(), beforeHead);
+});
+
+test("a direct local schema upgrade can replace its legacy remote boundary", async (t) => {
+  const seed = await makeAios(t, { gitignore: "node_modules/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "legacy-mirror.git");
+  const victim = path.join(root, "victim");
+  await fs.writeFile(path.join(seed, "aios.json"), '{"schema_version":"1.1.0"}\n');
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "legacy mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(victim, "config", "user.email", "owner@example.com");
+  await git(victim, "config", "user.name", "Owner");
+  await fs.writeFile(path.join(victim, ".gitignore"), "node_modules/\n/workspaces/\n");
+  await fs.writeFile(path.join(victim, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  await git(victim, "add", ".gitignore", "aios.json");
+  await git(victim, "commit", "-q", "-m", "migrate workspace boundary");
+
+  assert.equal(await createGit({ cwd: victim }).pullRebase("main"), "up-to-date");
+});
+
+test("a current local upgrade safely rebases a benign divergent legacy device", async (t) => {
+  const seed = await makeAios(t, { gitignore: "node_modules/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "legacy-divergence.git");
+  const currentDevice = path.join(root, "current-device");
+  const legacyDevice = path.join(root, "legacy-device");
+  await fs.writeFile(path.join(seed, "aios.json"), '{"schema_version":"1.1.0"}\n');
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "legacy mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, currentDevice);
+  await git(root, "clone", "-q", remote, legacyDevice);
+  for (const checkout of [currentDevice, legacyDevice]) {
+    await git(checkout, "config", "user.email", "owner@example.com");
+    await git(checkout, "config", "user.name", "Owner");
+  }
+
+  await fs.writeFile(path.join(currentDevice, ".gitignore"), "node_modules/\n/workspaces/\n");
+  await fs.writeFile(path.join(currentDevice, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  await git(currentDevice, "add", ".gitignore", "aios.json");
+  await git(currentDevice, "commit", "-q", "-m", "migrate workspace boundary");
+
+  await fs.writeFile(path.join(legacyDevice, "legacy-note.md"), "benign peer edit\n");
+  await git(legacyDevice, "add", "legacy-note.md");
+  await git(legacyDevice, "commit", "-q", "-m", "legacy peer edit");
+  await git(legacyDevice, "push", "-q", "origin", "main");
+
+  assert.equal(await createGit({ cwd: currentDevice }).pullRebase("main"), "rebased");
+  assert.equal(await fs.readFile(path.join(currentDevice, "legacy-note.md"), "utf8"), "benign peer edit\n");
+  assert.equal(JSON.parse(await fs.readFile(path.join(currentDevice, "aios.json"), "utf8")).schema_version, "1.2.0");
+  assert.match(await fs.readFile(path.join(currentDevice, ".gitignore"), "utf8"), /^\/workspaces\/$/m);
+});
+
+test("pullRebase refuses a duplicate-id remote project catalog before changing HEAD", async (t) => {
+  const seed = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "catalog-mirror.git");
+  const victim = path.join(root, "victim");
+  const attacker = path.join(root, "attacker");
+  await fs.writeFile(path.join(seed, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "safe mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(root, "clone", "-q", remote, attacker);
+  await git(attacker, "config", "user.email", "attacker@example.com");
+  await git(attacker, "config", "user.name", "Attacker");
+  for (const slug of ["one", "two"]) {
+    const readme = path.join(attacker, "projects", slug, "README.md");
+    await fs.mkdir(path.dirname(readme), { recursive: true });
+    await fs.writeFile(readme, `---\nid: duplicate-id\nproject: ${slug}\nstatus: active\n---\n# ${slug}\n`);
+  }
+  await git(attacker, "add", "projects");
+  await git(attacker, "commit", "-q", "-m", "poison project catalog");
+  await git(attacker, "push", "-q", "origin", "main");
+
+  const beforeHead = (await git(victim, "rev-parse", "HEAD")).stdout.trim();
+  await assert.rejects(
+    createGit({ cwd: victim }).pullRebase("main"),
+    /project catalog is invalid.*duplicate-id/i
+  );
+  assert.equal((await git(victim, "rev-parse", "HEAD")).stdout.trim(), beforeHead);
+});
+
+test("pullRebase validates the combined local and remote project catalog before rebase", async (t) => {
+  const seed = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const root = path.dirname(seed);
+  const remote = path.join(root, "combined-catalog-mirror.git");
+  const victim = path.join(root, "victim");
+  const peer = path.join(root, "peer");
+  await fs.writeFile(path.join(seed, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  await git(seed, "add", ".gitignore", "aios.json");
+  await git(seed, "commit", "-q", "-m", "safe mirror");
+  await git(root, "init", "-q", "--bare", remote);
+  await git(seed, "remote", "add", "origin", remote);
+  await git(seed, "push", "-q", "-u", "origin", "main");
+  await git(root, "--git-dir", remote, "symbolic-ref", "HEAD", "refs/heads/main");
+  await git(root, "clone", "-q", remote, victim);
+  await git(root, "clone", "-q", remote, peer);
+  for (const checkout of [victim, peer]) {
+    await git(checkout, "config", "user.email", "owner@example.com");
+    await git(checkout, "config", "user.name", "Owner");
+  }
+  for (const [checkout, slug] of [[victim, "local"], [peer, "remote"]]) {
+    const readme = path.join(checkout, "projects", slug, "README.md");
+    await fs.mkdir(path.dirname(readme), { recursive: true });
+    await fs.writeFile(readme, `---\nid: shared-id\nproject: ${slug}\nstatus: active\n---\n# ${slug}\n`);
+    await git(checkout, "add", "projects");
+    await git(checkout, "commit", "-q", "-m", `add ${slug} project`);
+  }
+  await git(peer, "push", "-q", "origin", "main");
+
+  const beforeHead = (await git(victim, "rev-parse", "HEAD")).stdout.trim();
+  await assert.rejects(
+    createGit({ cwd: victim }).pullRebase("main"),
+    /project catalog is invalid.*shared-id/i
+  );
+  assert.equal((await git(victim, "rev-parse", "HEAD")).stdout.trim(), beforeHead);
 });
 
 test("outer-index enforcement cannot be bypassed by a quoted workspace path", async (t) => {
@@ -183,6 +590,7 @@ test("layout-only mirror validation works before the outer repository is initial
   const aios = path.join(root, "aios");
   await fs.mkdir(aios, { recursive: true });
   t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(aios, "aios.json"), '{"schema_version":"1.2.0"}\n');
   await registerProject(aios, "widget");
   await makeWorkspace(aios, "widget");
 
@@ -209,10 +617,11 @@ test("initial upload permits a registered workspace after both policy passes", a
       init: async () => calls.push("init"),
       addRemote: async () => calls.push("remote"),
       commitAll: async () => "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1",
+      validateMirrorCommit: async () => calls.push("commit-tree"),
       push: async () => calls.push("push")
     }
   }));
-  assert.deepEqual(calls, ["layout", "init", "full", "remote", "push"]);
+  assert.deepEqual(calls, ["layout", "init", "full", "remote", "commit-tree", "push"]);
 });
 
 test("mirror validation refuses unsafe and mismatched workspace remotes", async (t) => {

@@ -21,8 +21,9 @@ test("renderTemplate handles ai_tools loops", () => {
   assert.equal(rendered, 'tools: "claude-code", "codex"');
 });
 
-test("templateOutputPath maps Cursor template to hidden file", () => {
+test("templateOutputPath maps ship-safe templates to hidden files", () => {
   assert.equal(templateOutputPath("cursorrules.hbs"), ".cursorrules");
+  assert.equal(templateOutputPath("gitignore.template"), ".gitignore");
   assert.equal(templateOutputPath("AGENTS.md.hbs"), "AGENTS.md");
 });
 

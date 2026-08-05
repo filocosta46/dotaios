@@ -5,6 +5,7 @@ import { readSyncConfig, writeSyncConfig } from "../../../core/src/sync-config.m
 import { createGit } from "./git.mjs";
 import { runTick, SYNC_STALLED_SUMMARY } from "./tick.mjs";
 import { readOptionValue } from "../lib/args.mjs";
+import { assertRepositoryBinding } from "./repository-binding.mjs";
 
 const LOCK_FILENAME = "sync.lock";
 
@@ -36,6 +37,7 @@ export async function runTickCommand(args = []) {
     readConfig: () => readSyncConfig(),
     writeConfig: (patch) => writeSyncConfig(patch),
     makeGit: (options) => createGit({ cwd: aiosPath, ...options }),
+    verifyRepositoryBinding: (git) => assertRepositoryBinding({ aiosPath, git }),
     appendEvent: (evt) => appendSyncEvent(aiosPath, evt),
     now: () => Date.now()
   });

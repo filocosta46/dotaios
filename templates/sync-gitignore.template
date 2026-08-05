@@ -1,5 +1,8 @@
 .env
 .env.*
+!.env.example
+credentials.*
+token.*
 *.key
 *.pem
 *.token

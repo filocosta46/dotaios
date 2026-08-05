@@ -263,6 +263,9 @@ export async function initialMirrorPush({
 
   // 4. Add + commit everything.
   const sha = await git.commitAll("Initial DotAIOS mirror") || await git.currentSha();
+  // Bind the upload receipt to the immutable tree that passed policy, not to
+  // symbolic HEAD, which another Git process can move concurrently.
+  await git.validateMirrorCommit(sha);
 
   // Persist the exact commit receipt before the network call. If the process
   // stops after GitHub accepts the push, an identical retry can prove and
@@ -270,7 +273,7 @@ export async function initialMirrorPush({
   await recordIntendedSha(sha);
 
   // 5. Push.
-  await git.push("main");
+  await git.push("main", sha);
 
   return sha;
 }

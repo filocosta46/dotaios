@@ -1,6 +1,7 @@
 import {
   classifyProjectRemote,
-  parseProjectRemote
+  parseProjectRemote,
+  projectRemotesMatch
 } from "../../core/src/project-workspaces.mjs";
 import {
   defaultSpawn,
@@ -59,8 +60,8 @@ export function createProjectGitAdapter({
     } catch {
       throw new Error("Effective Git URL rewrite produces an unsafe destination; refusing project clone before contacting the network.");
     }
-    if (effectiveRemote.identity !== remote.identity) {
-      throw new Error("Effective Git URL rewrite changes the project host or repository identity; refusing project clone before contacting the network.");
+    if (!projectRemotesMatch(remote.canonicalUrl, effectiveRemote.canonicalUrl)) {
+      throw new Error("Effective Git URL rewrite changes the project host, repository, or SSH principal identity; refusing project clone before contacting the network.");
     }
 
     const result = await run([

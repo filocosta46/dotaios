@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { schemaVersion } from "./schema.mjs";
+import { endsWithManagedWorkspaceIgnoreRule } from "./workspace-ignore.mjs";
 
 const PLAN_SCHEMA = "dotaios.migration-plan.v1";
 const JOURNAL_SCHEMA = "dotaios.migration-journal.v1";
@@ -152,7 +154,7 @@ export async function applyMigration({ aiosPath, planId, releaseVersion, signal 
     throw error;
   }
 
-  const journal = createJournal(computed.plan);
+  const journal = createJournal(computed.plan, computed.changes);
   await writeInitialJournal(transactionRoot, journal);
   await stageTransaction(root, transactionRoot, computed.changes, journal);
   throwIfAborted(signal, true, planId);
@@ -418,7 +420,7 @@ function appendWorkspaceIgnore(bytes) {
   if (!Buffer.from(text, "utf8").equals(bytes)) {
     throw new MigrationError("UNSAFE_IGNORE_FILE", ".gitignore is not valid UTF-8; refusing to rewrite it.");
   }
-  if (text.split(/\r?\n/).includes("/workspaces/")) return bytes;
+  if (endsWithManagedWorkspaceIgnoreRule(text)) return bytes;
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   const separator = text.length > 0 && !text.endsWith("\n") ? eol : "";
   return Buffer.from(`${text}${separator}/workspaces/${eol}`, "utf8");
@@ -437,7 +439,8 @@ function publicOperation(change) {
   };
 }
 
-function createJournal(plan) {
+function createJournal(plan, changes) {
+  const changesByPath = new Map(changes.map((change) => [change.path, change]));
   return {
     schema: JOURNAL_SCHEMA,
     plan_id: plan.plan_id,
@@ -446,13 +449,21 @@ function createJournal(plan) {
     from_schema_version: plan.from_schema_version,
     to_schema_version: plan.to_schema_version,
     migrations: plan.migrations.map(({ id }) => id),
-    operations: plan.operations.map((operation) => ({
-      path: operation.path,
-      action: operation.action,
-      before_sha256: operation.before_sha256,
-      after_sha256: operation.after_sha256,
-      backup_path: operation.before_sha256 ? path.posix.join("backups", operation.path) : null
-    }))
+    operations: plan.operations.map((operation) => {
+      const change = changesByPath.get(operation.path);
+      if (!change) {
+        throw new MigrationError("INVALID_REGISTRY", `Migration plan is missing internal state for ${operation.path}.`);
+      }
+      return {
+        path: operation.path,
+        action: operation.action,
+        before_sha256: operation.before_sha256,
+        after_sha256: operation.after_sha256,
+        before_mode: change.before_mode,
+        after_mode: change.after_mode,
+        backup_path: operation.before_sha256 ? path.posix.join("backups", operation.path) : null
+      };
+    })
   };
 }
 
@@ -475,7 +486,9 @@ async function stageTransaction(root, transactionRoot, changes, journal) {
     }
     const stagedPath = path.join(transactionRoot, "staged", ...change.path.split("/"));
     await fs.mkdir(path.dirname(stagedPath), { recursive: true });
-    await fs.writeFile(stagedPath, change.after, { flag: "wx", mode: change.after_mode || 0o644 });
+    const stagedMode = change.after_mode ?? 0o644;
+    await fs.writeFile(stagedPath, change.after, { flag: "wx", mode: stagedMode });
+    await fs.chmod(stagedPath, stagedMode);
   }
   await updateJournal(transactionRoot, { ...journal, status: "prepared" });
   await assertChangesUnchanged(root, changes);
@@ -515,7 +528,8 @@ async function assertChangeUnchanged(root, change) {
       return;
     }
   }
-  await lstatRegularFile(destination, change.path);
+  const stats = await lstatRegularFile(destination, change.path);
+  if ((stats.mode & 0o777) !== change.before_mode) throw concurrentEdit(change.path);
   const current = await fs.readFile(destination);
   if (!current.equals(change.before)) throw concurrentEdit(change.path);
 }
@@ -526,6 +540,8 @@ async function restoreOperation(root, transactionRoot, operation) {
   const current = await readOptionalRegularFile(destination, operation.path);
   const currentHash = current ? sha256(current.bytes) : null;
 
+  // Original bytes mean this operation never committed. Its current mode may
+  // be a legitimate concurrent chmod, so recovery must leave it untouched.
   if (currentHash === operation.before_sha256) return;
   if (currentHash !== operation.after_sha256) {
     throw new MigrationError(
@@ -533,6 +549,13 @@ async function restoreOperation(root, transactionRoot, operation) {
       `${operation.path} changed after the interrupted migration. Recovery will not overwrite it.`,
       { path: operation.path }
     );
+  }
+  // New journals bind both bytes and permissions. Once the migrated bytes are
+  // present, a different mode is a post-interruption user edit and must not be
+  // overwritten by rollback. Legacy journals did not record modes, so retain
+  // their historical hash-only recovery behavior.
+  if (operation.after_mode !== undefined && current?.mode !== operation.after_mode) {
+    throw concurrentEdit(operation.path);
   }
 
   if (!operation.before_sha256) {
@@ -545,9 +568,129 @@ async function restoreOperation(root, transactionRoot, operation) {
     throw new MigrationError("INVALID_BACKUP", `Backup for ${operation.path} does not match the journal.`);
   }
   const recoveryPath = path.join(transactionRoot, "recovery", ...operation.path.split("/"));
-  await fs.mkdir(path.dirname(recoveryPath), { recursive: true });
-  await fs.writeFile(recoveryPath, backup, { flag: "wx", mode: current?.mode || 0o600 });
+  // Journals written before mode metadata was added remain recoverable. Their
+  // staged replacement inherited the original mode, so use its current mode
+  // when available; otherwise retain the legacy private fallback.
+  const recoveryMode = operation.before_mode ?? current?.mode ?? 0o600;
+  const recoveryIdentity = await prepareRecoveryReplacement(
+    recoveryPath,
+    backup,
+    recoveryMode,
+    operation.path
+  );
+  await assertRecoveryReplacementExact(
+    recoveryPath,
+    backup,
+    recoveryMode,
+    recoveryIdentity,
+    operation.path
+  );
   await fs.rename(recoveryPath, destination);
+}
+
+async function prepareRecoveryReplacement(recoveryPath, expectedBytes, mode, label) {
+  await ensureDirectory(path.dirname(recoveryPath));
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    let handle;
+    let created = false;
+    try {
+      try {
+        handle = await fs.open(
+          recoveryPath,
+          fsConstants.O_RDWR | (fsConstants.O_NOFOLLOW || 0)
+        );
+      } catch (error) {
+        if (error.code !== "ENOENT") throw recoveryResidueError(label);
+        try {
+          handle = await fs.open(
+            recoveryPath,
+            fsConstants.O_CREAT
+              | fsConstants.O_EXCL
+              | fsConstants.O_RDWR
+              | (fsConstants.O_NOFOLLOW || 0),
+            0o600
+          );
+          created = true;
+        } catch (createError) {
+          if (createError.code === "EEXIST") continue;
+          throw createError;
+        }
+      }
+
+      if (created) {
+        await handle.writeFile(expectedBytes);
+        await handle.sync();
+      }
+      const stats = await handle.stat();
+      if (!stats.isFile() || stats.nlink !== 1) throw recoveryResidueError(label);
+      const bytes = await readHandleBytes(handle, stats.size);
+      if (!bytes.equals(expectedBytes)) throw recoveryResidueError(label);
+
+      // A stop can happen after exclusive creation but before chmod. Exact
+      // bytes at this deterministic, owned transaction path are sufficient to
+      // resume; normalize them back to the journaled mode through the verified
+      // open handle before installing anything in the AIOS root.
+      await handle.chmod(mode);
+      await handle.sync();
+      return `${stats.dev}:${stats.ino}`;
+    } finally {
+      await handle?.close().catch(() => {});
+    }
+  }
+
+  throw recoveryResidueError(label);
+}
+
+async function assertRecoveryReplacementExact(
+  recoveryPath,
+  expectedBytes,
+  mode,
+  expectedIdentity,
+  label
+) {
+  let handle;
+  try {
+    handle = await fs.open(
+      recoveryPath,
+      fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0)
+    );
+    const stats = await handle.stat();
+    if (
+      !stats.isFile()
+      || stats.nlink !== 1
+      || `${stats.dev}:${stats.ino}` !== expectedIdentity
+      || (stats.mode & 0o777) !== mode
+    ) {
+      throw recoveryResidueError(label);
+    }
+    const bytes = await readHandleBytes(handle, stats.size);
+    if (!bytes.equals(expectedBytes)) throw recoveryResidueError(label);
+  } catch (error) {
+    if (error instanceof MigrationError) throw error;
+    throw recoveryResidueError(label);
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+async function readHandleBytes(handle, size) {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const { bytesRead } = await handle.read(bytes, offset, size - offset, offset);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  return offset === size ? bytes : bytes.subarray(0, offset);
+}
+
+function recoveryResidueError(label) {
+  return new MigrationError(
+    "UNSAFE_RECOVERY_RESIDUE",
+    `Recovery staging file for ${label} is changed, linked, or foreign. Refusing to overwrite it or the AIOS file.`,
+    { path: label }
+  );
 }
 
 function createReceipt(plan, releaseVersion) {
@@ -646,10 +789,21 @@ function validateJournal(journal, planId) {
   }
   for (const operation of journal.operations) {
     assertWritableMigrationPath(operation.path);
-    if (typeof operation.after_sha256 !== "string") {
+    const legacyModes = operation.before_mode === undefined && operation.after_mode === undefined;
+    const validBeforeMode = operation.before_sha256
+      ? isPortableMode(operation.before_mode)
+      : operation.before_mode === null;
+    if (
+      typeof operation.after_sha256 !== "string" ||
+      (!legacyModes && (!validBeforeMode || !isPortableMode(operation.after_mode)))
+    ) {
       throw new MigrationError("INVALID_JOURNAL", `Migration journal ${planId} has an invalid operation.`);
     }
   }
+}
+
+function isPortableMode(mode) {
+  return Number.isInteger(mode) && mode >= 0 && mode <= 0o777;
 }
 
 async function assertTransactionHasNoCommittedState(transactionRoot) {

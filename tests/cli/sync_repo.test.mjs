@@ -12,6 +12,7 @@ import {
   initialMirrorPush
 } from "../../packages/cli/src/sync/repo.mjs";
 import { createGit } from "../../packages/cli/src/sync/git.mjs";
+import { schemaVersion } from "../../packages/core/src/schema.mjs";
 
 const run = promisify(execFile);
 const RECEIPT = "e5b05dfb181cdfd1d4a928809e6a3e42d0463cf1";
@@ -87,7 +88,8 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
       raw: async (args) => { calls.push(`raw:${args.join(" ")}`); return { stdout: "", stderr: "", code: 0 }; },
       dirty: async () => true,
       commitAll: async (m) => { calls.push(`commit:${m}`); return "deadbeef"; },
-      push: async (b) => calls.push(`push:${b}`)
+      validateMirrorCommit: async (sha) => calls.push(`commit-tree:${sha}`),
+      push: async (b, sourceSha) => calls.push(`push:${b}:${sourceSha}`)
     };
     const sha = await initialMirrorPush({
       aiosPath: tmp,
@@ -103,8 +105,9 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
       "content-policy:full",
       "remote:https://github.com/u/u-aios.git",
       "commit:Initial DotAIOS mirror",
+      "commit-tree:deadbeef",
       "receipt:deadbeef",
-      "push:main"
+      "push:main:deadbeef"
     ]);
     assert.equal(sha, "deadbeef", "returns the initial commit sha for last_push_sha");
     const writtenGitignore = await fs.readFile(path.join(tmp, ".gitignore"), "utf8");
@@ -129,6 +132,7 @@ test("initialMirrorPush leaves a matching existing origin untouched", async () =
         init: async () => calls.push("init"),
         addRemote: async () => calls.push("remote-mutated"),
         commitAll: async () => RECEIPT,
+        validateMirrorCommit: async () => {},
         push: async () => calls.push("push")
       }
     });
@@ -147,6 +151,7 @@ test("initialMirrorPush preserves custom ignore rules while adding sync exclusio
       init: async () => {},
       addRemote: async () => {},
       commitAll: async () => "deadbeef",
+      validateMirrorCommit: async () => {},
       push: async () => {}
     };
 
@@ -162,6 +167,37 @@ test("initialMirrorPush preserves custom ignore rules while adding sync exclusio
       await fs.readFile(path.join(tmp, ".gitignore"), "utf8"),
       "custom-secret.txt\n.env\n"
     );
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
+test("initialMirrorPush validates the immutable commit before receipt or push", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-mirror-sha-boundary-"));
+  try {
+    await fs.writeFile(path.join(tmp, "hello.md"), "hi");
+    const calls = [];
+    await assert.rejects(
+      initialMirrorPush({
+        aiosPath: tmp,
+        fullName: "u/u-aios",
+        gitignoreContent: "/workspaces/\n",
+        git: {
+          validateMirrorContent: async () => {},
+          init: async () => {},
+          addRemote: async () => {},
+          commitAll: async () => "unsafe-sha",
+          validateMirrorCommit: async (sha) => {
+            calls.push(`validate:${sha}`);
+            throw new Error("unsafe committed tree");
+          },
+          push: async () => calls.push("push")
+        },
+        recordIntendedSha: async () => calls.push("receipt")
+      }),
+      /unsafe committed tree/
+    );
+    assert.deepEqual(calls, ["validate:unsafe-sha"]);
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
@@ -195,6 +231,82 @@ test("initialMirrorPush refuses a symlinked .gitignore without changing its exte
   assert.equal((await fs.lstat(path.join(aiosPath, ".gitignore"))).isSymbolicLink(), true);
 });
 
+test("initialMirrorPush refuses a symlinked root .git marker before spawning Git", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-git-init-link-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  const externalGit = path.join(root, "external-git");
+  await fs.mkdir(aiosPath);
+  await fs.mkdir(externalGit);
+  await fs.writeFile(path.join(externalGit, "sentinel"), "unchanged\n");
+  await fs.symlink(externalGit, path.join(aiosPath, ".git"));
+
+  let spawned = false;
+  const client = createGit({
+    cwd: aiosPath,
+    spawnImpl: async () => {
+      spawned = true;
+      return { stdout: "", stderr: "", code: 0 };
+    }
+  });
+  await assert.rejects(
+    initialMirrorPush({
+      aiosPath,
+      fullName: "u/u-aios",
+      gitignoreContent: "/workspaces/\n",
+      git: {
+        ...client,
+        validateMirrorContent: async () => {}
+      }
+    }),
+    /root \.git.*symbolic link/i
+  );
+  assert.equal(spawned, false);
+  assert.equal(await fs.readFile(path.join(externalGit, "sentinel"), "utf8"), "unchanged\n");
+});
+
+test("Git init accepts a real linked worktree without rewriting its metadata", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-git-init-file-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const primary = path.join(root, "primary");
+  const linked = path.join(root, "linked");
+  await fs.mkdir(primary);
+  await git(primary, "init", "-q", "-b", "main");
+  await git(primary, "config", "user.email", "test@example.com");
+  await git(primary, "config", "user.name", "Test");
+  await fs.writeFile(path.join(primary, "README.md"), "base\n");
+  await git(primary, "add", "README.md");
+  await git(primary, "commit", "-q", "-m", "base");
+  await git(primary, "worktree", "add", "-q", "-b", "linked", linked);
+  const markerBefore = await fs.readFile(path.join(linked, ".git"), "utf8");
+
+  const client = createGit({ cwd: linked });
+  await client.init();
+  assert.equal(await fs.readFile(path.join(linked, ".git"), "utf8"), markerBefore);
+  assert.equal((await git(linked, "branch", "--show-current")).stdout.trim(), "linked");
+});
+
+test("Git init refuses a special root .git marker before spawning Git", async () => {
+  let spawned = false;
+  const client = createGit({
+    cwd: "/tmp/aios-special-git-marker",
+    filesystem: {
+      lstat: async () => ({
+        isSymbolicLink: () => false,
+        isDirectory: () => false,
+        isFile: () => false
+      })
+    },
+    spawnImpl: async () => {
+      spawned = true;
+      return { stdout: "", stderr: "", code: 0 };
+    }
+  });
+
+  await assert.rejects(client.init(), /root \.git.*special file/i);
+  assert.equal(spawned, false);
+});
+
 test("initialMirrorPush refuses a nested repo before changing ignore content or Git metadata", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-mirror-preflight-"));
   try {
@@ -204,8 +316,9 @@ test("initialMirrorPush refuses a nested repo before changing ignore content or 
     await git(tmp, "config", "dotaios.sentinel", "keep-me");
     await git(tmp, "remote", "add", "origin", "https://github.com/existing/mirror.git");
     await fs.writeFile(path.join(tmp, ".gitignore"), "custom-secret.txt\n");
+    await fs.writeFile(path.join(tmp, "aios.json"), JSON.stringify({ schema_version: schemaVersion }));
     await fs.writeFile(path.join(tmp, "README.md"), "base\n");
-    await git(tmp, "add", ".gitignore", "README.md");
+    await git(tmp, "add", ".gitignore", "aios.json", "README.md");
     await git(tmp, "commit", "-q", "-m", "base");
 
     const nested = path.join(tmp, "projects", "myapp");

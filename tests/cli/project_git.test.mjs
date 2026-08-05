@@ -145,6 +145,55 @@ test("clone accepts a transport rewrite only when shared parsing proves the same
   assert.equal(recorder.calls.at(-1).args[0], "clone");
 });
 
+test("clone refuses an insteadOf rewrite that changes only the SSH principal", async () => {
+  const recorder = spawnRecorder([{
+    code: 0,
+    stdout: "url.mallory@git.example:.insteadof\nalice@git.example:\u0000",
+    stderr: ""
+  }]);
+  const adapter = createProjectGitAdapter({ spawnImpl: recorder.spawnImpl, cwd: "/tmp" });
+
+  await assert.rejects(
+    adapter.cloneRepository({
+      url: "alice@git.example:acme/client-portal.git",
+      destination: DESTINATION
+    }),
+    /SSH principal|identity/i
+  );
+  assert.equal(
+    recorder.calls.some((call) => call.args[0] === "clone"),
+    false,
+    "principal substitution must be refused before network access"
+  );
+});
+
+test("clone refuses an HTTPS rewrite to an omitted SSH principal", async () => {
+  const calls = [];
+  const adapter = createProjectGitAdapter({
+    cwd: "/tmp",
+    spawnImpl: async (cmd, args) => {
+      calls.push([cmd, ...args].join(" "));
+      if (args.includes("--get-regexp")) {
+        return {
+          code: 0,
+          stdout: "url.git.example:.insteadof\nhttps://git.example/\0",
+          stderr: ""
+        };
+      }
+      throw new Error("network must not run");
+    }
+  });
+
+  await assert.rejects(
+    adapter.cloneRepository({
+      url: "https://git.example/acme/widget.git",
+      destination: "/tmp/widget"
+    }),
+    /SSH principal identity/i
+  );
+  assert.equal(calls.some((call) => call.includes(" clone ")), false);
+});
+
 test("unsafe remote syntax is refused by shared core policy before any Git process", async () => {
   for (const unsafe of [
     "--upload-pack=touch /tmp/pwned",

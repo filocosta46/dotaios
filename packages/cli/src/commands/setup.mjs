@@ -9,6 +9,7 @@ import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { parseJsonlLine } from "../../../core/src/jsonl.mjs";
 import { schemaVersion } from "../../../core/src/schema.mjs";
+import { processBirthToken, processRecordIsAlive } from "../../../core/src/process-identity.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import {
   LIGHTPANDA_VERSION,
@@ -76,17 +77,19 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     // createAios: false — a metric must never be the thing that creates the
     // folder a failed install did not. Otherwise the retry this very message
     // recommends trips over the wreckage of the attempt that printed it.
-    const dropIfMissing = { createAios: false };
-    await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
-    await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
-    await emitPilotMetric(aiosPath, {
-      type: "install_end",
-      command: "setup",
-      outcome: "fail",
-      phase: "init",
-      run_id: runId,
-      duration_ms: Date.now() - startedAt
-    }, dropIfMissing);
+    if (err.code !== "SETUP_ACTIVE") {
+      const dropIfMissing = { createAios: false };
+      await emitPilotMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId }, dropIfMissing);
+      await emitPilotMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "fail" }, dropIfMissing);
+      await emitPilotMetric(aiosPath, {
+        type: "install_end",
+        command: "setup",
+        outcome: "fail",
+        phase: "init",
+        run_id: runId,
+        duration_ms: Date.now() - startedAt
+      }, dropIfMissing);
+    }
     console.error(`Step 1 failed: ${err.message}`);
     console.error("Re-run: dotaios init to retry this step.");
     console.error("");
@@ -116,7 +119,12 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     console.error("");
   }
   if (setupTransactionActive) {
-    await fs.unlink(setupTransactionPath(aiosPath));
+    if (!await unlinkSetupMarkerTempIfSameFile(
+      setupTransactionPath(aiosPath),
+      setupTransactionActive.markerStats
+    )) {
+      throw new Error("Setup recovery marker changed before completion; refusing to remove it.");
+    }
   }
 
   // Step 3: reveal (best-effort, never blocks)
@@ -239,7 +247,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
       );
     }
   }
-  let transactionStarted = false;
+  let transactionStarted = null;
   try {
     await initCommand(passthrough, {
       beforeScaffold: async (plan) => {
@@ -255,11 +263,11 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
     const transaction = await readRecoverableSetupTransaction(aiosPath, passthrough);
     if (transaction) {
       await initCommand([...passthrough, "--force"], {
-        plan: transaction.plan,
+        plan: transaction.transaction.plan,
         allowSetupTransactionRecovery: true
       });
       console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
-      return true;
+      return { markerStats: transaction.markerStats };
     }
     if (!(await isFailedSetupResidue(aiosPath))) throw error;
     await initCommand([...passthrough, "--force"]);
@@ -293,10 +301,17 @@ async function beginSetupTransaction(aiosPath, passthrough, plan, lifecycle = {}
   }
 
   const manifest = await expectedSetupManifest(plan);
+  const processStartedAt = processBirthToken(process.pid);
   const transaction = {
     format: SETUP_TRANSACTION_FORMAT,
     target: aiosPath,
     args: passthrough,
+    owner: {
+      pid: process.pid,
+      nonce: randomUUID(),
+      created_at: new Date().toISOString(),
+      ...(processStartedAt && { process_started_at: processStartedAt })
+    },
     plan,
     manifest
   };
@@ -305,13 +320,20 @@ async function beginSetupTransaction(aiosPath, passthrough, plan, lifecycle = {}
   if ((await fs.readdir(aiosPath)).length !== 0) {
     throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
   }
+  if (!await cleanupPrepublicationSetupMarkerTemps(aiosPath, passthrough)) {
+    throw new Error(`Setup could not safely clean its interrupted staging marker: ${aiosPath}`);
+  }
 
-  const temporaryMarker = path.join(aiosPath, `.dotaios-setup-${randomUUID()}.tmp`);
+  // Stage beside the target directory, not inside it. A hard interruption
+  // before the exclusive link must leave the new target empty so the same
+  // setup command can safely retry.
+  const temporaryMarker = setupTransactionTemporaryPath(aiosPath);
   const markerPath = setupTransactionPath(aiosPath);
   await fs.writeFile(temporaryMarker, `${JSON.stringify(transaction, null, 2)}\n`, {
     flag: "wx",
     mode: 0o600
   });
+  const temporaryMarkerStats = await fs.lstat(temporaryMarker);
   try {
     await lifecycle.beforePublishMarker?.({ aiosPath, markerPath });
     try {
@@ -324,12 +346,52 @@ async function beginSetupTransaction(aiosPath, passthrough, plan, lifecycle = {}
       throw error;
     }
   } finally {
-    await fs.unlink(temporaryMarker).catch(() => {});
+    await unlinkSetupMarkerTempIfSameFile(temporaryMarker, temporaryMarkerStats);
   }
 
   const entries = await fs.readdir(aiosPath);
   if (entries.length !== 1 || entries[0] !== SETUP_TRANSACTION_FILE) {
     throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
+  }
+  return { markerStats: temporaryMarkerStats };
+}
+
+async function cleanupPrepublicationSetupMarkerTemps(aiosPath, passthrough) {
+  const parentPath = path.dirname(aiosPath);
+  let entries;
+  try {
+    entries = await fs.readdir(parentPath, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+
+  for (const entry of entries) {
+    if (!isSetupTransactionTemporaryName(aiosPath, entry.name)) continue;
+    const candidate = path.join(parentPath, entry.name);
+    let stats;
+    let transaction;
+    try {
+      stats = await fs.lstat(candidate);
+      if (!stats.isFile() || stats.isSymbolicLink()) continue;
+      if (typeof process.getuid === "function" && stats.uid !== process.getuid()) continue;
+      if (process.platform !== "win32" && (stats.mode & 0o777) !== 0o600) continue;
+      transaction = JSON.parse(await fs.readFile(candidate, "utf8"));
+    } catch {
+      continue;
+    }
+    if (!isSetupTransaction(transaction, aiosPath, passthrough)) continue;
+
+    let expected;
+    try {
+      expected = await expectedSetupManifest(transaction.plan);
+    } catch {
+      continue;
+    }
+    if (JSON.stringify(expected) !== JSON.stringify(transaction.manifest)) continue;
+    if (setupTransactionOwnerIsAlive(transaction.owner)) {
+      throw setupActiveError(aiosPath);
+    }
+    if (!await unlinkSetupMarkerTempIfSameFile(candidate, stats)) return false;
   }
   return true;
 }
@@ -347,6 +409,9 @@ async function readRecoverableSetupTransaction(aiosPath, passthrough) {
   }
 
   if (!isSetupTransaction(transaction, aiosPath, passthrough)) return null;
+  if (setupTransactionOwnerIsAlive(transaction.owner)) {
+    throw setupActiveError(aiosPath);
+  }
   if (!await cleanupLinkedSetupMarkerTemps(aiosPath, markerStats)) return null;
 
   let expected;
@@ -388,36 +453,74 @@ async function readRecoverableSetupTransaction(aiosPath, passthrough) {
   }
   if (!(await isRecoverableSetupMetrics(aiosPath, extra))) return null;
 
-  return transaction;
+  return { transaction, markerStats };
 }
 
 async function cleanupLinkedSetupMarkerTemps(aiosPath, markerStats) {
+  const parentPath = path.dirname(aiosPath);
   let entries;
   try {
-    entries = await fs.readdir(aiosPath, { withFileTypes: true });
+    entries = await fs.readdir(parentPath, { withFileTypes: true });
   } catch {
     return false;
   }
   for (const entry of entries) {
-    if (!/^\.dotaios-setup-[^.]+\.tmp$/.test(entry.name)) continue;
-    const candidate = path.join(aiosPath, entry.name);
+    if (!isSetupTransactionTemporaryName(aiosPath, entry.name)) continue;
+    const candidate = path.join(parentPath, entry.name);
     let stats;
     try {
       stats = await fs.lstat(candidate);
     } catch {
       return false;
     }
-    if (
-      !stats.isFile()
-      || stats.isSymbolicLink()
-      || stats.dev !== markerStats.dev
-      || stats.ino !== markerStats.ino
-    ) {
-      return false;
-    }
-    await fs.unlink(candidate);
+    // A pre-publication crash can leave a different private staging inode
+    // beside the target. It proves no ownership and must stay untouched.
+    if (stats.dev !== markerStats.dev || stats.ino !== markerStats.ino) continue;
+    if (!stats.isFile() || stats.isSymbolicLink()) return false;
+    if (!await unlinkSetupMarkerTempIfSameFile(candidate, markerStats)) return false;
   }
   return true;
+}
+
+function setupTransactionTemporaryPrefix(aiosPath) {
+  return `.${path.basename(aiosPath)}.dotaios-setup-`;
+}
+
+function setupTransactionTemporaryPath(aiosPath) {
+  return path.join(
+    path.dirname(aiosPath),
+    `${setupTransactionTemporaryPrefix(aiosPath)}${randomUUID()}.tmp`
+  );
+}
+
+function isSetupTransactionTemporaryName(aiosPath, name) {
+  const prefix = setupTransactionTemporaryPrefix(aiosPath);
+  if (!name.startsWith(prefix) || !name.endsWith(".tmp")) return false;
+  const id = name.slice(prefix.length, -".tmp".length);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+}
+
+async function unlinkSetupMarkerTempIfSameFile(candidate, expectedStats) {
+  let stats;
+  try {
+    stats = await fs.lstat(candidate);
+  } catch {
+    return false;
+  }
+  if (
+    !stats.isFile()
+    || stats.isSymbolicLink()
+    || stats.dev !== expectedStats.dev
+    || stats.ino !== expectedStats.ino
+  ) {
+    return false;
+  }
+  try {
+    await fs.unlink(candidate);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function isRecoverableSetupMetrics(aiosPath, extraEntries) {
@@ -505,6 +608,22 @@ function isSetupTransaction(transaction, aiosPath, passthrough) {
   if (transaction.format !== SETUP_TRANSACTION_FORMAT || transaction.target !== aiosPath) return false;
   if (!Array.isArray(transaction.args) || transaction.args.some((arg) => typeof arg !== "string")) return false;
   if (JSON.stringify(transaction.args) !== JSON.stringify(passthrough)) return false;
+  const ownerKeys = Object.keys(transaction.owner || {}).sort();
+  const legacyOwnerKeys = ["created_at", "nonce", "pid"];
+  const currentOwnerKeys = [...legacyOwnerKeys, "process_started_at"].sort();
+  if (
+    JSON.stringify(ownerKeys) !== JSON.stringify(legacyOwnerKeys)
+    && JSON.stringify(ownerKeys) !== JSON.stringify(currentOwnerKeys)
+  ) return false;
+  if (!Number.isSafeInteger(transaction.owner.pid) || transaction.owner.pid <= 0) return false;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(transaction.owner.nonce)) return false;
+  if (typeof transaction.owner.created_at !== "string" || Number.isNaN(Date.parse(transaction.owner.created_at))) return false;
+  if (
+    transaction.owner.process_started_at !== undefined
+    && (typeof transaction.owner.process_started_at !== "string"
+      || !transaction.owner.process_started_at
+      || transaction.owner.process_started_at.length > 256)
+  ) return false;
   if (!transaction.plan || typeof transaction.plan !== "object" || Array.isArray(transaction.plan)) return false;
   if (!isSetupPlan(transaction.plan, passthrough)) return false;
   if (!Array.isArray(transaction.manifest)) return false;
@@ -514,6 +633,16 @@ function isSetupTransaction(transaction, aiosPath, passthrough) {
       && typeof entry.path === "string"
       && (entry.type === "directory" || (entry.type === "file" && typeof entry.sha256 === "string"))
   );
+}
+
+function setupTransactionOwnerIsAlive(owner, kill = process.kill.bind(process)) {
+  return processRecordIsAlive(owner, { kill });
+}
+
+function setupActiveError(aiosPath) {
+  const error = new Error(`Another setup is already running for ${aiosPath}.`);
+  error.code = "SETUP_ACTIVE";
+  return error;
 }
 
 function isSetupPlan(plan, passthrough) {

@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { writeFileSafe } from "./files.mjs";
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 
@@ -219,12 +220,52 @@ export function renderResolver(skills) {
   return lines.join("\n");
 }
 
+async function lstatIfPresent(filePath) {
+  try {
+    return await fs.lstat(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function ensureRealSkillsDirectory(aiosPath) {
+  const rootStats = await lstatIfPresent(aiosPath);
+  if (rootStats && (!rootStats.isDirectory() || rootStats.isSymbolicLink())) {
+    throw new Error(`Cannot write a skill catalog through unsafe AIOS root: ${aiosPath}`);
+  }
+  if (!rootStats) await fs.mkdir(aiosPath, { recursive: true });
+
+  const skillsDir = path.join(aiosPath, "skills");
+  const skillsStats = await lstatIfPresent(skillsDir);
+  if (skillsStats && (!skillsStats.isDirectory() || skillsStats.isSymbolicLink())) {
+    throw new Error(`Cannot write a skill catalog through unsafe directory: ${skillsDir}`);
+  }
+  if (!skillsStats) await fs.mkdir(skillsDir);
+  return skillsDir;
+}
+
+async function assertSafeCatalogFiles(paths) {
+  for (const filePath of paths) {
+    const stats = await lstatIfPresent(filePath);
+    if (stats && (!stats.isFile() || stats.isSymbolicLink())) {
+      throw new Error(`Cannot overwrite unsafe skill catalog file: ${filePath}`);
+    }
+  }
+}
+
 // Regenerate <aiosPath>/skills/RESOLVER.md from the skills currently on disk.
 export async function writeResolver(aiosPath) {
+  await ensureRealSkillsDirectory(aiosPath);
   const skills = await collectSkills(aiosPath);
   const resolverPath = path.join(aiosPath, "skills", "RESOLVER.md");
-  await fs.mkdir(path.dirname(resolverPath), { recursive: true });
-  await fs.writeFile(resolverPath, `${renderResolver(skills)}\n`);
+  await assertSafeCatalogFiles([resolverPath]);
+  await writeFileSafe(
+    resolverPath,
+    `${renderResolver(skills)}\n`,
+    "overwrite",
+    { boundaryRoot: aiosPath }
+  );
   return { path: resolverPath, count: skills.length };
 }
 
@@ -232,12 +273,22 @@ export async function writeResolver(aiosPath) {
 // skills currently on disk. Called after any operation that can change the
 // installed skill set.
 export async function writeSkillsIndex(aiosPath) {
+  const skillsDir = await ensureRealSkillsDirectory(aiosPath);
   const skills = await collectSkills(aiosPath);
-  const skillsDir = path.join(aiosPath, "skills");
-  await fs.mkdir(skillsDir, { recursive: true });
   const indexPath = path.join(skillsDir, "INDEX.md");
   const resolverPath = path.join(skillsDir, "RESOLVER.md");
-  await fs.writeFile(indexPath, `${renderSkillsIndex(skills)}\n`);
-  await fs.writeFile(resolverPath, `${renderResolver(skills)}\n`);
+  await assertSafeCatalogFiles([indexPath, resolverPath]);
+  await writeFileSafe(
+    indexPath,
+    `${renderSkillsIndex(skills)}\n`,
+    "overwrite",
+    { boundaryRoot: aiosPath }
+  );
+  await writeFileSafe(
+    resolverPath,
+    `${renderResolver(skills)}\n`,
+    "overwrite",
+    { boundaryRoot: aiosPath }
+  );
   return { path: indexPath, resolverPath, count: skills.length };
 }

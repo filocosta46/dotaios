@@ -18,6 +18,7 @@ import { createGit } from "./git.mjs";
 import { readOptionValue } from "../lib/args.mjs";
 import { readSecretInput } from "../lib/secret-input.mjs";
 import { withOperationLock } from "./operation-lock.mjs";
+import { assertRepositoryBinding } from "./repository-binding.mjs";
 
 const SETUP_RECEIPT_FORMAT = "dotaios-sync-setup-receipt/v1";
 const SETUP_LOCK_FILENAME = "sync.lock";
@@ -141,7 +142,16 @@ export async function orchestrateSetup({
 
 async function hasGitMetadata(aiosPath, filesystem) {
   try {
-    await filesystem.lstat(path.join(aiosPath, ".git"));
+    const stats = await filesystem.lstat(path.join(aiosPath, ".git"));
+    const isSymbolicLink = typeof stats.isSymbolicLink === "function"
+      && stats.isSymbolicLink();
+    const canInspectType = typeof stats.isDirectory === "function"
+      && typeof stats.isFile === "function";
+    const isSupported = !canInspectType || stats.isDirectory() || stats.isFile();
+    if (isSymbolicLink || !isSupported) {
+      const kind = isSymbolicLink ? "symbolic link" : "special file";
+      throw new Error(`Root .git metadata is a ${kind}; sync setup changed nothing.`);
+    }
     return true;
   } catch (error) {
     if (error.code === "ENOENT") return false;
@@ -152,10 +162,13 @@ async function hasGitMetadata(aiosPath, filesystem) {
 export async function preflightSetupBranch({
   aiosPath,
   filesystem = fs,
-  createGitImpl = createGit
+  createGitImpl = createGit,
+  assertBindingImpl = assertRepositoryBinding
 }) {
   if (!await hasGitMetadata(aiosPath, filesystem)) return;
-  const branch = await createGitImpl({ cwd: aiosPath }).currentBranch();
+  const git = createGitImpl({ cwd: aiosPath });
+  await assertBindingImpl({ aiosPath, git, filesystem });
+  const branch = await git.currentBranch();
   if (branch !== "main") {
     throw new Error(`Existing Git repository is on ${branch || "an unknown branch"}; sync setup requires main and changed nothing.`);
   }
@@ -165,10 +178,12 @@ export async function preflightSetupOrigin({
   aiosPath,
   fullName,
   filesystem = fs,
-  createGitImpl = createGit
+  createGitImpl = createGit,
+  assertBindingImpl = assertRepositoryBinding
 }) {
   if (!await hasGitMetadata(aiosPath, filesystem)) return;
   const git = createGitImpl({ cwd: aiosPath });
+  await assertBindingImpl({ aiosPath, git, filesystem });
   try {
     const originIdentity = githubRepoIdentity(await git.originUrl());
     if (originIdentity !== githubRepoIdentity(plainRemoteUrl(fullName))) {
@@ -214,16 +229,21 @@ export async function completeInitialMirror({
   repoState,
   filesystem = fs,
   createGitImpl = createGit,
+  assertBindingImpl = assertRepositoryBinding,
   readConfig = readSyncConfig,
   writeConfig = writeSyncConfig,
   initialMirrorPushImpl = initialMirrorPush
 }) {
   const expectedIdentity = githubRepoIdentity(plainRemoteUrl(fullName));
   const canonicalAiosPath = await filesystem.realpath(aiosPath);
-  const hasLocalGit = await hasGitMetadata(aiosPath, filesystem);
+  const markerExists = await hasGitMetadata(aiosPath, filesystem);
   let preserveExistingOrigin = false;
 
   const inspectionGit = createGitImpl({ cwd: aiosPath });
+  const binding = markerExists
+    ? await assertBindingImpl({ aiosPath, git: inspectionGit, filesystem })
+    : null;
+  const hasLocalGit = Boolean(binding);
   if (hasLocalGit) {
     const branch = await inspectionGit.currentBranch();
     if (branch !== "main") {

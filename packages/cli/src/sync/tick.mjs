@@ -21,6 +21,7 @@ export async function runTick({
   readConfig,
   writeConfig,
   makeGit,
+  verifyRepositoryBinding,
   verifyRepoPrivate = defaultVerifyRepoPrivate,
   appendEvent,
   now = () => Date.now()
@@ -43,6 +44,10 @@ export async function runTick({
     // Inspect checkout identity in a Git process that has no sync token. The
     // token is not allowed into Git until origin is bound to the configured repo.
     const inspectionGit = makeGit({ accessToken: null, expectedRepoFullName: null });
+    if (typeof verifyRepositoryBinding !== "function") {
+      throw new Error("sync repository binding verification is unavailable");
+    }
+    await verifyRepositoryBinding(inspectionGit);
     let currentBranch = null;
     try {
       currentBranch = await inspectionGit.currentBranch();
@@ -128,6 +133,19 @@ export async function runTick({
       };
     }
 
+    // Fetch/rebase is a mutation boundary. Re-run the complete local policy
+    // before any push or success receipt so a safe local tree plus a safe remote
+    // tree cannot combine into an unsafe catalog or workspace state.
+    const candidateHead = await git.currentSha();
+    await inspectionGit.validateMirrorContent();
+    if (await git.currentSha() !== candidateHead) {
+      throw new Error("Local Git HEAD changed during privacy validation; sync stopped before push.");
+    }
+    // The working tree/index can be safe while HEAD points at a different,
+    // unsafe commit. Validate the immutable object that will be pushed too.
+    await git.validateMirrorCommit(candidateHead);
+    const validatedHead = candidateHead;
+
     const hasUnpushedCommit = pushedSha
       ? true
       : pullResult === "empty"
@@ -135,16 +153,21 @@ export async function runTick({
         : await git.hasUnpushedCommits("main");
     if (hasUnpushedCommit) {
       // 4. A new local commit, or one left by an earlier failed push, goes up.
-      await git.push("main");
-      // Record the actual HEAD after push: a rebase above may have rewritten
-      // the commit, so commitAll's pre-rebase sha can no longer exist.
-      pushedHead = await git.currentSha();
+      if (await git.currentSha() !== validatedHead) {
+        throw new Error("Local Git HEAD changed after privacy validation; sync stopped before push.");
+      }
+      // Publish the exact object that passed validation. A concurrent checkout
+      // change cannot redirect this push through symbolic HEAD.
+      await git.push("main", validatedHead);
+      pushedHead = validatedHead;
       pushed = true;
     }
 
     await writeConfig({
       last_tick_at: startedIso,
-      last_push_sha: pushed ? pushedHead : (cfg.last_push_sha ?? null),
+      // A successful explicit sync proves this immutable HEAD is the remote
+      // boundary even when no push was necessary (for example after a pull).
+      last_push_sha: validatedHead,
       last_pull_at: startedIso,
       last_error: null
     });

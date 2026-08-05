@@ -23,16 +23,41 @@ test("project remotes accept only credential-free HTTPS and SSH/scp transports",
   assert.deepEqual(parseProjectRemote("git@GitHub.com:Acme/Widget.git"), {
     transport: "scp",
     canonicalUrl: "git@github.com:Acme/Widget.git",
-    identity: "github.com/Acme/Widget"
+    identity: "git@github.com/Acme/Widget"
   });
   assert.deepEqual(parseProjectRemote("ssh://git@GitHub.com/Acme/Widget.git"), {
     transport: "ssh",
     canonicalUrl: "ssh://git@github.com/Acme/Widget.git",
-    identity: "github.com/Acme/Widget"
+    identity: "git@github.com/Acme/Widget"
   });
   assert.equal(
     projectRemotesMatch("https://github.com/Acme/Widget.git", "git@github.com:Acme/Widget.git"),
     true
+  );
+  assert.equal(
+    projectRemotesMatch("alice@git.example:Acme/Widget.git", "mallory@git.example:Acme/Widget.git"),
+    false,
+    "distinct SSH principals must never collapse to one repository identity"
+  );
+  assert.equal(
+    projectRemotesMatch("ssh://alice@git.example/Acme/Widget.git", "alice@git.example:Acme/Widget.git"),
+    true,
+    "SSH URL and scp syntax may describe the same principal and repository"
+  );
+  assert.equal(
+    projectRemotesMatch("https://git.example/Acme/Widget.git", "git.example:Acme/Widget.git"),
+    false,
+    "HTTPS must not collapse into the machine's implicit SSH principal"
+  );
+  assert.equal(
+    projectRemotesMatch("https://gitlab.com/Acme/Widget.git", "git@gitlab.com:Acme/Widget.git"),
+    true,
+    "a hosted forge's explicit fixed Git principal remains transport-portable"
+  );
+  assert.equal(
+    projectRemotesMatch("https://git.example/Acme/Widget.git", "git@git.example:Acme/Widget.git"),
+    false,
+    "an arbitrary host has no proven cross-transport repository identity"
   );
 });
 
@@ -220,6 +245,32 @@ test("restore destination classification refuses occupied and unverifiable paths
     readRepositoryHead
   })).state, "existing-match");
 
+  const worktree = path.join(root, "worktree");
+  await fs.mkdir(worktree);
+  await fs.writeFile(path.join(worktree, ".git"), "gitdir: ../shared.git/worktrees/widget\n");
+  await fs.writeFile(path.join(worktree, ".remote"), "git@github.com:acme/widget.git");
+  assert.equal((await classifyRestoreDestination({
+    destination: worktree,
+    expectedRemote,
+    readRepositoryRemote,
+    readRepositoryHead
+  })).state, "existing-match", "a regular non-symlink Git worktree marker remains supported");
+
+  const linkedMarker = path.join(root, "linked-marker");
+  let linkedMarkerRemoteReads = 0;
+  await fs.mkdir(linkedMarker);
+  await fs.symlink(path.join(matching, ".git"), path.join(linkedMarker, ".git"));
+  assert.equal((await classifyRestoreDestination({
+    destination: linkedMarker,
+    expectedRemote,
+    readRepositoryRemote: async () => {
+      linkedMarkerRemoteReads += 1;
+      return expectedRemote;
+    },
+    readRepositoryHead
+  })).state, "unsafe-git-marker");
+  assert.equal(linkedMarkerRemoteReads, 0, "a symlink marker is rejected before any Git inspection");
+
   const alias = path.join(root, "alias");
   await fs.symlink(matching, alias);
   assert.equal((await classifyRestoreDestination({
@@ -228,6 +279,35 @@ test("restore destination classification refuses occupied and unverifiable paths
     readRepositoryRemote,
     readRepositoryHead
   })).state, "symlink");
+});
+
+test("restore destination classification rejects special .git markers", async () => {
+  const destination = path.resolve("/virtual/special-git-marker");
+  let remoteReads = 0;
+  const directoryStats = {
+    isDirectory: () => true,
+    isFile: () => false,
+    isSymbolicLink: () => false
+  };
+  const specialStats = {
+    isDirectory: () => false,
+    isFile: () => false,
+    isSymbolicLink: () => false
+  };
+  const classification = await classifyRestoreDestination({
+    destination,
+    expectedRemote: "https://github.com/acme/widget.git",
+    fileSystem: {
+      lstat: async (target) => target === destination ? directoryStats : specialStats
+    },
+    readRepositoryRemote: async () => {
+      remoteReads += 1;
+      return "https://github.com/acme/widget.git";
+    }
+  });
+
+  assert.equal(classification.state, "unsafe-git-marker");
+  assert.equal(remoteReads, 0, "a special marker is rejected before any Git inspection");
 });
 
 test("managed restore dry-run is read-only and a real restore claims, clones, verifies, and maps", async (t) => {
@@ -279,9 +359,22 @@ test("managed restore dry-run is read-only and a real restore claims, clones, ve
   assert.equal(receipt.ok, true);
   assert.equal(receipt.results[0].action, "cloned");
   assert.equal(receipt.results[0].applied, true);
-  assert.deepEqual(calls[0], ["clone", "git@github.com:acme/widget.git", destination]);
+  assert.equal(calls[0][0], "clone");
+  assert.equal(calls[0][1], "git@github.com:acme/widget.git");
+  assert.equal(path.basename(calls[0][2]), "checkout");
+  assert.match(
+    path.basename(path.dirname(calls[0][2])),
+    /^\.dotaios-restore-widget-[0-9a-f-]+$/,
+    "clone is isolated in an owned sibling transaction before publication"
+  );
   assert.equal(calls[1][0], "map");
   assert.equal(calls[1][1].projectPath, destination);
+  assert.equal(await pathExists(destination), true);
+  assert.deepEqual(
+    (await fs.readdir(managedWorkspaceRoot(aiosPath))).sort(),
+    ["widget"],
+    "the staging transaction is removed after publication"
+  );
 });
 
 test("restore repairs only mapping for an existing matching checkout", async (t) => {
@@ -366,6 +459,439 @@ test("a verified clone remains visible after mapping failure and rerun repairs m
   assert.equal(mapped, true);
 });
 
+test("an interrupted clone removes only its owned staging transaction and an identical retry succeeds", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-interrupted-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  await fs.mkdir(aiosPath);
+  const project = {
+    id: "project-1",
+    slug: "widget",
+    repoUrl: "https://github.com/acme/widget.git",
+    projectPath: null,
+    pathAvailable: false
+  };
+  let cloneCalls = 0;
+  const readRepositoryRemote = async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8");
+  const readRepositoryHead = async () => "0123456789abcdef0123456789abcdef01234567";
+
+  const interrupted = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async ({ destination }) => {
+      cloneCalls += 1;
+      await fs.mkdir(path.join(destination, ".git"));
+      await fs.writeFile(path.join(destination, ".git", "PARTIAL"), "network stopped\n");
+      throw new Error("network interrupted");
+    },
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async () => assert.fail("an interrupted clone must not map")
+  });
+  assert.equal(interrupted.ok, false);
+  assert.equal(interrupted.results[0].reason, "clone-failed");
+  assert.equal(await pathExists(managedWorkspacePath(aiosPath, "widget")), false);
+  assert.deepEqual(await fs.readdir(managedWorkspaceRoot(aiosPath)), [], "owned partial staging is removed");
+
+  let mapped = null;
+  const retried = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async ({ destination }) => {
+      cloneCalls += 1;
+      await fs.mkdir(path.join(destination, ".git"));
+      await fs.writeFile(path.join(destination, ".remote"), project.repoUrl);
+    },
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async (mapping) => { mapped = mapping; }
+  });
+  assert.equal(retried.ok, true);
+  assert.equal(retried.results[0].action, "cloned");
+  assert.equal(cloneCalls, 2);
+  assert.equal(mapped.projectPath, managedWorkspacePath(aiosPath, "widget"));
+  assert.deepEqual(await fs.readdir(managedWorkspaceRoot(aiosPath)), ["widget"]);
+});
+
+test("a live matching restore transaction blocks a duplicate clone", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-live-owner-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  await fs.mkdir(aiosPath);
+  const project = {
+    id: "project-1",
+    slug: "widget",
+    repoUrl: "https://github.com/acme/widget.git",
+    projectPath: null,
+    pathAvailable: false
+  };
+  let cloneCalls = 0;
+  let announceClone;
+  let releaseClone;
+  const cloneStarted = new Promise((resolve) => { announceClone = resolve; });
+  const cloneReleased = new Promise((resolve) => { releaseClone = resolve; });
+  const readRepositoryRemote = async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8");
+  const readRepositoryHead = async () => "0123456789abcdef0123456789abcdef01234567";
+
+  const firstRestore = restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async ({ destination }) => {
+      cloneCalls += 1;
+      announceClone();
+      await cloneReleased;
+      await fs.mkdir(path.join(destination, ".git"));
+      await fs.writeFile(path.join(destination, ".remote"), project.repoUrl);
+    },
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async () => {}
+  });
+  await cloneStarted;
+
+  const concurrent = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async () => { cloneCalls += 1; },
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async () => {}
+  });
+  assert.equal(concurrent.ok, false);
+  assert.equal(concurrent.results[0].reason, "restore-busy");
+  assert.equal(cloneCalls, 1, "a live matching transaction prevents duplicate network work");
+
+  releaseClone();
+  const completed = await firstRestore;
+  assert.equal(completed.ok, true);
+  assert.deepEqual(await fs.readdir(managedWorkspaceRoot(aiosPath)), ["widget"]);
+});
+
+test("a dead owner's verified staging transaction is recovered without cloning again", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-transaction-recovery-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  await fs.mkdir(aiosPath);
+  const destination = managedWorkspacePath(aiosPath, "widget");
+  const project = {
+    id: "project-1",
+    slug: "widget",
+    repoUrl: "https://github.com/acme/widget.git",
+    projectPath: null,
+    pathAvailable: false
+  };
+  let transactionRoot = null;
+  const interruptedFs = new Proxy(fs, {
+    get(target, property) {
+      if (property === "rename") {
+        return async (source, targetPath) => {
+          if (targetPath === destination && path.basename(source) === "checkout") {
+            transactionRoot = path.dirname(source);
+            const error = new Error("simulated process interruption before publication");
+            error.code = "EIO";
+            throw error;
+          }
+          return fs.rename(source, targetPath);
+        };
+      }
+      if (property === "rm") {
+        return async (targetPath, options) => {
+          if (transactionRoot && targetPath === transactionRoot) {
+            throw new Error("simulated process exit before cleanup");
+          }
+          return fs.rm(targetPath, options);
+        };
+      }
+      return target[property];
+    }
+  });
+  const readRepositoryRemote = async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8");
+  const readRepositoryHead = async () => "0123456789abcdef0123456789abcdef01234567";
+
+  const interrupted = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    fileSystem: interruptedFs,
+    cloneRepository: async ({ destination: staged }) => {
+      await fs.mkdir(path.join(staged, ".git"));
+      await fs.writeFile(path.join(staged, ".remote"), project.repoUrl);
+    },
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async () => assert.fail("publication did not complete")
+  });
+  assert.equal(interrupted.ok, false);
+  assert.equal(interrupted.results[0].reason, "cleanup-required");
+  assert.ok(transactionRoot);
+
+  const markerPath = path.join(transactionRoot, "transaction.json");
+  const marker = JSON.parse(await fs.readFile(markerPath, "utf8"));
+  marker.pid = 2_147_483_647;
+  marker.process_started_at = "dead process";
+  await fs.writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+
+  let mapped = null;
+  const recovered = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async () => assert.fail("verified abandoned staging must be recovered, not recloned"),
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async (mapping) => { mapped = mapping; }
+  });
+  assert.equal(recovered.ok, true);
+  assert.equal(recovered.results[0].action, "cloned");
+  assert.equal(mapped.projectPath, destination);
+  assert.deepEqual(await fs.readdir(managedWorkspaceRoot(aiosPath)), ["widget"]);
+});
+
+test("retry after publication crash cleans the dead transaction before repairing mapping", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-published-recovery-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  await fs.mkdir(aiosPath);
+  const destination = managedWorkspacePath(aiosPath, "widget");
+  const project = {
+    id: "project-1",
+    slug: "widget",
+    repoUrl: "https://github.com/acme/widget.git",
+    projectPath: null,
+    pathAvailable: false
+  };
+  let publishedTransaction = null;
+  const interruptedFs = new Proxy(fs, {
+    get(target, property) {
+      if (property !== "rm") return target[property];
+      return async (targetPath, options) => {
+        if (path.basename(targetPath).startsWith(".dotaios-restore-widget-")) {
+          publishedTransaction = targetPath;
+          throw new Error("simulated exit after publication");
+        }
+        return fs.rm(targetPath, options);
+      };
+    }
+  });
+  const readRepositoryRemote = async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8");
+  const readRepositoryHead = async () => "0123456789abcdef0123456789abcdef01234567";
+
+  const interrupted = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    fileSystem: interruptedFs,
+    cloneRepository: async ({ destination: staged }) => {
+      await fs.mkdir(path.join(staged, ".git"));
+      await fs.writeFile(path.join(staged, ".remote"), project.repoUrl);
+    },
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async () => assert.fail("cleanup failure is surfaced before mapping")
+  });
+  assert.equal(interrupted.ok, false);
+  assert.equal(interrupted.results[0].reason, "cleanup-required");
+  assert.equal(await pathExists(destination), true, "the verified checkout was already published");
+  assert.ok(publishedTransaction);
+
+  const markerPath = path.join(publishedTransaction, "transaction.json");
+  const marker = JSON.parse(await fs.readFile(markerPath, "utf8"));
+  marker.pid = 2_147_483_647;
+  marker.process_started_at = "dead process";
+  await fs.writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+
+  let mapped = null;
+  const recovered = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async () => assert.fail("published checkout must not be cloned again"),
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async (mapping) => { mapped = mapping; }
+  });
+  assert.equal(recovered.ok, true);
+  assert.equal(recovered.results[0].action, "mapping-repaired");
+  assert.equal(mapped.projectPath, destination);
+  assert.deepEqual(await fs.readdir(managedWorkspaceRoot(aiosPath)), ["widget"]);
+});
+
+test("retry recovers a verified checkout after crashing between final-name claim and rename", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-claim-recovery-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  await fs.mkdir(aiosPath);
+  const destination = managedWorkspacePath(aiosPath, "widget");
+  const project = {
+    id: "project-1",
+    slug: "widget",
+    repoUrl: "https://github.com/acme/widget.git",
+    projectPath: null,
+    pathAvailable: false
+  };
+  let transactionRoot = null;
+  const interruptedFs = new Proxy(fs, {
+    get(target, property) {
+      if (property === "rename") {
+        return async (source, targetPath) => {
+          if (targetPath === destination && path.basename(source) === "checkout") {
+            transactionRoot = path.dirname(source);
+            const error = new Error("simulated exit after final-name claim");
+            error.code = "EIO";
+            throw error;
+          }
+          return fs.rename(source, targetPath);
+        };
+      }
+      if (property === "rmdir") {
+        return async (targetPath) => {
+          if (targetPath === destination) throw new Error("process exited before claim rollback");
+          return fs.rmdir(targetPath);
+        };
+      }
+      return target[property];
+    }
+  });
+  const readRepositoryRemote = async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8");
+  const readRepositoryHead = async () => "0123456789abcdef0123456789abcdef01234567";
+
+  const interrupted = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    fileSystem: interruptedFs,
+    cloneRepository: async ({ destination: staged }) => {
+      await fs.mkdir(path.join(staged, ".git"));
+      await fs.writeFile(path.join(staged, ".remote"), project.repoUrl);
+    },
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async () => assert.fail("publication did not complete")
+  });
+  assert.equal(interrupted.ok, false);
+  assert.equal(interrupted.results[0].reason, "cleanup-required");
+  assert.ok(transactionRoot);
+  assert.deepEqual(await fs.readdir(destination), [], "the exact empty final-name claim remains");
+  assert.equal(await pathExists(path.join(transactionRoot, "destination-claim.json")), true);
+
+  const markerPath = path.join(transactionRoot, "transaction.json");
+  const marker = JSON.parse(await fs.readFile(markerPath, "utf8"));
+  marker.pid = 2_147_483_647;
+  marker.process_started_at = "dead process";
+  await fs.writeFile(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+
+  let mapped = null;
+  const recovered = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async () => assert.fail("verified claimed staging must not be recloned"),
+    readRepositoryRemote,
+    readRepositoryHead,
+    updateMapping: async (mapping) => { mapped = mapping; }
+  });
+  assert.equal(recovered.ok, true);
+  assert.equal(recovered.results[0].action, "cloned");
+  assert.equal(mapped.projectPath, destination);
+  assert.deepEqual(await fs.readdir(managedWorkspaceRoot(aiosPath)), ["widget"]);
+});
+
+test("ambiguous restore markers are never deleted while a separate restore proceeds", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-ambiguous-marker-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  const workspaces = managedWorkspaceRoot(aiosPath);
+  await fs.mkdir(workspaces, { recursive: true });
+  const destination = managedWorkspacePath(aiosPath, "widget");
+  const project = {
+    id: "project-1",
+    slug: "widget",
+    repoUrl: "https://github.com/acme/widget.git",
+    projectPath: null,
+    pathAvailable: false
+  };
+  const canonicalOwner = "11111111-1111-4111-8111-111111111111";
+  const unknownKeyRoot = path.join(workspaces, `.dotaios-restore-widget-${canonicalOwner}`);
+  const arbitraryOwnerRoot = path.join(workspaces, ".dotaios-restore-widget-not-a-uuid");
+  const baseMarker = {
+    schema: "dotaios.project-restore-transaction.v1",
+    project_id: project.id,
+    slug: project.slug,
+    remote_url: project.repoUrl,
+    destination,
+    checkout: "checkout",
+    pid: 2_147_483_647,
+    owner: canonicalOwner,
+    created_at: new Date().toISOString()
+  };
+  await fs.mkdir(path.join(unknownKeyRoot, "checkout"), { recursive: true });
+  await fs.writeFile(
+    path.join(unknownKeyRoot, "transaction.json"),
+    `${JSON.stringify({ ...baseMarker, unexpected: true }, null, 2)}\n`
+  );
+  await fs.mkdir(path.join(arbitraryOwnerRoot, "checkout"), { recursive: true });
+  await fs.writeFile(
+    path.join(arbitraryOwnerRoot, "transaction.json"),
+    `${JSON.stringify({ ...baseMarker, owner: "not-a-uuid" }, null, 2)}\n`
+  );
+
+  const receipt = await restoreManagedProjects({
+    aiosPath,
+    projects: [project],
+    cloneRepository: async ({ destination: staged }) => {
+      await fs.mkdir(path.join(staged, ".git"));
+      await fs.writeFile(path.join(staged, ".remote"), project.repoUrl);
+    },
+    readRepositoryRemote: async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8"),
+    readRepositoryHead: async () => "0123456789abcdef0123456789abcdef01234567",
+    updateMapping: async () => {}
+  });
+  assert.equal(receipt.ok, true);
+  assert.equal(await pathExists(unknownKeyRoot), true, "unknown marker keys make ownership ambiguous");
+  assert.equal(await pathExists(arbitraryOwnerRoot), true, "non-canonical owners are not cleanup authority");
+  assert.equal(await pathExists(destination), true);
+});
+
+test("dead exact marker with a symlink checkout surfaces cleanup-required without deleting either path", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-symlink-staging-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  const workspaces = managedWorkspaceRoot(aiosPath);
+  const outside = path.join(root, "outside");
+  await fs.mkdir(workspaces, { recursive: true });
+  await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, "keep.txt"), "do not delete\n");
+  const owner = "22222222-2222-4222-8222-222222222222";
+  const transactionRoot = path.join(workspaces, `.dotaios-restore-widget-${owner}`);
+  const destination = managedWorkspacePath(aiosPath, "widget");
+  await fs.mkdir(transactionRoot);
+  await fs.symlink(outside, path.join(transactionRoot, "checkout"));
+  await fs.writeFile(path.join(transactionRoot, "transaction.json"), `${JSON.stringify({
+    schema: "dotaios.project-restore-transaction.v1",
+    project_id: "project-1",
+    slug: "widget",
+    remote_url: "https://github.com/acme/widget.git",
+    destination,
+    checkout: "checkout",
+    pid: 2_147_483_647,
+    owner,
+    created_at: new Date().toISOString()
+  }, null, 2)}\n`);
+
+  const receipt = await restoreManagedProjects({
+    aiosPath,
+    projects: [{
+      id: "project-1",
+      slug: "widget",
+      repoUrl: "https://github.com/acme/widget.git",
+      projectPath: null,
+      pathAvailable: false
+    }],
+    cloneRepository: async () => assert.fail("unsafe staging must block before clone"),
+    readRepositoryRemote: async () => assert.fail("symlink staging must not invoke Git"),
+    readRepositoryHead: async () => assert.fail("symlink staging must not invoke Git"),
+    updateMapping: async () => {}
+  });
+  assert.equal(receipt.ok, false);
+  assert.equal(receipt.results[0].reason, "cleanup-required");
+  assert.equal(await fs.readFile(path.join(outside, "keep.txt"), "utf8"), "do not delete\n");
+  assert.equal((await fs.lstat(path.join(transactionRoot, "checkout"))).isSymbolicLink(), true);
+});
+
 test("restore refuses a destination won concurrently and continues independent projects", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-race-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -379,6 +905,7 @@ test("restore refuses a destination won concurrently and continues independent p
       return async (targetPath, options) => {
         if (targetPath === racedDestination && options?.recursive === false) {
           await fs.mkdir(targetPath);
+          await fs.writeFile(path.join(targetPath, "winner.txt"), "concurrent owner\n");
           const error = new Error("already exists");
           error.code = "EEXIST";
           throw error;
@@ -395,9 +922,13 @@ test("restore refuses a destination won concurrently and continues independent p
       { id: "project-local", slug: "local", repoUrl: "file:///tmp/local", pathAvailable: false }
     ],
     fileSystem: racingFs,
-    cloneRepository: async () => { cloneCalls += 1; },
-    readRepositoryRemote: async () => null,
-    readRepositoryHead: async () => null,
+    cloneRepository: async ({ destination }) => {
+      cloneCalls += 1;
+      await fs.mkdir(path.join(destination, ".git"));
+      await fs.writeFile(path.join(destination, ".remote"), "https://github.com/acme/raced.git");
+    },
+    readRepositoryRemote: async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8"),
+    readRepositoryHead: async () => "0123456789abcdef0123456789abcdef01234567",
     updateMapping: async () => {}
   });
 
@@ -405,8 +936,58 @@ test("restore refuses a destination won concurrently and continues independent p
   assert.equal(receipt.results.length, 2);
   assert.equal(receipt.results[0].reason, "destination-raced");
   assert.equal(receipt.results[1].reason, "unsafe-remote");
-  assert.equal(cloneCalls, 0);
-  assert.equal((await fs.readdir(racedDestination)).length, 0, "concurrent winner is left untouched");
+  assert.equal(cloneCalls, 1);
+  assert.deepEqual(await fs.readdir(racedDestination), ["winner.txt"], "concurrent winner is left untouched");
+  assert.equal(await fs.readFile(path.join(racedDestination, "winner.txt"), "utf8"), "concurrent owner\n");
+  assert.deepEqual(
+    await fs.readdir(managedWorkspaceRoot(aiosPath)),
+    ["raced"],
+    "the losing restore removes only its own staging transaction"
+  );
+});
+
+test("restore never replaces an empty final destination created during publication", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-restore-empty-race-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  await fs.mkdir(aiosPath);
+  const destination = managedWorkspacePath(aiosPath, "widget");
+  const racingFs = new Proxy(fs, {
+    get(target, property) {
+      if (property !== "mkdir") return target[property];
+      return async (targetPath, options) => {
+        if (targetPath === destination && options?.recursive === false) {
+          await fs.mkdir(targetPath);
+          const error = new Error("concurrent empty destination");
+          error.code = "EEXIST";
+          throw error;
+        }
+        return fs.mkdir(targetPath, options);
+      };
+    }
+  });
+
+  const receipt = await restoreManagedProjects({
+    aiosPath,
+    fileSystem: racingFs,
+    projects: [{
+      id: "project-1",
+      slug: "widget",
+      repoUrl: "https://github.com/acme/widget.git",
+      pathAvailable: false
+    }],
+    cloneRepository: async ({ destination: staged }) => {
+      await fs.mkdir(path.join(staged, ".git"));
+      await fs.writeFile(path.join(staged, ".remote"), "https://github.com/acme/widget.git");
+    },
+    readRepositoryRemote: async (repoPath) => fs.readFile(path.join(repoPath, ".remote"), "utf8"),
+    readRepositoryHead: async () => "0123456789abcdef0123456789abcdef01234567",
+    updateMapping: async () => {}
+  });
+  assert.equal(receipt.ok, false);
+  assert.equal(receipt.results[0].reason, "destination-raced");
+  assert.deepEqual(await fs.readdir(destination), [], "the concurrent empty directory is not replaced");
+  assert.deepEqual(await fs.readdir(managedWorkspaceRoot(aiosPath)), ["widget"]);
 });
 
 test("a matching origin without a resolvable HEAD is a partial checkout", async (t) => {

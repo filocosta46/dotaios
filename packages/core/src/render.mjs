@@ -21,6 +21,7 @@ export function renderTemplate(template, data) {
 export function templateOutputPath(relativePath) {
   let outputRelative = relativePath.endsWith(".hbs") ? relativePath.slice(0, -4) : relativePath;
   if (outputRelative === "cursorrules") outputRelative = ".cursorrules";
+  if (outputRelative === "gitignore.template") outputRelative = ".gitignore";
   return outputRelative;
 }
 
@@ -42,11 +43,11 @@ export async function planTemplateTree(templateRoot, target, data, { include = (
 }
 
 export async function renderTemplateTree(templateRoot, target, data, options = {}) {
-  const { writeMode = "preserve" } = options;
+  const { writeMode = "preserve", boundaryRoot = null } = options;
   const plan = await planTemplateTree(templateRoot, target, data, options);
   const results = [];
   for (const item of plan) {
-    results.push(await writeFileSafe(item.path, item.content, writeMode));
+    results.push(await writeFileSafe(item.path, item.content, writeMode, { boundaryRoot }));
   }
   return results;
 }

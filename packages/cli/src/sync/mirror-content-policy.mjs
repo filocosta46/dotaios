@@ -11,6 +11,12 @@ export function findGitlinks(lsFilesStdout) {
     .map((entry) => entry.path);
 }
 
+export function findSymlinkEntries(lsFilesStdout) {
+  return parseIndexEntries(lsFilesStdout)
+    .filter((entry) => entry.metadata.startsWith("120000 "))
+    .map((entry) => entry.path);
+}
+
 export function findWorkspaceIndexEntries(lsFilesStdout) {
   const found = new Set();
   for (const { path: candidate } of parseIndexEntries(lsFilesStdout)) {
@@ -20,6 +26,13 @@ export function findWorkspaceIndexEntries(lsFilesStdout) {
     }
   }
   return [...found].sort();
+}
+
+function findWorkspaceChangedPaths(changedPaths) {
+  return [...new Set(changedPaths.filter((candidate) => {
+    const portablePath = String(candidate).replaceAll("\\", "/").toLowerCase();
+    return portablePath === "workspaces" || portablePath.startsWith("workspaces/");
+  }))].sort();
 }
 
 function parseIndexEntries(lsFilesStdout) {
@@ -33,6 +46,33 @@ function parseIndexEntries(lsFilesStdout) {
     if (tab === -1 || !record.slice(tab + 1)) return [];
     return [{ metadata: record.slice(0, tab), path: record.slice(tab + 1) }];
   });
+}
+
+function isSensitiveMirrorPath(candidate) {
+  const portablePath = String(candidate).replaceAll("\\", "/").toLowerCase();
+  const parts = portablePath.split("/").filter(Boolean);
+  const basename = parts.at(-1) || "";
+  if (basename === ".env" || (basename.startsWith(".env.") && basename !== ".env.example")) return true;
+  // Keep the fail-closed policy aligned with the scaffolded ignore contract.
+  // Patterns without a slash apply to these basenames at every depth, and the
+  // lower-cased portable path also blocks aliases on case-insensitive hosts.
+  if (/^(?:credentials|token)\./.test(basename)) return true;
+  if (/\.(?:key|pem|token|credentials)$/.test(basename)) return true;
+  if (basename === ".ds_store") return true;
+  if (basename === ".dotaios-setup-transaction.json") return true;
+  if (/^\.dotaios-setup-.*\.tmp$/.test(basename)) return true;
+  if (portablePath.startsWith(".dotaios/migrations/transactions/")) return true;
+  if (
+    portablePath.startsWith(".dotaios/migrations/receipts/")
+    && basename.endsWith(".pending")
+  ) return true;
+  if (parts.some((part) => part === "cache" || part === "tmp" || part === "node_modules")) return true;
+  if (/^connections\/[^/]+\/(?:credentials|token)\.json$/.test(portablePath)) return true;
+  return /^license\/[^/]+\.json$/.test(portablePath);
+}
+
+export function findSensitiveMirrorPaths(paths) {
+  return [...new Set(paths.filter(isSensitiveMirrorPath))].sort();
 }
 
 export function nestedRepoMessage(paths) {
@@ -61,6 +101,10 @@ async function isGitControlEntry(directory, filesystem) {
     if (error.code === "ENOENT") return false;
     throw error;
   }
+  // Git follows a symlinked .git marker. Treat it as repository control so the
+  // pre-add scan refuses it; otherwise Git can stage a Gitlink before the
+  // pre-commit hook gets a chance to object.
+  if (stat.isSymbolicLink()) return true;
   if (stat.isDirectory()) return true;
   if (!stat.isFile()) return false;
   const content = await filesystem.readFile(marker, "utf8");
@@ -152,6 +196,21 @@ async function assertWorkspaceCatalogEntries(
         `Cannot sync: workspace "${entry.name}" is a ${kind}; every workspace must be a real top-level directory.`
       );
     }
+    let gitControlStat;
+    try {
+      gitControlStat = await filesystem.lstat(path.join(candidate, ".git"));
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (
+      !gitControlStat
+      || gitControlStat.isSymbolicLink()
+      || (!gitControlStat.isDirectory() && !gitControlStat.isFile())
+    ) {
+      throw new Error(
+        `Cannot sync: workspace "${entry.name}" is not a complete Git repository with a safe regular Git control entry.`
+      );
+    }
     const repository = await inspectWorkspaceRepository(candidate);
     let repositoryRoot = null;
     try {
@@ -215,6 +274,39 @@ export async function assertMirrorContentSafe({
       ...workspaceIndexEntries.map((entry) => `  ${entry}`),
       "",
       "Nothing was committed or pushed."
+    ].join("\n"));
+  }
+  const workspaceChangedPaths = findWorkspaceChangedPaths(changedPaths);
+  if (workspaceChangedPaths.length > 0) {
+    throw new Error([
+      "Cannot sync: local workspace paths must stay under the exact ignored workspaces/ root.",
+      "",
+      ...workspaceChangedPaths.map((entry) => `  ${entry}`),
+      "",
+      "Nothing was staged, committed, or pushed."
+    ].join("\n"));
+  }
+  const sensitivePaths = findSensitiveMirrorPaths([
+    ...changedPaths,
+    ...parseIndexEntries(indexedEntries).map((entry) => entry.path)
+  ]);
+  if (sensitivePaths.length > 0) {
+    throw new Error([
+      "Cannot sync: the candidate mirror contains private or regenerable local files.",
+      "",
+      ...sensitivePaths.map((entry) => `  ${entry}`),
+      "",
+      "Nothing was staged, committed, or pushed. Keep these paths local and ignored."
+    ].join("\n"));
+  }
+  const symlinkEntries = findSymlinkEntries(indexedEntries);
+  if (symlinkEntries.length > 0) {
+    throw new Error([
+      "Cannot sync: the candidate mirror contains symbolic links.",
+      "",
+      ...symlinkEntries.map((entry) => `  ${entry}`),
+      "",
+      "Nothing was committed or pushed. Keep only regular files and directories in the portable mirror."
     ].join("\n"));
   }
   const found = new Set(findGitlinks(indexedEntries));

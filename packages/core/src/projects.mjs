@@ -7,6 +7,11 @@ import { promisify } from "node:util";
 import { parseDocument } from "yaml";
 import { isPathWithin } from "./paths.mjs";
 import { schemaVersion } from "./schema.mjs";
+import { processBirthToken, processRecordIsAlive } from "./process-identity.mjs";
+import {
+  hasExactManagedWorkspaceIgnoreRule,
+  isManagedWorkspaceEffectivelyIgnored
+} from "./workspace-ignore.mjs";
 import {
   classifyProjectPlacement,
   classifyProjectRemote,
@@ -101,8 +106,16 @@ export async function planProjectRegistration(options = {}) {
   const name = readRequiredString(options.name ?? existing?.metadata.name ?? path.basename(requestedProjectPath), "name");
   const status = readRequiredString(options.status ?? existing?.metadata.status ?? "active", "status");
   const domain = normalizeDomains(options.domain ?? existing?.metadata.domain ?? ["build"]);
+  const explicitRepoUrlSupplied = options.repoUrl !== undefined && options.repoUrl !== null;
+  const explicitRepoUrl = readOptionalString(options.repoUrl);
+  if (explicitRepoUrlSupplied) {
+    const explicitRemote = classifyProjectRemote(explicitRepoUrl);
+    if (!explicitRemote.safe) {
+      throw unsafeExplicitProjectRemoteError(explicitRemote.reason);
+    }
+  }
   const discoveredRepoUrl = await context.readRepoUrl(requestedProjectPath);
-  const remoteCandidate = readOptionalString(options.repoUrl)
+  const remoteCandidate = explicitRepoUrl
     ?? readOptionalString(discoveredRepoUrl)
     ?? readOptionalString(existing?.metadata.repo_url)
     ?? readOptionalString(existing?.metadata.repo)
@@ -315,9 +328,15 @@ async function assertManagedRestoreBoundary(context) {
       `Check the versioned folder upgrade: dotaios migrate --path ${JSON.stringify(context.aiosPath)}`
     ].join(" "));
   }
-  if (!content.split(/\r?\n/).some((line) => line === "/workspaces/")) {
+  if (!hasExactManagedWorkspaceIgnoreRule(content)) {
     throw new Error([
       "Managed project restore is blocked because the exact /workspaces/ ignore rule is not installed.",
+      `Check the versioned folder upgrade: dotaios migrate --path ${JSON.stringify(context.aiosPath)}`
+    ].join(" "));
+  }
+  if (!await isManagedWorkspaceEffectivelyIgnored(content, { filesystem: context.fs })) {
+    throw new Error([
+      "Managed project restore is blocked because a later ignore rule cancels the /workspaces/ privacy boundary.",
       `Check the versioned folder upgrade: dotaios migrate --path ${JSON.stringify(context.aiosPath)}`
     ].join(" "));
   }
@@ -454,18 +473,29 @@ export async function matchProjectRecord(referenceOrOptions, additionalOptions =
 export async function resolveProjectRecord(referenceOrOptions, additionalOptions = {}) {
   const project = await matchProjectRecord(referenceOrOptions, additionalOptions);
   if (!project.projectPath) {
+    const recovery = project.restoreEligible
+      ? restoreRecoveryInstruction(project)
+      : `Run \`dotaios project add <repo-path> --slug ${project.slug}\` to register it.`;
     throw new Error([
       `Project "${project.slug}" has no path on this machine.`,
-      `Run \`dotaios project add <repo-path> --slug ${project.slug}\` to register it.`
+      recovery
     ].join(" "));
   }
   if (!project.pathAvailable) {
+    const recovery = project.restoreEligible
+      ? restoreRecoveryInstruction(project)
+      : `Run \`dotaios project add <repo-path> --slug ${project.slug}\` to update it.`;
     throw new Error([
       `Project "${project.slug}" is registered at ${project.projectPath}, but that path is missing.`,
-      `Run \`dotaios project add <repo-path> --slug ${project.slug}\` to update it.`
+      recovery
     ].join(" "));
   }
   return project;
+}
+
+function restoreRecoveryInstruction(project) {
+  const reference = project.id || project.slug;
+  return `Run \`dotaios project restore ${reference} --dry-run\`, then repeat without \`--dry-run\` to restore it.`;
 }
 
 /** Resolve a writer or bridge project reference through the project catalog. */
@@ -984,11 +1014,13 @@ async function withProjectStateLock(context, operation) {
 
 async function acquireProjectStateLock(lockPath, fileSystem, recoveryDepth = 0) {
   if (recoveryDepth > 16) return null;
+  const processStartedAt = processBirthToken(process.pid);
   const record = {
     format: PROJECT_STATE_LOCK_FORMAT,
     pid: process.pid,
     owner: randomUUID(),
-    created_at: Date.now()
+    created_at: Date.now(),
+    ...(processStartedAt && { process_started_at: processStartedAt })
   };
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -1004,7 +1036,7 @@ async function acquireProjectStateLock(lockPath, fileSystem, recoveryDepth = 0) 
 
     const held = await readProjectStateLock(lockPath, fileSystem);
     if (!held) continue;
-    if (processIsAlive(held.record?.pid)) return null;
+    if (projectStateLockIsLive(held)) return null;
     if (!projectStateLockIsAbandoned(held)) return null;
     await recoverProjectStateLock(lockPath, fileSystem, recoveryDepth);
   }
@@ -1017,7 +1049,7 @@ async function recoverProjectStateLock(lockPath, fileSystem, recoveryDepth) {
   if (!recoveryLock) return false;
   try {
     const held = await readProjectStateLock(lockPath, fileSystem);
-    if (!held || processIsAlive(held.record?.pid) || !projectStateLockIsAbandoned(held)) return false;
+    if (!held || projectStateLockIsLive(held) || !projectStateLockIsAbandoned(held)) return false;
     const moved = `${lockPath}.stale.${randomUUID()}`;
     try {
       await fileSystem.rename(lockPath, moved);
@@ -1068,22 +1100,32 @@ function projectStateLockIsAbandoned(held) {
     && typeof held.record.owner === "string"
     && Number.isSafeInteger(held.record.pid)
     && held.record.pid > 0;
-  if (valid) return !processIsAlive(held.record.pid);
   const createdAt = Number.isFinite(held.record?.created_at)
     ? held.record.created_at
     : held.stats?.mtimeMs;
+  if (valid) return !processRecordIsAlive(held.record);
   return Number.isFinite(createdAt) && Date.now() - createdAt > PROJECT_STATE_LOCK_STALE_MS;
 }
 
-function processIsAlive(pid) {
+function projectStateLockIsLive(held) {
+  return held?.record?.format === PROJECT_STATE_LOCK_FORMAT
+    && typeof held.record.owner === "string"
+    && Number.isSafeInteger(held.record.pid)
+    && held.record.pid > 0
+    && processRecordIsAlive(held.record);
+}
+
+export function projectStateProcessIsAlive(pid, kill = process.kill.bind(process)) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
-    process.kill(pid, 0);
+    kill(pid, 0);
     return true;
   } catch (error) {
-    return error.code === "EPERM";
+    return error.code !== "ESRCH";
   }
 }
+
+const processIsAlive = projectStateProcessIsAlive;
 
 async function pathExists(fileSystem, filePath) {
   try {
@@ -1208,6 +1250,14 @@ function readRequiredString(value, field) {
 
 function readOptionalString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function unsafeExplicitProjectRemoteError(reason) {
+  const error = new Error(
+    `Explicit project remote is unsafe (${reason || "invalid"}); refusing registration before writing metadata.`
+  );
+  error.code = "ERR_DOTAIOS_UNSAFE_PROJECT_REMOTE";
+  return error;
 }
 
 function firstHeading(body) {

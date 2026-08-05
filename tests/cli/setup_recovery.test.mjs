@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -49,6 +49,38 @@ function runSetup(sandbox, args, env = {}) {
     // resolveLightpanda falls back to `which lightpanda`.
     env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin", ...env }
   });
+}
+
+function startSetup(sandbox, args, env = {}) {
+  const child = spawn(process.execPath, [
+    lifecycleHarness,
+    "--path", sandbox.aiosPath,
+    "--home", sandbox.homePath,
+    "--skip-reveal",
+    ...args
+  ], {
+    cwd: repoRoot,
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOME: sandbox.processHomePath, PATH: "/usr/bin:/bin", ...env }
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  return {
+    child,
+    completed: new Promise((resolve) => {
+      child.on("close", (status, signal) => resolve({ status, signal, stdout, stderr }));
+    })
+  };
+}
+
+async function waitForFile(filePath, timeoutMs = 5000) {
+  const started = Date.now();
+  while (!fs.existsSync(filePath)) {
+    if (Date.now() - started > timeoutMs) throw new Error(`timed out waiting for ${filePath}`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 function listTree(dir, prefix = "") {
@@ -323,6 +355,96 @@ test("the identical setup command recovers a hard interruption after init", () =
   assert.match(`${retry.stdout}${retry.stderr}`, /unfinished folder/i);
 });
 
+test("the identical setup command recovers a hard interruption before marker publication", () => {
+  const sandbox = makeSandbox("setup-marker-prepublish-interrupt");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_INTERRUPT_SETUP_BEFORE_MARKER_LINK: "1"
+  });
+
+  assert.equal(first.signal, "SIGKILL");
+  assert.deepEqual(listTree(sandbox.aiosPath), [], "pre-publication residue must stay outside the empty target");
+  assert.equal(
+    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    false,
+    "the canonical marker must not exist before its exclusive hard link"
+  );
+  assert.ok(
+    fs.readdirSync(sandbox.root).some((entry) => /^\.aios\.dotaios-setup-[^.]+\.tmp$/.test(entry)),
+    "the complete private staging inode must be beside the target"
+  );
+
+  const retry = runSetup(sandbox, ["--yes"]);
+
+  assert.equal(retry.status, 0, `an identical retry must start from the still-empty target:\n${retry.stdout}\n${retry.stderr}`);
+  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")));
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")), false);
+  assert.equal(
+    fs.readdirSync(sandbox.root).some((entry) => /^\.aios\.dotaios-setup-[^.]+\.tmp$/.test(entry)),
+    false,
+    "the retry must remove its verified pre-publication staging inode"
+  );
+});
+
+test("a live setup staging marker cannot be mistaken for an interrupted run", async () => {
+  const sandbox = makeSandbox("setup-live-overlap");
+  const barrier = path.join(sandbox.root, "setup-barrier");
+  const first = startSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_PAUSE_SETUP_BEFORE_MARKER_LINK: barrier
+  });
+  await waitForFile(`${barrier}.ready`);
+
+  const overlapping = runSetup(sandbox, ["--yes"]);
+  const treeBeforeRelease = listTree(sandbox.aiosPath);
+  fs.writeFileSync(`${barrier}.release`, "release\n");
+  const completed = await first.completed;
+
+  assert.notEqual(overlapping.status, 0);
+  assert.match(overlapping.stderr, /another setup is already running/i);
+  assert.deepEqual(treeBeforeRelease, [], "the overlapping run must not start scaffolding");
+  assert.equal(completed.status, 0, `${completed.stdout}\n${completed.stderr}`);
+  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, "aios.json")));
+  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")), false);
+});
+
+test("an old setup marker is never reclaimed while its owner PID is live", () => {
+  const sandbox = makeSandbox("setup-owner-pid-reuse");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT: "1"
+  });
+  assert.equal(first.signal, "SIGKILL");
+
+  const markerPath = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+  marker.owner.pid = process.pid;
+  delete marker.owner.process_started_at;
+  marker.owner.created_at = "2000-01-01T00:00:00.000Z";
+  fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+
+  const retry = runSetup(sandbox, ["--yes"]);
+  assert.notEqual(retry.status, 0);
+  assert.match(retry.stderr, /another setup is already running/i);
+  assert.equal(fs.existsSync(markerPath), true);
+});
+
+test("a setup marker is recoverable after its dead PID is reused", (t) => {
+  const sandbox = makeSandbox("setup-owner-pid-reuse");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT: "1"
+  });
+  assert.equal(first.signal, "SIGKILL");
+
+  const markerPath = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const marker = JSON.parse(fs.readFileSync(markerPath, "utf8"));
+  assert.equal(typeof marker.owner.process_started_at, "string");
+  marker.owner.pid = process.pid;
+  marker.owner.created_at = "2000-01-01T00:00:00.000Z";
+  fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
+
+  const retry = runSetup(sandbox, ["--yes"]);
+  assert.equal(retry.status, 0, `${retry.stdout}\n${retry.stderr}`);
+  assert.equal(fs.existsSync(markerPath), false);
+});
+
 test("setup recovers a crash between linking and unlinking its private marker", () => {
   const sandbox = makeSandbox("setup-marker-link-interrupt");
   const first = runSetup(sandbox, ["--yes"], {
@@ -331,21 +453,32 @@ test("setup recovers a crash between linking and unlinking its private marker", 
   assert.equal(first.signal, "SIGKILL");
 
   const marker = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
-  const temporary = fs.readdirSync(sandbox.aiosPath)
-    .find((entry) => /^\.dotaios-setup-[^.]+\.tmp$/.test(entry));
+  const temporary = fs.readdirSync(sandbox.root)
+    .find((entry) => /^\.aios\.dotaios-setup-[^.]+\.tmp$/.test(entry));
   assert.ok(temporary, "the crash window must leave the temporary hard link");
   const markerStats = fs.statSync(marker);
-  const temporaryStats = fs.statSync(path.join(sandbox.aiosPath, temporary));
+  const temporaryPath = path.join(sandbox.root, temporary);
+  const temporaryStats = fs.statSync(temporaryPath);
   assert.equal(markerStats.ino, temporaryStats.ino, "both names must identify the same complete marker inode");
   if (process.platform !== "win32") {
     assert.equal(markerStats.mode & 0o777, 0o600);
     assert.equal(temporaryStats.mode & 0o777, 0o600);
   }
+  const foreignTemporaryPath = path.join(
+    sandbox.root,
+    ".aios.dotaios-setup-00000000-0000-4000-8000-000000000000.tmp"
+  );
+  fs.writeFileSync(foreignTemporaryPath, "foreign sibling bytes\n");
 
   const retry = runSetup(sandbox, ["--yes"]);
   assert.equal(retry.status, 0, `same-inode marker recovery must finish:\n${retry.stdout}\n${retry.stderr}`);
   assert.equal(fs.existsSync(marker), false);
-  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, temporary)), false);
+  assert.equal(fs.existsSync(temporaryPath), false);
+  assert.equal(
+    fs.readFileSync(foreignTemporaryPath, "utf8"),
+    "foreign sibling bytes\n",
+    "cleanup must not unlink a lookalike sibling with a different inode"
+  );
 });
 
 test("the identical setup command recovers a hard interruption after activation persists skills-first", () => {

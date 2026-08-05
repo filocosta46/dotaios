@@ -18,13 +18,19 @@ It refuses unregistered workspaces, partial clones, symlinks, remote mismatches,
 and every other nested repository.
 
 Restore uses the user's normal project Git credentials. It never reuses the
-AIOS mirror token. It accepts credential-free HTTPS and SSH remotes, claims a
-new destination exclusively, verifies a resolved commit and matching origin,
-then saves only the machine-local path outside AIOS. A failed clone is left
-visible for inspection and a retry refuses to overwrite it. The user must
-inspect and explicitly remove disposable partial-clone debris before retrying;
-if the repository completed and only mapping failed, rerunning restore verifies
-the existing checkout and repairs the mapping without cloning again.
+AIOS mirror token. It accepts credential-free HTTPS and SSH remotes and clones
+into a hidden, owner-marked sibling transaction under `workspaces/`. DotAIOS
+verifies a resolved commit and matching origin there before publishing the
+checkout at `workspaces/<slug>/`, then saves only the machine-local path outside
+AIOS. A normal clone failure removes only that command's owned staging tree, so
+the same restore can be retried. After an abrupt process exit, a retry may clean
+or publish a transaction only when its exact project, remote, destination,
+canonical owner marker, and dead process identity all verify. Live matching
+transactions return busy, and malformed or ambiguous staging residue is never
+deleted automatically. A raced final destination is left untouched. If the
+checkout was published and only cleanup or mapping failed, rerunning restore
+verifies it, removes exact dead transaction debris, and repairs the mapping
+without cloning again.
 
 Existing folders must complete the preview-first schema 1.1 to 1.2 migration
 before restore. That migration preserves custom `.gitignore` bytes, adds the

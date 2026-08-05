@@ -1,19 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import {
+  processBirthToken,
+  processRecordIsAlive
+} from "../../../core/src/process-identity.mjs";
 
 const LOCK_FORMAT = "dotaios-sync-operation-lock/v1";
 const DEFAULT_STALE_MS = 5 * 60 * 1000;
-
-function processIsAlive(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code !== "ESRCH";
-  }
-}
 
 async function publishOwner(lockPath, record, filesystem) {
   const temporary = `${lockPath}.${record.owner}.tmp`;
@@ -58,18 +52,25 @@ async function stealAbandoned(lockPath, {
     let held;
     let stats;
     try {
-      [held, stats] = await Promise.all([
-        filesystem.readFile(lockPath, "utf8").then((raw) => JSON.parse(raw)),
+      const [raw, currentStats] = await Promise.all([
+        filesystem.readFile(lockPath, "utf8"),
         filesystem.stat(lockPath)
       ]);
+      stats = currentStats;
+      try {
+        held = JSON.parse(raw);
+      } catch {
+        held = null;
+      }
     } catch (error) {
       if (error.code === "ENOENT") return false;
       held = null;
       stats = await filesystem.stat(lockPath).catch(() => null);
     }
-    if (isOwnerAlive(held?.pid)) return false;
     const recordedAt = Number.isFinite(held?.at) ? held.at : stats?.mtimeMs;
     const ownerRecordIsValid = held?.format === LOCK_FORMAT && typeof held?.owner === "string";
+    const liveOwner = ownerRecordIsValid && isOwnerAlive(held);
+    if (liveOwner) return false;
     if (!ownerRecordIsValid && !(Number.isFinite(recordedAt) && now() - recordedAt > staleMs)) {
       return false;
     }
@@ -92,7 +93,7 @@ export async function acquireOperationLock(lockPath, {
   filesystem = fs,
   now = () => Date.now(),
   staleMs = DEFAULT_STALE_MS,
-  isOwnerAlive = processIsAlive,
+  isOwnerAlive = processRecordIsAlive,
   recoveryDepth = 0,
   maxRecoveryDepth = 32
 } = {}) {
@@ -101,11 +102,13 @@ export async function acquireOperationLock(lockPath, {
     await filesystem.chmod(path.dirname(lockPath), 0o700).catch(() => {});
   }
 
+  const processStartedAt = processBirthToken(process.pid);
   const record = {
     format: LOCK_FORMAT,
     pid: process.pid,
     owner: randomUUID(),
-    at: now()
+    at: now(),
+    ...(processStartedAt && { process_started_at: processStartedAt })
   };
   for (let attempt = 0; attempt < 3; attempt += 1) {
     if (await publishOwner(lockPath, record, filesystem)) {
@@ -119,18 +122,22 @@ export async function acquireOperationLock(lockPath, {
         filesystem.readFile(lockPath, "utf8"),
         filesystem.stat(lockPath)
       ]);
-      held = JSON.parse(raw);
       stats = currentStats;
+      try {
+        held = JSON.parse(raw);
+      } catch {
+        held = null;
+      }
     } catch (error) {
       if (error.code === "ENOENT") continue;
     }
 
-    // Never steal from a live PID, even if the operation has lasted longer
-    // than the old tick-only timeout. Sync setup legitimately waits on a user.
-    if (isOwnerAlive(held?.pid)) return null;
-
     const recordedAt = Number.isFinite(held?.at) ? held.at : stats?.mtimeMs;
     const ownerRecordIsValid = held?.format === LOCK_FORMAT && typeof held?.owner === "string";
+    if (
+      ownerRecordIsValid
+      && isOwnerAlive(held)
+    ) return null;
     const abandoned = ownerRecordIsValid
       || (Number.isFinite(recordedAt) && now() - recordedAt > staleMs);
     if (!abandoned) return null;

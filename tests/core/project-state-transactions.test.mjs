@@ -126,3 +126,53 @@ test("registration secures a newly-created default DotAIOS state directory", asy
   assert.equal(path.dirname(plan.statePath), path.join(homePath, ".dotaios"));
   assert.equal((await fs.stat(path.dirname(plan.statePath))).mode & 0o777, 0o700);
 });
+
+test("registration never steals an old project-state lock from a live owner", async (t) => {
+  const { root, aiosPath, projectPath } = await fixture(t);
+  const statePath = path.join(root, "state", "projects.json");
+  const plan = await makePlan({ aiosPath, projectPath, statePath });
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(`${statePath}.lock`, `${JSON.stringify({
+    format: "dotaios-project-state-lock/v1",
+    pid: process.pid,
+    owner: "reused-pid",
+    created_at: Date.now() - 31 * 60 * 1000
+  })}\n`);
+
+  await assert.rejects(
+    () => applyProjectRegistration(plan),
+    /already being updated/i
+  );
+  await assert.doesNotReject(fs.access(`${statePath}.lock`));
+});
+
+test("registration recovers a project-state lock after its PID is reused", async (t) => {
+  const { root, aiosPath, projectPath } = await fixture(t);
+  const statePath = path.join(root, "state", "projects.json");
+  const plan = await makePlan({ aiosPath, projectPath, statePath });
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(`${statePath}.lock`, `${JSON.stringify({
+    format: "dotaios-project-state-lock/v1",
+    pid: process.pid,
+    owner: "reused-pid",
+    created_at: Date.now() - 31 * 60 * 1000,
+    process_started_at: "definitely-not-the-current-process"
+  })}\n`);
+
+  await assert.doesNotReject(() => applyProjectRegistration(plan));
+  await assert.rejects(fs.access(`${statePath}.lock`), { code: "ENOENT" });
+});
+
+test("registration reclaims malformed project-state lock residue after it is stale", async (t) => {
+  const { root, aiosPath, projectPath } = await fixture(t);
+  const statePath = path.join(root, "state", "projects.json");
+  const plan = await makePlan({ aiosPath, projectPath, statePath });
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  const lockPath = `${statePath}.lock`;
+  await fs.writeFile(lockPath, "{truncated");
+  const old = new Date(Date.now() - 6 * 60 * 1000);
+  await fs.utimes(lockPath, old, old);
+
+  await assert.doesNotReject(() => applyProjectRegistration(plan));
+  await assert.rejects(fs.access(lockPath), { code: "ENOENT" });
+});

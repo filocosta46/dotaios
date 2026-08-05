@@ -9,6 +9,7 @@ import { createGit } from "../../packages/cli/src/sync/git.mjs";
 import { plainRemoteUrl, initialMirrorPush } from "../../packages/cli/src/sync/repo.mjs";
 
 const TOKEN = "ghp_SECRET_TOKEN_VALUE";
+const VALIDATED_SHA = "a".repeat(40);
 const run = promisify(execFile);
 
 function recordingSpawn(responses = {}) {
@@ -89,7 +90,7 @@ test("push authenticates via env-fed credential helper, never via argv or the st
     accessToken: TOKEN,
     expectedRepoFullName: "user/repo"
   });
-  await git.push("main");
+  await git.push("main", VALIDATED_SHA);
 
   const pushCall = calls.find((call) => call.args.includes("push"));
   assert.ok(pushCall, "expected a push invocation");
@@ -127,7 +128,7 @@ test("credential helper returns the token only for the exact HTTPS GitHub reposi
     accessToken: TOKEN,
     expectedRepoFullName: "user/repo"
   });
-  await git.push("main");
+  await git.push("main", VALIDATED_SHA);
 
   const pushCall = calls.find((call) => call.args.includes("push"));
   const helperConfig = pushCall.args.find((arg) => arg.startsWith("credential.helper=!"));
@@ -170,7 +171,7 @@ for (const rewriteKey of [
       expectedRepoFullName: "user/repo"
     });
 
-    await assert.rejects(() => git.push("main"), /URL rewrite/i);
+    await assert.rejects(() => git.push("main", VALIDATED_SHA), /URL rewrite/i);
     assert.ok(!calls.some((call) => call.args.includes("push")), "no network push is launched");
     assert.ok(
       !calls.some((call) => call.args[0] === "remote" && call.args[1] === "set-url"),
@@ -198,7 +199,7 @@ test("credentialed Git allows an unrelated URL rewrite", async () => {
     expectedRepoFullName: "user/repo"
   });
 
-  await assert.rejects(() => git.push("main"), /test blocked a network operation/);
+  await assert.rejects(() => git.push("main", VALIDATED_SHA), /test blocked a network operation/);
   assert.ok(calls.some((args) => args.includes("push")), "unrelated rewrites must reach the network operation");
 });
 
@@ -223,7 +224,7 @@ for (const source of ["local", "global"]) {
       expectedRepoFullName: "user/repo"
     });
 
-    await assert.rejects(() => git.push("main"), /URL rewrite/i);
+    await assert.rejects(() => git.push("main", VALIDATED_SHA), /URL rewrite/i);
     assert.ok(!calls.some((args) => args.includes("push")), "the blocked rewrite launches no push");
     assert.ok(
       !calls.some((args) => args[0] === "remote" && args[1] === "set-url"),
@@ -252,10 +253,29 @@ test("a legacy token-embedded remote is self-healed to the plain URL before netw
   assert.ok(setUrlIndex < fetchIndex, "self-heal must happen before the network op");
 });
 
+test("credentialed Git refuses network access when an embedded token cannot be removed", async () => {
+  const { calls, spawnImpl } = recordingSpawn({
+    "remote get-url": { stdout: `https://x-access-token:${TOKEN}@github.com/user/repo.git\n` },
+    "remote set-url": { code: 1, stderr: "read-only config" }
+  });
+  const git = createGit({
+    cwd: "/tmp/x",
+    spawnImpl,
+    accessToken: TOKEN,
+    expectedRepoFullName: "user/repo"
+  });
+
+  await assert.rejects(
+    () => git.push("main", VALIDATED_SHA),
+    /could not remove the embedded Git credential/i
+  );
+  assert.equal(calls.some((call) => call.args.includes("push")), false);
+});
+
 test("without an access token git behaves exactly as before (no helper, no env var)", async () => {
   const { calls, spawnImpl } = recordingSpawn();
   const git = createGit({ cwd: "/tmp/x", spawnImpl });
-  await git.push("main");
+  await git.push("main", VALIDATED_SHA);
 
   const pushCall = calls.find((call) => call.args.includes("push"));
   assert.ok(!pushCall.args.some((arg) => String(arg).startsWith("credential.helper=")), "no helper without a token");
@@ -268,41 +288,40 @@ test("a credentialed Git client refuses network access without a bound repositor
   });
   const git = createGit({ cwd: "/tmp/x", spawnImpl, accessToken: TOKEN });
 
-  await assert.rejects(() => git.push("main"), /repository identity is unavailable/i);
+  await assert.rejects(() => git.push("main", VALIDATED_SHA), /repository identity is unavailable/i);
   assert.ok(!calls.some((call) => call.args.includes("push")), "no credentialed push is launched");
   assert.ok(calls.every((call) => !("DOTAIOS_SYNC_TOKEN" in call.opts.env)), "the token never enters a local inspection command");
 });
 
-test("initialMirrorPush stores the plain remote and still pushes", async () => {
-  const { calls, spawnImpl } = recordingSpawn();
+test("initialMirrorPush stores the plain remote and still pushes", async (t) => {
+  const aiosPath = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-credential-upload-"));
+  t.after(() => fs.rm(aiosPath, { recursive: true, force: true }));
+  await fs.writeFile(path.join(aiosPath, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  const { calls, spawnImpl } = recordingSpawn({
+    "rev-parse --git-path index": { stdout: ".git/index\n" },
+    "rev-parse HEAD": { stdout: `${VALIDATED_SHA}\n` },
+    "ls-tree -r -z": { stdout: [
+      `100644 blob ${"b".repeat(40)}\t.gitignore`,
+      `100644 blob ${"c".repeat(40)}\taios.json`,
+      ""
+    ].join("\0") },
+    [`cat-file blob ${VALIDATED_SHA}:.gitignore`]: { stdout: "build/\n/workspaces/\n" },
+    [`cat-file blob ${VALIDATED_SHA}:aios.json`]: { stdout: '{"schema_version":"1.2.0"}\n' },
+    "remote get-url": { stdout: "https://github.com/user/repo.git\n" }
+  });
   const git = createGit({
-    cwd: "/tmp/x",
+    cwd: aiosPath,
     spawnImpl,
     accessToken: TOKEN,
     expectedRepoFullName: "user/repo"
   });
-  const fakeFsWrites = [];
-  let pendingContent = null;
-  const fakeFs = {
-    readdir: async () => [],
-    readFile: async () => { const error = new Error("missing"); error.code = "ENOENT"; throw error; },
-    lstat: async () => { const error = new Error("missing"); error.code = "ENOENT"; throw error; },
-    open: async (p) => ({
-      writeFile: async (content) => { pendingContent = content; fakeFsWrites.push(p); },
-      sync: async () => {},
-      close: async () => {}
-    }),
-    rename: async () => { assert.equal(pendingContent, "build/\n"); },
-    rm: async () => {}
-  };
 
   await initialMirrorPush({
-    aiosPath: "/tmp/x",
+    aiosPath,
     accessToken: TOKEN,
     fullName: "user/repo",
-    gitignoreContent: "build/\n",
-    git,
-    filesystem: fakeFs
+    gitignoreContent: "build/\n/workspaces/\n",
+    git
   });
 
   const addCall = calls.find((call) => call.args[0] === "remote" && call.args[1] === "add");
