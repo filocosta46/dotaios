@@ -24,10 +24,15 @@ test("activate creates global and project agent bridges for installed tools", ()
 test("activate skips AI tools that are not installed on the machine", () => {
   const { aiosPath, homePath } = setupAios();
 
-  const result = run(["activate", "--path", aiosPath, "--home", homePath]);
+  const result = run(["activate", "--path", aiosPath, "--home", homePath], {
+    env: { ...process.env, PATH: "" }
+  });
 
   assert.equal(fs.existsSync(path.join(homePath, ".claude", "CLAUDE.md")), false);
   assert.equal(fs.existsSync(path.join(homePath, ".codex", "AGENTS.md")), false);
+  assert.equal(fs.existsSync(path.join(homePath, ".claude")), false);
+  assert.equal(fs.existsSync(path.join(homePath, ".gemini")), false);
+  assert.equal(fs.existsSync(path.join(homePath, ".agents", "skills")), true);
   assert.match(result.stdout, /No known AI tools were detected/);
 });
 
@@ -39,6 +44,15 @@ test("activate --all connects every known tool even when not detected", () => {
   assert.match(read(path.join(homePath, ".claude", "CLAUDE.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
   assert.match(read(path.join(homePath, ".codex", "AGENTS.md")), new RegExp(escapeRegex(path.join(aiosPath, "AGENTS.md"))));
   assert.match(read(path.join(homePath, ".gemini", "GEMINI.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
+});
+
+test("retired 1.x catalog commands fail with a boundary-safe migration message", () => {
+  for (const command of ["license", "market"]) {
+    const result = runFail([command]);
+    assert.doesNotMatch(result.stderr, /Unknown command/i, command);
+    assert.match(result.stderr, /removed from the free core in 1\.28\.0/i, command);
+    assert.match(result.stderr, /no action was taken/i, command);
+  }
 });
 
 test("activate preserves unmanaged files by default", () => {
@@ -250,10 +264,11 @@ function installAgents(homePath) {
   }
 }
 
-function run(args) {
+function run(args, options = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    ...options
   });
 
   if (result.status !== 0) {

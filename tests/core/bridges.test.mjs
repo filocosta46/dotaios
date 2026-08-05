@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bridgeContent, bridgePath, loadAgentRegistry } from "../../packages/core/src/bridges.mjs";
+import { bridgeContent, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../packages/core/src/bridges.mjs";
 
 test("registry preserves non-bridge runtimes such as Hermes", async () => {
   const registry = await loadAgentRegistry();
@@ -22,6 +22,29 @@ test("Antigravity detection follows its documented Gemini-owned directory", asyn
   assert.ok(antigravity);
   assert.equal(antigravity.detect, ".gemini/antigravity");
   assert.equal(antigravity.skills.dir, ".gemini/antigravity/skills");
+});
+
+test("agent detection recognizes a declared command on PATH without a config folder", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-agent-command-"));
+  try {
+    const command = process.platform === "win32" ? "example-agent.CMD" : "example-agent";
+    await fs.writeFile(path.join(root, command), "", { mode: 0o755 });
+    const installed = await isAgentInstalled(
+      path.join(root, "empty-home"),
+      { command: "example-agent", detect: ".example-agent" },
+      {
+        env: {
+          PATH: root,
+          ...(process.platform === "win32" ? { PATHEXT: ".CMD;.EXE" } : {})
+        },
+        platform: process.platform
+      }
+    );
+
+    assert.equal(installed, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
 });
 
 test("managed bridges route working memory through the canonical projection", async () => {

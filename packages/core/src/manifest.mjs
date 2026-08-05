@@ -17,6 +17,7 @@ const requiredPermissionKeys = [
 ];
 
 const safeNamePattern = /^[a-z0-9][a-z0-9-]*$/;
+const allowedManifestKeys = new Set(requiredManifestKeys);
 
 export function validateManifest(manifest) {
   const errors = [];
@@ -24,6 +25,11 @@ export function validateManifest(manifest) {
 
   if (missing.length > 0) {
     errors.push(`Missing required key(s): ${missing.join(", ")}`);
+  }
+
+  const unsupported = Object.keys(manifest).filter((key) => !allowedManifestKeys.has(key));
+  if (unsupported.length > 0) {
+    errors.push(`Unsupported top-level key(s): ${unsupported.join(", ")}`);
   }
 
   if (manifest.name !== undefined && !safeNamePattern.test(manifest.name)) {
@@ -42,44 +48,11 @@ export function validateManifest(manifest) {
     errors.push(...validateRequires(manifest.requires));
   }
 
-  errors.push(...validateMonetization(manifest));
-
   return {
     valid: errors.length === 0,
     missing,
     errors
   };
-}
-
-export function isPaidManifest(manifest) {
-  return manifest?.paid === true;
-}
-
-export function manifestProductId(manifest) {
-  return manifest?.product_id || null;
-}
-
-function validateMonetization(manifest) {
-  const errors = [];
-
-  if (manifest.paid !== undefined && typeof manifest.paid !== "boolean") {
-    errors.push("paid must be a boolean");
-  }
-
-  if (manifest.vendor !== undefined && (typeof manifest.vendor !== "string" || !safeNamePattern.test(manifest.vendor))) {
-    errors.push("vendor must be a string of lowercase letters, numbers, and hyphens");
-  }
-
-  if (manifest.product_id !== undefined && (typeof manifest.product_id !== "string" || !safeNamePattern.test(manifest.product_id))) {
-    errors.push("product_id must be a string of lowercase letters, numbers, and hyphens");
-  }
-
-  if (manifest.paid === true) {
-    if (!manifest.vendor) errors.push("paid plugins must declare a vendor");
-    if (!manifest.product_id) errors.push("paid plugins must declare a product_id");
-  }
-
-  return errors;
 }
 
 export function summarizePermissions(manifest) {

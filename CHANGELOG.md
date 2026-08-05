@@ -63,16 +63,16 @@ All notable changes to DotAIOS will be documented in this file.
   rollback resumes only exact single-link staging residue and refuses anything
   changed, linked, or foreign without touching user files.
 
+### Removed
+
+- Commercial delivery, license verification, catalog, and internal pilot gate
+  machinery no longer ship in the public repository or npm package. The public
+  core contains only the local-first foundation and its generic plugin installer.
+
 ## [1.27.1] - 2026-08-04
 
 ### Removed
 
-- **Breaking for importers:** `verifyGumroadLicense` is no longer exported from
-  `packages/core/src/licenses.mjs`. It moved to
-  `packages/cli/src/adapters/gumroad-license.mjs`, and `addLicense` now requires
-  an explicit `verifier` argument rather than defaulting to a network call. This
-  keeps `packages/core` offline. Nothing in the CLI changes for users; only a
-  direct importer of that symbol is affected.
 - The marketing site source no longer ships in the public repository, and the
   release checklist and CI no longer run its build and verify steps. The site is
   built and deployed from its own repository.
@@ -86,11 +86,6 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Fixed
 
-- **Refunded purchases no longer keep access.** Gumroad answers `success: true`
-  for any key it ever issued, including one whose money has gone back, and the
-  local licence store is verified once then read offline forever. Verification
-  now rejects `refunded`, `chargebacked`, and `disputed` purchases unless the
-  seller won the dispute.
 - **The trigger writer no longer corrupts frontmatter.** It emitted an unquoted
   YAML scalar through a string replacement. A phrase containing `": "` or `" #"`
   made the whole frontmatter unparseable, so the skill vanished from the host
@@ -208,7 +203,6 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Notes
 - npm publish left to the maintainer. Install with `npx dotaios@latest` after publish.
-- Outcome packs / checkout remain closed. Free core only.
 
 ## [1.24.0] - 2026-07-16
 ### Added
@@ -227,14 +221,11 @@ All notable changes to DotAIOS will be documented in this file.
 - Project catalog commands: `project add`, `list`, `resolve`, and `doctor`. Durable project metadata and repository URLs sync inside `projects/`, while checkout paths stay machine-local in `~/.dotaios/projects.json`.
 - One deterministic, project-filtered working-context projection shared by the compact brief and MCP digest, with a visible character budget.
 - Preview-first `memory promote` workflow for signal, context, project, vault, skill, and session-only dispositions, with structured receipts.
-- Strict public catalog validation that keeps draft outcome packs visible but non-purchasable and non-installable.
 
 ### Changed
 - Cross-device sync is manual by default through `dotaios sync now`. The legacy automatic hook requires an explicit opt-in in a controlled main worktree. Rebase conflicts stop safely without creating recovery branches, resetting files, or pushing.
 - Setup distinguishes a ready folder from an actually configured local client and defaults optional GitHub sync to off.
 - Public copy now distinguishes local storage, provider processing, supported session capture, and browser-chat limitations.
-- The website registry is emitted at `/registry.json`; draft offers contain no checkout links or automatic-update claims.
-- The free starter keeps planning, saving, ingest, import, review, and continuity workflows. Paid packages are described by the outcomes they are intended to support, not by a count of skills.
 - MCP is now an optional advanced adapter with three bounded read-only tools. Gemini uses its simpler SessionStart hook without duplicate MCP configuration.
 
 ### Fixed
@@ -359,13 +350,7 @@ All notable changes to DotAIOS will be documented in this file.
 ## [1.16.0] - 2026-05-28
 ### Added
 - Internal scaffolding for a future adapter-first memory backend (resolver + contract). Note: not wired into any command in this release; the running product still uses the existing local file-based memory.
-- **Pilot instrumentation**, `dotaios setup`, `search`, and `capture` emit best-effort, non-blocking metrics to `memory/metrics/pilot.jsonl` (`install_start/end`, `setup_phase_start/end`, `search_run`, `capture_saved/deleted`).
-- `dotaios pilot-score`, record one scored pilot sample with required provenance (`--scorer-id`, `--method-version`, `--first-recall-min`, `--p-at-5`).
-- `dotaios pilot-report [--json]`, run the rollup and print ship decisions (pilot + public) with explicit block reasons.
-- Go/kill rollup with anti-gaming gates: requires ≥2 distinct scorers (pilot) / ≥3 (public), rejects future-dated and incomplete score rows, and a stricter public bar. See `docs/pilot/scoring-rubric.md`.
-
-### Changed
-- Rollup logic now lives in a shared library (`packages/cli/src/lib/pilot-rollup.mjs`) used by both `pilot-report` and `scripts/pilot-rollup.mjs`, so `pilot-report` works from an installed npm package (no subprocess, no unshipped script).
+- **Local setup instrumentation**, `dotaios setup`, `search`, and `capture` emit best-effort, non-blocking metrics to `memory/metrics/pilot.jsonl` (`install_start/end`, `setup_phase_start/end`, `search_run`, `capture_saved/deleted`).
 
 ### Removed
 - Stale `HANDOVER.md` internal handoff doc.
@@ -464,12 +449,8 @@ All notable changes to DotAIOS will be documented in this file.
 - `dotaios setup`, one-shot onboarding wizard (init + activate + reveal).
 - `dotaios doctor`, single health-check command that reports Node version, Terminal state, AIOS folder, and agent bridges with fix-lines per warning.
 - `dotaios skill add|list|remove`, friendly alias surface for plugin management.
-- `dotaios market list|info|install`, public skill marketplace, fetches `https://dotaios.com/registry.json` (override via `--registry` or `DOTAIOS_REGISTRY_URL`).
-- `dotaios license add|list|remove`, license keys for paid skills, stored at `~/.dotaios/licenses.json` (mode 0600). Verified once via Gumroad License Verification API, then offline.
 - `install` accepts git URLs (`https://...git`, `git@host:owner/repo`) and `--subdir <path>` for monorepo plugins.
-- Monetization manifest fields: `paid`, `vendor`, `product_id`. Paid plugins require a stored license before install.
 - Windows installer source under `installers/windows/` (WiX 4 `.wxs`), GitHub Actions workflow at `.github/workflows/release-installers.yml` that builds an MSI on tag push and attaches it to the release.
-- New docs: `docs/marketplace.md`.
 
 ### Changed
 - `dotaios --version` now reads from `package.json` instead of a hardcoded constant. Removes the version-drift bug that left users on stale CLI metadata.

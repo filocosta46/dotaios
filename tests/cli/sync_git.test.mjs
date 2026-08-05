@@ -361,11 +361,23 @@ test("commitAll() refuses when the staged-index probe fails", async (t) => {
   assert.ok(!calls.some((args) => args.includes("commit")), "unknown index state must not commit");
 });
 
-test("parsePorcelainZ stages rename destinations and skips the source field", () => {
-  // R  new.md\0old.md\0 M other.md\0
-  const stdout = "R  new.md\0old.md\0 M other.md\0";
+test("parsePorcelainZ stages both paths for index and worktree renames/copies", () => {
+  const stdout = [
+    "R  index-renamed.md", "index-original.md",
+    " R worktree-renamed.md", "worktree-original.md",
+    "C  index-copy.md", "index-copy-source.md",
+    " C worktree-copy.md", "worktree-copy-source.md",
+    " M other.md",
+    ""
+  ].join("\0");
   const paths = parsePorcelainZ(stdout);
-  assert.deepEqual(paths, ["new.md", "other.md"]);
+  assert.deepEqual(paths, [
+    "index-renamed.md", "index-original.md",
+    "worktree-renamed.md", "worktree-original.md",
+    "index-copy.md", "index-copy-source.md",
+    "worktree-copy.md", "worktree-copy-source.md",
+    "other.md"
+  ]);
 });
 
 test("push() redacts embedded token from error message", async () => {

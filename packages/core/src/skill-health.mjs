@@ -2,13 +2,19 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { isPathWithinLexically } from "./paths.mjs";
-import { MANAGED_END, MANAGED_START, isAgentInstalled, loadAgentRegistry } from "./bridges.mjs";
+import {
+  MANAGED_END,
+  MANAGED_START,
+  isAgentInstalled,
+  isCommandAvailable,
+  loadAgentRegistry
+} from "./bridges.mjs";
 import { renderResolver, renderSkillsIndex, collectSkills } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
 import { discoverHermesConfigPaths } from "./hermes-config.mjs";
 import { findManagedSkillAliases } from "./skills-install.mjs";
 
-export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) {
+export async function inspectSkillHealth({ aiosPath, homePath = os.homedir(), detection = {} }) {
   const registry = await loadAgentRegistry(aiosPath);
   const sourceSkills = await collectSkills(aiosPath);
   const skillsDir = path.join(aiosPath, "skills");
@@ -26,7 +32,7 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
   const targets = [];
   for (const target of symlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
-    const active = await isSkillTargetActive(homePath, targetDir, registry);
+    const active = await isSkillTargetActive(homePath, targetDir, registry, detection);
     targets.push(await inspectSkillTarget({
       aiosPath,
       homePath,
@@ -36,9 +42,9 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
     }));
   }
 
-  const bridges = await inspectBridges({ aiosPath, homePath });
+  const bridges = await inspectBridges({ aiosPath, homePath, detection });
   const hermes = await inspectHermes({ aiosPath, homePath, registry });
-  const runtimes = await inspectRuntimes({ homePath, registry, targets, bridges, hermes });
+  const runtimes = await inspectRuntimes({ homePath, registry, targets, bridges, hermes, detection });
   const issues = [];
 
   if (!catalogs.index.current) issues.push("skills/INDEX.md is missing or stale");
@@ -85,18 +91,18 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir() }) 
   };
 }
 
-async function inspectRuntimes({ homePath, registry, targets, bridges, hermes }) {
+async function inspectRuntimes({ homePath, registry, targets, bridges, hermes, detection }) {
   const targetByDir = new Map(targets.map((target) => [target.dir, target]));
   const bridgeByName = new Map(bridges.map((bridge) => [bridge.name, bridge]));
   const rows = [];
 
   for (const agent of registry) {
-    const installed = await isAgentInstalled(homePath, agent);
+    const installed = await isAgentInstalled(homePath, agent, detection);
     const bridge = bridgeByName.get(agent.name);
     const configured = configuredStatus({ agent, installed, bridge, homePath, targetByDir, hermes });
     const discoverable = discoverableStatus({ agent, installed, bridge, homePath, targetByDir, hermes });
     const binary = installed
-      ? await commandStatus(agent.command)
+      ? await commandStatus(agent.command, detection)
       : "not-detected";
 
     rows.push({
@@ -174,20 +180,9 @@ function hermesEvidence(agent, homePath, hermes) {
   }));
 }
 
-async function commandStatus(command) {
+async function commandStatus(command, detection) {
   if (!command) return "not-declared";
-  const candidates = command.includes(path.sep) || path.isAbsolute(command)
-    ? [command]
-    : (process.env.PATH || "").split(path.delimiter).filter(Boolean).map((dir) => path.join(dir, command));
-  for (const candidate of candidates) {
-    try {
-      await fs.access(candidate, fs.constants.X_OK);
-      return "available";
-    } catch {
-      // Try the next PATH entry.
-    }
-  }
-  return "missing";
+  return await isCommandAvailable(command, detection) ? "available" : "missing";
 }
 
 async function compareFile(filePath, expected) {
@@ -325,11 +320,11 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
   };
 }
 
-async function inspectBridges({ aiosPath, homePath }) {
+async function inspectBridges({ aiosPath, homePath, detection }) {
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = [];
   for (const agent of registry) {
-    const installed = await isAgentInstalled(homePath, agent);
+    const installed = await isAgentInstalled(homePath, agent, detection);
     if (!agent.bridge) {
       bridges.push({ name: agent.name, path: null, status: "not-applicable", installed, bridge: false });
       continue;
@@ -381,7 +376,7 @@ async function inspectHermes({ aiosPath, homePath, registry = [] }) {
   return { available: true, canonical: expected, configs };
 }
 
-async function isSkillTargetActive(homePath, targetDir, registry) {
+async function isSkillTargetActive(homePath, targetDir, registry, detection) {
   if (await pathExists(targetDir)) return true;
   const relative = path.relative(homePath, targetDir);
   const consumers = registry.filter(
@@ -389,7 +384,7 @@ async function isSkillTargetActive(homePath, targetDir, registry) {
   );
   if (consumers.length > 0) {
     const installed = await Promise.all(
-      consumers.map((agent) => isAgentInstalled(homePath, agent))
+      consumers.map((agent) => isAgentInstalled(homePath, agent, detection))
     );
     return installed.some(Boolean);
   }

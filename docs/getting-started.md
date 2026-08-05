@@ -135,23 +135,6 @@ npx dotaios@latest install https://github.com/example/my-plugin.git
 npx dotaios@latest install https://github.com/owner/repo.git --subdir packages/my-plugin
 ```
 
-Browse the public outcome catalog. Draft entries are visible as coming soon but cannot be purchased or installed:
-
-```bash
-npx dotaios@latest market list
-npx dotaios@latest market info <id>
-npx dotaios@latest market install <id>
-```
-
-When a paid package is released, its publisher can require a license key:
-
-```bash
-npx dotaios@latest license add <product-id> <license-key>
-npx dotaios@latest license list
-```
-
-See [marketplace.md](marketplace.md) for the full publishing flow.
-
 List local manual schedules:
 
 ```bash

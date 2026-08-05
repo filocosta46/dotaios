@@ -2,10 +2,9 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { isPaidManifest, manifestProductId, summarizePermissions, validateManifest } from "../../../core/src/manifest.mjs";
+import { summarizePermissions, validateManifest } from "../../../core/src/manifest.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
-import { hasLicense } from "../../../core/src/licenses.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { activateCommand } from "./activate.mjs";
@@ -36,8 +35,8 @@ Options:
     throw new Error("Usage: dotaios install <plugin-path-or-url> [--path <aios-dir>] [--home <home-dir>] [--dry-run]");
   }
 
-  // --subdir can come from a remote market registry entry, so it is untrusted:
-  // reject anything that could escape the cloned/resolved source directory.
+  // A remote caller can supply --subdir, so reject anything that could escape
+  // the cloned or resolved source directory.
   assertSafeSubdir(options.subdir);
 
   let sourcePath;
@@ -125,20 +124,6 @@ async function runInstall(sourcePath, options) {
   }
 
   printManifestSummary(manifest);
-
-  if (isPaidManifest(manifest)) {
-    const productId = manifestProductId(manifest);
-    const licensed = await hasLicense(productId);
-    if (!licensed) {
-      throw new Error([
-        `This plugin is paid: ${manifest.vendor}/${productId}.`,
-        `Add a license first:`,
-        `  dotaios license add ${productId} <license-key>`,
-        `Buy a key (if you do not have one) from the vendor's checkout page.`
-      ].join("\n"));
-    }
-    console.log(`[ok] License for ${productId} verified locally.`);
-  }
 
   if (options.dryRun) {
     console.log("\nDry run only. Nothing copied.");

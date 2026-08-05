@@ -3,7 +3,7 @@ import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from 
 import { readJson } from "../../../core/src/files.mjs";
 import { markMatches, SEARCH_SCOPES, searchAios } from "../../../core/src/search.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { emitPilotMetric, hashMetricValue } from "../lib/pilot-metrics.mjs";
+import { emitReliabilityMetric, hashMetricValue } from "../lib/reliability-metrics.mjs";
 
 const validScopes = new Set(SEARCH_SCOPES);
 
@@ -53,14 +53,14 @@ export async function searchCommand(args) {
   }
 
   const elapsedMs = Date.now() - startedAt;
-  await emitPilotMetric(target, {
+  await emitReliabilityMetric(target, {
     type: "search_run",
     query_hash: hashMetricValue(query),
     scope,
     total_results: totalResults,
     limit,
     search_latency_ms: elapsedMs,
-    // Kept nullable by design; this must come from scored pilot workflow.
+    // Kept nullable by design; this requires an independent workflow evaluation.
     first_recall_min: null,
     p_at_5: null
   });

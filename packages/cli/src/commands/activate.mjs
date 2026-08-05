@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
@@ -23,7 +24,8 @@ import {
   symlinkTargets,
   retiredSymlinkTargets,
   projectSymlinkTargets,
-  projectHermesConfigTargets
+  projectHermesConfigTargets,
+  wellKnownSymlinkTargets
 } from "../../../core/src/skill-targets.mjs";
 import {
   installSymlinkSkills,
@@ -38,10 +40,6 @@ import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = MANAGED_START;
 const managedEnd = MANAGED_END;
-
-// Written next to a bridge file the first time DotAIOS splices into it, so a
-// user whose file predates splicing can always recover their original.
-const backupSuffix = ".dotaios-backup";
 
 export async function activateCommand(args, { lifecycle = {} } = {}) {
   if (hasHelpFlag(args)) {
@@ -86,12 +84,13 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     homePath,
     options,
     skillsFirst,
-    skillsCatalog
+    skillsCatalog,
+    lifecycle
   );
   const results = [...global.results];
 
   if (options.project) {
-    results.push(...await createProjectBridges(aiosPath, resolvePath(options.project), options));
+    results.push(...await createProjectBridges(aiosPath, resolvePath(options.project), options, lifecycle));
   }
 
   printResults("DotAIOS activated", results);
@@ -228,12 +227,14 @@ async function createGlobalBridges(
   homePath,
   options,
   skillsFirst = false,
-  skillsCatalog
+  skillsCatalog,
+  lifecycle = {}
 ) {
   const registry = await loadAgentRegistry(aiosPath);
   const results = [];
   let installedCount = 0;
   let configuredContextCount = 0;
+  const installedAgentNames = new Set();
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
@@ -244,6 +245,7 @@ async function createGlobalBridges(
       continue;
     }
     installedCount += 1;
+    installedAgentNames.add(agent.name.toLowerCase());
 
     if (!agent.bridge) {
       results.push({
@@ -257,15 +259,21 @@ async function createGlobalBridges(
     const result = await writeManagedFile(
       destination,
       await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog }),
-      { ...options, boundaryRoot: homePath }
+      {
+        ...options,
+        boundaryRoot: homePath,
+        beforeReplace: lifecycle.beforeBridgeReplace,
+        beforePublish: lifecycle.beforeBridgePublish,
+        beforeCommit: lifecycle.beforeBridgeCommit
+      }
     );
     results.push(result);
-    if (["created", "updated", "would create", "would update"].includes(result.action)) {
+    if (["created", "updated", "unchanged", "would create", "would update"].includes(result.action)) {
       configuredContextCount += 1;
     }
   }
 
-  const skills = await installAllSkills(aiosPath, homePath, options, registry);
+  const skills = await installAllSkills(aiosPath, homePath, options, registry, installedAgentNames);
   return { results: [...results, ...skills], installedCount, configuredContextCount };
 }
 
@@ -286,18 +294,28 @@ async function previewSkillsIndex(aiosPath) {
 
 // Install DotAIOS skills natively into each documented client directory plus
 // the shared Agent Skills root, then register the source dir in Hermes config.
-async function installAllSkills(aiosPath, homePath, options, registry) {
+async function installAllSkills(aiosPath, homePath, options, registry, installedAgentNames = new Set()) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
   const results = [];
+  const activeTargetDirs = new Set(wellKnownSymlinkTargets(registry).map((target) => target.dir));
+  for (const agent of registry) {
+    if (
+      installedAgentNames.has(agent.name.toLowerCase())
+      && agent.skills?.mode === "symlink"
+      && agent.skills.dir
+    ) {
+      activeTargetDirs.add(agent.skills.dir);
+    }
+  }
   for (const target of retiredSymlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     results.push(...await removeManagedSkillLinks({
       aiosPath, targetDir, dryRun: options.dryRun
     }));
   }
-  for (const target of symlinkTargets(registry)) {
+  for (const target of symlinkTargets(registry).filter((entry) => activeTargetDirs.has(entry.dir))) {
     const targetDir = path.join(homePath, target.dir);
     results.push(...await installSymlinkSkills({
       aiosPath, targetDir, dryRun: options.dryRun, overwrite: options.overwrite
@@ -322,7 +340,7 @@ async function installAllSkills(aiosPath, homePath, options, registry) {
   return results;
 }
 
-async function createProjectBridges(aiosPath, projectPath, options) {
+async function createProjectBridges(aiosPath, projectPath, options, lifecycle = {}) {
   let project = await resolveProjectContext({
     aiosPath,
     homePath: resolvePath(options.home || os.homedir()),
@@ -347,7 +365,10 @@ async function createProjectBridges(aiosPath, projectPath, options) {
   const bridges = [
     await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
       ...options,
-      projectRoot: projectPath
+      projectRoot: projectPath,
+      beforeReplace: lifecycle.beforeBridgeReplace,
+      beforePublish: lifecycle.beforeBridgePublish,
+      beforeCommit: lifecycle.beforeBridgeCommit
     }),
     await removeRetiredManagedFile(
       path.join(projectPath, ".cursor", "rules", "dotaios.mdc"),
@@ -500,7 +521,15 @@ async function isDirectory(value) {
 async function writeManagedFile(
   destination,
   content,
-  { dryRun = false, overwrite = false, projectRoot = null, boundaryRoot = projectRoot } = {}
+  {
+    dryRun = false,
+    overwrite = false,
+    projectRoot = null,
+    boundaryRoot = projectRoot,
+    beforeReplace = null,
+    beforePublish = null,
+    beforeCommit = null
+  } = {}
 ) {
   if (projectRoot) {
     const safety = await validateProjectPath({ projectRoot, targetPath: destination });
@@ -529,10 +558,20 @@ async function writeManagedFile(
     if (!overwrite) {
       return { action: "kept", path: destination, note: "existing unmanaged file" };
     }
-    if (!dryRun) {
-      await writeFileSafe(destination, content, "overwrite", { boundaryRoot });
+    if (dryRun) {
+      return { action: "would update", path: destination };
     }
-    return { action: dryRun ? "would update" : "updated", path: destination };
+    const replacement = await replaceFileIfUnchanged(destination, current, content, {
+      boundaryRoot,
+      beforeReplace,
+      beforePublish,
+      beforeCommit,
+      expectedStats: stats,
+      mode: stats.mode & 0o777
+    });
+    return replacement.replaced
+      ? updatedBridgeResult(destination, replacement.preservedPath)
+      : concurrentBridgeResult(destination, replacement.preservedPath);
   }
 
   // Managed block present: replace only the block. Every byte the user wrote
@@ -543,26 +582,172 @@ async function writeManagedFile(
   }
   const next = `${current.slice(0, existingBlock.start)}${generatedBlock.text}${current.slice(existingBlock.end)}`;
 
+  // Nothing to do when the block is already current. Rewriting an identical
+  // file would only churn mtimes and litter a pointless backup beside it.
+  if (next === current) {
+    return { action: "unchanged", path: destination };
+  }
+
   if (dryRun) {
     return { action: "would update", path: destination };
   }
 
-  // Nothing to do when the block is already current. Rewriting an identical
-  // file would only churn mtimes and litter a pointless backup beside it.
-  if (next === current) {
-    return { action: "updated", path: destination };
-  }
-
-  const backedUp = await backupOnce(destination, current, {
+  const replacement = await replaceFileIfUnchanged(destination, current, next, {
     boundaryRoot,
+    beforeReplace,
+    beforePublish,
+    beforeCommit,
+    expectedStats: stats,
     mode: stats.mode & 0o777
   });
-  await writeFileSafe(destination, next, "overwrite", { boundaryRoot });
+  return replacement.replaced
+    ? updatedBridgeResult(destination, replacement.preservedPath)
+    : concurrentBridgeResult(destination, replacement.preservedPath);
+}
+
+function updatedBridgeResult(destination, preservedPath) {
   return {
     action: "updated",
     path: destination,
-    ...(backedUp ? { note: `backed up the previous file to ${path.basename(destination)}${backupSuffix}` } : {})
+    ...(preservedPath ? { note: `preserved the previous file at ${path.basename(preservedPath)}` } : {})
   };
+}
+
+function concurrentBridgeResult(destination, preservedPath = null) {
+  return {
+    action: "conflict",
+    path: destination,
+    note: `bridge changed during activation; left the concurrent edit untouched${preservedPath ? ` and preserved the previous file at ${path.basename(preservedPath)}` : ""}`
+  };
+}
+
+async function replaceFileIfUnchanged(
+  destination,
+  expected,
+  content,
+  {
+    boundaryRoot = null,
+    mode = 0o666,
+    beforeReplace = null,
+    beforePublish = null,
+    beforeCommit = null,
+    expectedStats = null
+  } = {}
+) {
+  const token = `${process.pid}-${randomUUID()}`;
+  const basename = path.basename(destination);
+  const staged = path.join(path.dirname(destination), `.${basename}.dotaios-${token}.next`);
+  const preservedPath = `${destination}.dotaios-backup-${token}`;
+  let claimed = false;
+  // The canonical bridge remains live while the replacement is staged and
+  // validated. Publication below preserves the old inode before claiming the
+  // destination with a no-clobber hard link.
+  await writeFileSafe(staged, content, "preserve", { boundaryRoot, mode });
+  await fs.chmod(staged, mode);
+
+  try {
+    await beforeReplace?.({ destination, current: expected, next: content, staged });
+    if (!await fileStillMatches(destination, expected, expectedStats)) {
+      return { replaced: false, preservedPath: null };
+    }
+
+    await beforePublish?.({ destination, current: expected, next: content, staged });
+    if (!await fileStillMatches(destination, expected, expectedStats)) {
+      return { replaced: false, preservedPath: null };
+    }
+
+    if (!await fileStillMatches(destination, expected, expectedStats)) {
+      return { replaced: false, preservedPath: null };
+    }
+
+    // First move the exact old inode to a unique visible backup. The new bridge
+    // is then linked into the empty path with no-clobber semantics. If an editor
+    // recreates the path, link() returns EEXIST and its bytes win.
+    await fs.rename(destination, preservedPath);
+    claimed = true;
+    if (!await movedFileStillMatches(preservedPath, expected, expectedStats)) {
+      await restorePreservedNoClobber(preservedPath, destination);
+      return { replaced: false, preservedPath };
+    }
+
+    await beforeCommit?.({ destination, current: expected, next: content, staged, preservedPath });
+    if (!await movedFileStillMatches(preservedPath, expected, expectedStats)) {
+      await restorePreservedNoClobber(preservedPath, destination);
+      return { replaced: false, preservedPath };
+    }
+
+    try {
+      await fs.link(staged, destination);
+    } catch (error) {
+      if (error?.code === "EEXIST") return { replaced: false, preservedPath };
+      throw error;
+    }
+    return { replaced: true, preservedPath };
+  } catch (error) {
+    if (claimed) await restorePreservedNoClobber(preservedPath, destination);
+    throw error;
+  } finally {
+    await fs.rm(staged, { force: true });
+  }
+}
+
+async function restorePreservedNoClobber(preservedPath, destination) {
+  try {
+    await fs.link(preservedPath, destination);
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST") return false;
+    throw error;
+  }
+}
+
+async function fileStillMatches(destination, expected, expectedStats) {
+  const before = await lstatIfPresent(destination);
+  if (!sameRegularFile(before, expectedStats)) return false;
+
+  let current;
+  try {
+    current = await fs.readFile(destination, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  const after = await lstatIfPresent(destination);
+  return current === expected && sameRegularFile(after, before);
+}
+
+async function movedFileStillMatches(destination, expected, expectedStats) {
+  const before = await lstatIfPresent(destination);
+  if (!sameMovedRegularFile(before, expectedStats)) return false;
+
+  let current;
+  try {
+    current = await fs.readFile(destination, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  const after = await lstatIfPresent(destination);
+  return current === expected && sameRegularFile(after, before);
+}
+
+function sameRegularFile(actual, expected) {
+  if (!actual?.isFile() || actual.isSymbolicLink() || !expected) return false;
+  return actual.dev === expected.dev
+    && actual.ino === expected.ino
+    && actual.size === expected.size
+    && actual.mtimeMs === expected.mtimeMs
+    && actual.ctimeMs === expected.ctimeMs
+    && (actual.mode & 0o777) === (expected.mode & 0o777);
+}
+
+function sameMovedRegularFile(actual, expected) {
+  if (!actual?.isFile() || actual.isSymbolicLink() || !expected) return false;
+  return actual.dev === expected.dev
+    && actual.ino === expected.ino
+    && actual.size === expected.size
+    && actual.mtimeMs === expected.mtimeMs
+    && (actual.mode & 0o777) === (expected.mode & 0o777);
 }
 
 // Locate the managed block. Returns null when a marker is missing or the
@@ -574,14 +759,6 @@ function findManagedBlock(text) {
   if (endStart < 0) return null;
   const end = endStart + managedEnd.length;
   return { start, end, text: text.slice(start, end) };
-}
-
-// Keep the pre-existing bridge bytes once. The preserve-mode safe writer keeps
-// an older backup authoritative, so a later run can never bury the original.
-async function backupOnce(destination, content, { boundaryRoot = null, mode = 0o666 } = {}) {
-  const backup = `${destination}${backupSuffix}`;
-  const result = await writeFileSafe(backup, content, "preserve", { boundaryRoot, mode });
-  return result.action === "created";
 }
 
 async function lstatIfPresent(destination) {

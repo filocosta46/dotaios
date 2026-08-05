@@ -99,14 +99,47 @@ function detectPath(homePath, agent) {
   return path.join(homePath, agent.detect);
 }
 
-// Is this agent actually installed on the machine? True when its detect path exists.
-export async function isAgentInstalled(homePath, agent) {
+// A declared command is the strongest signal on a fresh host, before the
+// client creates its configuration directory.
+export async function isAgentInstalled(
+  homePath,
+  agent,
+  { env = process.env, platform = process.platform } = {}
+) {
+  if (agent.command && await isCommandAvailable(agent.command, { env, platform })) return true;
   try {
     await fs.access(detectPath(homePath, agent));
     return true;
   } catch {
     return false;
   }
+}
+
+export async function isCommandAvailable(
+  command,
+  { env = process.env, platform = process.platform } = {}
+) {
+  const pathValue = env.PATH || env.Path || env.path || "";
+  const explicitPath = path.isAbsolute(command) || command.includes("/") || command.includes("\\");
+  const directories = explicitPath ? [""] : pathValue.split(path.delimiter).filter(Boolean);
+  const extensions = platform === "win32" && !path.extname(command)
+    ? (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
+    : [""];
+
+  for (const directory of directories) {
+    for (const extension of extensions) {
+      const candidate = explicitPath
+        ? `${command}${extension}`
+        : path.join(directory, `${command}${extension}`);
+      try {
+        await fs.access(candidate, platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
+        if ((await fs.stat(candidate)).isFile()) return true;
+      } catch {
+        // Keep scanning PATH.
+      }
+    }
+  }
+  return false;
 }
 
 // The managed bridge-file body for one agent. Always points at the single

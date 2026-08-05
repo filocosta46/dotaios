@@ -4,10 +4,19 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { promisify } from "node:util";
-import { validateMarketRegistry } from "../../packages/core/src/market-registry.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const run = promisify(execFile);
+
+async function npmPackDryRun() {
+  const { stdout } = await run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+    cwd: repoRoot,
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  const result = JSON.parse(stdout);
+  const pack = Array.isArray(result) ? result[0] : Object.values(result)[0];
+  return pack.files.map((file) => file.path);
+}
 
 test("commercial website source stays outside the public repository", async () => {
   const { stdout } = await run("git", ["-C", repoRoot, "ls-files", "--", "website"]);
@@ -31,27 +40,53 @@ test("public claims stay inside the verified product boundary", async () => {
   assert.doesNotMatch(corpus, /every AI reads|no cloud memory|native in every tool/i);
 });
 
-test("the public registry fixture is schema-valid and non-purchasable", async () => {
-  const file = path.join(repoRoot, "tests", "fixtures", "market-registry-draft.json");
-  const registry = validateMarketRegistry(JSON.parse(await fs.readFile(file, "utf8")), {
-    source: file,
-  });
-  const forbiddenDeliveryFields = [
-    "checkout_url",
-    "download_url",
-    "entitlement_url",
-    "git_url",
-    "gumroad_url",
-    "install_url",
-    "license_url",
-    "product_id",
+test("commercial delivery and internal launch gates stay outside the public core", async () => {
+  const forbiddenPaths = [
+    "docs/beta-testing.md",
+    "docs/marketplace.md",
+    "docs/pilot/README.md",
+    "docs/pilot/pilot-sheet-template.md",
+    "docs/pilot/scoring-rubric.md",
+    "packages/cli/src/adapters/gumroad-license.mjs",
+    "packages/cli/src/commands/license.mjs",
+    "packages/cli/src/commands/market.mjs",
+    "packages/cli/src/commands/pilot-report.mjs",
+    "packages/cli/src/commands/pilot-score.mjs",
+    "packages/cli/src/lib/pilot-rollup.mjs",
+    "packages/core/src/licenses.mjs",
+    "packages/core/src/market-registry.mjs",
+    "scripts/pilot-rollup.mjs",
   ];
-
-  assert.ok(registry.entries.length > 0);
-  for (const entry of registry.entries) {
-    assert.match(entry.status, /^(draft|planned)$/);
-    for (const field of forbiddenDeliveryFields) assert.equal(entry[field], undefined);
+  for (const relativePath of forbiddenPaths) {
+    await assert.rejects(
+      fs.access(path.join(repoRoot, relativePath)),
+      (error) => error.code === "ENOENT",
+      `${relativePath} is private launch or delivery machinery`
+    );
   }
+
+  let handoffFiles = [];
+  try {
+    handoffFiles = await fs.readdir(path.join(repoRoot, "docs", "handoff"));
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  assert.deepEqual(handoffFiles, [], "internal handoff documents stay outside the public repository");
+
+  const packedFiles = await npmPackDryRun();
+  assert.equal(packedFiles.includes("packages/cli/src/lib/pilot-metrics.mjs"), false);
+
+  const textExtensions = new Set([".hbs", ".json", ".md", ".mjs", ".txt", ".yaml", ".yml"]);
+  const textFiles = packedFiles.filter((relativePath) => textExtensions.has(path.extname(relativePath)));
+  const contents = await Promise.all(textFiles.map((relativePath) =>
+    fs.readFile(path.join(repoRoot, relativePath), "utf8")
+  ));
+  const corpus = contents.join("\n");
+  const corpusWithoutLegacyRecoveryFilename = corpus.replaceAll("pilot.jsonl", "legacy-metrics.jsonl");
+
+  assert.doesNotMatch(corpus, /gumroad|lemonsqueezy|checkout_url|product_id|paid packages?|paid plugins?/i);
+  assert.doesNotMatch(corpus, /pilot-(?:score|report)|ship_pilot|go_public/i);
+  assert.doesNotMatch(corpusWithoutLegacyRecoveryFilename, /\bpilot\b|Pilot health/i);
 });
 
 test("public context guidance documents only the current MCP tools and one memory projection", async () => {

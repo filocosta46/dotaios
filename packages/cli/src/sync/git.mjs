@@ -157,8 +157,9 @@ const SYNC_GIT_IDENTITY = {
 
 // Parse `git status --porcelain -z` output into the list of paths to stage.
 // Each entry is "XY <path>" NUL-separated; renames/copies (X = R or C) carry a
-// second NUL-separated field with the source path, which we drop — staging the
-// destination path is enough for git to record the rename. Empty input -> [].
+// second NUL-separated field with the source path. Stage both sides explicitly
+// so worktree and index renames/copies preserve their complete change surface.
+// Empty input -> [].
 export function parsePorcelainZ(stdout) {
   if (!stdout) return [];
   const fields = stdout.split("\0");
@@ -170,9 +171,12 @@ export function parsePorcelainZ(stdout) {
     const path = field.slice(3);
     if (!path) continue;
     paths.push(path);
-    const code = status[0];
     // R/C entries are followed by the original path in its own NUL field.
-    if (code === "R" || code === "C") i += 1;
+    if ([...status].some((code) => code === "R" || code === "C")) {
+      const sourcePath = fields[i + 1];
+      if (sourcePath) paths.push(sourcePath);
+      i += 1;
+    }
   }
   return paths;
 }
@@ -1378,8 +1382,8 @@ export function createGit({
     // Enumerating the changed paths from `git status --porcelain -z` lets us add
     // each one by name, which keeps the commit surface explicit and lets a future
     // caller filter paths (skip large files, secrets, etc.). Deletions and
-    // renames are staged by naming the destination path. Returns null when there
-    // is nothing to commit.
+    // renames are staged by naming both their source and destination paths.
+    // Returns null when there is nothing to commit.
     async commitAll(message) {
       const indexLocation = await run(["rev-parse", "--git-path", "index"]);
       if (indexLocation.code !== 0 || !indexLocation.stdout.trim()) {

@@ -675,10 +675,12 @@ test("tick writes last_error on git failure and does not throw", async () => {
 
 test("acquireLock steals a stale lock older than staleMs", async () => {
   const { lockPath, dir } = await tmpLock();
+  const now = Date.now();
   try {
-    // write a lock timestamped 10 minutes ago
-    await fs.writeFile(lockPath, JSON.stringify({ pid: 2147483647, at: Date.now() - 10 * 60 * 1000 }));
-    const got = await acquireOperationLock(lockPath, { now: () => Date.now(), staleMs: 5 * 60 * 1000 });
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 2147483647, at: now - 10 * 60 * 1000 }));
+    const old = new Date(now - 10 * 60 * 1000);
+    await fs.utimes(lockPath, old, old);
+    const got = await acquireOperationLock(lockPath, { now: () => now, staleMs: 5 * 60 * 1000 });
     assert.ok(got);
     await releaseOperationLock(got);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
@@ -741,6 +743,97 @@ test("operation lock reclaims malformed stale JSON using file age", async () => 
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test("operation lock preserves fresh malformed JSON until its file age is stale", async () => {
+  const { lockPath, dir } = await tmpLock();
+  const now = Date.now();
+  try {
+    await fs.writeFile(lockPath, "{truncated");
+    const fresh = new Date(now - 100);
+    await fs.utimes(lockPath, fresh, fresh);
+
+    const got = await acquireOperationLock(lockPath, {
+      now: () => now,
+      staleMs: 1_000
+    });
+
+    assert.equal(got, null, "a partial write can still be in progress while its inode is fresh");
+    assert.equal(await fs.readFile(lockPath, "utf8"), "{truncated");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("operation lock ages incomplete current-format records by file time", async () => {
+  const { lockPath, dir } = await tmpLock();
+  const now = Date.now();
+  const incomplete = {
+    format: "dotaios-sync-operation-lock/v1",
+    owner: "partial-owner",
+    at: now - 60_000
+  };
+  try {
+    await fs.writeFile(lockPath, JSON.stringify(incomplete));
+    const fresh = new Date(now - 100);
+    await fs.utimes(lockPath, fresh, fresh);
+
+    const freshAttempt = await acquireOperationLock(lockPath, {
+      now: () => now,
+      staleMs: 1_000,
+      isOwnerAlive: () => {
+        throw new Error("invalid records must not reach the liveness probe");
+      }
+    });
+    assert.equal(freshAttempt, null, "an embedded timestamp cannot make a partial record stale");
+
+    const stale = new Date(now - 2_000);
+    await fs.utimes(lockPath, stale, stale);
+    const staleAttempt = await acquireOperationLock(lockPath, {
+      now: () => now,
+      staleMs: 1_000,
+      isOwnerAlive: () => {
+        throw new Error("invalid records must not reach the liveness probe");
+      }
+    });
+    assert.ok(staleAttempt, "the same partial record is reclaimable once its file is stale");
+    await releaseOperationLock(staleAttempt);
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("operation lock strictly validates every current-format owner field", async (t) => {
+  const now = Date.now();
+  const valid = {
+    format: "dotaios-sync-operation-lock/v1",
+    pid: process.pid,
+    owner: "valid-owner",
+    at: now,
+    process_started_at: "valid-birth-token"
+  };
+  const cases = [
+    ["format", { ...valid, format: "dotaios-sync-operation-lock/v0" }],
+    ["pid", { ...valid, pid: "123" }],
+    ["owner", { ...valid, owner: "" }],
+    ["timestamp", { ...valid, at: "now" }],
+    ["optional birth token", { ...valid, process_started_at: "" }]
+  ];
+
+  for (const [label, record] of cases) {
+    await t.test(label, async () => {
+      const { lockPath, dir } = await tmpLock();
+      try {
+        await fs.writeFile(lockPath, JSON.stringify(record));
+        const got = await acquireOperationLock(lockPath, {
+          now: () => now,
+          staleMs: 1_000,
+          isOwnerAlive: () => {
+            throw new Error("invalid records must not reach the liveness probe");
+          }
+        });
+        assert.equal(got, null);
+      } finally {
+        await fs.rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
 test("tick does not throw when writeConfig/appendEvent reject in error path", async () => {
   const { lockPath, dir } = await tmpLock();
   try {
@@ -770,10 +863,12 @@ test("tick does not throw when writeConfig/appendEvent reject in error path", as
 
 test("acquireLock: two racers on a stale lock — exactly one wins", async () => {
   const { lockPath, dir } = await tmpLock();
+  const now = Date.now();
   try {
-    // pre-write a stale lock (10 min old)
-    await fs.writeFile(lockPath, JSON.stringify({ pid: 2147483647, at: Date.now() - 10 * 60 * 1000 }));
-    const opts = { now: () => Date.now(), staleMs: 5 * 60 * 1000 };
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 2147483647, at: now - 10 * 60 * 1000 }));
+    const old = new Date(now - 10 * 60 * 1000);
+    await fs.utimes(lockPath, old, old);
+    const opts = { now: () => now, staleMs: 5 * 60 * 1000 };
     const [a, b] = await Promise.all([
       acquireOperationLock(lockPath, opts),
       acquireOperationLock(lockPath, opts)

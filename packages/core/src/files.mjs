@@ -176,9 +176,10 @@ export async function copyFileSafe(
     );
     return { action: created ? "created" : "kept", path: destination };
   }
-  await replaceWithTemporaryFile(destination, (temporary) =>
-    fs.copyFile(source, temporary, fs.constants.COPYFILE_EXCL)
-  );
+  await replaceWithTemporaryFile(destination, async (temporary) => {
+    await fs.copyFile(source, temporary, fs.constants.COPYFILE_EXCL);
+    if (existing) await fs.chmod(temporary, existing.mode & 0o777);
+  });
   return { action: existing ? "updated" : "created", path: destination };
 }
 

@@ -27,6 +27,13 @@ test("preview is deterministic and writes zero files", async (t) => {
   assert.equal(first.plan.from_schema_version, "1.0.0");
   assert.equal(first.plan.to_schema_version, "1.2.0");
   assert.deepEqual(first.plan.operations.map((operation) => operation.path), [".gitignore", "aios.json"]);
+  assert.deepEqual(
+    first.plan.operations.map(({ path: operationPath, ownership }) => ({ path: operationPath, ownership })),
+    [
+      { path: ".gitignore", ownership: "DotAIOS sync safety metadata" },
+      { path: "aios.json", ownership: "DotAIOS compatibility metadata" }
+    ]
+  );
   assert.ok(first.plan.preserved_paths.some((entry) => entry.path === "context/identity.md"));
   assert.equal("created_at" in first.plan, false);
   assert.equal("release_version" in first.plan, false);

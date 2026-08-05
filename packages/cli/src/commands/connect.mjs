@@ -245,7 +245,7 @@ function googleConnectionDoc({ versionText }) {
   return `# Google Workspace
 
 Status: Active
-Connection: Optional; no paid DotAIOS package required
+Connection: Optional; Google is not required for DotAIOS
 Tool: gws
 Version: ${versionText || "unknown"}
 Auth: managed by \`gws\`, outside DotAIOS

@@ -9,6 +9,34 @@ import {
 const LOCK_FORMAT = "dotaios-sync-operation-lock/v1";
 const DEFAULT_STALE_MS = 5 * 60 * 1000;
 
+function ownerRecordIsValid(record) {
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  if (record.format !== LOCK_FORMAT) return false;
+  if (!Number.isSafeInteger(record.pid) || record.pid <= 0) return false;
+  if (
+    typeof record.owner !== "string"
+    || !record.owner
+    || record.owner.length > 256
+    || record.owner.trim() !== record.owner
+  ) return false;
+  if (!Number.isSafeInteger(record.at) || record.at < 0) return false;
+  if (
+    record.process_started_at !== undefined
+    && (
+      typeof record.process_started_at !== "string"
+      || !record.process_started_at
+      || record.process_started_at.length > 256
+      || record.process_started_at.trim() !== record.process_started_at
+    )
+  ) return false;
+  return true;
+}
+
+function ownerCanBeReclaimed(record, stats, { now, staleMs, isOwnerAlive }) {
+  if (ownerRecordIsValid(record)) return !isOwnerAlive(record);
+  return Number.isFinite(stats?.mtimeMs) && now() - stats.mtimeMs > staleMs;
+}
+
 async function publishOwner(lockPath, record, filesystem) {
   const temporary = `${lockPath}.${record.owner}.tmp`;
   await filesystem.writeFile(temporary, `${JSON.stringify(record)}\n`, {
@@ -67,13 +95,7 @@ async function stealAbandoned(lockPath, {
       held = null;
       stats = await filesystem.stat(lockPath).catch(() => null);
     }
-    const recordedAt = Number.isFinite(held?.at) ? held.at : stats?.mtimeMs;
-    const ownerRecordIsValid = held?.format === LOCK_FORMAT && typeof held?.owner === "string";
-    const liveOwner = ownerRecordIsValid && isOwnerAlive(held);
-    if (liveOwner) return false;
-    if (!ownerRecordIsValid && !(Number.isFinite(recordedAt) && now() - recordedAt > staleMs)) {
-      return false;
-    }
+    if (!ownerCanBeReclaimed(held, stats, { now, staleMs, isOwnerAlive })) return false;
 
     const moved = `${lockPath}.stale.${randomUUID()}`;
     try {
@@ -132,15 +154,7 @@ export async function acquireOperationLock(lockPath, {
       if (error.code === "ENOENT") continue;
     }
 
-    const recordedAt = Number.isFinite(held?.at) ? held.at : stats?.mtimeMs;
-    const ownerRecordIsValid = held?.format === LOCK_FORMAT && typeof held?.owner === "string";
-    if (
-      ownerRecordIsValid
-      && isOwnerAlive(held)
-    ) return null;
-    const abandoned = ownerRecordIsValid
-      || (Number.isFinite(recordedAt) && now() - recordedAt > staleMs);
-    if (!abandoned) return null;
+    if (!ownerCanBeReclaimed(held, stats, { now, staleMs, isOwnerAlive })) return null;
     await stealAbandoned(lockPath, {
       filesystem,
       now,

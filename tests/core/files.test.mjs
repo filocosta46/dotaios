@@ -19,6 +19,24 @@ test("writeFileSafe atomically overwrites an ordinary file and preserves its mod
   assert.deepEqual(fs.readdirSync(root), ["generated.md"]);
 });
 
+test("copyFileSafe atomically overwrites an ordinary file and preserves its mode", async (t) => {
+  if (process.platform === "win32") t.skip("POSIX mode semantics");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-copy-mode-"));
+  const source = path.join(root, "source.md");
+  const destination = path.join(root, "generated.md");
+  fs.writeFileSync(source, "after\n", { mode: 0o600 });
+  fs.writeFileSync(destination, "before\n", { mode: 0o640 });
+  fs.chmodSync(source, 0o600);
+  fs.chmodSync(destination, 0o640);
+
+  const result = await copyFileSafe(source, destination, "overwrite");
+
+  assert.equal(result.action, "updated");
+  assert.equal(fs.readFileSync(destination, "utf8"), "after\n");
+  assert.equal(fs.statSync(destination).mode & 0o777, 0o640);
+  assert.deepEqual(fs.readdirSync(root).sort(), ["generated.md", "source.md"]);
+});
+
 test("writeFileSafe never follows an overwrite destination symlink", async (t) => {
   if (process.platform === "win32") t.skip("symlink permissions are platform-specific");
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-files-link-"));
