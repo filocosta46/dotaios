@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isPathWithinLexically } from "./paths.mjs";
 
 const SAFE_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const CONTROL_RE = /[\u0000-\u001f\u007f]/;
@@ -91,7 +92,7 @@ export async function classifyProjectPlacement(options = {}) {
   }
 
   const exactManagedPath = projectPath === destination;
-  const lexicallyInsideAios = isLexicallyWithin(aiosPath, projectPath);
+  const lexicallyInsideAios = isPathWithinLexically(aiosPath, projectPath);
   const stats = await lstatIfPresent(fileSystem, projectPath);
   const canonicalAios = await fileSystem.realpath(aiosPath);
   const managedRootSafe = await isManagedRootSafe(fileSystem, aiosPath, canonicalAios);
@@ -125,7 +126,7 @@ export async function classifyProjectPlacement(options = {}) {
   if (exactManagedPath && managedRootSafe && canonicalProject === canonicalDestination) {
     return { placement: "managed", managed: true, pathAvailable: true, destination };
   }
-  if (lexicallyInsideAios || isLexicallyWithin(canonicalAios, canonicalProject)) {
+  if (lexicallyInsideAios || isPathWithinLexically(canonicalAios, canonicalProject)) {
     return { placement: "unsafe", managed: false, pathAvailable: true, destination };
   }
   return {
@@ -151,10 +152,15 @@ export async function classifyRestoreDestination(options = {}) {
   if (stats.isSymbolicLink()) return { state: "symlink", destination, expectedRemote: expected };
   if (!stats.isDirectory()) return { state: "non-repository", destination, expectedRemote: expected };
 
-  const entries = await fileSystem.readdir(destination);
-  if (entries.length === 0) return { state: "empty-directory", destination, expectedRemote: expected };
   const gitMarker = await lstatIfPresent(fileSystem, path.join(destination, ".git"));
-  if (!gitMarker) return { state: "non-repository", destination, expectedRemote: expected };
+  if (!gitMarker) {
+    const entries = await fileSystem.readdir(destination);
+    return {
+      state: entries.length === 0 ? "empty-directory" : "non-repository",
+      destination,
+      expectedRemote: expected
+    };
+  }
 
   let actualValue;
   try {
@@ -621,15 +627,6 @@ async function statIfPresent(fileSystem, target) {
     if (error.code === "ENOENT") return null;
     throw error;
   }
-}
-
-function isLexicallyWithin(parent, candidate) {
-  const relative = path.relative(path.resolve(parent), path.resolve(candidate));
-  return relative === "" || (
-    !path.isAbsolute(relative)
-    && !relative.startsWith(`..${path.sep}`)
-    && relative !== ".."
-  );
 }
 
 function remoteError(reason, message) {

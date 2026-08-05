@@ -1094,15 +1094,6 @@ async function pathExists(fileSystem, filePath) {
   }
 }
 
-async function readTextIfPresent(fileSystem, filePath) {
-  try {
-    return await fileSystem.readFile(filePath, "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") return "";
-    throw error;
-  }
-}
-
 async function findIdForPath(context, paths, projectPath) {
   for (const [id, localPath] of Object.entries(paths)) {
     if (await pathsReferToSameDirectory(context, localPath, projectPath)) return id;

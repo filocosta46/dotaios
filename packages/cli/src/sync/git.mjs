@@ -44,7 +44,7 @@ const CREDENTIAL_HELPER =
   'printf "username=x-access-token\\npassword=%s\\n" "$DOTAIOS_SYNC_TOKEN"; ' +
   '}; f "$@"';
 
-function defaultSpawn(cmd, args, opts) {
+export function defaultSpawn(cmd, args, opts) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { ...opts, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
@@ -99,6 +99,34 @@ export function sanitizedGitEnvironment(env = process.env) {
   return { ...clean, ...SYNC_GIT_IDENTITY };
 }
 
+export function parseUrlRewriteRules(output) {
+  return String(output || "").split("\0").flatMap((entry) => {
+    if (!entry) return [];
+    const newline = entry.indexOf("\n");
+    if (newline === -1) return [];
+    const key = entry.slice(0, newline);
+    const value = entry.slice(newline + 1);
+    const match = key.match(/^url\.(.*)\.(insteadof|pushinsteadof)$/i);
+    return match && value
+      ? [{ replacement: match[1], prefix: value, kind: match[2].toLowerCase() }]
+      : [];
+  });
+}
+
+export function rewrittenDestination(destination, operation, rules) {
+  const preferredKind = operation === "push" ? "pushinsteadof" : "insteadof";
+  let candidates = rules.filter((rule) => rule.kind === preferredKind && destination.startsWith(rule.prefix));
+  if (operation === "push" && candidates.length === 0) {
+    candidates = rules.filter((rule) => rule.kind === "insteadof" && destination.startsWith(rule.prefix));
+  }
+  if (candidates.length === 0) return destination;
+  const longest = Math.max(...candidates.map((rule) => rule.prefix.length));
+  const effective = new Set(candidates
+    .filter((rule) => rule.prefix.length === longest)
+    .map((rule) => rule.replacement + destination.slice(rule.prefix.length)));
+  return effective.size === 1 ? [...effective][0] : null;
+}
+
 export function createGit({
   cwd,
   spawnImpl = defaultSpawn,
@@ -147,29 +175,7 @@ export function createGit({
         `could not inspect effective Git configuration; refusing credentialed Git access: ${redactToken(configured.stderr.trim()) || `git config exited ${configured.code}`}`
       );
     }
-    return configured.stdout.split("\0").flatMap((entry) => {
-      if (!entry) return [];
-      const newline = entry.indexOf("\n");
-      if (newline === -1) return [];
-      const key = entry.slice(0, newline);
-      const value = entry.slice(newline + 1);
-      const match = key.match(/^url\.(.*)\.(insteadof|pushinsteadof)$/i);
-      return match && value ? [{ replacement: match[1], prefix: value, kind: match[2].toLowerCase() }] : [];
-    });
-  }
-
-  function rewrittenDestination(destination, operation, rules) {
-    const preferredKind = operation === "push" ? "pushinsteadof" : "insteadof";
-    let candidates = rules.filter((rule) => rule.kind === preferredKind && destination.startsWith(rule.prefix));
-    if (operation === "push" && candidates.length === 0) {
-      candidates = rules.filter((rule) => rule.kind === "insteadof" && destination.startsWith(rule.prefix));
-    }
-    if (candidates.length === 0) return destination;
-    const longest = Math.max(...candidates.map((rule) => rule.prefix.length));
-    const effective = new Set(candidates
-      .filter((rule) => rule.prefix.length === longest)
-      .map((rule) => rule.replacement + destination.slice(rule.prefix.length)));
-    return effective.size === 1 ? [...effective][0] : null;
+    return parseUrlRewriteRules(configured.stdout);
   }
 
   async function preflightCredentialedNetwork(operation) {
@@ -274,9 +280,11 @@ export function createGit({
         inspectWholeTree: true,
         projectCatalog,
         inspectWorkspaceRepository: async (workspacePath) => {
-          const topLevel = await run(["-C", workspacePath, "rev-parse", "--show-toplevel"]);
-          const head = await run(["-C", workspacePath, "rev-parse", "--verify", "HEAD"]);
-          const origin = await run(["-C", workspacePath, "remote", "get-url", "origin"]);
+          const [topLevel, head, origin] = await Promise.all([
+            run(["-C", workspacePath, "rev-parse", "--show-toplevel"]),
+            run(["-C", workspacePath, "rev-parse", "--verify", "HEAD"]),
+            run(["-C", workspacePath, "remote", "get-url", "origin"])
+          ]);
           return {
             topLevelPath: topLevel.code === 0 ? topLevel.stdout.trim() : null,
             head: head.code === 0 && /^[0-9a-f]{40,64}$/i.test(head.stdout.trim())

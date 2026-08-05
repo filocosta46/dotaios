@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { isSyncEnabled } from "../../../core/src/sync-config.mjs";
 
-export function isReadOnlyCliCommand(command, args = []) {
+export function skipsPortableMirrorSync(command, args = []) {
   if (command === "skills" && ["doctor", "probe"].includes(args[0])) return true;
   if (command === "migrate" && !args.includes("--apply") && !args.includes("--recover")) return true;
   if (command === "project") {

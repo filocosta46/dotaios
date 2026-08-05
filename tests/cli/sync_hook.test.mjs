@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   fireSyncHook,
-  isReadOnlyCliCommand
+  skipsPortableMirrorSync
 } from "../../packages/cli/src/lib/sync-hook.mjs";
 
 test("project commands only request outer sync after an applied catalog change", () => {
@@ -15,10 +15,10 @@ test("project commands only request outer sync after an applied catalog change",
     ["context", "client"],
     ["add", "/tmp/client"]
   ]) {
-    assert.equal(isReadOnlyCliCommand("project", args), true, args.join(" "));
+    assert.equal(skipsPortableMirrorSync("project", args), true, args.join(" "));
   }
-  assert.equal(isReadOnlyCliCommand("project", ["add", "/tmp/client", "--apply"]), false);
-  assert.equal(isReadOnlyCliCommand("project", ["add", "/tmp/client", "--yes"]), false);
+  assert.equal(skipsPortableMirrorSync("project", ["add", "/tmp/client", "--apply"]), false);
+  assert.equal(skipsPortableMirrorSync("project", ["add", "/tmp/client", "--yes"]), false);
 });
 
 test("fireSyncHook returns immediately when sync not enabled", async () => {

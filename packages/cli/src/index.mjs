@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { readFileSync } from "node:fs";
-import { fireSyncHook, isReadOnlyCliCommand } from "./lib/sync-hook.mjs";
+import { fireSyncHook, skipsPortableMirrorSync } from "./lib/sync-hook.mjs";
 
 const pkg = JSON.parse(
   readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
@@ -128,7 +128,7 @@ async function main(argv) {
   // Fire-and-forget: sync any files the command changed. Best-effort, never throws.
   // A health report is deliberately a read-only operation. It must not mutate
   // the sync queue while the caller is checking whether the system is healthy.
-  const readOnly = isReadOnlyCliCommand(commandName, args);
+  const readOnly = skipsPortableMirrorSync(commandName, args);
   await fireSyncHook({ command: commandName, dryRun: args.includes("--dry-run"), readOnly });
 }
 

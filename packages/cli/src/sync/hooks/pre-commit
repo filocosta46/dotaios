@@ -5,7 +5,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { readProjectCatalog } from "../../../../core/src/projects.mjs";
-import { assertMirrorContentSafe } from "../mirror-content-policy.mjs";
+import {
+  assertMirrorContentSafe,
+  findGitlinks,
+  findWorkspaceIndexEntries
+} from "../mirror-content-policy.mjs";
 
 const inheritedIndex = process.env.GIT_INDEX_FILE;
 const baseEnvironment = Object.fromEntries(
@@ -31,15 +35,7 @@ if (inspected.status !== 0) {
   process.exit(1);
 }
 
-const entries = inspected.stdout.split("\0").flatMap((entry) => {
-  if (!entry) return [];
-  const tab = entry.indexOf("\t");
-  if (tab === -1) return [];
-  return [{ metadata: entry.slice(0, tab), path: entry.slice(tab + 1) }];
-});
-const gitlinks = entries
-  .filter((entry) => entry.metadata.startsWith("160000 "))
-  .map((entry) => entry.path);
+const gitlinks = findGitlinks(inspected.stdout);
 
 if (gitlinks.length > 0) {
   process.stderr.write(
@@ -49,12 +45,7 @@ if (gitlinks.length > 0) {
   process.exit(1);
 }
 
-const workspaceEntries = entries
-  .map((entry) => entry.path)
-  .filter((entry) => {
-    const portablePath = entry.toLowerCase();
-    return portablePath === "workspaces" || portablePath.startsWith("workspaces/");
-  });
+const workspaceEntries = findWorkspaceIndexEntries(inspected.stdout);
 
 if (workspaceEntries.length > 0) {
   process.stderr.write(
