@@ -59,6 +59,10 @@ export async function runTick({
         `Sync stopped before sending credentials or changing Git.`
       );
     }
+    if (typeof inspectionGit.validateMirrorContent !== "function") {
+      throw new Error("sync mirror content validation is unavailable");
+    }
+    await inspectionGit.validateMirrorContent();
     if (typeof verifyRepoPrivate !== "function") {
       throw new Error("sync privacy verification is unavailable");
     }

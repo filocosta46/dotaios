@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readProjectCatalog } from "../../../core/src/projects.mjs";
 import {
   assertMirrorContentSafe,
   nestedRepoMessage
@@ -211,6 +212,20 @@ export function createGit({
   }
 
   return {
+    async isRepositoryRoot() {
+      const topLevel = await run(["rev-parse", "--show-toplevel"]);
+      if (topLevel.code !== 0 || !topLevel.stdout.trim()) return false;
+      try {
+        const [actualRoot, expectedRoot] = await Promise.all([
+          filesystem.realpath(topLevel.stdout.trim()),
+          filesystem.realpath(cwd)
+        ]);
+        return actualRoot === expectedRoot;
+      } catch {
+        return false;
+      }
+    },
+
     async currentBranch() {
       const { code, stdout } = await run(["symbolic-ref", "--quiet", "--short", "HEAD"]);
       if (code !== 0) return null;
@@ -231,6 +246,49 @@ export function createGit({
       return stdout.trim().length > 0;
     },
 
+    async validateMirrorContent({ outerGit = true } = {}) {
+      let workspacesRootIgnored = null;
+      let indexedEntries = "";
+      if (outerGit) {
+        const ignored = await run(["check-ignore", "--no-index", "-q", "--", "workspaces/"]);
+        if (ignored.code !== 0 && ignored.code !== 1) {
+          throw new Error(
+            `git ignore inspection failed: ${redactToken(ignored.stderr.trim()) || `git check-ignore exited ${ignored.code}`}`
+          );
+        }
+        workspacesRootIgnored = ignored.code === 0;
+        const indexed = await run(["ls-files", "-s", "-z"]);
+        if (indexed.code !== 0) {
+          throw new Error(
+            `git index inspection failed: ${redactToken(indexed.stderr.trim()) || `git ls-files exited ${indexed.code}`}`
+          );
+        }
+        indexedEntries = indexed.stdout;
+      }
+      const projectCatalog = await readProjectCatalog({ aiosPath: cwd, fs: filesystem });
+      await assertMirrorContentSafe({
+        root: cwd,
+        changedPaths: [],
+        indexedEntries,
+        workspacesRootIgnored,
+        inspectWholeTree: true,
+        projectCatalog,
+        inspectWorkspaceRepository: async (workspacePath) => {
+          const topLevel = await run(["-C", workspacePath, "rev-parse", "--show-toplevel"]);
+          const head = await run(["-C", workspacePath, "rev-parse", "--verify", "HEAD"]);
+          const origin = await run(["-C", workspacePath, "remote", "get-url", "origin"]);
+          return {
+            topLevelPath: topLevel.code === 0 ? topLevel.stdout.trim() : null,
+            head: head.code === 0 && /^[0-9a-f]{40,64}$/i.test(head.stdout.trim())
+              ? head.stdout.trim()
+              : null,
+            remoteUrl: origin.code === 0 ? origin.stdout.trim() : null
+          };
+        },
+        filesystem
+      });
+    },
+
     // Stage every changed path explicitly (never `git add -A`), then commit.
     // Enumerating the changed paths from `git status --porcelain -z` lets us add
     // each one by name, which keeps the commit surface explicit and lets a future
@@ -241,7 +299,7 @@ export function createGit({
       const { stdout } = await run(["status", "--porcelain", "-z"]);
       const paths = parsePorcelainZ(stdout);
       if (paths.length === 0) return null;
-      const indexed = await run(["ls-files", "-s"]);
+      const indexed = await run(["ls-files", "-s", "-z"]);
       if (indexed.code !== 0) {
         throw new Error(
           `git index inspection failed: ${redactToken(indexed.stderr.trim()) || `git ls-files exited ${indexed.code}`}`

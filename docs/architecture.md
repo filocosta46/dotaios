@@ -18,9 +18,18 @@ DotAIOS is a local file convention.
 
 ## Projects
 
-`projects/` is the durable catalog of work the user owns. Each project keeps a small synced README with its stable ID, status, domain, repository URL, decisions, and next steps. The actual source repository stays outside `~/aios` and keeps its own Git history.
+`projects/` is the durable catalog of work the user owns. Each project keeps a
+small synced README with its stable ID, status, domain, repository URL,
+decisions, and next steps. A managed checkout may live at
+`workspaces/<slug>/`, inside the AIOS folder but outside its Git mirror. External
+checkouts remain supported. Every checkout keeps its own Git history.
 
-Local checkout paths are machine-specific and must not be committed to the AIOS mirror. A new machine can read the project catalog before the repository is cloned, then reconnect the local checkout without changing the durable project record.
+Local checkout paths are machine-specific and must not be committed to the
+AIOS mirror. A new machine can read the project catalog, run
+`dotaios project restore`, and recreate committed project state without
+changing the durable record. The sync boundary rejects every outer-index entry
+under `workspaces/`, unregistered or partial workspaces, remote mismatches, and
+other nested repositories. See [ADR 0002](adr/0002-managed-project-workspaces.md).
 
 ## Memory
 

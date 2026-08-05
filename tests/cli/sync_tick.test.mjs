@@ -32,6 +32,9 @@ function runTick(options) {
       if (typeof client.originUrl !== "function") {
         client.originUrl = async () => "https://github.com/alice/alice-aios.git";
       }
+      if (typeof client.validateMirrorContent !== "function") {
+        client.validateMirrorContent = async () => {};
+      }
       return client;
     }
   });
@@ -145,6 +148,60 @@ test("tick skips when within 10s of last tick", async () => {
       now: () => 5000 // 4 seconds later
     });
     assert.equal(result.skipped, "rate-limit-gap");
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("a clean tick validates the complete mirror content policy before network access", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const inspectionGit = makeGit({ branch: "main", calls });
+    inspectionGit.originUrl = async () => "https://github.com/alice/alice-aios.git";
+    inspectionGit.validateMirrorContent = async () => { calls.push("content-policy"); };
+    const credentialedGit = makeGit({ dirty: false, pullResult: "up-to-date", ahead: false, calls });
+
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", repo_full_name: "alice/alice-aios" }),
+      writeConfig: async () => {},
+      makeGit: ({ accessToken }) => accessToken ? credentialedGit : inspectionGit,
+      verifyRepoPrivate: async () => { calls.push("privacy"); },
+      appendEvent: async () => {},
+      now: () => Date.parse("2026-08-05T12:00:00.000Z")
+    });
+
+    assert.equal(result.outcome, "success");
+    assert.ok(calls.includes("content-policy"));
+    assert.ok(calls.indexOf("content-policy") < calls.indexOf("privacy"));
+    assert.ok(calls.indexOf("content-policy") < calls.indexOf("dirty"));
+  } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test("tick refuses an unsafe workspace policy before credentials, privacy, or dirty checks", async () => {
+  const { lockPath, dir } = await tmpLock();
+  try {
+    const calls = [];
+    const result = await runTick({
+      lockPath,
+      readConfig: async () => ({ access_token: "T", repo_full_name: "alice/alice-aios" }),
+      writeConfig: async () => {},
+      makeGit: ({ accessToken }) => {
+        calls.push(accessToken ? "credentialed-git" : "inspection-git");
+        const client = makeGit({ branch: "main", calls });
+        client.originUrl = async () => "https://github.com/alice/alice-aios.git";
+        client.validateMirrorContent = async () => {
+          calls.push("content-policy");
+          throw new Error("workspace widget has an unsafe project remote");
+        };
+        return client;
+      },
+      verifyRepoPrivate: async () => { calls.push("privacy"); },
+      appendEvent: async () => {},
+      now: () => Date.parse("2026-08-05T12:00:00.000Z")
+    });
+
+    assert.match(result.error, /unsafe project remote/i);
+    assert.deepEqual(calls, ["inspection-git", "branch-current:main", "content-policy"]);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
 });
 

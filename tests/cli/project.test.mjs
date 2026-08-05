@@ -148,6 +148,34 @@ test("registerProject writes project truth only with explicit apply or yes", asy
   });
 });
 
+test("default project Git discovery ignores inherited repository-control environment", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "real-repository");
+  const attackerPath = await makeRepo(root, "attacker-repository");
+  for (const [repoPath, remote] of [
+    [projectPath, "https://github.com/acme/real-repository.git"],
+    [attackerPath, "https://github.com/attacker/wrong.git"]
+  ]) {
+    await execFileAsync("git", ["init", "-q", repoPath]);
+    await execFileAsync("git", ["-C", repoPath, "remote", "add", "origin", remote]);
+  }
+
+  const previousGitDir = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(attackerPath, ".git");
+  try {
+    const plan = await planProjectRegistration({
+      aiosPath,
+      statePath,
+      projectPath,
+      createId: () => "real-id"
+    });
+    assert.equal(plan.repoUrl, "https://github.com/acme/real-repository.git");
+  } finally {
+    if (previousGitDir === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = previousGitDir;
+  }
+});
+
 test("project add CLI preview is zero-write and keeps absolute paths out of portable JSON", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "json-preview");
@@ -641,7 +669,7 @@ test("projectCommand exposes add preview data plus list, resolve, and doctor out
     output: capture.output
   });
   assert.equal(listed.length, 1);
-  assert.match(capture.lines.join("\n"), /\[ok\] cli-project.*domain: build, make/s);
+  assert.match(capture.lines.join("\n"), /\[external\] cli-project.*domain: build, make/s);
 
   capture.lines.length = 0;
   const resolved = await projectCommand([
@@ -662,6 +690,36 @@ test("projectCommand exposes add preview data plus list, resolve, and doctor out
   assert.equal(report.ok, false);
   assert.equal(exitCode, 1);
   assert.match(capture.lines.join("\n"), /\[mismatch\].*1 issue\(s\) found/s);
+});
+
+test("project list names managed, external, restorable, and local-only states", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const managedPath = path.join(aiosPath, "workspaces", "managed");
+  const externalPath = path.join(root, "external");
+  await fs.mkdir(managedPath, { recursive: true });
+  await fs.mkdir(externalPath, { recursive: true });
+  await writeProjectReadme(aiosPath, "managed", "id: managed-id\nproject: managed\nrepo_url: https://github.com/acme/managed.git");
+  await writeProjectReadme(aiosPath, "external", "id: external-id\nproject: external\nrepo_url: https://github.com/acme/external.git");
+  await writeProjectReadme(aiosPath, "restorable", "id: restorable-id\nproject: restorable\nrepo_url: https://github.com/acme/restorable.git");
+  await writeProjectReadme(aiosPath, "local-only", "id: local-id\nproject: local-only\nrepo_url: https://token@github.com/acme/private.git");
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    paths: {
+      "managed-id": managedPath,
+      "external-id": externalPath
+    }
+  })}\n`);
+
+  const capture = outputCapture();
+  await projectCommand(["list", "--path", aiosPath, "--state-path", statePath], {
+    output: capture.output
+  });
+  const rendered = capture.lines.join("\n");
+  assert.match(rendered, /\[managed\] managed:/);
+  assert.match(rendered, /\[external\] external:/);
+  assert.match(rendered, /\[restorable\] restorable:/);
+  assert.match(rendered, /\[local-only\] local-only:/);
 });
 
 test("projectCommand rejects invalid metadata options before writing", async (t) => {

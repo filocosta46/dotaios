@@ -4,7 +4,23 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **Managed project restore across machines.** Portable records remain in
+  tracked `projects/`, while `dotaios project restore [slug-or-id]` recreates
+  committed project state under ignored `workspaces/` using the project's own
+  Git credentials. External checkouts remain supported.
+- **Folder schema 1.2 migration.** Existing schema 1.1 folders get a
+  preview-first, receipted upgrade that preserves custom `.gitignore` content,
+  adds the anchored `/workspaces/` boundary, and commits `aios.json` last so an
+  interrupted upgrade can be recovered safely before project restore.
+
 ### Fixed
+
+- **Project repositories cannot leak into the AIOS mirror.** Sync verifies the
+  root workspace ignore, refuses every outer-index entry under `workspaces/`,
+  validates each registered workspace's stable ID, complete checkout, and safe
+  matching origin, and still rejects every other nested repository.
 
 - **Sync no longer reports success when Git cannot mirror a nested project.**
   Gitlink pointers are refused before commit, an index inspection failure stops

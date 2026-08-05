@@ -49,6 +49,7 @@ async function makeAios() {
   const aios = path.join(root, "aios");
   await makeRepo(aios);
   await fs.writeFile(path.join(aios, "README.md"), "base\n");
+  await fs.writeFile(path.join(aios, ".gitignore"), "/workspaces/\n");
   await git(aios, "add", "-A");
   await git(aios, "commit", "-q", "-m", "base");
   return aios;
@@ -163,6 +164,98 @@ test("the owned pre-commit validator refuses a gitlink introduced after prefligh
   assert.match((await git(aios, "ls-files", "-s", "projects/raced")).stdout, /^160000 /);
 });
 
+test("the owned pre-commit validator refuses every candidate index entry under workspaces", async () => {
+  const aios = await makeAios();
+  await fs.writeFile(path.join(aios, ".gitignore"), "/workspaces/\n");
+  await fs.writeFile(path.join(aios, "sync-change.md"), "sync me\n");
+  const workspaceFile = path.join(aios, "workspaces", "raced", "tracked.txt");
+  await fs.mkdir(path.dirname(workspaceFile), { recursive: true });
+  await fs.writeFile(workspaceFile, "local workspace\n");
+  let injected = false;
+  const spawnImpl = async (cmd, args, opts) => {
+    const result = await realGitFailing(aios, () => false, {})(cmd, args, opts);
+    if (!injected && args[0] === "add") {
+      injected = true;
+      await git(aios, "add", "-f", "workspaces/raced/tracked.txt");
+    }
+    return result;
+  };
+
+  await assert.rejects(
+    () => createGit({ cwd: aios, spawnImpl }).commitAll("sync"),
+    /candidate index.*workspaces/i
+  );
+  assert.equal(
+    (await git(aios, "ls-files", "workspaces/raced/tracked.txt")).stdout.trim(),
+    "workspaces/raced/tracked.txt"
+  );
+});
+
+test("the owned pre-commit validator refuses case aliases of workspaces", async () => {
+  const aios = await makeAios();
+  await fs.writeFile(path.join(aios, "sync-change.md"), "sync me\n");
+  const workspaceFile = path.join(aios, "Workspaces", "raced", "private.txt");
+  await fs.mkdir(path.dirname(workspaceFile), { recursive: true });
+  await fs.writeFile(workspaceFile, "private workspace data\n");
+  let injected = false;
+  const spawnImpl = async (cmd, args, opts) => {
+    const result = await realGitFailing(aios, () => false, {})(cmd, args, opts);
+    if (!injected && args[0] === "add") {
+      injected = true;
+      await git(aios, "add", "-f", "--", "Workspaces/raced/private.txt");
+    }
+    return result;
+  };
+
+  await assert.rejects(
+    () => createGit({ cwd: aios, spawnImpl }).commitAll("sync"),
+    /candidate index.*workspaces/i
+  );
+});
+
+test("the owned pre-commit validator refuses a candidate catalog changed after preflight", async () => {
+  const aios = await makeAios();
+  const projectReadme = path.join(aios, "projects", "widget", "README.md");
+  await fs.mkdir(path.dirname(projectReadme), { recursive: true });
+  await fs.writeFile(projectReadme, [
+    "---",
+    "id: widget-id",
+    "project: widget",
+    "repo_url: https://github.com/acme/widget.git",
+    "---",
+    "# Widget",
+    ""
+  ].join("\n"));
+  const workspace = path.join(aios, "workspaces", "widget");
+  await makeRepo(workspace);
+  await fs.writeFile(path.join(workspace, "README.md"), "# Widget\n");
+  await git(workspace, "add", "README.md");
+  await git(workspace, "commit", "-q", "-m", "widget base");
+  await git(workspace, "remote", "add", "origin", "https://github.com/acme/widget.git");
+  await git(aios, "add", "projects/widget/README.md");
+  await git(aios, "commit", "-q", "-m", "register widget");
+
+  await fs.writeFile(path.join(aios, "sync-change.md"), "sync me\n");
+  let injected = false;
+  const spawnImpl = async (cmd, args, opts) => {
+    const result = await realGitFailing(aios, () => false, {})(cmd, args, opts);
+    if (!injected && args[0] === "add") {
+      injected = true;
+      await fs.writeFile(
+        projectReadme,
+        (await fs.readFile(projectReadme, "utf8")).replace("acme/widget.git", "acme/wrong.git")
+      );
+    }
+    return result;
+  };
+
+  await assert.rejects(
+    () => createGit({ cwd: aios, spawnImpl }).commitAll("sync"),
+    /complete candidate mirror is unsafe.*origin does not match/is
+  );
+  assert.match((await git(aios, "show", "HEAD:projects/widget/README.md")).stdout, /acme\/widget\.git/);
+});
+
 test("a HEAD rev-parse failure after commit keeps the committed index aligned with the new HEAD", async () => {
   const aios = await makeAios();
   const notesPath = path.join(aios, "notes.md");
@@ -259,8 +352,9 @@ test("commitAll cannot be redirected by inherited repository environment", async
   const wrong = path.join(root, "wrong");
   await makeRepo(intended);
   await makeRepo(wrong);
+  await fs.writeFile(path.join(intended, ".gitignore"), "/workspaces/\n");
   await fs.writeFile(path.join(intended, "base.md"), "intended\n");
-  await git(intended, "add", "base.md");
+  await git(intended, "add", ".gitignore", "base.md");
   await git(intended, "commit", "-q", "-m", "base");
   await fs.writeFile(path.join(wrong, "base.md"), "wrong\n");
   await git(wrong, "add", "base.md");
@@ -315,6 +409,7 @@ test("a dirty tree that stages nothing is reported, not silently called success"
     makeGit: () => ({
       currentBranch: async () => "main",
       originUrl: async () => "https://github.com/user/user-aios.git",
+      validateMirrorContent: async () => {},
       dirty: async () => true,        // git sees changes
       commitAll: async () => null,    // but none of them can be staged
       pullRebase: async () => "ok",

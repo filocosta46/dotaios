@@ -30,11 +30,16 @@ If you prefer to set it up yourself, the technical instructions are in [INSTALL.
 
 - One place for your identity and priorities
 - A clear home for projects and next steps
+- One-command restore of committed project state into private local workspaces
 - Recent notes and saved conversations
 - Long-term knowledge and sources
 - Trusted workflows your assistants can follow
 
 Everything stays in a local `~/aios` folder: readable, portable, and yours. You can optionally sync it privately between your own devices.
+
+Project records sync with AIOS. Managed project repositories sit under its
+ignored `workspaces/` root with their own history and credentials, so source
+code never enters the personal-context mirror.
 
 DotAIOS does not keep an endless transcript. Important information is deliberately saved into the right place so it remains useful later.
 

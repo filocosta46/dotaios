@@ -80,6 +80,9 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
     const calls = [];
     const fakeGit = {
       init: async () => calls.push("init"),
+      validateMirrorContent: async ({ outerGit = true } = {}) => calls.push(
+        outerGit ? "content-policy:full" : "content-policy:layout"
+      ),
       addRemote: async (url) => calls.push(`remote:${url}`),
       raw: async (args) => { calls.push(`raw:${args.join(" ")}`); return { stdout: "", stderr: "", code: 0 }; },
       dirty: async () => true,
@@ -95,7 +98,9 @@ test("initialMirrorPush invokes git init, add, commit, push in order", async () 
       recordIntendedSha: async (intended) => calls.push(`receipt:${intended}`)
     });
     assert.deepEqual(calls, [
+      "content-policy:layout",
       "init",
+      "content-policy:full",
       "remote:https://github.com/u/u-aios.git",
       "commit:Initial DotAIOS mirror",
       "receipt:deadbeef",
@@ -120,6 +125,7 @@ test("initialMirrorPush leaves a matching existing origin untouched", async () =
       gitignoreContent: ".env\n",
       preserveExistingOrigin: true,
       git: {
+        validateMirrorContent: async () => {},
         init: async () => calls.push("init"),
         addRemote: async () => calls.push("remote-mutated"),
         commitAll: async () => RECEIPT,
@@ -137,6 +143,7 @@ test("initialMirrorPush preserves custom ignore rules while adding sync exclusio
   try {
     await fs.writeFile(path.join(tmp, ".gitignore"), "custom-secret.txt\n");
     const fakeGit = {
+      validateMirrorContent: async () => {},
       init: async () => {},
       addRemote: async () => {},
       commitAll: async () => "deadbeef",
@@ -158,6 +165,34 @@ test("initialMirrorPush preserves custom ignore rules while adding sync exclusio
   } finally {
     await fs.rm(tmp, { recursive: true, force: true });
   }
+});
+
+test("initialMirrorPush refuses a symlinked .gitignore without changing its external target", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-mirror-ignore-link-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const aiosPath = path.join(root, "aios");
+  const outside = path.join(root, "outside-ignore");
+  await fs.mkdir(aiosPath);
+  await fs.writeFile(outside, "outside-original\n");
+  await fs.symlink(outside, path.join(aiosPath, ".gitignore"));
+
+  await assert.rejects(
+    initialMirrorPush({
+      aiosPath,
+      fullName: "u/u-aios",
+      gitignoreContent: "/workspaces/\n",
+      git: {
+        validateMirrorContent: async () => {},
+        init: async () => assert.fail("Git init must not run"),
+        addRemote: async () => {},
+        commitAll: async () => "deadbeef",
+        push: async () => {}
+      }
+    }),
+    /\.gitignore must be a regular file.*symlink/i
+  );
+  assert.equal(await fs.readFile(outside, "utf8"), "outside-original\n");
+  assert.equal((await fs.lstat(path.join(aiosPath, ".gitignore"))).isSymbolicLink(), true);
 });
 
 test("initialMirrorPush refuses a nested repo before changing ignore content or Git metadata", async () => {

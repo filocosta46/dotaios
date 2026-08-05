@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { nestedRepoMessage } from "./mirror-content-policy.mjs";
 
 const REPO_DESCRIPTION = "DotAIOS personal memory mirror — synced from local ~/aios/. Auto-managed by dotaios.";
 
@@ -62,31 +63,33 @@ function unverifiableSetupPrivacyMessage(fullName) {
   );
 }
 
-async function findNestedRepositories(root, filesystem) {
-  const found = [];
-  const pending = [root];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    const entries = await filesystem.readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const entryPath = path.join(current, entry.name);
-      if (entry.name === ".git") {
-        const relativeParent = path.relative(root, current);
-        if (relativeParent) found.push(relativeParent.split(path.sep).join("/"));
-        continue;
-      }
-      if (entry.isDirectory()) pending.push(entryPath);
-    }
-  }
-  return found.sort();
-}
-
-async function readExistingFile(filePath, filesystem) {
+async function readExistingRegularFile(filePath, filesystem) {
+  let stats;
   try {
-    return await filesystem.readFile(filePath, "utf8");
+    stats = await filesystem.lstat(filePath);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(`DotAIOS refused to update ${filePath}: .gitignore must be a regular file, not a symlink or special file.`);
+  }
+  const handle = await filesystem.open(
+    filePath,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0)
+  );
+  try {
+    const openedStats = await handle.stat();
+    if (!openedStats.isFile()) {
+      throw new Error(`DotAIOS refused to update ${filePath}: .gitignore changed during setup.`);
+    }
+    return {
+      content: await handle.readFile("utf8"),
+      identity: fileIdentity(openedStats),
+      mode: openedStats.mode & 0o777
+    };
+  } finally {
+    await handle.close();
   }
 }
 
@@ -94,6 +97,48 @@ function mergeGitignore(existing, template) {
   if (existing === null) return template;
   if (!template || existing.includes(template)) return existing;
   return `${existing}${existing.endsWith("\n") ? "" : "\n"}${template}`;
+}
+
+function fileIdentity(stats) {
+  return `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeMs}`;
+}
+
+async function writeGitignoreAtomically(filePath, content, existing, filesystem) {
+  const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  const mode = existing?.mode ?? 0o644;
+  let handle;
+  try {
+    handle = await filesystem.open(
+      temporaryPath,
+      fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | (fsConstants.O_NOFOLLOW || 0),
+      mode
+    );
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = null;
+
+    let current = null;
+    try {
+      current = await filesystem.lstat(filePath);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (existing === null) {
+      if (current !== null) throw new Error(`DotAIOS refused to update ${filePath}: .gitignore appeared during setup.`);
+    } else if (
+      current === null
+      || !current.isFile()
+      || current.isSymbolicLink()
+      || fileIdentity(current) !== existing.identity
+    ) {
+      throw new Error(`DotAIOS refused to update ${filePath}: .gitignore changed during setup.`);
+    }
+    await filesystem.rename(temporaryPath, filePath);
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await filesystem.rm(temporaryPath, { force: true }).catch(() => {});
+  }
 }
 
 /**
@@ -193,23 +238,22 @@ export async function initialMirrorPush({
   recordIntendedSha = async () => {},
   preserveExistingOrigin = false
 }) {
-  // Refuse before touching .gitignore or Git metadata. Once Git stages a
-  // nested repository it records only a gitlink pointer, never its files.
-  const nestedRepositories = await findNestedRepositories(aiosPath, filesystem);
-  if (nestedRepositories.length > 0) {
-    throw new Error(nestedRepoMessage(nestedRepositories));
+  if (typeof git.validateMirrorContent !== "function") {
+    throw new Error("sync mirror content validation is unavailable");
   }
+  await git.validateMirrorContent({ outerGit: false });
 
   // Preserve custom rules while adding DotAIOS' sync exclusions.
   const gitignorePath = path.join(aiosPath, ".gitignore");
-  const existingGitignore = await readExistingFile(gitignorePath, filesystem);
-  await filesystem.writeFile(
-    gitignorePath,
-    mergeGitignore(existingGitignore, gitignoreContent)
-  );
+  const existingGitignore = await readExistingRegularFile(gitignorePath, filesystem);
+  const mergedGitignore = mergeGitignore(existingGitignore?.content ?? null, gitignoreContent);
+  if (mergedGitignore !== existingGitignore?.content) {
+    await writeGitignoreAtomically(gitignorePath, mergedGitignore, existingGitignore, filesystem);
+  }
 
   // 2. Init git repo on default branch "main" if not already.
   await git.init();
+  await git.validateMirrorContent();
 
   // 3. Set the plain remote — the token authenticates via git's credential
   //    helper (git was constructed with accessToken), never via the URL.

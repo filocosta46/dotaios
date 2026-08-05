@@ -6,11 +6,22 @@ import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { parseDocument } from "yaml";
 import { isPathWithin } from "./paths.mjs";
+import { schemaVersion } from "./schema.mjs";
+import {
+  classifyProjectPlacement,
+  classifyProjectRemote,
+  classifyRestoreDestination,
+  managedWorkspacePath,
+  projectRemotesMatch,
+  restoreManagedProjects
+} from "./project-workspaces.mjs";
 
 const execFileAsync = promisify(execFile);
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const PROJECT_PLAN_VERSION = 1;
 const PROJECT_STATE_VERSION = 1;
+const PROJECT_STATE_LOCK_FORMAT = "dotaios-project-state-lock/v1";
+const PROJECT_STATE_LOCK_STALE_MS = 5 * 60 * 1000;
 const PROJECT_DOMAINS = new Set(["build", "make", "sell"]);
 
 /**
@@ -37,12 +48,6 @@ export async function planProjectRegistration(options = {}) {
   const requestedProjectPath = resolveUserPath(options.projectPath, context.homePath);
   await assertDirectory(context.fs, requestedProjectPath, "Project path");
   const realProjectPath = await context.fs.realpath(requestedProjectPath);
-  if (await isPathWithin(context.aiosPath, requestedProjectPath, { fileSystem: context.fs })) {
-    throw new Error([
-      `Cannot register ${requestedProjectPath} because it is inside the AIOS folder.`,
-      "Keep the actual project repository outside AIOS so it retains its own Git history."
-    ].join(" "));
-  }
 
   const [records, state] = await Promise.all([
     readProjectRecords(context),
@@ -63,6 +68,19 @@ export async function planProjectRegistration(options = {}) {
   const slug = requestedSlug
     || mappedRecord?.directorySlug
     || slugify(path.basename(requestedProjectPath));
+  const placement = await classifyProjectPlacement({
+    aiosPath: context.aiosPath,
+    projectPath: requestedProjectPath,
+    slug,
+    fileSystem: context.fs
+  });
+  if (placement.placement === "unsafe") {
+    throw new Error([
+      `Cannot register ${requestedProjectPath} because it is inside the AIOS folder.`,
+      "Keep the actual project repository outside AIOS so it retains its own Git history,",
+      `or use the exact managed workspace at ${placement.destination}.`
+    ].join(" "));
+  }
   const existing = records.find((record) => record.directorySlug === slug) || null;
   if (mappedId && existing?.id && mappedId !== existing.id) {
     throw new Error([
@@ -84,11 +102,13 @@ export async function planProjectRegistration(options = {}) {
   const status = readRequiredString(options.status ?? existing?.metadata.status ?? "active", "status");
   const domain = normalizeDomains(options.domain ?? existing?.metadata.domain ?? ["build"]);
   const discoveredRepoUrl = await context.readRepoUrl(requestedProjectPath);
-  const repoUrl = readOptionalString(options.repoUrl)
+  const remoteCandidate = readOptionalString(options.repoUrl)
     ?? readOptionalString(discoveredRepoUrl)
     ?? readOptionalString(existing?.metadata.repo_url)
     ?? readOptionalString(existing?.metadata.repo)
     ?? null;
+  const remote = classifyProjectRemote(remoteCandidate);
+  const repoUrl = remote.safe ? remote.canonicalUrl : null;
 
   const readmePath = path.join(context.aiosPath, "projects", slug, "README.md");
   await assertProjectReadmePath(context, readmePath);
@@ -172,56 +192,48 @@ export async function applyProjectRegistration(plan, options = {}) {
   await assertStateOutsideAios(context);
   await assertProjectReadmePath(context, plan.readmePath);
 
-  const currentSource = await readMarkdownSource(context.fs, plan.readmePath);
-  const currentReadmeExists = currentSource !== null;
-  const currentReadme = currentSource?.content || "";
-  if (currentReadmeExists !== plan.readmeExists || currentReadme !== plan.readmeBefore) {
-    throw new Error("The project README changed after the preview. Preview project add again.");
-  }
-  const currentState = await readProjectState(context);
-  if (JSON.stringify(currentState) !== JSON.stringify(plan.stateBefore)) {
-    throw new Error("The machine-local project path state changed after the preview. Preview project add again.");
-  }
+  await withProjectStateLock(context, async () => {
+    const currentSource = await readMarkdownSource(context.fs, plan.readmePath);
+    const currentReadmeExists = currentSource !== null;
+    const currentReadme = currentSource?.content || "";
+    if (currentReadmeExists !== plan.readmeExists || currentReadme !== plan.readmeBefore) {
+      throw new Error("The project README changed after the preview. Preview project add again.");
+    }
+    const currentState = await readProjectState(context);
+    if (JSON.stringify(currentState) !== JSON.stringify(plan.stateBefore)) {
+      throw new Error("The machine-local project path state changed after the preview. Preview project add again.");
+    }
 
-  await context.fs.mkdir(path.dirname(plan.readmePath), { recursive: true });
-  const stateBeforeText = await readTextIfPresent(context.fs, context.statePath);
-  const stateBeforeExists = stateBeforeText !== "" || await pathExists(context.fs, context.statePath);
+    await context.fs.mkdir(path.dirname(plan.readmePath), { recursive: true });
 
-  // Durable truth is the first write. If machine-local state cannot be
-  // persisted, roll the README back so a later doctor run cannot see a
-  // half-registered project.
-  await context.fs.writeFile(plan.readmePath, plan.readme, "utf8");
-  try {
-    await writeProjectState(context, plan.stateAfter);
-  } catch (error) {
-    const rollbackErrors = [];
+    // Keep README validation, its write, and the state CAS under one owner-safe
+    // lock. A concurrent loser therefore fails before it can touch the winner's
+    // durable record.
+    await context.fs.writeFile(plan.readmePath, plan.readme, {
+      encoding: "utf8",
+      flag: plan.readmeExists ? "w" : "wx"
+    });
     try {
-      if (plan.readmeExists) {
-        await context.fs.writeFile(plan.readmePath, plan.readmeBefore, "utf8");
-      } else {
-        await context.fs.rm(plan.readmePath, { force: true });
+      await writeProjectState(context, plan.stateAfter, {
+        expectedState: plan.stateBefore,
+        lockHeld: true
+      });
+    } catch (error) {
+      const rollbackErrors = [];
+      try {
+        await rollbackProjectReadmeWrite(context, plan);
+      } catch (rollbackError) {
+        rollbackErrors.push(rollbackError);
       }
-    } catch (rollbackError) {
-      rollbackErrors.push(rollbackError);
-    }
-    try {
-      if (stateBeforeExists) {
-        await context.fs.mkdir(path.dirname(context.statePath), { recursive: true });
-        await context.fs.writeFile(context.statePath, stateBeforeText, "utf8");
-      } else {
-        await context.fs.rm(context.statePath, { force: true });
+      if (rollbackErrors.length > 0) {
+        throw new AggregateError(
+          [error, ...rollbackErrors],
+          "Project registration failed and its rollback could not be completed."
+        );
       }
-    } catch (rollbackError) {
-      rollbackErrors.push(rollbackError);
+      throw new Error(`Project registration rolled back because local state could not be saved: ${error.message}`);
     }
-    if (rollbackErrors.length > 0) {
-      throw new AggregateError(
-        [error, ...rollbackErrors],
-        "Project registration failed and its rollback could not be completed."
-      );
-    }
-    throw new Error(`Project registration rolled back because local state could not be saved: ${error.message}`);
-  }
+  });
 
   return {
     ...plan,
@@ -236,6 +248,166 @@ export async function listProjects(options = {}) {
   await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
   await assertStateOutsideAios(context);
   return listProjectRecords(context);
+}
+
+/** Restore catalog projects through injected Git operations and local state only. */
+export async function restoreProjects(options = {}) {
+  const context = createContext(options);
+  await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
+  await assertStateOutsideAios(context);
+  await assertManagedRestoreBoundary(context);
+  const projects = await listProjectRecords(context);
+  const reference = readOptionalString(
+    options.reference ?? options.project ?? options.slug ?? options.id
+  );
+  return restoreManagedProjects({
+    aiosPath: context.aiosPath,
+    projects,
+    reference,
+    dryRun: options.dryRun,
+    fileSystem: context.fs,
+    cloneRepository: options.cloneRepository,
+    readRepositoryRemote: context.readRepoUrl,
+    readRepositoryHead: context.readRepoHead,
+    updateMapping: (request) => updateProjectPathMapping({
+      aiosPath: context.aiosPath,
+      homePath: context.homePath,
+      statePath: context.statePath,
+      fs: context.fs,
+      id: request.id,
+      slug: request.slug,
+      projectPath: request.projectPath,
+      expectedPath: request.previousPath,
+      expectedRemote: request.expectedRemote,
+      expectedHead: request.expectedHead,
+      readRepoUrl: context.readRepoUrl,
+      readRepoHead: context.readRepoHead
+    })
+  });
+}
+
+async function assertManagedRestoreBoundary(context) {
+  const configPath = path.join(context.aiosPath, "aios.json");
+  let config;
+  try {
+    config = JSON.parse(await context.fs.readFile(configPath, "utf8"));
+  } catch (error) {
+    const detail = error.code === "ENOENT" ? "is missing" : "is unreadable or invalid";
+    throw new Error(`Managed project restore is blocked because ${configPath} ${detail}.`);
+  }
+  if (config?.schema_version !== schemaVersion) {
+    throw new Error([
+      `Managed project restore requires folder schema ${schemaVersion}; this folder reports ${config?.schema_version || "unknown"}.`,
+      `Preview the versioned upgrade first: dotaios migrate --path ${JSON.stringify(context.aiosPath)}`
+    ].join(" "));
+  }
+
+  const ignorePath = path.join(context.aiosPath, ".gitignore");
+  let stats;
+  let content;
+  try {
+    stats = await context.fs.lstat(ignorePath);
+    if (!stats.isFile() || stats.isSymbolicLink()) throw new Error("unsafe-type");
+    content = await context.fs.readFile(ignorePath, "utf8");
+  } catch {
+    throw new Error([
+      "Managed project restore is blocked because the /workspaces/ privacy boundary is missing or unsafe.",
+      `Check the versioned folder upgrade: dotaios migrate --path ${JSON.stringify(context.aiosPath)}`
+    ].join(" "));
+  }
+  if (!content.split(/\r?\n/).some((line) => line === "/workspaces/")) {
+    throw new Error([
+      "Managed project restore is blocked because the exact /workspaces/ ignore rule is not installed.",
+      `Check the versioned folder upgrade: dotaios migrate --path ${JSON.stringify(context.aiosPath)}`
+    ].join(" "));
+  }
+}
+
+/** Atomically update one verified managed checkout mapping, preserving all others. */
+export async function updateProjectPathMapping(options = {}) {
+  const context = createContext(options);
+  await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
+  await assertStateOutsideAios(context);
+  const id = readRequiredString(options.id ?? options.projectId, "project id");
+  const slug = validateSlug(options.slug);
+  const projectPath = resolveUserPath(
+    readRequiredString(options.projectPath, "projectPath"),
+    context.homePath
+  );
+  const placement = await classifyProjectPlacement({
+    aiosPath: context.aiosPath,
+    projectPath,
+    slug,
+    fileSystem: context.fs
+  });
+  if (placement.placement !== "managed" || placement.destination !== projectPath) {
+    throw new Error(`Project mapping must use the exact verified managed workspace: ${placement.destination}`);
+  }
+  const expectedRemote = classifyProjectRemote(
+    readRequiredString(options.expectedRemote, "expectedRemote")
+  );
+  if (!expectedRemote.safe) {
+    throw new Error(`Project mapping requires a safe expected remote (${expectedRemote.reason}).`);
+  }
+  const expectedHead = readRequiredString(options.expectedHead, "expectedHead").toLowerCase();
+  if (!/^[0-9a-f]{40,64}$/.test(expectedHead)) {
+    throw new Error("Project mapping requires a verified Git commit id.");
+  }
+  const hasExpectedPath = Object.prototype.hasOwnProperty.call(options, "expectedPath");
+  const expectedPath = typeof options.expectedPath === "string" && options.expectedPath.trim()
+    ? resolveUserPath(options.expectedPath, context.homePath)
+    : null;
+
+  return withProjectStateLock(context, async () => {
+    const repositoryBefore = await managedRepositoryReceipt(context, projectPath);
+    const verified = await classifyRestoreDestination({
+      destination: projectPath,
+      expectedRemote: expectedRemote.canonicalUrl,
+      fileSystem: context.fs,
+      readRepositoryHead: context.readRepoHead,
+      readRepositoryRemote: context.readRepoUrl
+    });
+    if (verified.state !== "existing-match" || verified.head !== expectedHead) {
+      throw new Error(
+        `Project mapping target changed after verification (${verified.state}); restore again before saving the mapping.`
+      );
+    }
+    const repositoryAfter = await managedRepositoryReceipt(context, projectPath);
+    if (repositoryBefore !== repositoryAfter) {
+      throw new Error("Project mapping target changed during verification; restore again before saving the mapping.");
+    }
+
+    const state = await readProjectState(context);
+    const currentPath = readMappedPath(state.paths[id]);
+    if (currentPath !== projectPath) {
+      if (hasExpectedPath && currentPath !== expectedPath) {
+        throw new Error(`Project mapping changed concurrently for id ${id}.`);
+      }
+      if (!hasExpectedPath && currentPath !== null) {
+        throw new Error(`Project mapping conflict for id ${id}.`);
+      }
+    }
+    for (const [otherId, value] of Object.entries(state.paths)) {
+      if (otherId !== id && readMappedPath(value) === projectPath) {
+        throw new Error(`Project mapping conflict: ${projectPath} is already mapped to ${otherId}.`);
+      }
+    }
+    if (currentPath === projectPath) {
+      return { changed: false, id, projectPath, statePath: context.statePath };
+    }
+    const nextState = { ...state, paths: { ...state.paths, [id]: projectPath } };
+    await writeProjectStateFile(context, nextState);
+    return { changed: true, id, projectPath, statePath: context.statePath };
+  });
+}
+
+async function managedRepositoryReceipt(context, projectPath) {
+  const stats = await context.fs.lstat(projectPath);
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Managed project mapping target must remain a real directory: ${projectPath}`);
+  }
+  const canonicalPath = await context.fs.realpath(projectPath);
+  return `${canonicalPath}\u0000${stats.dev}\u0000${stats.ino}`;
 }
 
 /** Read the portable project catalog without consulting machine-local paths. */
@@ -377,6 +549,62 @@ export async function doctorProjects(options = {}) {
       });
       continue;
     }
+    if (!project.remoteSafe && project.remoteReason !== "missing") {
+      issues.push({
+        type: "unsafe_remote",
+        reason: project.remoteReason,
+        project,
+        message: `Project "${project.slug}" has an unsafe catalog remote (${project.remoteReason}). It is local-only and cannot be restored.`
+      });
+    }
+    if (project.placement === "unsafe") {
+      issues.push({
+        type: "unsafe_placement",
+        reason: "inside_aios",
+        project,
+        actual: project.projectPath,
+        message: `Project "${project.slug}" uses an unsafe path inside AIOS: ${project.projectPath}`
+      });
+    }
+
+    let managedDestination = null;
+    let managedState = null;
+    if (project.remoteSafe) {
+      managedDestination = managedWorkspacePath(context.aiosPath, project.slug);
+      managedState = await classifyRestoreDestination({
+        destination: managedDestination,
+        expectedRemote: project.repoUrl,
+        fileSystem: context.fs,
+        readRepositoryHead: context.readRepoHead,
+        readRepositoryRemote: context.readRepoUrl
+      });
+      if (managedState.state === "remote-mismatch") {
+        issues.push({
+          type: "remote_mismatch",
+          reason: "managed_workspace",
+          project,
+          expected: project.repoUrl,
+          actual: managedState.actualRemote?.canonicalUrl || null,
+          message: `Managed workspace "${project.slug}" has a Git origin that does not match its catalog remote.`
+        });
+      } else if (managedState.state === "unsafe-remote") {
+        issues.push({
+          type: "unsafe_remote",
+          reason: managedState.actualRemote?.reason || "invalid",
+          project,
+          actual: managedDestination,
+          message: `Managed workspace "${project.slug}" has an unsafe Git origin.`
+        });
+      } else if (!["missing", "existing-match"].includes(managedState.state)) {
+        issues.push({
+          type: "incomplete_checkout",
+          reason: managedState.state,
+          project,
+          actual: managedDestination,
+          message: `Managed workspace "${project.slug}" is incomplete or unsafe (${managedState.state}): ${managedDestination}`
+        });
+      }
+    }
     if (!project.projectPath) {
       issues.push({
         type: "missing_path",
@@ -396,10 +624,30 @@ export async function doctorProjects(options = {}) {
       });
       continue;
     }
+    if (project.placement === "unsafe") continue;
     if (!project.repoUrl) continue;
 
-    const actualRepoUrl = readOptionalString(await context.readRepoUrl(project.projectPath));
-    if (!repoUrlsMatch(project.repoUrl, actualRepoUrl)) {
+    if (managedDestination && path.resolve(project.projectPath) === managedDestination) {
+      continue;
+    }
+
+    let actualRepoUrl = null;
+    try {
+      actualRepoUrl = readOptionalString(await context.readRepoUrl(project.projectPath));
+    } catch {
+      // A broken or unreadable checkout is a doctor finding, not a reason for
+      // the whole report to abort.
+    }
+    const actualRemote = classifyProjectRemote(actualRepoUrl);
+    if (!actualRemote.safe && actualRemote.reason !== "missing") {
+      issues.push({
+        type: "unsafe_remote",
+        reason: actualRemote.reason,
+        project,
+        actual: project.projectPath,
+        message: `Project "${project.slug}" checkout has an unsafe Git origin (${actualRemote.reason}).`
+      });
+    } else if (!projectRemotesMatch(project.repoUrl, actualRepoUrl)) {
       issues.push({
         type: "remote_mismatch",
         project,
@@ -412,19 +660,48 @@ export async function doctorProjects(options = {}) {
     }
   }
 
+  let workspace = { checked: false, outer_git: null };
+  if (typeof options.inspectWorkspaceBoundary === "function") {
+    try {
+      const result = await options.inspectWorkspaceBoundary();
+      workspace = {
+        checked: true,
+        outer_git: result?.outerGit === true
+      };
+      if (result?.ok === false) {
+        issues.push({
+          type: "workspace_boundary",
+          reason: result.reason || "invalid",
+          project: null,
+          message: result.message || "The managed workspace boundary is not safe."
+        });
+      }
+    } catch (error) {
+      issues.push({
+        type: "workspace_boundary",
+        reason: "inspection_failed",
+        project: null,
+        message: `Workspace boundary inspection failed: ${error.message}`
+      });
+      workspace = { checked: true, outer_git: null };
+    }
+  }
+
   return {
     ok: issues.length === 0,
     checked: checkedProjects.length,
     projects: checkedProjects,
-    issues
+    issues,
+    workspace
   };
 }
 
 function createContext(options) {
   const homePath = path.resolve(options.homePath || os.homedir());
   const aiosPath = resolveUserPath(options.aiosPath || path.join(homePath, "aios"), homePath);
+  const defaultStatePath = path.join(homePath, ".dotaios", "projects.json");
   const statePath = resolveUserPath(
-    options.statePath || path.join(homePath, ".dotaios", "projects.json"),
+    options.statePath || defaultStatePath,
     homePath
   );
   return {
@@ -432,6 +709,8 @@ function createContext(options) {
     createId: options.createId || randomUUID,
     fs: options.fs || fs,
     homePath,
+    ownsStateDirectory: statePath === defaultStatePath,
+    readRepoHead: options.readRepoHead || readGitHead,
     readRepoUrl: options.readRepoUrl || readGitRemoteUrl,
     statePath
   };
@@ -444,6 +723,13 @@ async function listProjectRecords(context) {
   ]);
   return Promise.all(records.map(async (record) => {
     const projectPath = record.id ? readMappedPath(state.paths[record.id]) : null;
+    const placement = await classifyProjectPlacement({
+      aiosPath: context.aiosPath,
+      projectPath,
+      slug: record.slug,
+      fileSystem: context.fs
+    });
+    const restoreEligible = Boolean(record.id && record.remote.safe && placement.placement === "missing");
     return {
       id: record.id,
       slug: record.slug,
@@ -453,7 +739,12 @@ async function listProjectRecords(context) {
       domain: record.domain,
       repoUrl: record.repoUrl,
       projectPath,
-      pathAvailable: projectPath ? await isDirectory(context.fs, projectPath) : false,
+      pathAvailable: placement.pathAvailable,
+      placement: placement.placement,
+      remoteSafe: record.remote.safe,
+      remoteReason: record.remote.reason,
+      restoreEligible,
+      restoreStatus: restoreStatus(record.remote, placement),
       readmePath: record.readmePath,
       readme: record.source.content
     };
@@ -476,11 +767,19 @@ async function readProjectRecords(context) {
   const records = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
     if (!entry.isDirectory()) continue;
+    try {
+      validateSlug(entry.name);
+    } catch {
+      throw new Error(
+        `Invalid project directory slug "${entry.name}". Use lowercase letters, numbers, and single hyphens.`
+      );
+    }
     const readmePath = path.join(projectsPath, entry.name, "README.md");
     const source = await readMarkdownSource(context.fs, readmePath);
     if (source === null) continue;
     records.push(projectRecord(entry.name, readmePath, source));
   }
+  assertUniqueProjectIds(records);
   return records;
 }
 
@@ -491,6 +790,9 @@ function projectRecord(directorySlug, readmePath, source) {
     || readOptionalString(metadata.slug)
     || directorySlug;
   const bodyName = firstHeading(source.body);
+  const remote = classifyProjectRemote(
+    readOptionalString(metadata.repo_url) || readOptionalString(metadata.repo) || null
+  );
   return {
     directorySlug,
     id,
@@ -499,7 +801,8 @@ function projectRecord(directorySlug, readmePath, source) {
     project,
     status: readOptionalString(metadata.status) || "unknown",
     domain: normalizeStoredDomains(metadata.domain),
-    repoUrl: readOptionalString(metadata.repo_url) || readOptionalString(metadata.repo) || null,
+    remote,
+    repoUrl: remote.safe ? remote.canonicalUrl : null,
     readmePath,
     slug: directorySlug,
     source
@@ -516,6 +819,8 @@ function toProjectCatalogRecord(record) {
     status: record.status,
     domains: record.domain,
     repoUrl: record.repoUrl,
+    remoteSafe: record.remote.safe,
+    remoteReason: record.remote.reason,
     description: readOptionalString(record.metadata.description) || firstDescription(body),
     contextExcerpt: projectExcerpt(body),
     readme: record.source.content,
@@ -532,11 +837,23 @@ function readProjectId(metadata, source) {
 }
 
 async function readMarkdownSource(fileSystem, readmePath) {
+  let stats;
+  try {
+    stats = await fileSystem.lstat(readmePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(`Project README must be a regular file, not a symlink or special file: ${readmePath}`);
+  }
   let content;
   try {
     content = await fileSystem.readFile(readmePath, "utf8");
   } catch (error) {
-    if (error.code === "ENOENT") return null;
+    if (error.code === "ENOENT") {
+      throw new Error(`Project README changed while it was being read: ${readmePath}`);
+    }
     throw error;
   }
 
@@ -594,16 +911,178 @@ async function readProjectState(context) {
   return { ...state, paths: { ...(state.paths || {}) } };
 }
 
-async function writeProjectState(context, state) {
+async function writeProjectState(context, state, options = {}) {
+  const write = async () => {
+    if (options.expectedState) {
+      const currentState = await readProjectState(context);
+      if (JSON.stringify(currentState) !== JSON.stringify(options.expectedState)) {
+        throw new Error("The machine-local project path state changed after the preview. Preview project add again.");
+      }
+    }
+    await writeProjectStateFile(context, state);
+  };
+  return options.lockHeld === true ? write() : withProjectStateLock(context, write);
+}
+
+async function rollbackProjectReadmeWrite(context, plan) {
+  const currentExists = await pathExists(context.fs, plan.readmePath);
+  const currentReadme = currentExists
+    ? await context.fs.readFile(plan.readmePath, "utf8")
+    : null;
+  if (!currentExists || currentReadme !== plan.readme) {
+    throw new Error("The project README changed after this registration wrote it; refusing to overwrite or remove the newer content.");
+  }
+  if (plan.readmeExists) {
+    await context.fs.writeFile(plan.readmePath, plan.readmeBefore, "utf8");
+  } else {
+    await context.fs.rm(plan.readmePath, { force: true });
+  }
+}
+
+async function writeProjectStateFile(context, state) {
   const paths = Object.fromEntries(
     Object.entries(state.paths).sort(([left], [right]) => left.localeCompare(right))
   );
-  await context.fs.mkdir(path.dirname(context.statePath), { recursive: true });
-  await context.fs.writeFile(
-    context.statePath,
-    `${JSON.stringify({ ...state, version: PROJECT_STATE_VERSION, paths }, null, 2)}\n`,
-    "utf8"
-  );
+  const temporaryPath = `${context.statePath}.${process.pid}.${randomUUID()}.tmp`;
+  const content = `${JSON.stringify({ ...state, version: PROJECT_STATE_VERSION, paths }, null, 2)}\n`;
+  const currentStats = await lstatIfPresent(context.fs, context.statePath);
+  if (currentStats?.isSymbolicLink()) {
+    throw new Error(`Project path state must not be a symlink: ${context.statePath}`);
+  }
+  try {
+    await context.fs.writeFile(temporaryPath, content, {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600
+    });
+    await context.fs.chmod(temporaryPath, 0o600);
+    await context.fs.rename(temporaryPath, context.statePath);
+  } catch (error) {
+    await context.fs.rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function withProjectStateLock(context, operation) {
+  const stateDirectory = path.dirname(context.statePath);
+  const lockPath = `${context.statePath}.lock`;
+  const createdDirectory = await context.fs.mkdir(stateDirectory, {
+    recursive: true,
+    ...(context.ownsStateDirectory ? { mode: 0o700 } : {})
+  });
+  if (context.ownsStateDirectory && createdDirectory && process.platform !== "win32") {
+    await context.fs.chmod(stateDirectory, 0o700);
+  }
+  const lock = await acquireProjectStateLock(lockPath, context.fs);
+  if (!lock) throw new Error(`Project path state is already being updated: ${context.statePath}`);
+  try {
+    return await operation();
+  } finally {
+    await releaseProjectStateLock(lock, context.fs);
+  }
+}
+
+async function acquireProjectStateLock(lockPath, fileSystem, recoveryDepth = 0) {
+  if (recoveryDepth > 16) return null;
+  const record = {
+    format: PROJECT_STATE_LOCK_FORMAT,
+    pid: process.pid,
+    owner: randomUUID(),
+    created_at: Date.now()
+  };
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      await fileSystem.writeFile(lockPath, `${JSON.stringify(record)}\n`, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600
+      });
+      return { lockPath, owner: record.owner };
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+
+    const held = await readProjectStateLock(lockPath, fileSystem);
+    if (!held) continue;
+    if (processIsAlive(held.record?.pid)) return null;
+    if (!projectStateLockIsAbandoned(held)) return null;
+    await recoverProjectStateLock(lockPath, fileSystem, recoveryDepth);
+  }
+  return null;
+}
+
+async function recoverProjectStateLock(lockPath, fileSystem, recoveryDepth) {
+  const recoveryPath = `${lockPath}.recovery`;
+  const recoveryLock = await acquireProjectStateLock(recoveryPath, fileSystem, recoveryDepth + 1);
+  if (!recoveryLock) return false;
+  try {
+    const held = await readProjectStateLock(lockPath, fileSystem);
+    if (!held || processIsAlive(held.record?.pid) || !projectStateLockIsAbandoned(held)) return false;
+    const moved = `${lockPath}.stale.${randomUUID()}`;
+    try {
+      await fileSystem.rename(lockPath, moved);
+    } catch (error) {
+      if (error.code === "ENOENT") return false;
+      throw error;
+    }
+    await fileSystem.rm(moved, { force: true });
+    return true;
+  } finally {
+    await releaseProjectStateLock(recoveryLock, fileSystem);
+  }
+}
+
+async function releaseProjectStateLock(lock, fileSystem) {
+  const held = await readProjectStateLock(lock.lockPath, fileSystem);
+  if (held?.record?.format !== PROJECT_STATE_LOCK_FORMAT || held.record.owner !== lock.owner) {
+    throw new Error(`Project path state lock ownership changed before release: ${lock.lockPath}`);
+  }
+  try {
+    await fileSystem.unlink(lock.lockPath);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+async function readProjectStateLock(lockPath, fileSystem) {
+  try {
+    const [raw, stats] = await Promise.all([
+      fileSystem.readFile(lockPath, "utf8"),
+      fileSystem.stat(lockPath)
+    ]);
+    let record = null;
+    try {
+      record = JSON.parse(raw);
+    } catch {
+      // A malformed lock is recoverable only after the stale window below.
+    }
+    return { record, stats };
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+function projectStateLockIsAbandoned(held) {
+  const valid = held.record?.format === PROJECT_STATE_LOCK_FORMAT
+    && typeof held.record.owner === "string"
+    && Number.isSafeInteger(held.record.pid)
+    && held.record.pid > 0;
+  if (valid) return !processIsAlive(held.record.pid);
+  const createdAt = Number.isFinite(held.record?.created_at)
+    ? held.record.created_at
+    : held.stats?.mtimeMs;
+  return Number.isFinite(createdAt) && Date.now() - createdAt > PROJECT_STATE_LOCK_STALE_MS;
+}
+
+function processIsAlive(pid) {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
 }
 
 async function pathExists(fileSystem, filePath) {
@@ -832,12 +1311,16 @@ async function readGitRemoteUrl(projectPath) {
   return gitOutput(projectPath, ["config", "--get", `remote.${firstRemote}.url`]);
 }
 
+async function readGitHead(projectPath) {
+  return gitOutput(projectPath, ["rev-parse", "--verify", "HEAD"]);
+}
+
 async function gitOutput(projectPath, args) {
   try {
     const { stdout } = await execFileAsync(
       "git",
       ["-C", projectPath, ...args],
-      { encoding: "utf8" }
+      { encoding: "utf8", env: sanitizedReadOnlyGitEnvironment() }
     );
     return readOptionalString(stdout);
   } catch {
@@ -845,21 +1328,24 @@ async function gitOutput(projectPath, args) {
   }
 }
 
-function repoUrlsMatch(expected, actual) {
-  if (!expected || !actual) return expected === actual;
-  return normalizeRepoUrl(expected) === normalizeRepoUrl(actual);
+function sanitizedReadOnlyGitEnvironment(env = process.env) {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => !key.startsWith("GIT_"))
+  );
 }
 
-function normalizeRepoUrl(value) {
-  const trimmed = value.trim().replace(/^git\+/, "").replace(/\/+$/, "").replace(/\.git$/i, "");
-  const scpMatch = /^(?:[^@]+@)?([^:]+):(.+)$/.exec(trimmed);
-  if (scpMatch && !trimmed.includes("://")) {
-    return `${scpMatch[1].toLowerCase()}/${scpMatch[2].replace(/^\/+/, "")}`;
-  }
+async function lstatIfPresent(fileSystem, target) {
   try {
-    const url = new URL(trimmed);
-    return `${url.hostname.toLowerCase()}/${url.pathname.replace(/^\/+/, "")}`;
-  } catch {
-    return trimmed;
+    return await fileSystem.lstat(target);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
   }
+}
+
+function restoreStatus(remote, placement) {
+  if (!remote.safe) return "local-only";
+  if (placement.placement === "missing") return "restorable";
+  if (placement.placement === "unsafe") return "unsafe-placement";
+  return `available-${placement.placement}`;
 }

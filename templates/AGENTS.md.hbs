@@ -63,9 +63,11 @@ preserve replaced claims through supersession.
 Each project lives at `projects/<slug>/README.md` with portable frontmatter for
 its stable `id`, `project` or `name`, `domain`, `status`, and `repo_url`.
 
-The README is the synced project record. Repositories stay outside this AIOS
-folder with independent Git histories. Resolve the local checkout with
-`dotaios project resolve <slug-or-id>`; never store machine-local paths in the
+The README is the synced project record. Managed repositories may live under
+the ignored `workspaces/<slug>/` root; external checkouts remain supported.
+Both keep independent Git histories. Resolve the local checkout with
+`dotaios project resolve <slug-or-id>` or restore missing committed state with
+`dotaios project restore [slug-or-id]`; never store machine-local paths in the
 project README. Domains are `make`, `sell`, and `build`.
 
 ## Skills

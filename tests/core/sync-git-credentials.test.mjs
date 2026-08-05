@@ -282,10 +282,18 @@ test("initialMirrorPush stores the plain remote and still pushes", async () => {
     expectedRepoFullName: "user/repo"
   });
   const fakeFsWrites = [];
+  let pendingContent = null;
   const fakeFs = {
     readdir: async () => [],
     readFile: async () => { const error = new Error("missing"); error.code = "ENOENT"; throw error; },
-    writeFile: async (p) => { fakeFsWrites.push(p); }
+    lstat: async () => { const error = new Error("missing"); error.code = "ENOENT"; throw error; },
+    open: async (p) => ({
+      writeFile: async (content) => { pendingContent = content; fakeFsWrites.push(p); },
+      sync: async () => {},
+      close: async () => {}
+    }),
+    rename: async () => { assert.equal(pendingContent, "build/\n"); },
+    rm: async () => {}
   };
 
   await initialMirrorPush({

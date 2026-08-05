@@ -115,14 +115,21 @@ is covered.
 If the repository you are opening owns a project-local `skills/` directory,
 register and attach that checkout too:
 ```
-npx -y dotaios@latest project add /path/to/project --path ~/aios
+npx -y dotaios@latest project add /path/to/project --path ~/aios --apply
 npx -y dotaios@latest attach /path/to/project --path ~/aios
 ```
 The project record and repository URL can sync, while the checkout path stays
-local to this machine. The real repository remains outside AIOS with its own
-Git history. Project skills stay separate from the global AIOS library and
-foreign project entries are preserved. Use `--dry-run` first when attaching an
-existing repo.
+local to this machine. A missing checkout can later be recreated with
+`npx -y dotaios@latest project restore <slug-or-id> --path ~/aios`; the managed
+copy lives under ignored `~/aios/workspaces/` and keeps its own Git history.
+External checkouts remain supported. Project skills stay separate from the
+global AIOS library and foreign project entries are preserved. Use `--dry-run`
+first when attaching an existing repo.
+
+Before restoring projects into an AIOS folder created by an older release, run
+`npx -y dotaios@latest migrate --path ~/aios`, review the preview, and apply the
+exact plan ID it prints. Restore will not clone until schema 1.2 and the private
+`/workspaces/` boundary are installed.
 
 ---
 

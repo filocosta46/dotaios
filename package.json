@@ -25,6 +25,8 @@
     "templates",
     "skills",
     "docs/advanced-memory.md",
+    "docs/adr/0001-versioned-aios-folder-migrations.md",
+    "docs/adr/0002-managed-project-workspaces.md",
     "docs/architecture.md",
     "docs/beta-testing.md",
     "docs/client-support.md",

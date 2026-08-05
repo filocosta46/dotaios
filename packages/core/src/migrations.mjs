@@ -8,7 +8,7 @@ const JOURNAL_SCHEMA = "dotaios.migration-journal.v1";
 const RECEIPT_SCHEMA = "dotaios.migration-receipt.v1";
 const OWNER_CONTENT = `${JSON.stringify({ schema: "dotaios.migrations.v1" }, null, 2)}\n`;
 const PROTECTED_SHELVES = Object.freeze(["context/", "projects/", "memory/", "vault/"]);
-const WRITABLE_PATHS = new Set(["aios.json"]);
+const WRITABLE_PATHS = new Set([".gitignore", "aios.json"]);
 
 // This registry is deliberately ordered and internal. Folder schema versions,
 // not package releases, select the exact chain that runs.
@@ -28,6 +28,32 @@ const MIGRATIONS = Object.freeze([
         ownership: "DotAIOS compatibility metadata",
         summary: "Update only schema_version; preserve every other config byte."
       }];
+    }
+  }),
+  Object.freeze({
+    id: "schema-1.1.0-to-1.2.0",
+    from: "1.1.0",
+    to: "1.2.0",
+    summary: "Keep managed project workspaces outside the private AIOS mirror.",
+    migrate(files) {
+      const configPath = "aios.json";
+      const configBefore = files.get(configPath);
+      const ignorePath = ".gitignore";
+      const ignoreBefore = files.get(ignorePath) || Buffer.alloc(0);
+      return [
+        {
+          path: ignorePath,
+          after: appendWorkspaceIgnore(ignoreBefore),
+          ownership: "DotAIOS sync safety metadata",
+          summary: "Append the anchored /workspaces/ rule while preserving existing ignore bytes."
+        },
+        {
+          path: configPath,
+          after: replaceSchemaVersion(configBefore, this.from, this.to),
+          ownership: "DotAIOS compatibility metadata",
+          summary: "Update only schema_version; preserve every other config byte."
+        }
+      ];
     }
   })
 ]);
@@ -59,7 +85,7 @@ export async function previewMigration({ aiosPath }) {
     };
   }
 
-  const preview = buildPreview(configState);
+  const preview = await buildPreviewForRoot(root, configState);
   if (preview.status !== "ready") return publicPreview(preview);
   const preservedPaths = await inventoryPreservedPaths(root);
   return publicPreview({ ...preview, plan: { ...preview.plan, preserved_paths: preservedPaths } });
@@ -99,7 +125,7 @@ export async function applyMigration({ aiosPath, planId, releaseVersion, signal 
     throw recoveryRequired(activeTransactions);
   }
 
-  const identityCheck = buildPreview(configState);
+  const identityCheck = await buildPreviewForRoot(root, configState);
   if (identityCheck.status === "current") {
     throw new MigrationError(
       "NO_MIGRATION_NEEDED",
@@ -219,7 +245,22 @@ export async function recoverMigration({ aiosPath, planId = null }) {
   return { status: "rolled_back", plan_id: selectedPlanId, schema_version: restoredConfig.version };
 }
 
-function buildPreview(configState, preservedPaths = []) {
+async function buildPreviewForRoot(root, configState) {
+  if (configState.version === schemaVersion) return buildPreview(configState);
+  const ignore = await readOptionalRegularFile(path.join(root, ".gitignore"), ".gitignore");
+  return buildPreview(configState, {
+    files: new Map([
+      ["aios.json", configState.bytes],
+      ...(ignore ? [[".gitignore", ignore.bytes]] : [])
+    ]),
+    modes: new Map([
+      ["aios.json", configState.mode],
+      ...(ignore ? [[".gitignore", ignore.mode]] : [])
+    ])
+  });
+}
+
+function buildPreview(configState, migrationState = null) {
   if (configState.version === schemaVersion) {
     return {
       status: "current",
@@ -230,7 +271,8 @@ function buildPreview(configState, preservedPaths = []) {
   }
 
   const chain = migrationChain(configState.version);
-  const files = new Map([["aios.json", configState.bytes]]);
+  const files = migrationState?.files || new Map([["aios.json", configState.bytes]]);
+  const modes = migrationState?.modes || new Map([["aios.json", configState.mode]]);
   const originalFiles = new Map(files);
   const summaries = new Map();
 
@@ -255,8 +297,8 @@ function buildPreview(configState, preservedPaths = []) {
       path: relativePath,
       before,
       after,
-      before_mode: relativePath === "aios.json" ? configState.mode : null,
-      after_mode: relativePath === "aios.json" ? configState.mode : 0o644,
+      before_mode: modes.get(relativePath) ?? null,
+      after_mode: modes.get(relativePath) ?? 0o644,
       ownership: "DotAIOS compatibility metadata",
       summary: (summaries.get(relativePath) || []).join(" ")
     });
@@ -279,7 +321,7 @@ function buildPreview(configState, preservedPaths = []) {
   // inventory is receipt material and may legitimately grow between preview
   // and apply (memory appends, new signals); hashing it would strand valid plans.
   const planId = `migrate-${versionToken(configState.version)}-to-${versionToken(schemaVersion)}-${sha256(canonicalJson(planBody)).slice(0, 16)}`;
-  const plan = { ...planBody, preserved_paths: preservedPaths, plan_id: planId };
+  const plan = { ...planBody, preserved_paths: [], plan_id: planId };
 
   return { status: "ready", plan, changes };
 }
@@ -369,6 +411,17 @@ function replaceSchemaVersion(bytes, fromVersion, toVersion) {
     throw new MigrationError("INVALID_REGISTRY", "Schema migration did not produce the expected config version.");
   }
   return Buffer.from(updated, "utf8");
+}
+
+function appendWorkspaceIgnore(bytes) {
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) {
+    throw new MigrationError("UNSAFE_IGNORE_FILE", ".gitignore is not valid UTF-8; refusing to rewrite it.");
+  }
+  if (text.split(/\r?\n/).includes("/workspaces/")) return bytes;
+  const eol = text.includes("\r\n") ? "\r\n" : "\n";
+  const separator = text.length > 0 && !text.endsWith("\n") ? eol : "";
+  return Buffer.from(`${text}${separator}/workspaces/${eol}`, "utf8");
 }
 
 function publicOperation(change) {
