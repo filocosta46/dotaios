@@ -134,7 +134,7 @@ export async function writeFileSafe(
   destination,
   content,
   writeMode = "preserve",
-  { boundaryRoot = null } = {}
+  { boundaryRoot = null, mode = 0o666 } = {}
 ) {
   const existing = await lstatIfPresent(destination);
   assertSafeOverwriteTarget(destination, existing);
@@ -145,14 +145,14 @@ export async function writeFileSafe(
 
   if (!existing && writeMode === "preserve") {
     const created = await createOrKeepWithTemporaryFile(destination, (temporary) =>
-      fs.writeFile(temporary, content, { flag: "wx", mode: 0o666 })
+      fs.writeFile(temporary, content, { flag: "wx", mode })
     );
     return { action: created ? "created" : "kept", path: destination };
   }
   await replaceWithTemporaryFile(destination, async (temporary) => {
-    const mode = existing ? existing.mode & 0o777 : 0o666;
-    await fs.writeFile(temporary, content, { flag: "wx", mode });
-    if (existing) await fs.chmod(temporary, mode);
+    const fileMode = existing ? existing.mode & 0o777 : mode;
+    await fs.writeFile(temporary, content, { flag: "wx", mode: fileMode });
+    if (existing) await fs.chmod(temporary, fileMode);
   });
   return { action: existing ? "updated" : "created", path: destination };
 }

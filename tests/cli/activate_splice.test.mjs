@@ -158,10 +158,12 @@ describe("activate — managed block splicing", () => {
     const dirs = await makeTmpDirs();
     try {
       const { bridge, original, backup } = await seedManagedBridge(dirs.homePath);
+      await fs.chmod(bridge, 0o600);
 
       await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
       assert.equal(await fs.readFile(backup, "utf8"), original, "the first spliced write backs up the pre-existing file");
       const firstStat = await fs.stat(backup);
+      assert.equal(firstStat.mode & 0o777, 0o600, "the backup preserves the bridge file mode");
       const filesAfterFirstRun = (await fs.readdir(path.dirname(bridge))).sort();
 
       await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
@@ -213,6 +215,30 @@ describe("activate — managed block splicing", () => {
       const created = await fs.readFile(bridge, "utf8");
       assert.match(created, new RegExp(MANAGED_START.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")));
       assert.equal(await exists(`${bridge}.dotaios-backup`), false, "a newly created file has nothing to back up");
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a symlinked global bridge file without touching its target", async (t) => {
+    if (process.platform === "win32") t.skip("symlink permissions are platform-specific");
+    const dirs = await makeTmpDirs();
+    try {
+      const bridge = path.join(dirs.homePath, ".codex", "AGENTS.md");
+      const outside = path.join(dirs.base, "outside.md");
+      const original = `${BEFORE}${STALE_BLOCK}${AFTER}`;
+      await fs.mkdir(path.dirname(bridge), { recursive: true });
+      await fs.writeFile(outside, original);
+      await fs.symlink(outside, bridge, "file");
+
+      const activation = await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
+      const result = activation.results.find((entry) => entry.path === bridge);
+
+      assert.equal(result?.action, "unsafe-target");
+      assert.match(result?.note ?? "", /regular file/i);
+      assert.equal(await fs.readFile(outside, "utf8"), original);
+      assert.equal((await fs.lstat(bridge)).isSymbolicLink(), true);
+      assert.equal(await exists(`${bridge}.dotaios-backup`), false, "a refused symlink must not create a backup");
     } finally {
       await fs.rm(dirs.base, { recursive: true, force: true });
     }

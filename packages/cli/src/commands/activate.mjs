@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathExists } from "../../../core/src/files.mjs";
+import { pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
   MANAGED_END,
@@ -60,6 +60,9 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     throw new Error("Refusing to connect a temporary AIOS path to the real home; use a permanent AIOS folder.");
   }
   await ensureAiosFolder(aiosPath);
+  if (!options.dryRun) {
+    await fs.mkdir(homePath, { recursive: true });
+  }
 
   const config = await readAiosConfig(aiosPath);
   const skillsFirst = options.skillsFirst ?? Boolean(config.skills_first);
@@ -254,7 +257,7 @@ async function createGlobalBridges(
     const result = await writeManagedFile(
       destination,
       await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog }),
-      options
+      { ...options, boundaryRoot: homePath }
     );
     results.push(result);
     if (["created", "updated", "would create", "would update"].includes(result.action)) {
@@ -494,19 +497,25 @@ async function isDirectory(value) {
   }
 }
 
-async function writeManagedFile(destination, content, { dryRun = false, overwrite = false, projectRoot = null } = {}) {
+async function writeManagedFile(
+  destination,
+  content,
+  { dryRun = false, overwrite = false, projectRoot = null, boundaryRoot = projectRoot } = {}
+) {
   if (projectRoot) {
     const safety = await validateProjectPath({ projectRoot, targetPath: destination });
     if (!safety.safe) {
       return { action: "unsafe-target", path: destination, note: safety.reason };
     }
   }
-  const exists = await pathExists(destination);
+  const stats = await lstatIfPresent(destination);
+  if (stats && (!stats.isFile() || stats.isSymbolicLink())) {
+    return { action: "unsafe-target", path: destination, note: "existing bridge path is not a regular file" };
+  }
 
-  if (!exists) {
+  if (!stats) {
     if (!dryRun) {
-      await fs.mkdir(path.dirname(destination), { recursive: true });
-      await fs.writeFile(destination, content);
+      await writeFileSafe(destination, content, "preserve", { boundaryRoot });
     }
     return { action: dryRun ? "would create" : "created", path: destination };
   }
@@ -521,7 +530,7 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
       return { action: "kept", path: destination, note: "existing unmanaged file" };
     }
     if (!dryRun) {
-      await fs.writeFile(destination, content);
+      await writeFileSafe(destination, content, "overwrite", { boundaryRoot });
     }
     return { action: dryRun ? "would update" : "updated", path: destination };
   }
@@ -544,8 +553,11 @@ async function writeManagedFile(destination, content, { dryRun = false, overwrit
     return { action: "updated", path: destination };
   }
 
-  const backedUp = await backupOnce(destination);
-  await fs.writeFile(destination, next);
+  const backedUp = await backupOnce(destination, current, {
+    boundaryRoot,
+    mode: stats.mode & 0o777
+  });
+  await writeFileSafe(destination, next, "overwrite", { boundaryRoot });
   return {
     action: "updated",
     path: destination,
@@ -564,15 +576,19 @@ function findManagedBlock(text) {
   return { start, end, text: text.slice(start, end) };
 }
 
-// Copy the pre-existing file aside once. COPYFILE_EXCL keeps an older backup
-// authoritative, so a later run can never bury the original under a copy of
-// the already-spliced file.
-async function backupOnce(destination) {
+// Keep the pre-existing bridge bytes once. The preserve-mode safe writer keeps
+// an older backup authoritative, so a later run can never bury the original.
+async function backupOnce(destination, content, { boundaryRoot = null, mode = 0o666 } = {}) {
+  const backup = `${destination}${backupSuffix}`;
+  const result = await writeFileSafe(backup, content, "preserve", { boundaryRoot, mode });
+  return result.action === "created";
+}
+
+async function lstatIfPresent(destination) {
   try {
-    await fs.copyFile(destination, `${destination}${backupSuffix}`, fs.constants.COPYFILE_EXCL);
-    return true;
+    return await fs.lstat(destination);
   } catch (error) {
-    if (error?.code === "EEXIST") return false;
+    if (error?.code === "ENOENT") return null;
     throw error;
   }
 }

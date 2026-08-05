@@ -1,6 +1,6 @@
 # Outcome Catalog and Paid Packages
 
-DotAIOS core and its bundled starter workflows are free. Paid packages are a separate future layer and are not available in v1.24.
+DotAIOS core and its bundled starter workflows are free. Paid packages are a separate future layer and are not available in the public registry yet.
 
 ## Current status
 

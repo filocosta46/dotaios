@@ -51,7 +51,9 @@ All notable changes to DotAIOS will be documented in this file.
   recoverable; arbitrary, modified, symlinked, or extra user content fails closed.
 - **Activation preserves user-authored bridge content.** DotAIOS replaces only
   its managed block, keeps surrounding bytes intact, and writes the original
-  bridge to a one-time `.dotaios-backup` before the first splice.
+  bridge to a one-time `.dotaios-backup` before the first splice. Global bridge
+  writes now reject symlinked bridge files and use the same safe replacement
+  path as generated setup files.
 - **Generated files no longer follow unsafe overwrite or preserve targets.**
   Initialization preflights its complete scaffold, rejects linked roots,
   generated parents, files, and skill catalogs, preserves existing file modes,
