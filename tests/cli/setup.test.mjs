@@ -16,6 +16,8 @@ describe("setupCommand — step isolation", () => {
     const messages = [];
     const originalError = console.error.bind(console);
     const originalLog = console.log.bind(console);
+    const originalExitCode = process.exitCode;
+    let setupExitCode;
     console.error = (...args) => messages.push(["err", args.join(" ")]);
     console.log = (...args) => messages.push(["log", args.join(" ")]);
 
@@ -34,15 +36,18 @@ describe("setupCommand — step isolation", () => {
         "--skip-reveal",
         "--home", "/nonexistent-home-12345"
       ]);
+      setupExitCode = process.exitCode;
     } catch {
       // setup should NOT throw — it should catch and report
       assert.fail("setupCommand should not throw when a step fails — it should report and continue");
     } finally {
+      process.exitCode = originalExitCode;
       console.error = originalError;
       console.log = originalLog;
       await fs.rm(tmpBase, { recursive: true, force: true });
     }
 
+    assert.equal(setupExitCode, 1, "an activation failure must set a failing process status");
     const allOutput = messages.map(([, m]) => m).join("\n");
     assert.ok(
       allOutput.includes("Step 2 failed:") || allOutput.includes("Re-run: dotaios activate"),
@@ -118,6 +123,8 @@ test("non-interactive setup does not download the optional web browsing engine b
   const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-lp-"));
   const aiosPath = path.join(tmp, "aios");
   const homePath = path.join(tmp, "home");
+  const processHomePath = path.join(tmp, "process-home");
+  fsSync.mkdirSync(processHomePath, { recursive: true });
   const result = spawnSync(process.execPath, [
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
@@ -130,7 +137,7 @@ test("non-interactive setup does not download the optional web browsing engine b
     // HOME isolation only covers the ~/.dotaios/bin probe; resolveLightpanda
     // also falls back to `which lightpanda`, so PATH must not reach a real
     // engine installed on this machine (e.g. ~/.local/bin on the fleet Mini).
-    env: { ...process.env, HOME: homePath, PATH: "/usr/bin:/bin" }
+    env: { ...process.env, HOME: processHomePath, PATH: "/usr/bin:/bin" }
   });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Web browsing engine: not installed.*plain fetch remains available/);

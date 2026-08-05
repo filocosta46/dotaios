@@ -28,7 +28,9 @@ export function renderStatus(cfg, remote = null) {
   if (cfg.last_error) lines.push(`  Last error:     ${cfg.last_error}`);
   if (remote?.sha) {
     lines.push(`  Remote main sha: ${remote.sha.slice(0, 7)}`);
-    if (!cfg.last_push_sha) {
+    if (cfg.last_error) {
+      lines.push("  Remote parity: UNKNOWN (last sync failed)");
+    } else if (!cfg.last_push_sha) {
       lines.push("  Remote parity: UNKNOWN (no recorded push sha)");
     } else if (cfg.last_push_sha === remote.sha) {
       lines.push("  Remote parity: MATCH");
@@ -52,7 +54,13 @@ export async function runStatus(args = [], dependencies = {}) {
       // Plain remotes (no token in URL) need the credential helper — same as
       // tick/setup. Passing the token here is what keeps `sync status` parity
       // checks working after credential-hygiene removed embedded PATs.
-      remote = { sha: await gitFactory({ cwd: aiosPath, accessToken: cfg.access_token }).remoteHead("main") };
+      remote = {
+        sha: await gitFactory({
+          cwd: aiosPath,
+          accessToken: cfg.access_token,
+          expectedRepoFullName: cfg.repo_full_name
+        }).remoteHead("main")
+      };
     } catch (error) {
       remote = { error: error.message };
     }

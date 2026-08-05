@@ -1,6 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { fireSyncHook } from "../../packages/cli/src/lib/sync-hook.mjs";
+import {
+  fireSyncHook,
+  skipsPortableMirrorSync
+} from "../../packages/cli/src/lib/sync-hook.mjs";
+
+test("project commands only request outer sync after an applied catalog change", () => {
+  for (const args of [
+    ["restore"],
+    ["restore", "client", "--dry-run"],
+    ["list"],
+    ["resolve", "client"],
+    ["doctor"],
+    ["context", "client"],
+    ["add", "/tmp/client"]
+  ]) {
+    assert.equal(skipsPortableMirrorSync("project", args), true, args.join(" "));
+  }
+  assert.equal(skipsPortableMirrorSync("project", ["add", "/tmp/client", "--apply"]), false);
+  assert.equal(skipsPortableMirrorSync("project", ["add", "/tmp/client", "--yes"]), false);
+});
 
 test("fireSyncHook returns immediately when sync not enabled", async () => {
   let spawned = false;

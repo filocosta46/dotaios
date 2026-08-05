@@ -41,12 +41,14 @@ The commercial website and its deployment configuration are maintained outside
 this public repository. Do not add storefront source, offer copy, or deployment
 secrets here.
 
-## v1.23 architecture boundaries
+## Architecture boundaries
 
 - **Portable projects, local paths.** `projects/<slug>/README.md` is the synced
-  record (stable ID, name, status, domain, repo URL). Actual repositories stay
-  outside AIOS; `~/.dotaios/projects.json` maps IDs to checkout paths on one
-  machine. Never put absolute paths in portable metadata or working context.
+  record (stable ID, name, status, domain, repo URL). Repositories may live in
+  the root-ignored `workspaces/<slug>/` shelf or at an external path; each keeps
+  its own Git history and remote. `~/.dotaios/projects.json` maps IDs to checkout
+  paths on one machine. Never put absolute paths in portable metadata or working
+  context, and never track anything under `workspaces/` in the AIOS mirror.
 - **Promotion is preview-first.** Captured sessions are evidence. `dotaios memory
   promote` plans and previews by default; only explicit `--apply` may append to a
   signal, context, project, vault, or skill, or record `session-only`. Apply

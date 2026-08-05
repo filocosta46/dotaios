@@ -23,6 +23,19 @@ Generated AIOS folders include a `.gitignore` that ignores:
 
 Agents should never ask users to paste API keys, passwords, tokens, private keys, or OAuth client secrets into chat. They should name the required variable and ask the user to edit `.env` locally.
 
+## Project restore
+
+`dotaios project restore` accepts only credential-free HTTPS and SSH project
+remotes. It invokes Git with the user's normal project credentials and a
+sanitized process environment. The private AIOS mirror token is removed from
+that environment and is never used to clone a project.
+
+Managed checkouts live under the root-ignored `workspaces/` directory. Before
+sync, DotAIOS verifies that the outer repository tracks nothing under that root
+and that every workspace is registered, complete, and bound to the expected
+safe remote. This prevents project contents, Gitlinks, and clone residue from
+entering the personal-context mirror.
+
 ## Optional Connections
 
 Google Workspace auth remains inside `gws`. DotAIOS requests the fixed read-only Gmail, Calendar, and Drive service set, and does not expose full, custom-scope, or custom-service login options. `gws auth status` does not verify the scopes of an existing grant, so broader grants must be revoked or re-authorized in `gws`. Google and `gws` process requested Workspace data. DotAIOS connection records contain neither OAuth material nor absolute binary paths. Google commands are not exposed through the read-only DotAIOS MCP adapter.

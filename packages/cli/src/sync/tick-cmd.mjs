@@ -3,8 +3,9 @@ import { appendEventRecord } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, expandHome, syncConfigPath } from "../../../core/src/paths.mjs";
 import { readSyncConfig, writeSyncConfig } from "../../../core/src/sync-config.mjs";
 import { createGit } from "./git.mjs";
-import { runTick } from "./tick.mjs";
+import { runTick, SYNC_STALLED_SUMMARY } from "./tick.mjs";
 import { readOptionValue } from "../lib/args.mjs";
+import { assertRepositoryBinding } from "./repository-binding.mjs";
 
 const LOCK_FILENAME = "sync.lock";
 
@@ -31,15 +32,12 @@ export async function runTickCommand(args = []) {
   );
   // Lock file lives alongside sync.json in ~/.dotaios/
   const lockPath = path.join(path.dirname(syncConfigPath()), LOCK_FILENAME);
-  // Read the token once so the git helper can authenticate without a
-  // credential-embedded remote URL.
-  const accessToken = (await readSyncConfig())?.access_token || null;
-
   const result = await runTick({
     lockPath,
     readConfig: () => readSyncConfig(),
     writeConfig: (patch) => writeSyncConfig(patch),
-    makeGit: () => createGit({ cwd: aiosPath, accessToken }),
+    makeGit: (options) => createGit({ cwd: aiosPath, ...options }),
+    verifyRepositoryBinding: (git) => assertRepositoryBinding({ aiosPath, git }),
     appendEvent: (evt) => appendSyncEvent(aiosPath, evt),
     now: () => Date.now()
   });
@@ -49,7 +47,9 @@ export async function runTickCommand(args = []) {
 }
 
 export function reportTickResult(result, args = []) {
-  if (result.conflict || result.error || result.skipped === "locked") {
+  const succeeded = result.outcome === "success";
+  const informationalNoToken = result.skipped === "no-token";
+  if (!succeeded && !informationalNoToken) {
     process.exitCode = 1;
   }
 
@@ -58,18 +58,18 @@ export function reportTickResult(result, args = []) {
     return;
   }
 
-  if (result.pushed) {
+  if (succeeded && result.pushed) {
     console.log("DotAIOS is synced.");
-  } else if (result.conflict || result.error) {
+  } else if (result.conflict || result.error || result.stalled) {
     console.log("Sync stopped safely. Your pre-existing edits were preserved.");
-    console.log(`Reason: ${result.error || "local and remote changes overlap"}`);
+    console.log(`Reason: ${result.error || (result.stalled ? SYNC_STALLED_SUMMARY : "local and remote changes overlap")}`);
     if (result.event_log_error) {
       console.log(`Event log warning: ${result.event_log_error}`);
     }
     if (result.config_error) {
       console.log(`Sync state warning: ${result.config_error}`);
     }
-    console.log("Resolve the Git conflict, then run `dotaios sync now` again.");
+    console.log("Fix the issue above, then run `dotaios sync now` again.");
   } else if (result.skipped === "locked") {
     console.log("Sync did not run because another sync is already running.");
     console.log("Wait for it to finish, then run `dotaios sync now` again.");
@@ -77,7 +77,16 @@ export function reportTickResult(result, args = []) {
     console.log("Sync is not set up. Run `dotaios sync setup` when you want it.");
   } else if (result.skipped === "not-main-branch") {
     console.log("Sync did not run because this AIOS checkout is not on main.");
-  } else {
+    console.log("Switch to the main checkout, then run `dotaios sync now` again.");
+  } else if (result.skipped === "rate-limit-gap") {
+    console.log("Sync did not run because it ran less than 10 seconds ago.");
+    console.log("Wait a few seconds, then run `dotaios sync now` again.");
+  } else if (result.skipped) {
+    console.log(`Sync did not run (${result.skipped}).`);
+  } else if (succeeded) {
     console.log("DotAIOS is already up to date.");
+  } else {
+    console.log("Sync did not complete.");
+    console.log("Run `dotaios sync now` again. If it still fails, run `dotaios sync status`.");
   }
 }

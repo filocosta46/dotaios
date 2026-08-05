@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { syncConfigPath } from "./paths.mjs";
 
 export async function readSyncConfig(filePath = syncConfigPath()) {
@@ -44,12 +45,16 @@ export async function writeSyncConfig(filePathOrPatch, maybePatch) {
   // Write to .tmp first (mode honored on creation), then atomic rename.
   // This guarantees the new content lands at 0600 from the moment it exists,
   // and concurrent readers never see a half-written file.
-  const tmp = `${filePath}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
-  if (process.platform !== "win32") {
-    await fs.chmod(tmp, 0o600); // belt-and-suspenders
+  const tmp = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    if (process.platform !== "win32") {
+      await fs.chmod(tmp, 0o600); // belt-and-suspenders
+    }
+    await fs.rename(tmp, filePath);
+  } finally {
+    await fs.rm(tmp, { force: true }).catch(() => {});
   }
-  await fs.rename(tmp, filePath);
   return merged;
 }
 

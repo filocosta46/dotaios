@@ -15,6 +15,10 @@ and pushing it back. The next `dotaios sync now` on your laptop pulls your
 phone edits down with a rebase, so the two stay in sync without a second
 service.
 
+The mirror contains project records, not project source repositories. Managed
+checkouts under `workspaces/` are ignored and must be restored separately on
+each computer with `dotaios project restore`.
+
 ## Pick a client
 
 - **GitSync** (iOS) supports GitHub OAuth, an in-app editor, and scheduled

@@ -1,6 +1,15 @@
 import { spawn } from "node:child_process";
 import { isSyncEnabled } from "../../../core/src/sync-config.mjs";
 
+export function skipsPortableMirrorSync(command, args = []) {
+  if (command === "skills" && ["doctor", "probe"].includes(args[0])) return true;
+  if (command === "migrate" && !args.includes("--apply") && !args.includes("--recover")) return true;
+  if (command === "project") {
+    return !(args[0] === "add" && (args.includes("--apply") || args.includes("--yes")));
+  }
+  return false;
+}
+
 function defaultSpawn(cmd, args) {
   const child = spawn(cmd, args, {
     detached: true,

@@ -2,6 +2,67 @@
 
 All notable changes to DotAIOS will be documented in this file.
 
+## [Unreleased]
+
+## [1.28.0] - 2026-08-05
+
+### Added
+
+- **Managed project restore across machines.** Portable records remain in
+  tracked `projects/`, while `dotaios project restore [slug-or-id]` recreates
+  committed project state under ignored `workspaces/` using the project's own
+  Git credentials. External checkouts remain supported.
+- **Folder schema 1.2 migration.** Existing schema 1.1 folders get a
+  preview-first, receipted upgrade that preserves custom `.gitignore` content,
+  adds the anchored `/workspaces/` boundary, and commits `aios.json` last so an
+  interrupted upgrade can be recovered safely before project restore.
+
+### Fixed
+
+- **Project repositories cannot leak into the AIOS mirror.** Sync verifies the
+  root workspace ignore, refuses every outer-index entry under `workspaces/`,
+  validates each registered workspace's stable ID, complete checkout, and safe
+  matching origin, and still rejects every other nested repository.
+
+- **Sync no longer reports success when Git cannot mirror a nested project.**
+  Gitlink pointers are refused before commit, an index inspection failure stops
+  safely, and a dirty tree that cannot stage content now exits non-zero instead
+  of printing “already up to date.”
+- **Every manual sync re-verifies that the GitHub mirror is private.** A mirror
+  changed to public—or whose visibility cannot be confirmed—is rejected before
+  DotAIOS commits, pulls, or pushes personal context. The verified repository
+  must also match the checkout's real Git origin; credential helpers are bound
+  to that exact GitHub path, URL rewrites and hooks are disabled for token-bearing
+  network operations, and a failed safety check preserves the user's staged work.
+- **Sync operations are bound to the exact AIOS repository.** Setup and normal
+  sync refuse enclosing repositories, redirected Git files, and linked Git
+  configuration before credentials or mutation. Logout removes only the origin
+  named by the private sync config and refuses shared linked-worktree origins.
+- **Sync preserves the user's exact Git staging state across races and failures.**
+  DotAIOS builds its commit in isolation, holds Git's normal index boundary for
+  the final transaction, recovers an interrupted owned transaction on the next
+  run, and refuses concurrent index changes without erasing flags or partial
+  staging. Portable mirrors also reject symbolic links, which prevents synced
+  memory paths from escaping the owned AIOS folder.
+- **Setup now reports activation failures to callers.** Step-one and step-two
+  failures exit non-zero, failed activation is recorded as a failed install,
+  and an ownership marker makes interrupted first installs recoverable only when
+  every existing generated path still matches. Legacy 1.27.1 residue remains
+  recoverable; arbitrary, modified, symlinked, or extra user content fails closed.
+- **Activation preserves user-authored bridge content.** DotAIOS replaces only
+  its managed block, keeps surrounding bytes intact, and writes the original
+  bridge to a one-time `.dotaios-backup` before the first splice. Global bridge
+  writes now reject symlinked bridge files and use the same safe replacement
+  path as generated setup files.
+- **Generated files no longer follow unsafe overwrite or preserve targets.**
+  Initialization preflights its complete scaffold, rejects linked roots,
+  generated parents, files, and skill catalogs, preserves existing file modes,
+  and installs the packaged `.gitignore` boundary on clean npm hosts.
+- **Interrupted project restore and folder migration are retryable.** Owned
+  restore transactions resume verified clones without recloning, while migration
+  rollback resumes only exact single-link staging residue and refuses anything
+  changed, linked, or foreign without touching user files.
+
 ## [1.27.1] - 2026-08-04
 
 ### Removed

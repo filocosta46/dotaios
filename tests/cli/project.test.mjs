@@ -12,6 +12,7 @@ import {
   doctorProjects,
   listProjects,
   planProjectRegistration,
+  projectStateProcessIsAlive,
   registerProject,
   resolveProject
 } from "../../packages/core/src/projects.mjs";
@@ -28,6 +29,7 @@ async function fixture(t) {
   const homePath = path.join(root, "home");
   const statePath = path.join(root, "local-state", "projects.json");
   await fs.mkdir(path.join(aiosPath, "projects"), { recursive: true });
+  await fs.writeFile(path.join(aiosPath, "aios.json"), '{"schema_version":"1.2.0"}\n');
   await fs.mkdir(homePath, { recursive: true });
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return { root, aiosPath, homePath, statePath };
@@ -146,6 +148,85 @@ test("registerProject writes project truth only with explicit apply or yes", asy
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")).paths, {
     "approved-id": projectPath
   });
+});
+
+test("an explicitly supplied unsafe project remote fails redacted before any write", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "unsafe-explicit-remote");
+  const secret = "super-secret-token";
+  const unsafeRemote = `https://user:${secret}@github.com/acme/private.git`;
+  let discoveryCalled = false;
+
+  await assert.rejects(
+    registerProject({
+      aiosPath,
+      statePath,
+      projectPath,
+      repoUrl: unsafeRemote,
+      yes: true,
+      createId: () => "unsafe-remote-id",
+      readRepoUrl: async () => {
+        discoveryCalled = true;
+        return "https://github.com/acme/safe-fallback.git";
+      }
+    }),
+    (error) => {
+      assert.equal(error.code, "ERR_DOTAIOS_UNSAFE_PROJECT_REMOTE");
+      assert.match(error.message, /explicit project remote is unsafe/i);
+      assert.equal(error.message.includes(secret), false);
+      assert.equal(error.message.includes(unsafeRemote), false);
+      return true;
+    }
+  );
+
+  assert.equal(discoveryCalled, false, "an explicit rejection must not fall back to Git discovery");
+  assert.deepEqual(await fs.readdir(path.join(aiosPath, "projects")), []);
+  await assert.rejects(fs.access(statePath), { code: "ENOENT" });
+});
+
+test("an unsafe discovered project remote remains local-only", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "unsafe-discovered-remote");
+
+  const plan = await planProjectRegistration({
+    aiosPath,
+    statePath,
+    projectPath,
+    createId: () => "local-only-id",
+    readRepoUrl: async () => "https://user:hidden@github.com/acme/private.git"
+  });
+
+  assert.equal(plan.repoUrl, null);
+  assert.doesNotMatch(plan.readme, /hidden/);
+  assert.doesNotMatch(plan.readme, /https?:\/\//);
+});
+
+test("default project Git discovery ignores inherited repository-control environment", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "real-repository");
+  const attackerPath = await makeRepo(root, "attacker-repository");
+  for (const [repoPath, remote] of [
+    [projectPath, "https://github.com/acme/real-repository.git"],
+    [attackerPath, "https://github.com/attacker/wrong.git"]
+  ]) {
+    await execFileAsync("git", ["init", "-q", repoPath]);
+    await execFileAsync("git", ["-C", repoPath, "remote", "add", "origin", remote]);
+  }
+
+  const previousGitDir = process.env.GIT_DIR;
+  process.env.GIT_DIR = path.join(attackerPath, ".git");
+  try {
+    const plan = await planProjectRegistration({
+      aiosPath,
+      statePath,
+      projectPath,
+      createId: () => "real-id"
+    });
+    assert.equal(plan.repoUrl, "https://github.com/acme/real-repository.git");
+  } finally {
+    if (previousGitDir === undefined) delete process.env.GIT_DIR;
+    else process.env.GIT_DIR = previousGitDir;
+  }
 });
 
 test("project add CLI preview is zero-write and keeps absolute paths out of portable JSON", async (t) => {
@@ -471,7 +552,7 @@ test("resolveProject accepts slug or id and explains unavailable paths", async (
     projectPath,
     apply: true,
     createId: () => "resolve-id",
-    readRepoUrl: async () => null
+    readRepoUrl: async () => "https://github.com/acme/resolvable.git"
   });
 
   assert.equal(await resolveProject("resolvable", { aiosPath, statePath }), projectPath);
@@ -480,7 +561,7 @@ test("resolveProject accepts slug or id and explains unavailable paths", async (
   await fs.rm(projectPath, { recursive: true });
   await assert.rejects(
     resolveProject({ aiosPath, statePath, project: "resolvable" }),
-    /registered at .* but that path is missing.*project add/
+    /registered at .* but that path is missing.*project restore resolve-id --dry-run/
   );
 
   await writeProjectReadme(
@@ -496,6 +577,18 @@ test("resolveProject accepts slug or id and explains unavailable paths", async (
     resolveProject({ aiosPath, statePath, project: "unknown" }),
     /is not registered.*project list/
   );
+});
+
+test("project-state liveness fails closed on every error except ESRCH", () => {
+  const throws = (code) => () => {
+    const error = new Error(code);
+    error.code = code;
+    throw error;
+  };
+  assert.equal(projectStateProcessIsAlive(42, throws("ESRCH")), false);
+  assert.equal(projectStateProcessIsAlive(42, throws("EPERM")), true);
+  assert.equal(projectStateProcessIsAlive(42, throws("EACCES")), true);
+  assert.equal(projectStateProcessIsAlive(42, () => {}), true);
 });
 
 test("doctorProjects reports missing paths and remote mismatches without writing", async (t) => {
@@ -641,7 +734,7 @@ test("projectCommand exposes add preview data plus list, resolve, and doctor out
     output: capture.output
   });
   assert.equal(listed.length, 1);
-  assert.match(capture.lines.join("\n"), /\[ok\] cli-project.*domain: build, make/s);
+  assert.match(capture.lines.join("\n"), /\[external\] cli-project.*domain: build, make/s);
 
   capture.lines.length = 0;
   const resolved = await projectCommand([
@@ -662,6 +755,36 @@ test("projectCommand exposes add preview data plus list, resolve, and doctor out
   assert.equal(report.ok, false);
   assert.equal(exitCode, 1);
   assert.match(capture.lines.join("\n"), /\[mismatch\].*1 issue\(s\) found/s);
+});
+
+test("project list names managed, external, restorable, and local-only states", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const managedPath = path.join(aiosPath, "workspaces", "managed");
+  const externalPath = path.join(root, "external");
+  await fs.mkdir(managedPath, { recursive: true });
+  await fs.mkdir(externalPath, { recursive: true });
+  await writeProjectReadme(aiosPath, "managed", "id: managed-id\nproject: managed\nrepo_url: https://github.com/acme/managed.git");
+  await writeProjectReadme(aiosPath, "external", "id: external-id\nproject: external\nrepo_url: https://github.com/acme/external.git");
+  await writeProjectReadme(aiosPath, "restorable", "id: restorable-id\nproject: restorable\nrepo_url: https://github.com/acme/restorable.git");
+  await writeProjectReadme(aiosPath, "local-only", "id: local-id\nproject: local-only\nrepo_url: https://token@github.com/acme/private.git");
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    paths: {
+      "managed-id": managedPath,
+      "external-id": externalPath
+    }
+  })}\n`);
+
+  const capture = outputCapture();
+  await projectCommand(["list", "--path", aiosPath, "--state-path", statePath], {
+    output: capture.output
+  });
+  const rendered = capture.lines.join("\n");
+  assert.match(rendered, /\[managed\] managed:/);
+  assert.match(rendered, /\[external\] external:/);
+  assert.match(rendered, /\[restorable\] restorable:/);
+  assert.match(rendered, /\[local-only\] local-only:/);
 });
 
 test("projectCommand rejects invalid metadata options before writing", async (t) => {

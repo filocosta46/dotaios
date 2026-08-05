@@ -1,108 +1,102 @@
-import fs from "node:fs/promises";
+import {
+  githubRepoIdentity,
+  plainRemoteUrl,
+  verifyRepoPrivate as defaultVerifyRepoPrivate
+} from "./repo.mjs";
+import { acquireOperationLock, releaseOperationLock } from "./operation-lock.mjs";
 
 const MIN_TICK_GAP_MS = 10_000;
-const STALE_LOCK_MS = 5 * 60 * 1000;
-const LOCK_RETRY_MS = 50;
-const LOCK_WAIT_MS = 5_000;
 const SYNC_CONFLICT_SUMMARY =
   "Sync stopped because local and remote changes overlap. Your pre-existing edits were preserved. DotAIOS recorded the conflict locally and did not create a recovery branch, reset files, or push. Ask your agent to resolve it safely, then run `dotaios sync now` again.";
-
-function delay(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Atomically remove a stale lock. rename() is exclusive: if two stealers race,
-// exactly one wins the rename and the other gets ENOENT.
-async function stealLockFile(lockPath) {
-  const moved = `${lockPath}.steal.${process.pid}.${Date.now()}`;
-  try {
-    await fs.rename(lockPath, moved);
-  } catch {
-    return false;
-  }
-  await fs.rm(moved, { force: true });
-  return true;
-}
-
-/**
- * Acquire an exclusive lock file. Returns true if acquired, false if a fresh
- * lock is already held by another tick. A lock older than staleMs is treated
- * as abandoned (crashed process) and stolen.
- */
-export async function acquireLock(lockPath, { now = () => Date.now(), staleMs = STALE_LOCK_MS } = {}) {
-  const deadline = Date.now() + LOCK_WAIT_MS;
-  while (Date.now() <= deadline) {
-    try {
-      const fh = await fs.open(lockPath, "wx"); // exclusive create — fails if exists
-      await fh.writeFile(JSON.stringify({ pid: process.pid, at: now() }));
-      await fh.close();
-      return true;
-    } catch (err) {
-      if (err.code !== "EEXIST") throw err;
-      // A lock file exists. Decide if it is stale.
-      let stale = false;
-      try {
-        const raw = await fs.readFile(lockPath, "utf8");
-        const { at } = JSON.parse(raw);
-        stale = !Number.isFinite(at) || now() - at > staleMs;
-      } catch {
-        // unreadable / corrupt lock — treat as stale
-        stale = true;
-      }
-      if (!stale) return false;
-      const stole = await stealLockFile(lockPath);
-      if (!stole) await delay(LOCK_RETRY_MS);
-    }
-  }
-  return false;
-}
-
-export async function releaseLock(lockPath) {
-  await fs.rm(lockPath, { force: true });
-}
+// Git reported changes in the folder, but staging them produced nothing to
+// commit. The usual cause is a nested project repository: its own commits move
+// while the pointer recorded in this repo does not, so every tick sees a dirty
+// tree, stages nothing, and used to report success. Left silent this repeats
+// forever while the user's work is never mirrored.
+export const SYNC_STALLED_SUMMARY =
+  "Sync found changes in your folder but had nothing it could record. This usually means a project inside your AIOS folder has its own Git repository, which Git stores as a pointer rather than as files. Ask your agent to inspect the folder for nested Git repositories. Nothing was lost, and nothing was pushed.";
 
 export async function runTick({
   lockPath,
   readConfig,
   writeConfig,
   makeGit,
+  verifyRepositoryBinding,
+  verifyRepoPrivate = defaultVerifyRepoPrivate,
   appendEvent,
   now = () => Date.now()
 }) {
-  const cfg = await readConfig();
-  if (!cfg?.access_token) return { skipped: "no-token" };
-
-  if (cfg.last_tick_at) {
-    const last = Date.parse(cfg.last_tick_at);
-    if (Number.isFinite(last) && now() - last < MIN_TICK_GAP_MS) {
-      return { skipped: "rate-limit-gap" };
-    }
-  }
-
-  const git = makeGit();
-  let currentBranch = null;
-  try {
-    currentBranch = await git.currentBranch();
-  } catch {
-    // An unknown checkout is not safe to mutate.
-  }
-  if (currentBranch !== "main") return { skipped: "not-main-branch" };
-
-  const locked = await acquireLock(lockPath, { now });
-  if (!locked) return { skipped: "locked" };
-
+  const operationLock = await acquireOperationLock(lockPath, { now });
+  if (!operationLock) return { skipped: "locked" };
   const startedIso = new Date(now()).toISOString();
 
   try {
+    const cfg = await readConfig();
+    if (!cfg?.access_token) return { skipped: "no-token" };
+
+    if (cfg.last_tick_at) {
+      const last = Date.parse(cfg.last_tick_at);
+      if (Number.isFinite(last) && now() - last < MIN_TICK_GAP_MS) {
+        return { skipped: "rate-limit-gap" };
+      }
+    }
+
+    // Inspect checkout identity in a Git process that has no sync token. The
+    // token is not allowed into Git until origin is bound to the configured repo.
+    const inspectionGit = makeGit({ accessToken: null, expectedRepoFullName: null });
+    if (typeof verifyRepositoryBinding !== "function") {
+      throw new Error("sync repository binding verification is unavailable");
+    }
+    await verifyRepositoryBinding(inspectionGit);
+    let currentBranch = null;
+    try {
+      currentBranch = await inspectionGit.currentBranch();
+    } catch {
+      // An unknown checkout is not safe to mutate.
+    }
+    if (currentBranch !== "main") return { skipped: "not-main-branch" };
+
+    const expectedIdentity = githubRepoIdentity(plainRemoteUrl(cfg.repo_full_name || ""));
+    const originIdentity = githubRepoIdentity(await inspectionGit.originUrl());
+    if (!expectedIdentity || originIdentity !== expectedIdentity) {
+      throw new Error(
+        `the configured Git origin does not match the private sync repository ${cfg.repo_full_name || "(unknown)"}. ` +
+        `Sync stopped before sending credentials or changing Git.`
+      );
+    }
+    if (typeof inspectionGit.validateMirrorContent !== "function") {
+      throw new Error("sync mirror content validation is unavailable");
+    }
+    await inspectionGit.validateMirrorContent();
+    if (typeof verifyRepoPrivate !== "function") {
+      throw new Error("sync privacy verification is unavailable");
+    }
+    await verifyRepoPrivate({
+      accessToken: cfg.access_token,
+      fullName: cfg.repo_full_name
+    });
+    const git = makeGit({
+      accessToken: cfg.access_token,
+      expectedRepoFullName: cfg.repo_full_name
+    });
 
     // 1. Commit local changes FIRST — rebase refuses to run on a dirty tree.
     let pushedSha = null;
     if (await git.dirty()) {
       pushedSha = await git.commitAll(`sync: ${startedIso}`);
+      // dirty() saw changes and commitAll could stage none of them. Record it —
+      // writing last_error: null here is what made the stall invisible.
+      if (pushedSha === null) {
+        const error = new Error(SYNC_STALLED_SUMMARY);
+        error.syncStalled = true;
+        throw error;
+      }
     }
 
     // 2. Pull by rebasing the local commit(s) on top of origin.
-    const pullResult = await git.pullRebase("main");
+    const pullResult = await git.pullRebase("main", {
+      lastPushSha: cfg.last_push_sha ?? null
+    });
 
     // 3. pullRebase aborts a conflicted rebase before returning. The local sync
     //    commit remains, and no remote push or destructive reset occurs.
@@ -139,25 +133,50 @@ export async function runTick({
       };
     }
 
-    if (pushedSha) {
-      // 4. Local commit (now replayed on top of origin) goes up.
-      await git.push("main");
-      // Record the actual HEAD after push: a rebase above may have rewritten
-      // the commit, so commitAll's pre-rebase sha can no longer exist.
-      pushedHead = await git.currentSha();
+    // Fetch/rebase is a mutation boundary. Re-run the complete local policy
+    // before any push or success receipt so a safe local tree plus a safe remote
+    // tree cannot combine into an unsafe catalog or workspace state.
+    const candidateHead = await git.currentSha();
+    await inspectionGit.validateMirrorContent();
+    if (await git.currentSha() !== candidateHead) {
+      throw new Error("Local Git HEAD changed during privacy validation; sync stopped before push.");
+    }
+    // The working tree/index can be safe while HEAD points at a different,
+    // unsafe commit. Validate the immutable object that will be pushed too.
+    await git.validateMirrorCommit(candidateHead);
+    const validatedHead = candidateHead;
+
+    const hasUnpushedCommit = pushedSha
+      ? true
+      : pullResult === "empty"
+        ? true
+        : await git.hasUnpushedCommits("main");
+    if (hasUnpushedCommit) {
+      // 4. A new local commit, or one left by an earlier failed push, goes up.
+      if (await git.currentSha() !== validatedHead) {
+        throw new Error("Local Git HEAD changed after privacy validation; sync stopped before push.");
+      }
+      // Publish the exact object that passed validation. A concurrent checkout
+      // change cannot redirect this push through symbolic HEAD.
+      await git.push("main", validatedHead);
+      pushedHead = validatedHead;
       pushed = true;
     }
 
     await writeConfig({
       last_tick_at: startedIso,
-      last_push_sha: pushed ? pushedHead : (cfg.last_push_sha ?? null),
+      // A successful explicit sync proves this immutable HEAD is the remote
+      // boundary even when no push was necessary (for example after a pull).
+      last_push_sha: validatedHead,
       last_pull_at: startedIso,
       last_error: null
     });
 
     return {
+      outcome: "success",
       pulled: pullResult,
       pushed,
+      stalled: false,
       sha: pushed ? pushedHead : null
     };
   } catch (err) {
@@ -168,10 +187,13 @@ export async function runTick({
     try {
       await appendEvent({ type: "sync-error", reason: err.message, at: startedIso });
     } catch { /* swallow */ }
-    return { error: err.message };
+    return {
+      error: err.message,
+      ...(err.syncStalled && { stalled: true, pushed: false, sha: null })
+    };
   } finally {
     try {
-      await releaseLock(lockPath);
+      await releaseOperationLock(operationLock);
     } catch { /* swallow — lock removal is best-effort; stale-steal recovers it */ }
   }
 }

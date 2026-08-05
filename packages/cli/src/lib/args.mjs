@@ -10,6 +10,14 @@ export function hasHelpFlag(args) {
   return args.includes("--help") || args.includes("-h");
 }
 
+export function assertUniqueOptions(args = [], optionNames = []) {
+  for (const optionName of optionNames) {
+    if (args.filter((arg) => arg === optionName).length > 1) {
+      throw new Error(`${optionName} may only be provided once`);
+    }
+  }
+}
+
 // Shared parser for the common `--path` / `--home` option pair.
 // Throws on any unrecognized flag so command typos surface immediately.
 export function parsePathHomeOptions(args = []) {

@@ -5,15 +5,43 @@ import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
 import { copyFileSafe, listFiles, pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
-import { renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
+import { planTemplateTree, renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
 import { createAiosConfig } from "../../../core/src/schema.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
-import { defaultAiosPath, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { hasStableManagedWorkspaceIgnoreRule } from "../../../core/src/workspace-ignore.mjs";
+import {
+  defaultAiosPath,
+  expandHome,
+  isPathWithin,
+  isPathWithinLexically,
+  resolveVaultPath
+} from "../../../core/src/paths.mjs";
+import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
+const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
+const BASE_TREE_DIRS = [
+  "context/domains",
+  "projects",
+  "connections/apis",
+  "memory/signals",
+  "memory/daily",
+  "memory/sessions",
+  "skills",
+  "plugins",
+  "decisions",
+  "archives"
+];
+const BUILT_IN_VAULT_DIRS = [
+  "vault/wiki",
+  "vault/raw",
+  "vault/org/companies",
+  "vault/org/people",
+  "vault/outputs"
+];
+const SKILL_CATALOG_FILES = ["skills/INDEX.md", "skills/RESOLVER.md"];
 
-export async function initCommand(args) {
+export async function initCommand(args, lifecycle = {}) {
   if (hasHelpFlag(args)) {
     printInitHelp();
     return;
@@ -21,6 +49,34 @@ export async function initCommand(args) {
 
   const options = parseOptions(args);
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
+  await assertAiosRootSafe(target);
+  if (
+    options.force
+    && !lifecycle.allowSetupTransactionRecovery
+    && await pathExists(path.join(target, SETUP_TRANSACTION_FILE))
+  ) {
+    throw new Error(
+      "An unfinished setup marker is present. Re-run the identical `dotaios setup` command without --force or --overwrite."
+    );
+  }
+  let vaultInsideTarget = false;
+  if (options.vaultPath) {
+    vaultInsideTarget = isPathWithinLexically(target, options.vaultPath);
+    if (!vaultInsideTarget) {
+      try {
+        vaultInsideTarget = await isPathWithin(target, options.vaultPath);
+      } catch {
+        // The existing vault usability check below owns invalid-path errors and
+        // gives the user the actionable --vault-path diagnostic.
+      }
+    }
+  }
+  if (vaultInsideTarget) {
+    throw new Error(
+      `Invalid --vault-path: ${options.vaultPath}\n` +
+      "An external vault must be outside the AIOS target. Omit --vault-path to use the target's built-in vault."
+    );
+  }
   const exists = await pathExists(target);
 
   if (exists && await pathExists(path.join(target, "aios.json"))) {
@@ -43,37 +99,67 @@ export async function initCommand(args) {
     }
   }
 
+  if (options.force && !options.overwrite) {
+    await assertPreservedWorkspaceIgnoreSafe(target);
+  }
+
   if (options.vaultPath) {
     await assertVaultPathUsable(options.vaultPath);
   }
 
-  const answers = options.yes ? defaultAnswers() : await promptAnswers();
-  const config = createAiosConfig({
+  const planned = lifecycle.plan;
+  const answers = planned ? null : (options.yes ? defaultAnswers() : await promptAnswers());
+  const config = planned?.config || createAiosConfig({
     aiTools: splitCsv(answers.ai_tools),
     vaultPath: options.vaultPath || null
   });
 
-  const data = {
+  const data = planned?.data || {
     ...answers,
     created_at: config.created_at,
     ai_tools: config.ai_tools,
     vault_path: config.vault_path
   };
 
+  if (options.force) {
+    await assertGeneratedDestinationsSafe(target, data, Boolean(config.vault_path));
+  }
+
+  await lifecycle.beforeScaffold?.({ config, data });
+  // Setup's ownership marker is published by beforeScaffold. Re-check the
+  // complete write surface after that hook and before the scaffold itself can
+  // mutate anything, so a raced descendant or ignore boundary cannot redirect
+  // or weaken this run.
+  await assertAiosRootSafe(target);
+  await assertGeneratedDestinationsSafe(target, data, Boolean(config.vault_path));
+  if (options.force && !options.overwrite) {
+    await assertPreservedWorkspaceIgnoreSafe(target);
+  }
   await createBaseTree(target, Boolean(config.vault_path));
-  await createVaultTree(resolveVaultPath(config, target));
+  await lifecycle.afterCreateBaseTree?.();
+  if (!lifecycle.skipVaultTree) {
+    await createVaultTree(resolveVaultPath(config, target));
+  }
   const writeMode = options.overwrite ? "overwrite" : "preserve";
   const results = [];
   results.push(...await renderTemplates(target, data, writeMode));
-  results.push(await writeFileSafe(path.join(target, "aios.json"), `${JSON.stringify(config, null, 2)}\n`, writeMode));
+  results.push(await writeFileSafe(
+    path.join(target, "aios.json"),
+    `${JSON.stringify(config, null, 2)}\n`,
+    writeMode,
+    { boundaryRoot: target }
+  ));
   results.push(...await copySkills(target, writeMode));
   results.push(...await createStarterFiles(target, data, writeMode));
   await writeSkillsIndex(target);
 
-  printSuccess(target, resolveVaultPath(config, target), results);
+  if (!lifecycle.quiet) {
+    printSuccess(target, resolveVaultPath(config, target), results);
+  }
 }
 
 function parseOptions(args = []) {
+  assertUniqueOptions(args, ["--path", "--vault-path"]);
   const options = { force: false, overwrite: false, path: null, vaultPath: null, yes: false };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -163,31 +249,133 @@ function defaultAnswers() {
 }
 
 async function createBaseTree(target, usesExternalVault) {
-  const dirs = [
-    "context/domains",
-    "projects",
-    "connections/apis",
-    "memory/signals",
-    "memory/daily",
-    "memory/sessions",
-    "skills",
-    "plugins",
-    "decisions",
-    "archives"
-  ];
-
-  if (!usesExternalVault) {
-    dirs.push(
-      "vault/wiki",
-      "vault/raw",
-      "vault/org/companies",
-      "vault/org/people",
-      "vault/outputs"
-    );
-  }
+  const dirs = baseTreeDirs(usesExternalVault);
 
   await fs.mkdir(target, { recursive: true });
-  await Promise.all(dirs.map((dir) => fs.mkdir(path.join(target, dir), { recursive: true })));
+  await assertAiosRootSafe(target);
+  for (const dir of dirs) {
+    await createSafeDescendantDirectory(target, dir);
+  }
+}
+
+function baseTreeDirs(usesExternalVault) {
+  return usesExternalVault
+    ? [...BASE_TREE_DIRS]
+    : [...BASE_TREE_DIRS, ...BUILT_IN_VAULT_DIRS];
+}
+
+async function lstatIfPresent(filePath) {
+  try {
+    return await fs.lstat(filePath);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+async function assertAiosRootSafe(target) {
+  const stats = await lstatIfPresent(target);
+  if (!stats) return;
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error(`Cannot initialize an unsafe AIOS target: ${target}`);
+  }
+}
+
+async function createSafeDescendantDirectory(target, relative) {
+  let current = target;
+  for (const segment of relative.split("/").filter(Boolean)) {
+    current = path.join(current, segment);
+    try {
+      await fs.mkdir(current);
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+    }
+    const stats = await lstatIfPresent(current);
+    if (!stats || !stats.isDirectory() || stats.isSymbolicLink()) {
+      throw new Error(`Cannot initialize through unsafe generated directory: ${current}`);
+    }
+  }
+}
+
+async function assertPreservedWorkspaceIgnoreSafe(target) {
+  const ignorePath = path.join(target, ".gitignore");
+  const stats = await lstatIfPresent(ignorePath);
+  if (!stats) return;
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error(`Cannot preserve unsafe existing ignore file: ${ignorePath}`);
+  }
+  const ignoreContent = await fs.readFile(ignorePath, "utf8");
+  if (!hasStableManagedWorkspaceIgnoreRule(ignoreContent)) {
+    throw new Error([
+      `Cannot preserve ${ignorePath} because it does not contain a stable exact /workspaces/ boundary.`,
+      "Add /workspaces/ as the final effective rule, then retry --force; or use --overwrite to replace generated files."
+    ].join(" "));
+  }
+}
+
+function templateTreeOptions() {
+  return {
+    // sync-gitignore.template is a build-time resource for `dotaios sync
+    // setup`, not a file the user's AIOS folder should carry.
+    include: (outputRelative) =>
+      outputRelative !== "aios.json" &&
+      outputRelative !== "sync-gitignore.template"
+  };
+}
+
+async function planGeneratedPaths(target, data, usesExternalVault) {
+  const templateRoot = path.join(repoRoot, "templates");
+  const templatePlan = await planTemplateTree(templateRoot, target, data, templateTreeOptions());
+  const skillRoot = path.join(repoRoot, "skills");
+  const skillFiles = await listFiles(skillRoot);
+  const files = new Set([
+    ...templatePlan.map((item) => item.path),
+    path.join(target, "aios.json"),
+    ...skillFiles.map((file) => path.join(target, "skills", path.relative(skillRoot, file))),
+    ...Object.keys(starterFileContents(data)).map((relative) => path.join(target, relative)),
+    ...SKILL_CATALOG_FILES.map((relative) => path.join(target, relative))
+  ]);
+  const directories = new Set(baseTreeDirs(usesExternalVault).map((relative) => path.join(target, relative)));
+
+  for (const plannedDirectory of [...directories]) {
+    let directory = plannedDirectory;
+    while (directory !== target) {
+      directories.add(directory);
+      const parent = path.dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  }
+
+  for (const file of files) {
+    let directory = path.dirname(file);
+    while (directory !== target) {
+      directories.add(directory);
+      const parent = path.dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+  }
+
+  return { files: [...files], directories: [...directories] };
+}
+
+async function assertGeneratedDestinationsSafe(target, data, usesExternalVault) {
+  const { files, directories } = await planGeneratedPaths(target, data, usesExternalVault);
+
+  for (const directory of directories.sort((a, b) => a.length - b.length)) {
+    const stats = await lstatIfPresent(directory);
+    if (stats && (!stats.isDirectory() || stats.isSymbolicLink())) {
+      throw new Error(`Cannot initialize through unsafe generated directory: ${directory}`);
+    }
+  }
+
+  for (const file of files) {
+    const stats = await lstatIfPresent(file);
+    if (stats && (!stats.isFile() || stats.isSymbolicLink())) {
+      throw new Error(`Cannot overwrite unsafe generated file: ${file}`);
+    }
+  }
 }
 
 // Runs before createBaseTree so a bad --vault-path cannot leave a
@@ -228,11 +416,8 @@ async function renderTemplates(target, data, writeMode) {
   const templateRoot = path.join(repoRoot, "templates");
   return renderTemplateTree(templateRoot, target, data, {
     writeMode,
-    // sync-gitignore.template is a build-time resource for `dotaios sync
-    // setup`, not a file the user's AIOS folder should carry.
-    include: (outputRelative) =>
-      outputRelative !== "aios.json" &&
-      outputRelative !== "sync-gitignore.template"
+    boundaryRoot: target,
+    ...templateTreeOptions()
   });
 }
 
@@ -244,15 +429,26 @@ async function copySkills(target, writeMode) {
   for (const file of files) {
     const relative = path.relative(skillRoot, file);
     const destination = path.join(target, "skills", relative);
-    await fs.mkdir(path.dirname(destination), { recursive: true });
-    results.push(await copyFileSafe(file, destination, writeMode));
+    results.push(await copyFileSafe(file, destination, writeMode, { boundaryRoot: target }));
   }
 
   return results;
 }
 
 async function createStarterFiles(target, data, writeMode) {
-  const files = {
+  const files = starterFileContents(data);
+  const results = [];
+
+  for (const [relative, content] of Object.entries(files)) {
+    const destination = path.join(target, relative);
+    results.push(await writeFileSafe(destination, content, writeMode, { boundaryRoot: target }));
+  }
+
+  return results;
+}
+
+function starterFileContents(data) {
+  return {
     ".env.example": [
       "# Copy this file to .env when plugins require local secrets.",
       "# Never paste secrets into chat or memory files.",
@@ -289,14 +485,6 @@ async function createStarterFiles(target, data, writeMode) {
     ].join("\n") + "\n",
     "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"memory-maintenance\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"
   };
-  const results = [];
-
-  for (const [relative, content] of Object.entries(files)) {
-    const destination = path.join(target, relative);
-    results.push(await writeFileSafe(destination, content, writeMode));
-  }
-
-  return results;
 }
 
 function splitCsv(value) {

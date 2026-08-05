@@ -21,8 +21,9 @@ test("renderTemplate handles ai_tools loops", () => {
   assert.equal(rendered, 'tools: "claude-code", "codex"');
 });
 
-test("templateOutputPath maps Cursor template to hidden file", () => {
+test("templateOutputPath maps ship-safe templates to hidden files", () => {
   assert.equal(templateOutputPath("cursorrules.hbs"), ".cursorrules");
+  assert.equal(templateOutputPath("gitignore.template"), ".gitignore");
   assert.equal(templateOutputPath("AGENTS.md.hbs"), "AGENTS.md");
 });
 
@@ -162,7 +163,8 @@ test("AGENTS.md.hbs retains portability, ownership, and durable-write approval b
     "utf8"
   );
 
-  assert.match(tpl, /Repositories stay outside this AIOS\s+folder/);
+  assert.match(tpl, /Managed repositories may live under\s+the ignored `workspaces\/<slug>\/` root/);
+  assert.match(tpl, /external checkouts remain supported/i);
   assert.match(tpl, /never store machine-local paths/);
   assert.match(tpl, /plain text the user owns/);
   assert.match(tpl, /Never expose secrets/);

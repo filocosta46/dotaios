@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathExists } from "../../../core/src/files.mjs";
+import { pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
   MANAGED_END,
@@ -39,7 +39,11 @@ import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 const managedStart = MANAGED_START;
 const managedEnd = MANAGED_END;
 
-export async function activateCommand(args) {
+// Written next to a bridge file the first time DotAIOS splices into it, so a
+// user whose file predates splicing can always recover their original.
+const backupSuffix = ".dotaios-backup";
+
+export async function activateCommand(args, { lifecycle = {} } = {}) {
   if (hasHelpFlag(args)) {
     printActivateHelp();
     return;
@@ -56,14 +60,19 @@ export async function activateCommand(args) {
     throw new Error("Refusing to connect a temporary AIOS path to the real home; use a permanent AIOS folder.");
   }
   await ensureAiosFolder(aiosPath);
+  if (!options.dryRun) {
+    await fs.mkdir(homePath, { recursive: true });
+  }
 
   const config = await readAiosConfig(aiosPath);
   const skillsFirst = options.skillsFirst ?? Boolean(config.skills_first);
+  const configPatch = activationConfigPatch(options);
 
   // A real activation persists an explicit preference. Dry-run uses the
   // requested value for its preview without changing aios.json.
-  if (!options.dryRun && options.skillsFirst !== undefined) {
-    await updateAiosConfig(aiosPath, { skills_first: options.skillsFirst });
+  if (configPatch) {
+    await updateAiosConfig(aiosPath, configPatch);
+    await lifecycle.afterConfigPersisted?.({ aiosPath, configPatch });
   }
 
   // Refresh before writing bridges. Dry-run renders the same catalog in memory
@@ -174,6 +183,15 @@ function parseOptions(args = []) {
   return options;
 }
 
+export function plannedActivationConfigPatch(args = []) {
+  return activationConfigPatch(parseOptions(args));
+}
+
+function activationConfigPatch(options) {
+  if (options.dryRun || options.skillsFirst === undefined) return null;
+  return { skills_first: options.skillsFirst };
+}
+
 function printActivateHelp() {
   console.log(`Usage:
   dotaios activate [options]
@@ -239,7 +257,7 @@ async function createGlobalBridges(
     const result = await writeManagedFile(
       destination,
       await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog }),
-      options
+      { ...options, boundaryRoot: homePath }
     );
     results.push(result);
     if (["created", "updated", "would create", "would update"].includes(result.action)) {
@@ -479,34 +497,100 @@ async function isDirectory(value) {
   }
 }
 
-async function writeManagedFile(destination, content, { dryRun = false, overwrite = false, projectRoot = null } = {}) {
+async function writeManagedFile(
+  destination,
+  content,
+  { dryRun = false, overwrite = false, projectRoot = null, boundaryRoot = projectRoot } = {}
+) {
   if (projectRoot) {
     const safety = await validateProjectPath({ projectRoot, targetPath: destination });
     if (!safety.safe) {
       return { action: "unsafe-target", path: destination, note: safety.reason };
     }
   }
-  const exists = await pathExists(destination);
+  const stats = await lstatIfPresent(destination);
+  if (stats && (!stats.isFile() || stats.isSymbolicLink())) {
+    return { action: "unsafe-target", path: destination, note: "existing bridge path is not a regular file" };
+  }
 
-  if (!exists) {
+  if (!stats) {
     if (!dryRun) {
-      await fs.mkdir(path.dirname(destination), { recursive: true });
-      await fs.writeFile(destination, content);
+      await writeFileSafe(destination, content, "preserve", { boundaryRoot });
     }
     return { action: dryRun ? "would create" : "created", path: destination };
   }
 
   const current = await fs.readFile(destination, "utf8");
-  const managed = current.includes(managedStart) && current.includes(managedEnd);
-  if (!managed && !overwrite) {
-    return { action: "kept", path: destination, note: "existing unmanaged file" };
+  const existingBlock = findManagedBlock(current);
+
+  // No usable managed block: this is somebody else's file. Replacing it whole
+  // stays an explicit --overwrite decision.
+  if (!existingBlock) {
+    if (!overwrite) {
+      return { action: "kept", path: destination, note: "existing unmanaged file" };
+    }
+    if (!dryRun) {
+      await writeFileSafe(destination, content, "overwrite", { boundaryRoot });
+    }
+    return { action: dryRun ? "would update" : "updated", path: destination };
   }
 
-  if (!dryRun) {
-    await fs.writeFile(destination, content);
+  // Managed block present: replace only the block. Every byte the user wrote
+  // outside the markers survives untouched.
+  const generatedBlock = findManagedBlock(content);
+  if (!generatedBlock) {
+    throw new Error("generated bridge content is missing its managed block");
+  }
+  const next = `${current.slice(0, existingBlock.start)}${generatedBlock.text}${current.slice(existingBlock.end)}`;
+
+  if (dryRun) {
+    return { action: "would update", path: destination };
   }
 
-  return { action: dryRun ? "would update" : "updated", path: destination };
+  // Nothing to do when the block is already current. Rewriting an identical
+  // file would only churn mtimes and litter a pointless backup beside it.
+  if (next === current) {
+    return { action: "updated", path: destination };
+  }
+
+  const backedUp = await backupOnce(destination, current, {
+    boundaryRoot,
+    mode: stats.mode & 0o777
+  });
+  await writeFileSafe(destination, next, "overwrite", { boundaryRoot });
+  return {
+    action: "updated",
+    path: destination,
+    ...(backedUp ? { note: `backed up the previous file to ${path.basename(destination)}${backupSuffix}` } : {})
+  };
+}
+
+// Locate the managed block. Returns null when a marker is missing or the
+// markers are out of order, so a malformed file is never spliced blind.
+function findManagedBlock(text) {
+  const start = text.indexOf(managedStart);
+  if (start < 0) return null;
+  const endStart = text.indexOf(managedEnd, start + managedStart.length);
+  if (endStart < 0) return null;
+  const end = endStart + managedEnd.length;
+  return { start, end, text: text.slice(start, end) };
+}
+
+// Keep the pre-existing bridge bytes once. The preserve-mode safe writer keeps
+// an older backup authoritative, so a later run can never bury the original.
+async function backupOnce(destination, content, { boundaryRoot = null, mode = 0o666 } = {}) {
+  const backup = `${destination}${backupSuffix}`;
+  const result = await writeFileSafe(backup, content, "preserve", { boundaryRoot, mode });
+  return result.action === "created";
+}
+
+async function lstatIfPresent(destination) {
+  try {
+    return await fs.lstat(destination);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 async function removeRetiredManagedFile(destination, { dryRun = false, projectRoot = null } = {}) {
@@ -531,17 +615,16 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
     return { action: "kept", path: destination, note: "retired path is not a regular file" };
   }
   const current = await fs.readFile(destination, "utf8");
-  const managed = current.includes(managedStart) && current.includes(managedEnd);
-  if (!managed) {
-    return { action: "kept", path: destination, note: "existing unmanaged file" };
+  const managedBlock = findManagedBlock(current);
+  if (!managedBlock) {
+    const hasBothMarkers = current.includes(managedStart) && current.includes(managedEnd);
+    return {
+      action: "kept",
+      path: destination,
+      note: hasBothMarkers ? "managed markers are out of order" : "existing unmanaged file"
+    };
   }
-  const blockStart = current.indexOf(managedStart);
-  const blockEndStart = current.indexOf(managedEnd, blockStart + managedStart.length);
-  if (blockEndStart < 0) {
-    return { action: "kept", path: destination, note: "managed markers are out of order" };
-  }
-  const blockEnd = blockEndStart + managedEnd.length;
-  let remainder = `${current.slice(0, blockStart)}${current.slice(blockEnd)}`;
+  let remainder = `${current.slice(0, managedBlock.start)}${current.slice(managedBlock.end)}`;
   remainder = remainder.replace(
     /^---\r?\ndescription: DotAIOS personal context\r?\nglobs:\r?\nalwaysApply: true\r?\n---\r?\n*/u,
     ""

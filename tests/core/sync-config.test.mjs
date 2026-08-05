@@ -78,3 +78,20 @@ test("writeSyncConfig ensures parent dir is 0700", { skip: process.platform === 
     assert.equal(dirStat.mode & 0o777, 0o700);
   });
 });
+
+test("concurrent identical config writes use unique temporary files", async () => {
+  await withTmpHome(async (cfg, dir) => {
+    await Promise.all(Array.from({ length: 32 }, () =>
+      writeSyncConfig(cfg, { access_token: "T", repo_full_name: "alice/alice-aios" })
+    ));
+    assert.deepEqual(await readSyncConfig(cfg), {
+      access_token: "T",
+      repo_full_name: "alice/alice-aios"
+    });
+    assert.deepEqual(
+      (await fs.readdir(dir)).filter((entry) => entry.endsWith(".tmp")),
+      [],
+      "successful and losing writers must leave no fixed or unique temp residue"
+    );
+  });
+});

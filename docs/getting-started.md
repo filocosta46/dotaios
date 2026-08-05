@@ -21,13 +21,26 @@ The init flow asks five questions, then creates starter context and memory files
 For Cursor or project-scoped agents, attach a project folder:
 
 ```bash
-npx dotaios@latest project add /path/to/project
+npx dotaios@latest project add /path/to/project --apply
 npx dotaios@latest attach /path/to/project
 ```
 
 The project catalog syncs the durable README and repository URL. Each machine
-keeps its own checkout path outside the synced AIOS content. The project source
-repository stays independent and is never copied into `~/aios`.
+keeps its own checkout path outside the synced AIOS content. On another machine,
+restore committed project state into the ignored managed workspace:
+
+```bash
+npx dotaios@latest migrate
+npx dotaios@latest project restore <slug-or-id>
+```
+
+`migrate` is a read-only preview. On an older folder, run the exact
+`migrate --apply <plan-id>` command it prints before restore. Restore refuses to
+clone until schema 1.2 and the `/workspaces/` privacy boundary are active.
+
+Run without a slug to restore every missing project, or add `--dry-run` to
+preview. The project repository stays independent and never enters the AIOS Git
+mirror; external checkout locations remain supported.
 
 After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Cursor, or another repo-aware assistant.
 

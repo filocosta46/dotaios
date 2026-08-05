@@ -1,5 +1,8 @@
 .env
 .env.*
+!.env.example
+credentials.*
+token.*
 *.key
 *.pem
 *.token
@@ -11,3 +14,6 @@ license/*.json
 cache/
 tmp/
 node_modules/
+/workspaces/
+.dotaios-setup-transaction.json
+.dotaios-setup-*.tmp
