@@ -1024,6 +1024,7 @@ test("activate symlinks AIOS skills into ~/.claude/skills/ for slash-command dis
   const homePath = path.join(tempRoot, "home");
 
   runCli(["init", "--path", aiosPath, "--yes"]);
+  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
   runCli(["activate", "--path", aiosPath, "--home", homePath]);
 
   const claudeSkills = path.join(homePath, ".claude", "skills");

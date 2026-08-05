@@ -45,6 +45,7 @@ test("skills install fans the canonical skills into native agent directories", a
 
 test("installing a raw skill also propagates it to native agent directories", () => {
   const { aiosPath, homePath, tempRoot } = setupAios();
+  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
   const rawSkill = path.join(tempRoot, "demo-skill");
   fs.mkdirSync(rawSkill, { recursive: true });
   fs.writeFileSync(
@@ -67,6 +68,7 @@ test("installing a raw skill also propagates it to native agent directories", ()
 
 test("installing a plugin exposes its declared skill and propagates it natively", () => {
   const { aiosPath, homePath } = setupAios();
+  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
   const pluginPath = path.join(repoRoot, "examples", "plugins", "hello-memory");
 
   run(["install", pluginPath, "--path", aiosPath, "--home", homePath]);
