@@ -5,18 +5,20 @@ DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of i
 > **Audience.** DotAIOS free core is for people already using local agents and comfortable with Node / `npx`. Setup is run by the user in a system terminal. An agent may inspect or verify it, but should not fetch remote instructions and execute them. See the [README](../README.md) for the product promise and honest limits.
 
 ```bash
-npx dotaios@1.28.1 setup --dry-run
-npx dotaios@1.28.1 setup
+npx dotaios@1.28.2 setup --dry-run
+npx dotaios@1.28.2 setup
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
 
-Setup and upgrade commands use `npx dotaios@latest ...`: no global install is
-needed, and `@latest` always fetches the newest published release rather than a
-cached older copy. Later examples in this guide drop `@latest` for brevity —
-add it whenever you want to be sure you are on the current version.
+First-time setup stays pinned so the package, source tag, and integrity record
+are reproducible. Later maintenance examples use `@latest` deliberately when
+you choose to inspect or run the newest published release; no global install is
+needed.
 
-The setup flow asks a few questions, creates starter context and memory files, then adds managed bridge blocks or links for detected Claude Code, Codex, and Gemini installations. Private sync is not enabled.
+The setup flow asks a few questions, creates starter context and memory files,
+then adds managed bridge blocks or links for detected Claude Code, Codex, and
+Gemini installations. Private sync remains off unless you explicitly opt in.
 
 For Cursor or project-scoped agents, attach a project folder:
 
@@ -47,7 +49,7 @@ After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Curs
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
 
 ```bash
-npx dotaios@latest init --vault-path ~/my-vault
+npx dotaios@1.28.2 init --vault-path ~/my-vault
 ```
 
 Check setup health:
@@ -126,14 +128,15 @@ Search your local AIOS files:
 npx dotaios@latest search "daily planning" --scope skills
 ```
 
-Validate and install a plugin (trusted local folder or reviewed git URL):
+Validate and install a plugin from a reviewed local folder:
 
 ```bash
 npx dotaios@latest install ./my-plugin --dry-run
 npx dotaios@latest install ./my-plugin
-npx dotaios@latest install https://github.com/example/my-plugin.git
-npx dotaios@latest install https://github.com/owner/repo.git --subdir packages/my-plugin
 ```
+
+DotAIOS refuses remote plugin URLs. Pin and download or clone the exact revision
+yourself, inspect it outside DotAIOS, then run the local-folder dry run above.
 
 List local manual schedules:
 

@@ -6,6 +6,22 @@ import { readJson } from "./files.mjs";
 export const MANAGED_START = "<!-- dotaios-managed:start -->";
 export const MANAGED_END = "<!-- dotaios-managed:end -->";
 
+// Locate one complete managed block. Malformed or reversed markers are not
+// ownership proof, so callers must preserve the file instead of editing it.
+export function findManagedBlock(text) {
+  const start = text.indexOf(MANAGED_START);
+  const endStart = text.indexOf(MANAGED_END);
+  if (
+    start < 0
+    || endStart < 0
+    || start !== text.lastIndexOf(MANAGED_START)
+    || endStart !== text.lastIndexOf(MANAGED_END)
+    || start >= endStart
+  ) return null;
+  const end = endStart + MANAGED_END.length;
+  return { start, end, text: text.slice(start, end) };
+}
+
 // The canonical entrypoint every bridge points at. One front door for every agent.
 export const AGENT_ENTRYPOINT = "AGENTS.md";
 

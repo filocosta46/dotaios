@@ -84,6 +84,74 @@ test("setup --dry-run reports an unmanaged bridge collision without changing it"
   }
 });
 
+test("setup --dry-run preserves a bridge whose managed markers are reversed", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-reversed-markers-"));
+  const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
+  const bridgePath = path.join(homePath, ".claude", "CLAUDE.md");
+  const existing = "<!-- dotaios-managed:end -->\nuser content\n<!-- dotaios-managed:start -->\n";
+  fsSync.mkdirSync(aiosPath, { recursive: true });
+  fsSync.mkdirSync(path.dirname(bridgePath), { recursive: true });
+  fsSync.writeFileSync(bridgePath, existing);
+
+  const result = spawnSync(process.execPath, [
+    path.resolve(repoRoot, "packages/cli/src/index.mjs"),
+    "setup",
+    "--dry-run",
+    "--path", aiosPath,
+    "--home", homePath
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: "/usr/bin:/bin" }
+  });
+
+  try {
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /\[would preserve collision\].*CLAUDE\.md.*managed markers are malformed/);
+    assert.equal(fsSync.readFileSync(bridgePath, "utf8"), existing);
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("setup --dry-run preserves a bridge with duplicate managed markers", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-duplicate-markers-"));
+  const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
+  const bridgePath = path.join(homePath, ".claude", "CLAUDE.md");
+  const existing = [
+    "<!-- dotaios-managed:start -->",
+    "first block",
+    "<!-- dotaios-managed:end -->",
+    "<!-- dotaios-managed:start -->",
+    "second block",
+    "<!-- dotaios-managed:end -->",
+    ""
+  ].join("\n");
+  fsSync.mkdirSync(aiosPath, { recursive: true });
+  fsSync.mkdirSync(path.dirname(bridgePath), { recursive: true });
+  fsSync.writeFileSync(bridgePath, existing);
+
+  const result = spawnSync(process.execPath, [
+    path.resolve(repoRoot, "packages/cli/src/index.mjs"),
+    "setup",
+    "--dry-run",
+    "--path", aiosPath,
+    "--home", homePath
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: "/usr/bin:/bin" }
+  });
+
+  try {
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /\[would preserve collision\].*CLAUDE\.md.*managed markers are malformed/);
+    assert.equal(fsSync.readFileSync(bridgePath, "utf8"), existing);
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("setup --dry-run reports that a non-empty target would stop", () => {
   const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-blocked-"));
   const aiosPath = path.join(tmp, "aios");

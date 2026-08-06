@@ -1,7 +1,5 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
 import { summarizePermissions, validateManifest } from "../../../core/src/manifest.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
@@ -12,18 +10,19 @@ import { activateCommand } from "./activate.mjs";
 export async function installCommand(args) {
   if (hasHelpFlag(args)) {
     console.log(`Usage:
-  dotaios install <plugin-path-or-url> [options]
+  dotaios install <local-plugin-path> [options]
 
 Accepts:
   - A local folder containing manifest.json (plugin) or SKILL.md (raw skill).
-  - An https:// git URL (cloned into a temp folder, then installed).
-  - A git@host:owner/repo.git SSH URL.
+
+Remote URLs are refused. Download or clone a source yourself, inspect it, then
+pass the reviewed local folder to this command.
 
 Options:
   --path <dir>     Install into an AIOS folder other than ~/aios
   --home <dir>     Write native agent bridges and skills under this home directory
   --dry-run        Validate and display permissions without copying files
-  --subdir <path>  After cloning/resolving, install from this subdirectory
+  --subdir <path>  Install from this subdirectory of the local source
 `);
     return;
   }
@@ -32,36 +31,18 @@ Options:
   const [pluginPath] = options.positionals;
 
   if (!pluginPath) {
-    throw new Error("Usage: dotaios install <plugin-path-or-url> [--path <aios-dir>] [--home <home-dir>] [--dry-run]");
+    throw new Error("Usage: dotaios install <local-plugin-path> [--path <aios-dir>] [--home <home-dir>] [--dry-run]");
   }
 
-  // A remote caller can supply --subdir, so reject anything that could escape
-  // the cloned or resolved source directory.
+  assertLocalInstallSource(pluginPath);
+
+  // Keep a local subdirectory selection inside the reviewed source directory.
   assertSafeSubdir(options.subdir);
 
-  let sourcePath;
-  let cleanupClone = null;
-
-  if (isGitUrl(pluginPath)) {
-    const cloneResult = await cloneRepo(pluginPath);
-    cleanupClone = cloneResult.cleanup;
-    sourcePath = options.subdir
-      ? path.join(cloneResult.path, options.subdir)
-      : cloneResult.path;
-    console.log(`Cloned ${pluginPath} to ${cloneResult.path}${options.subdir ? `/${options.subdir}` : ""}`);
-  } else if (/^[a-z]+:\/\//i.test(pluginPath)) {
-    throw new Error(`Unsupported URL scheme. Use https:// or git@ remotes, or a local folder.`);
-  } else {
-    sourcePath = options.subdir
-      ? path.join(path.resolve(pluginPath), options.subdir)
-      : path.resolve(pluginPath);
-  }
-
-  try {
-    await runInstall(sourcePath, options);
-  } finally {
-    if (cleanupClone) await cleanupClone();
-  }
+  const sourcePath = options.subdir
+    ? path.join(path.resolve(pluginPath), options.subdir)
+    : path.resolve(pluginPath);
+  await runInstall(sourcePath, options);
 }
 
 async function runInstall(sourcePath, options) {
@@ -139,33 +120,14 @@ async function runInstall(sourcePath, options) {
   console.log(`\nInstalled ${manifest.name}@${manifest.version} into ${path.join(target, "plugins", manifest.name)}`);
 }
 
-// A remote source is a git@ SSH URL or an https URL ending in .git.
-// Requiring the .git suffix keeps the rule unambiguous: a plain
-// https://github.com/owner/repo link to a file or release is not cloned.
-function isGitUrl(input) {
-  if (typeof input !== "string") return false;
-  if (input.startsWith("git@")) return true;
-  return /^https?:\/\//i.test(input) && input.endsWith(".git");
-}
-
-async function cloneRepo(url) {
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-plugin-"));
-  const result = spawnSync("git", ["clone", "--depth", "1", "--", url, tmpDir], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"]
-  });
-  if (result.error) {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-    throw new Error(`git clone failed to start: ${result.error.message}. Install git first.`);
+export function assertLocalInstallSource(input) {
+  if (typeof input !== "string") return;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(input) || input.startsWith("git@")) {
+    throw new Error(
+      "Remote plugin sources are not executed directly. Download or clone it yourself, " +
+      "inspect the source and revision, then pass the reviewed local folder to `dotaios install`."
+    );
   }
-  if (result.status !== 0) {
-    await fs.rm(tmpDir, { recursive: true, force: true });
-    throw new Error(`git clone failed (status ${result.status}): ${(result.stderr || "").trim()}`);
-  }
-  return {
-    path: tmpDir,
-    cleanup: () => fs.rm(tmpDir, { recursive: true, force: true })
-  };
 }
 
 async function readManifest(manifestPath) {
@@ -179,9 +141,8 @@ async function readManifest(manifestPath) {
   }
 }
 
-// Reject a --subdir that is absolute or contains ".." segments — it would let
-// an untrusted source (e.g. a market registry entry) escape the source dir and
-// copy arbitrary files into the (potentially GitHub-synced) vault.
+// Reject a --subdir that is absolute or contains ".." segments so the install
+// cannot escape the reviewed local source directory.
 export function assertSafeSubdir(subdir) {
   if (subdir == null) return;
   if (path.isAbsolute(subdir)) {

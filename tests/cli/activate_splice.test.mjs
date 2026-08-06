@@ -308,6 +308,56 @@ describe("activate — managed block splicing", () => {
     }
   });
 
+  it("keeps malformed managed markers byte-identical and reports the collision", async () => {
+    const malformedFiles = [
+      `${MANAGED_END}\nuser content\n${MANAGED_START}\n`,
+      `${STALE_BLOCK}\n${STALE_BLOCK}\n`,
+      `${MANAGED_END}\n${STALE_BLOCK}\n`
+    ];
+
+    for (const original of malformedFiles) {
+      const dirs = await makeTmpDirs();
+      try {
+        const bridge = path.join(dirs.homePath, ".codex", "AGENTS.md");
+        await fs.mkdir(path.dirname(bridge), { recursive: true });
+        await fs.writeFile(bridge, original);
+
+        const activation = await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"]);
+        const result = activation.results.find((entry) => entry.path === bridge);
+
+        assert.equal(result?.action, "kept");
+        assert.match(result?.note || "", /managed markers are malformed/);
+        assert.equal(await fs.readFile(bridge, "utf8"), original);
+      } finally {
+        await fs.rm(dirs.base, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it("never treats overwrite as permission to replace malformed managed markers", async () => {
+    const dirs = await makeTmpDirs();
+    try {
+      const bridge = path.join(dirs.homePath, ".codex", "AGENTS.md");
+      const original = `${STALE_BLOCK}\n${STALE_BLOCK}\nuser content\n`;
+      await fs.mkdir(path.dirname(bridge), { recursive: true });
+      await fs.writeFile(bridge, original);
+
+      const activation = await activate([
+        "--path", dirs.aiosPath,
+        "--home", dirs.homePath,
+        "--all",
+        "--overwrite"
+      ]);
+      const result = activation.results.find((entry) => entry.path === bridge);
+
+      assert.equal(result?.action, "kept");
+      assert.match(result?.note || "", /managed markers are malformed/);
+      assert.equal(await fs.readFile(bridge, "utf8"), original);
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
   it("writes the backup exactly once and never overwrites it", async () => {
     const dirs = await makeTmpDirs();
     try {

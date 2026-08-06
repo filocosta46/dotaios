@@ -170,7 +170,7 @@ export function renderSkillsIndex(skills) {
   ];
 
   if (skills.length === 0) {
-    lines.push("_No skills installed yet. Add one with_ `dotaios skill add <url-or-path>`.", "");
+    lines.push("_No skills installed yet. Add a reviewed local folder with_ `dotaios skill add <local-folder>`.", "");
   } else {
     for (const skill of skills) {
       lines.push(`## ${skill.name}`, "");

@@ -47,18 +47,78 @@ test("first-time onboarding stays human-run, pinned, and free of install lifecyc
   }
 
   const relativeFiles = ["README.md", "INSTALL.md", "docs/friend-setup.md", "docs/getting-started.md"];
-  const contents = await Promise.all(
-    relativeFiles.map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8"))
-  );
+  const documents = Object.fromEntries(await Promise.all(
+    relativeFiles.map(async (relativePath) => [
+      relativePath,
+      await fs.readFile(path.join(repoRoot, relativePath), "utf8")
+    ])
+  ));
+  const contents = relativeFiles.map((relativePath) => documents[relativePath]);
   const corpus = contents.join("\n");
   const pinned = `dotaios@${pkg.version} setup`;
+  const pinnedPattern = pinned.replaceAll(".", "\\.");
 
-  assert.match(corpus, new RegExp(`${pinned.replaceAll(".", "\\.")} --dry-run`));
-  assert.match(corpus, new RegExp(pinned.replaceAll(".", "\\.")));
-  assert.doesNotMatch(contents[0], new RegExp(`^npx -y ${pinned.replaceAll(".", "\\.")}`, "m"));
+  for (const relativePath of relativeFiles) {
+    assert.match(documents[relativePath], new RegExp(`${pinnedPattern} --dry-run`), `${relativePath} must pin the preview`);
+    assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must pin human-run setup`);
+  }
   assert.doesNotMatch(corpus, /Please set up DotAIOS for me|agent-led setup|you are on the agent path/i);
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
+  assert.doesNotMatch(documents["docs/friend-setup.md"], /dotaios@latest (?:init|activate|setup)/, "friend setup must not switch first-time commands back to @latest");
+  assert.doesNotMatch(documents["docs/getting-started.md"], /Setup and upgrade commands use .*@latest/i, "getting started must distinguish pinned setup from later updates");
+  assert.match(documents["INSTALL.md"], /shared\s+`~\/\.agents\/skills` directory/i, "INSTALL must disclose the shared global skill surface");
+  assert.match(documents["INSTALL.md"], /each attached checkout listed in `~\/\.dotaios\/projects\.json`/i, "INSTALL must cover project-local removal");
+  assert.doesNotMatch(documents["INSTALL.md"], /use `\/memory-maintenance`/, "INSTALL must use cross-client skill invocation language");
+  assert.doesNotMatch(documents["INSTALL.md"], /npx(?: -y)? dotaios@latest/i, "INSTALL must inspect latest metadata before running one exact release");
+  assert.match(documents["INSTALL.md"], /pins DotAIOS itself, not its complete dependency graph/i, "INSTALL must bound the reproducibility claim");
+  assert.match(documents["INSTALL.md"], /`~\/aios\/memory\/sessions`.*private GitHub mirror/is, "INSTALL must disclose capture and sync composition");
+  assert.match(documents["INSTALL.md"], /GitHub\s+repository remains.*revoke the token/is, "INSTALL must disclose remote and credential cleanup");
+  assert.match(documents["INSTALL.md"], /bundled with the reviewed release.*does not install third-party plugins/is, "INSTALL must bound the shared skill surface");
+  assert.match(documents["INSTALL.md"], /\[would preserve collision\].*\[would stop\]/is, "INSTALL must turn preview output into a proceed-or-stop gate");
+  assert.match(documents["INSTALL.md"], /^npx dotaios@[^\s]+ skills doctor$/m, "INSTALL must lead with human-readable skill verification");
+  assert.match(documents["INSTALL.md"], /Do not use this for your personal installation/i, "INSTALL must separate test automation from personal setup");
+  assert.match(documents["INSTALL.md"], /github\.com\/filocosta46\/dotaios\/issues/, "INSTALL must provide a support handoff");
+  assert.match(documents["INSTALL.md"], /1\.28\.2 removal contract/i, "INSTALL must scope removal instructions to the installed release");
+  assert.match(documents["INSTALL.md"], /doctor --path <aios-path>/i, "INSTALL must make custom-path removal inspectable");
+  assert.match(documents["INSTALL.md"], /retired `~\/\.cursor\/skills`.*`~\/\.gemini\/skills`.*`~\/\.gemini\/config\/skills`/is, "INSTALL must cover retired global skill targets");
+  assert.match(documents["INSTALL.md"], /\.cursor\/rules\/dotaios\.mdc.*remove only that block/is, "INSTALL must cover the retired project Cursor bridge");
+
+  for (const retiredLauncher of [
+    ".github/workflows/release-installers.yml",
+    "installers/windows/setup.bat",
+    "installers/windows/dotaios.wxs"
+  ]) {
+    await assert.rejects(
+      fs.access(path.join(repoRoot, retiredLauncher)),
+      (error) => error.code === "ENOENT",
+      `${retiredLauncher} must not bypass the pinned preview-first install path`
+    );
+  }
+
+  const pluginDevelopment = await fs.readFile(path.join(repoRoot, "docs/plugin-development.md"), "utf8");
+  const securityGuide = await fs.readFile(path.join(repoRoot, "docs/security.md"), "utf8");
+  const skillSurfaces = await Promise.all([
+    "packages/cli/src/commands/skill.mjs",
+    "packages/cli/src/commands/skills.mjs",
+    "packages/core/src/skills.mjs"
+  ].map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8")));
+  const pluginContract = `${corpus}\n${pluginDevelopment}\n${securityGuide}\n${skillSurfaces.join("\n")}`;
+  assert.doesNotMatch(
+    pluginContract,
+    /dotaios@(?:latest|[0-9.]+) install (?:https?:\/\/|git@)/i,
+    "public guides must not advertise mutable remote plugin execution"
+  );
+  assert.doesNotMatch(
+    pluginContract,
+    /url-or-path|git\/https URL|trusted git URLs|Git URL installs are supported/i,
+    "all public plugin surfaces must advertise reviewed local folders only"
+  );
+  assert.match(
+    securityGuide,
+    /remote\s+URL inputs are refused/i,
+    "the security guide must state the executable remote-source boundary"
+  );
 });
 
 test("commercial delivery and internal launch gates stay outside the public core", async () => {

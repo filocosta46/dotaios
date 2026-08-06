@@ -11,8 +11,7 @@ const HELP_TEXT = `Usage:
   dotaios skill <subcommand> [options]
 
 Subcommands:
-  add <url-or-path>   Install a skill or plugin into your AIOS folder.
-                      Accepts a local folder path or a git/https URL.
+  add <local-folder>  Install a reviewed local skill or plugin folder.
   list                Show every skill currently installed.
   remove <name>       Remove a previously installed plugin from your AIOS.
 
@@ -38,7 +37,7 @@ export async function skillCommand(args) {
 
   if (subcommand === "add") {
     if (positionals.length === 0) {
-      throw new Error("Usage: dotaios skill add <url-or-path>");
+      throw new Error("Usage: dotaios skill add <local-folder>");
     }
     const installArgs = [...positionals];
     if (options.path) installArgs.push("--path", options.path);
@@ -117,7 +116,7 @@ async function listSkills(options) {
   }
 
   console.log("");
-  console.log("Add a new skill: `dotaios skill add <url-or-path>`");
+  console.log("Add a reviewed local skill: `dotaios skill add <local-folder>`");
 }
 
 async function removeSkill(name, options) {

@@ -23,8 +23,8 @@ You need Node.js 20 or newer. You do not need a GitHub or DotAIOS account.
 Run these commands yourself in Terminal, PowerShell, or another system shell. The first command previews the selected folder, detected clients, and collisions without creating `~/aios` or changing client configuration or sync. npm may download and cache the named package. The second command runs the same pinned release and guides you through setup:
 
 ```sh
-npx dotaios@1.28.1 setup --dry-run
-npx dotaios@1.28.1 setup
+npx dotaios@1.28.2 setup --dry-run
+npx dotaios@1.28.2 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
@@ -32,19 +32,19 @@ Setup creates `~/aios`, then connects supported AI apps detected on the machine.
 Do not ask an AI assistant to fetch remote instructions and install DotAIOS for you. An assistant can help you inspect the source or explain the preview, but you should run the setup command yourself. Afterward, either you or the assistant can verify the local installation with:
 
 ```sh
-npx dotaios@1.28.1 doctor
+npx dotaios@1.28.2 doctor
 ```
 
 ### Verify before running
 
-The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `1.28.1` maps to Git tag [`v1.28.1`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.1).
+The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `1.28.2` maps to Git tag [`v1.28.2`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.2).
 
 These commands inspect registry provenance and packaged contents without running DotAIOS setup:
 
 ```sh
-npm view dotaios@1.28.1 version dist.integrity dist.tarball gitHead
-npm view dotaios@1.28.1 scripts
-npm pack dotaios@1.28.1 --dry-run
+npm view dotaios@1.28.2 version dist.integrity dist.tarball gitHead
+npm view dotaios@1.28.2 scripts
+npm pack dotaios@1.28.2 --dry-run
 ```
 
 The published package defines no `preinstall`, `install`, or `postinstall` lifecycle script. `npx` still downloads and runs the named npm package when you invoke its CLI. The human-run commands intentionally omit `npx -y`, so npm can show its first-run confirmation for the pinned package. If you do not trust the source, publisher, integrity record, or package contents, do not approve it. Interactive setup may then offer private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every optional capability defaults to No. Read [INSTALL.md](INSTALL.md) for the complete human-run sequence and [the security model](docs/security.md) for package and permission boundaries.
