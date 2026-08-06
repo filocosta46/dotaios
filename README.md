@@ -16,23 +16,38 @@ If you use more than one AI assistant, DotAIOS helps you:
 
 The free core is available now.
 
-## Install and activate
+## Install: preview, then run
 
-You do not need a GitHub account.
+You need Node.js 20 or newer. You do not need a GitHub or DotAIOS account.
 
-The simplest path is to ask a local AI assistant to set it up for you. Open Claude Code, Codex, or Cursor and paste:
-
-> Please set up DotAIOS for me. Read https://github.com/filocosta46/dotaios and follow INSTALL.md step by step. Explain anything you need from me in plain language, and do not overwrite existing files without asking.
-
-If you prefer the terminal, you need Node.js 20 or newer:
+Run these commands yourself in Terminal, PowerShell, or another system shell. The first command previews the selected folder, detected clients, and collisions without creating `~/aios` or changing client configuration or sync. npm may download and cache the named package. The second command runs the same pinned release and guides you through setup:
 
 ```sh
-npx -y dotaios@latest init --yes
-npx -y dotaios@latest activate
-npx -y dotaios@latest skills doctor --json
+npx dotaios@1.28.1 setup --dry-run
+npx dotaios@1.28.1 setup
 ```
 
-`init` creates `~/aios`. `activate` connects detected local clients without replacing unmanaged files. `skills doctor` verifies the files and links DotAIOS controls; it cannot guarantee that every client version will invoke every skill. See [INSTALL.md](INSTALL.md) for the complete agent-led setup and optional Claude Code capture.
+Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
+
+Do not ask an AI assistant to fetch remote instructions and install DotAIOS for you. An assistant can help you inspect the source or explain the preview, but you should run the setup command yourself. Afterward, either you or the assistant can verify the local installation with:
+
+```sh
+npx dotaios@1.28.1 doctor
+```
+
+### Verify before running
+
+The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `1.28.1` maps to Git tag [`v1.28.1`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.1).
+
+These commands inspect registry provenance and packaged contents without running DotAIOS setup:
+
+```sh
+npm view dotaios@1.28.1 version dist.integrity dist.tarball gitHead
+npm view dotaios@1.28.1 scripts
+npm pack dotaios@1.28.1 --dry-run
+```
+
+The published package defines no `preinstall`, `install`, or `postinstall` lifecycle script. `npx` still downloads and runs the named npm package when you invoke its CLI. The human-run commands intentionally omit `npx -y`, so npm can show its first-run confirmation for the pinned package. If you do not trust the source, publisher, integrity record, or package contents, do not approve it. Interactive setup may then offer private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every optional capability defaults to No. Read [INSTALL.md](INSTALL.md) for the complete human-run sequence and [the security model](docs/security.md) for package and permission boundaries.
 
 ## What you have afterward
 
@@ -43,7 +58,7 @@ npx -y dotaios@latest skills doctor --json
 - Long-term knowledge and sources
 - Trusted workflows your assistants can follow
 
-Your context stays in a local `~/aios` folder: readable, portable, and yours. Activation also writes small managed bridge files and skill links in client-owned configuration locations, while machine-local project path mappings live in `~/.dotaios/projects.json`. When you use an AI client, that provider processes the context you send it. You can optionally sync selected AIOS files privately between your own devices.
+Your context stays in a local `~/aios` folder: readable, portable, and yours. Activation may add a DotAIOS-managed block to `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, or `~/.gemini/GEMINI.md`, plus documented skill links for detected clients. Machine-local project path mappings live in `~/.dotaios/projects.json`. Existing unmanaged content is preserved. When you use an AI client, that provider processes the context you send it. You can optionally sync selected AIOS files privately between your own devices.
 
 Project records sync with AIOS. Managed project repositories sit under its
 ignored `workspaces/` root with their own history and credentials, so source
@@ -93,7 +108,7 @@ npx -y dotaios@latest doctor
 npx -y dotaios@latest migrate
 ```
 
-`npx ...@latest` selects the current published CLI. `migrate` previews versioned folder changes and asks for the exact plan before applying them. Your existing `~/aios` remains readable local data across releases. Re-run `activate` after changing clients or repairing managed bridges.
+`npx ...@latest` selects the newest published CLI; use an exact version when you need reproducibility. `migrate` previews versioned folder changes and asks for the exact plan before applying them. Your existing `~/aios` remains readable local data across releases. Re-run `activate` after changing clients or repairing managed bridges.
 
 ## Disconnecting or removing
 
@@ -122,8 +137,8 @@ Those commands stop managed capture and private sync. The current release does n
 
 ## Docs
 
-- [INSTALL.md](INSTALL.md) — agent-led setup
-- [Getting started](docs/getting-started.md) — terminal path
+- [INSTALL.md](INSTALL.md) — human-run install and removal
+- [Getting started](docs/getting-started.md) — product walkthrough
 - [Architecture](docs/architecture.md) · [Projects](docs/projects.md) · [Client support](docs/client-support.md) · [Security](docs/security.md) · [all guides](docs/)
 
 ## License

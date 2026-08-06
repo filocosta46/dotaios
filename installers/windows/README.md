@@ -1,6 +1,6 @@
 > **Status: not a shipped path (kept for reference).** DotAIOS onboards through
-> an AI agent — the agent installs Node.js and runs setup with no terminal typing
-> (see the repo's `INSTALL.md`). This MSI launcher is unbuilt, unsigned, and
+> a user-run, preview-first terminal setup (see the repo's `INSTALL.md`). This
+> MSI launcher is unbuilt, unsigned, and
 > unmaintained. A native installer was evaluated and rejected on KISS grounds:
 > code-signing, notarization, and per-OS CI are release infrastructure DotAIOS
 > would have to own, and the installer would still need an agent app plus Node to
@@ -14,11 +14,11 @@ This directory holds the source files for the DotAIOS `.msi` installer for Windo
 
 The MSI is a tiny launcher, not a Node.js distribution. It installs:
 
-- `setup.bat` — first-run script that detects Node.js, calls `npx -y dotaios@latest setup`, and pauses so the user can read output.
+- `setup.bat` — first-run script that detects Node.js, calls the pinned user-run setup command, and pauses so the user can read output.
 - `README.txt` — plain-English notes shown post-install.
 - A "Set up DotAIOS" shortcut in the Start Menu.
 
-This design keeps the installer tiny (~50 KB), keeps DotAIOS always at the latest version via `npx`, and avoids bundling/maintaining a Node.js distribution.
+This historical design kept the installer small, but an unsigned launcher that executes an unpinned remote package does not meet the current trust contract and is not shipped.
 
 If Node.js is missing, `setup.bat` opens https://nodejs.org in the user's default browser and asks them to install it first.
 

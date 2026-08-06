@@ -40,6 +40,27 @@ test("public claims stay inside the verified product boundary", async () => {
   assert.doesNotMatch(corpus, /every AI reads|no cloud memory|native in every tool/i);
 });
 
+test("first-time onboarding stays human-run, pinned, and free of install lifecycle scripts", async () => {
+  const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
+  for (const lifecycle of ["preinstall", "install", "postinstall"]) {
+    assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
+  }
+
+  const relativeFiles = ["README.md", "INSTALL.md", "docs/friend-setup.md", "docs/getting-started.md"];
+  const contents = await Promise.all(
+    relativeFiles.map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8"))
+  );
+  const corpus = contents.join("\n");
+  const pinned = `dotaios@${pkg.version} setup`;
+
+  assert.match(corpus, new RegExp(`${pinned.replaceAll(".", "\\.")} --dry-run`));
+  assert.match(corpus, new RegExp(pinned.replaceAll(".", "\\.")));
+  assert.doesNotMatch(contents[0], new RegExp(`^npx -y ${pinned.replaceAll(".", "\\.")}`, "m"));
+  assert.doesNotMatch(corpus, /Please set up DotAIOS for me|agent-led setup|you are on the agent path/i);
+  assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
+  assert.match(corpus, /npm may download and cache the named package/i);
+});
+
 test("commercial delivery and internal launch gates stay outside the public core", async () => {
   const forbiddenPaths = [
     "docs/beta-testing.md",

@@ -4,6 +4,24 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [1.28.1] - 2026-08-06
+
+### Added
+
+- `dotaios setup --dry-run` now previews the local folder, managed client
+  bridges, sync boundary, credential boundary, verification, and removal path
+  without creating files or changing client configuration.
+
+### Fixed
+
+- First-time onboarding is now explicitly human-run and pins the published
+  package version. Public guides no longer tell an AI assistant to fetch remote
+  instructions or execute installation commands. Package provenance, contents,
+  integrity inspection, post-install verification, and rollback are visible
+  before setup. Human commands retain npm's package confirmation, while private
+  sync, local schedules, conversation capture or backfill, and optional browser
+  downloads now all default to No and require an explicit opt-in.
+
 ## [1.28.0] - 2026-08-05
 
 ### Added

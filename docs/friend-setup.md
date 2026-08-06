@@ -2,9 +2,9 @@
 
 A one-page recipe for getting DotAIOS running on your Mac so your AI tools (Claude Code, Cursor, Codex, Gemini) know who you are, what you're working on, and how to help without asking you to re-explain everything.
 
-> **Two paths.** Manual terminal steps below, or ask a local agent (Claude Code,
-> Codex, Cursor, Gemini) to follow [`../INSTALL.md`](../INSTALL.md). Either way
-> you need Node 20+ on the machine. This is not a no-terminal consumer product.
+> **You run setup.** A local agent can inspect the source or verify the finished
+> installation, but it should not be asked to fetch remote instructions and run
+> them. You need Node 20+ on the machine. This is not a no-terminal consumer product.
 
 ## What you need before starting
 
@@ -24,13 +24,14 @@ The commands below run inside the **Terminal app** on your computer. They will n
 
 A small black-and-white window opens. Every command in this guide is pasted into that window, one line at a time.
 
-## The fast path (one command)
+## Preview, then use the one-command setup
 
 ```bash
-npx dotaios@latest setup
+npx dotaios@1.28.1 setup --dry-run
+npx dotaios@1.28.1 setup
 ```
 
-This runs the three steps below in sequence and opens your new folder when finished. If you want to understand each step or troubleshoot, follow the manual path instead.
+The preview makes no DotAIOS-managed changes: it does not create `~/aios` or change client configuration or sync. npm may cache the pinned package. The setup command runs the three steps below in sequence and opens your new folder when finished. Private GitHub sync stays off unless you explicitly opt in. If you want to inspect provenance first, follow the verification steps in [`../INSTALL.md`](../INSTALL.md).
 
 ## The manual path (5 steps)
 

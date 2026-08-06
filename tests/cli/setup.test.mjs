@@ -5,8 +5,141 @@ import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { explicitOptIn } from "../../packages/cli/src/commands/setup.mjs";
 
 const repoRoot = new URL("../..", import.meta.url).pathname;
+
+test("optional setup capabilities require an explicit yes", () => {
+  for (const answer of ["", "n", "no", "later", " "]) {
+    assert.equal(explicitOptIn(answer), false);
+  }
+  for (const answer of ["y", "Y", "yes", " YES "]) {
+    assert.equal(explicitOptIn(answer), true);
+  }
+});
+
+test("setup --dry-run previews concrete actions without DotAIOS-managed changes", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-preview-"));
+  const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
+
+  const result = spawnSync(process.execPath, [
+    path.resolve(repoRoot, "packages/cli/src/index.mjs"),
+    "setup",
+    "--dry-run",
+    "--path", aiosPath,
+    "--home", homePath
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: "/usr/bin:/bin" }
+  });
+
+  try {
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /Setup preview - no DotAIOS-managed changes made/);
+    assert.match(result.stdout, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(result.stdout, /\[would create\]/);
+    assert.match(result.stdout, /preserves unmanaged files/i);
+    assert.match(result.stdout, /private GitHub sync stays off/i);
+    assert.match(result.stdout, /does not copy credentials/i);
+    assert.match(result.stdout, /dotaios doctor/);
+    assert.match(result.stdout, /remove only DotAIOS-managed bridges/i);
+    assert.match(result.stdout, /npm may download and cache the named package/i);
+    assert.equal(fsSync.existsSync(aiosPath), false, "preview must not create the AIOS folder");
+    assert.equal(fsSync.existsSync(homePath), false, "preview must not create client configuration");
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("setup --dry-run reports an unmanaged bridge collision without changing it", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-collision-"));
+  const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
+  const bridgePath = path.join(homePath, ".claude", "CLAUDE.md");
+  const existing = "# My existing Claude instructions\n";
+  fsSync.mkdirSync(aiosPath, { recursive: true });
+  fsSync.mkdirSync(path.dirname(bridgePath), { recursive: true });
+  fsSync.writeFileSync(bridgePath, existing);
+
+  const result = spawnSync(process.execPath, [
+    path.resolve(repoRoot, "packages/cli/src/index.mjs"),
+    "setup",
+    "--dry-run",
+    "--path", aiosPath,
+    "--home", homePath
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: "/usr/bin:/bin" }
+  });
+
+  try {
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /\[would populate\].*existing empty directory/);
+    assert.match(result.stdout, /\[would preserve collision\].*CLAUDE\.md.*existing unmanaged file/);
+    assert.equal(fsSync.readFileSync(bridgePath, "utf8"), existing);
+    assert.deepEqual(fsSync.readdirSync(aiosPath), []);
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("setup --dry-run reports that a non-empty target would stop", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-blocked-"));
+  const aiosPath = path.join(tmp, "aios");
+  fsSync.mkdirSync(aiosPath, { recursive: true });
+  fsSync.writeFileSync(path.join(aiosPath, "keep.txt"), "keep\n");
+
+  const result = spawnSync(process.execPath, [
+    path.resolve(repoRoot, "packages/cli/src/index.mjs"),
+    "setup",
+    "--dry-run",
+    "--path", aiosPath,
+    "--home", path.join(tmp, "home")
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, PATH: "/usr/bin:/bin" }
+  });
+
+  try {
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /\[would stop\].*already exists and is not empty/);
+    assert.doesNotMatch(result.stdout, /\[would create\].*aios/);
+    assert.equal(fsSync.readFileSync(path.join(aiosPath, "keep.txt"), "utf8"), "keep\n");
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+for (const args of [
+  ["--all"],
+  ["--overwrite"],
+  ["--vault-path", "/tmp/external-vault"]
+]) {
+  test(`setup --dry-run rejects unsupported preview option ${args[0]}`, () => {
+    const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-option-preview-"));
+    const aiosPath = path.join(tmp, "aios");
+    const result = spawnSync(process.execPath, [
+      path.resolve(repoRoot, "packages/cli/src/index.mjs"),
+      "setup",
+      "--dry-run",
+      "--path", aiosPath,
+      "--home", path.join(tmp, "home"),
+      ...args
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: "/usr/bin:/bin" }
+    });
+
+    try {
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /cannot safely preview.*option/i);
+      assert.equal(fsSync.existsSync(aiosPath), false);
+    } finally {
+      fsSync.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
 
 describe("setupCommand — step isolation", () => {
   it("prints clear failure message and does not throw when activate fails", async () => {

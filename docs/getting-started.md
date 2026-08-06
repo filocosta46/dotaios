@@ -2,11 +2,11 @@
 
 DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of it as the shared notebook for your AI companion: context, memory, and skills stay on your machine as plain files.
 
-> **Audience.** DotAIOS free core is for people already using local agents and comfortable with Node / `npx`. A local agent can still run setup for you via [INSTALL.md](../INSTALL.md). The commands below are the direct terminal path. See the [README](../README.md) for the product promise and honest limits.
+> **Audience.** DotAIOS free core is for people already using local agents and comfortable with Node / `npx`. Setup is run by the user in a system terminal. An agent may inspect or verify it, but should not fetch remote instructions and execute them. See the [README](../README.md) for the product promise and honest limits.
 
 ```bash
-npx dotaios@latest init
-npx dotaios@latest activate
+npx dotaios@1.28.1 setup --dry-run
+npx dotaios@1.28.1 setup
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
@@ -16,7 +16,7 @@ needed, and `@latest` always fetches the newest published release rather than a
 cached older copy. Later examples in this guide drop `@latest` for brevity —
 add it whenever you want to be sure you are on the current version.
 
-The init flow asks five questions, then creates starter context and memory files. `activate` creates small bridge files in the global memory locations used by Claude Code, Codex, and Gemini.
+The setup flow asks a few questions, creates starter context and memory files, then adds managed bridge blocks or links for detected Claude Code, Codex, and Gemini installations. Private sync is not enabled.
 
 For Cursor or project-scoped agents, attach a project folder:
 
