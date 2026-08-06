@@ -350,7 +350,7 @@ function round(value) {
 function listSkills(skills) {
   if (skills.length === 0) {
     console.log("No skills installed.");
-    console.log("Add one: dotaios skill add <url-or-path>");
+    console.log("Add a reviewed local folder: dotaios skill add <local-folder>");
     return;
   }
 

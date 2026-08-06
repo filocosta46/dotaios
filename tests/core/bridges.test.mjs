@@ -3,7 +3,37 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { bridgeContent, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../packages/core/src/bridges.mjs";
+import {
+  MANAGED_END,
+  MANAGED_START,
+  bridgeContent,
+  bridgePath,
+  findManagedBlock,
+  isAgentInstalled,
+  loadAgentRegistry
+} from "../../packages/core/src/bridges.mjs";
+
+test("managed bridge detection requires ordered markers", () => {
+  const block = `${MANAGED_START}\nmanaged\n${MANAGED_END}`;
+  assert.deepEqual(findManagedBlock(`before\n${block}\nafter`), {
+    start: 7,
+    end: 7 + block.length,
+    text: block
+  });
+  assert.equal(findManagedBlock(`${MANAGED_END}\n${MANAGED_START}`), null);
+  assert.equal(findManagedBlock(MANAGED_START), null);
+
+  const malformed = [
+    `${MANAGED_END}\n${block}`,
+    `${block}\n${MANAGED_END}`,
+    `${MANAGED_START}\n${block}`,
+    `${block}\n${MANAGED_START}`,
+    `${block}\n${block}`
+  ];
+  for (const content of malformed) {
+    assert.equal(findManagedBlock(content), null, "extra managed markers must fail closed");
+  }
+});
 
 test("registry preserves non-bridge runtimes such as Hermes", async () => {
   const registry = await loadAgentRegistry();

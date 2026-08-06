@@ -44,15 +44,19 @@ Lightpanda is never downloaded as an unattended default. Interactive setup requi
 
 ## Plugins
 
-Plugins can come from trusted local folders or trusted git URLs. The manifest declares permissions, and the CLI prints them before install, but DotAIOS does not sandbox plugin code.
+DotAIOS installs plugins and raw skills only from reviewed local folders. Remote
+URL inputs are refused. If a source lives in Git, acquire and pin the revision
+outside DotAIOS, review that local checkout, then pass its folder to the CLI.
+The manifest declares permissions, and the CLI prints them before install, but
+DotAIOS does not sandbox plugin code.
 
 Current rule:
 
 - Install only plugins you trust and have reviewed locally.
 - Use `--dry-run` before install.
 - Do not treat the current plugin system as a public marketplace.
-
-Git URL installs are supported, but they are still trust-based. Prefer known sources, run `npx dotaios@latest install <plugin> --dry-run`, and review permissions and source before install.
+- Install with `dotaios install <local-plugin-path> --dry-run`, then repeat
+  without `--dry-run` only after the source and permission preview are acceptable.
 
 ## Integration Safety Lanes
 

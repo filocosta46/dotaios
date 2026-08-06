@@ -15,6 +15,7 @@ import {
   MANAGED_END,
   MANAGED_START,
   bridgePath,
+  findManagedBlock,
   isAgentInstalled,
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
@@ -266,7 +267,7 @@ async function printSetupPreview(aiosPath, args) {
   }
 
   const homePath = path.resolve(expandHome(extractOption(args, "--home") || os.homedir()));
-  const target = await previewSetupTarget(aiosPath, args);
+  const target = await previewSetupTarget(aiosPath);
 
   console.log("DotAIOS Setup preview - no DotAIOS-managed changes made");
   console.log("Scope: AIOS target, detected global bridge files, and managed skill-link directories.");
@@ -302,7 +303,7 @@ async function printSetupPreview(aiosPath, args) {
   console.log("To remove it, first disable capture and sync, then remove only DotAIOS-managed bridges and archive or delete the AIOS folder. Unmanaged client configuration is left alone.");
 }
 
-async function previewSetupTarget(aiosPath, args) {
+async function previewSetupTarget(aiosPath) {
   let stats;
   try {
     stats = await fs.lstat(aiosPath);
@@ -318,17 +319,10 @@ async function previewSetupTarget(aiosPath, args) {
   const entries = await fs.readdir(aiosPath);
   if (entries.length === 0) return { action: "[would populate]", note: "existing empty directory" };
 
-  if (!args.includes("--force") && !args.includes("--overwrite")) {
-    return {
-      action: "[would stop]",
-      note: "target already exists and is not empty; inspect it with `dotaios doctor`",
-      blocked: true
-    };
-  }
-
   return {
-    action: args.includes("--overwrite") ? "[would preflight replacement]" : "[would preflight missing files]",
-    note: "existing content requires the command's full safety checks"
+    action: "[would stop]",
+    note: "target already exists and is not empty; inspect it with `dotaios doctor`",
+    blocked: true
   };
 }
 
@@ -377,8 +371,11 @@ async function previewManagedBridge(destination) {
   }
 
   const current = await fs.readFile(destination, "utf8");
-  if (current.includes(MANAGED_START) && current.includes(MANAGED_END)) {
+  if (findManagedBlock(current)) {
     return `[would update managed block] ${destination} (content outside the block preserved)`;
+  }
+  if (current.includes(MANAGED_START) || current.includes(MANAGED_END)) {
+    return `[would preserve collision] ${destination} (managed markers are malformed; no overwrite)`;
   }
   return `[would preserve collision] ${destination} (existing unmanaged file; no overwrite)`;
 }

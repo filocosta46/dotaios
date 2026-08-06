@@ -4,6 +4,25 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [1.28.2] - 2026-08-06
+
+### Fixed
+
+- Setup preview and activation now share one managed-block parser, so malformed
+  or reversed markers are preserved and reported consistently.
+- First-time guides pin every setup path and distinguish deliberate later
+  `@latest` maintenance commands.
+- Remote plugin URLs are refused. Plugins must be downloaded at a pinned
+  revision, inspected, previewed, and installed from a local folder.
+- Removal guidance now names every managed surface and preserves unmanaged
+  client configuration.
+
+### Removed
+
+- The unbuilt, unsigned Windows MSI launcher and its manual build workflow.
+  The launcher bypassed the preview-first pinned install contract and was not a
+  supported distribution path.
+
 ## [1.28.1] - 2026-08-06
 
 ### Added

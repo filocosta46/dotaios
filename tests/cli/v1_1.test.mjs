@@ -239,9 +239,9 @@ test("schedule run-due runs due DotAIOS schedules", () => {
   assert.match(read(path.join(aiosPath, "schedules.yml")), /last_run:/);
 });
 
-test("install refuses unsupported URL schemes", () => {
+test("install refuses remote URL schemes", () => {
   const result = runFail(["install", "ftp://example.com/plugin"]);
-  assert.match(result.stderr, /Unsupported URL scheme/);
+  assert.match(result.stderr, /Remote plugin sources are not executed directly/);
 });
 
 function setupAios() {

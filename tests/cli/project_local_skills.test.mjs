@@ -310,6 +310,28 @@ test("attach preserves a Cursor rule with reversed managed markers", () => {
   }
 });
 
+test("attach preserves a retired Cursor rule with duplicate managed blocks", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const rulePath = path.join(projectPath, ".cursor", "rules", "dotaios.mdc");
+  const block = [
+    "<!-- dotaios-managed:start -->",
+    "legacy DotAIOS Cursor bridge",
+    "<!-- dotaios-managed:end -->"
+  ].join("\n");
+  const original = `user content before\n${block}\n${block}\nuser content after\n`;
+  fs.mkdirSync(path.dirname(rulePath), { recursive: true });
+  fs.writeFileSync(rulePath, original);
+
+  try {
+    const output = run(["attach", projectPath, "--path", aiosPath]);
+
+    assert.match(output, /managed markers are malformed/i);
+    assert.equal(fs.readFileSync(rulePath, "utf8"), original);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("attach --dry-run previews project-local skill wiring without changing files", () => {
   const { tempRoot, aiosPath, projectPath } = setupProject();
   addForeignEntries(projectPath);

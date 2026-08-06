@@ -1,8 +1,9 @@
 # Plugin Development
 
-Plugins are optional local extensions. DotAIOS supports installing a trusted plugin from a local directory or a git URL. A plugin contains a `manifest.json`, a `SKILL.md`, and optional source code.
-
-Remote source installs are supported through git URLs (`https://...git`, `git@...`, optional `--subdir`). For safety, review source and permissions before installing.
+Plugins are optional local extensions. DotAIOS installs a trusted plugin from a
+local directory containing a `manifest.json`, a `SKILL.md`, and optional source
+code. It refuses remote URLs so acquiring and reviewing source stays a separate,
+human-controlled step.
 
 ```json
 {
@@ -49,19 +50,20 @@ This copies the plugin into `~/aios/plugins/<name>/` and updates `~/aios/skills/
 
 Use `--path <dir>` to install into a non-default AIOS folder.
 
-Install from git when needed:
+For a plugin hosted in Git, pin and clone or download the exact revision outside
+DotAIOS. Review it, then pass the local folder to the dry run:
 
 ```bash
-npx dotaios@latest install https://github.com/owner/repo.git
-npx dotaios@latest install https://github.com/owner/repo.git --subdir packages/my-plugin
+npx dotaios@latest install ./reviewed-repo --dry-run
+npx dotaios@latest install ./reviewed-repo
+npx dotaios@latest install ./reviewed-repo --subdir packages/my-plugin --dry-run
 ```
 
-Before installing from git, confirm:
+Before installing, confirm:
 
-- `git` is installed and available in your terminal.
-- You have network access to the repository host.
-- Private repositories are authenticated (GitHub token or SSH key configured locally).
-- You run `npx dotaios@latest install <plugin> --dry-run` first to preview permissions.
+- The checked-out or downloaded revision is the one you intended to inspect.
+- The source and manifest permissions are acceptable.
+- You run the local-folder command with `--dry-run` first.
 
 For trust and safety expectations, see `docs/security.md#plugins`.
 

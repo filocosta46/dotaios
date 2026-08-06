@@ -9,6 +9,7 @@ import {
   MANAGED_START,
   bridgeContent,
   bridgePath,
+  findManagedBlock,
   isAgentInstalled,
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
@@ -552,9 +553,17 @@ async function writeManagedFile(
   const current = await fs.readFile(destination, "utf8");
   const existingBlock = findManagedBlock(current);
 
-  // No usable managed block: this is somebody else's file. Replacing it whole
-  // stays an explicit --overwrite decision.
+  // No usable managed block: any DotAIOS marker is ambiguous and always fails
+  // closed. A truly unmanaged file can be replaced only with explicit overwrite.
   if (!existingBlock) {
+    const hasManagedMarker = current.includes(managedStart) || current.includes(managedEnd);
+    if (hasManagedMarker) {
+      return {
+        action: "kept",
+        path: destination,
+        note: "managed markers are malformed; existing file kept"
+      };
+    }
     if (!overwrite) {
       return { action: "kept", path: destination, note: "existing unmanaged file" };
     }
@@ -750,17 +759,6 @@ function sameMovedRegularFile(actual, expected) {
     && (actual.mode & 0o777) === (expected.mode & 0o777);
 }
 
-// Locate the managed block. Returns null when a marker is missing or the
-// markers are out of order, so a malformed file is never spliced blind.
-function findManagedBlock(text) {
-  const start = text.indexOf(managedStart);
-  if (start < 0) return null;
-  const endStart = text.indexOf(managedEnd, start + managedStart.length);
-  if (endStart < 0) return null;
-  const end = endStart + managedEnd.length;
-  return { start, end, text: text.slice(start, end) };
-}
-
 async function lstatIfPresent(destination) {
   try {
     return await fs.lstat(destination);
@@ -794,11 +792,11 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
   const current = await fs.readFile(destination, "utf8");
   const managedBlock = findManagedBlock(current);
   if (!managedBlock) {
-    const hasBothMarkers = current.includes(managedStart) && current.includes(managedEnd);
+    const hasManagedMarker = current.includes(managedStart) || current.includes(managedEnd);
     return {
       action: "kept",
       path: destination,
-      note: hasBothMarkers ? "managed markers are out of order" : "existing unmanaged file"
+      note: hasManagedMarker ? "managed markers are malformed; existing file kept" : "existing unmanaged file"
     };
   }
   let remainder = `${current.slice(0, managedBlock.start)}${current.slice(managedBlock.end)}`;

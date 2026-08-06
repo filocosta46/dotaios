@@ -209,5 +209,5 @@ test("memory-maintenance skill ships in skills/", async () => {
 
 test("INSTALL.md offers the memory-maintenance skill to a new user", async () => {
   const install = await fs.readFile(path.resolve("INSTALL.md"), "utf8");
-  assert.match(install, /\/memory-maintenance/);
+  assert.match(install, /use the `memory-maintenance` skill/);
 });
