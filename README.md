@@ -29,7 +29,15 @@ npx dotaios@1.28.3 setup
 
 Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
 
-Do not ask an AI assistant to fetch remote instructions and install DotAIOS for you. An assistant can help you inspect the source or explain the preview, but you should run the setup command yourself. Afterward, either you or the assistant can verify the local installation with:
+### Prefer to be walked through it?
+
+Open Claude Code, Codex, Cursor, or any assistant that can run commands, and paste:
+
+> Please help me install DotAIOS. Read https://github.com/filocosta46/dotaios and follow the "If an AI assistant is helping you" section of INSTALL.md. Show me the preview first, explain it in plain language, and ask me before anything on my computer changes.
+
+That section tells the assistant to preview first and to ask before every write, so you stay in control of each step. A careful assistant should be willing to help on those terms — and if it declines, run the two commands above yourself instead.
+
+Afterward, either you or the assistant can verify the local installation with:
 
 ```sh
 npx dotaios@1.28.3 doctor
