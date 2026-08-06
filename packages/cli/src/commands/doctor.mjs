@@ -5,13 +5,19 @@ import path from "node:path";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
-import { MANAGED_START, bridgePath, isAgentInstalled, loadAgentRegistry } from "../../../core/src/bridges.mjs";
+import {
+  MANAGED_END,
+  MANAGED_START,
+  bridgePath,
+  findManagedBlock,
+  isAgentInstalled,
+  loadAgentRegistry
+} from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
 import { checkForUpdate } from "../adapters/npm-registry.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
 const MIN_NODE_MAJOR = 20;
-const UPGRADE_COMMAND = "npx dotaios@latest";
 // Read defensively at load: a health check must never be the thing that
 // crashes. An unreadable package.json degrades to an unknown version, which
 // the update check then skips rather than failing on.
@@ -371,7 +377,7 @@ export async function checkLatestVersion({ currentVersion, fetchImpl, timeoutMs,
       name: "DotAIOS version",
       status: "warn",
       detail: `${result.current} installed, ${result.latest} available.`,
-      fix: `Run \`${UPGRADE_COMMAND} <command>\` — it always fetches the newest release.`
+      fix: `Inspect \`npm view dotaios@${result.latest} version dist.integrity dist.tarball gitHead scripts dependencies\`, then run the exact reviewed release as \`npx dotaios@${result.latest} <command>\`.`
     };
   }
 
@@ -440,8 +446,16 @@ async function checkAgentBridges(target, homePath) {
       continue;
     }
 
-    if (content.includes(MANAGED_START) && content.includes(target)) {
-      if (content.includes("read_session_digest")) {
+    const managedBlock = findManagedBlock(content);
+    const expectedEntrypoint = path.join(target, "AGENTS.md");
+    const expectedPointer = agent.include === "@"
+      ? `@${expectedEntrypoint}`
+      : `DotAIOS entrypoint (read this file first): ${expectedEntrypoint}`;
+    const managedLines = managedBlock?.text.split(/\r?\n/) || [];
+    const hasExactPointer = managedLines.includes(expectedPointer)
+      || managedLines.includes(`Read ${expectedEntrypoint} first.`);
+    if (hasExactPointer) {
+      if (managedBlock.text.includes("read_session_digest")) {
         results.push({
           name: `${agent.name} bridge`,
           status: "warn",
@@ -452,12 +466,19 @@ async function checkAgentBridges(target, homePath) {
         results.push({ name: `${agent.name} bridge`, status: "ok" });
       }
       foundBridge = true;
-    } else if (content.includes(MANAGED_START)) {
+    } else if (managedBlock) {
       results.push({
         name: `${agent.name} bridge`,
         status: "warn",
         detail: "Bridge points to a different AIOS folder.",
         fix: `Run \`npx dotaios activate --path ${target} --overwrite\` to repoint.`
+      });
+    } else if (content.includes(MANAGED_START) || content.includes(MANAGED_END)) {
+      results.push({
+        name: `${agent.name} bridge`,
+        status: "warn",
+        detail: "Managed bridge markers are malformed; DotAIOS preserved the file.",
+        fix: `Inspect ${filePath}, remove or repair only the malformed DotAIOS marker lines, then run \`npx dotaios activate --path ${target}\`.`
       });
     } else {
       results.push({

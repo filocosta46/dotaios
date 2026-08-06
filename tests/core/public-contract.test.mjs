@@ -42,6 +42,7 @@ test("public claims stay inside the verified product boundary", async () => {
 
 test("first-time onboarding stays human-run, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
+  assert.equal(pkg.version, "1.28.3", "the public onboarding contract must target the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
   }
@@ -79,7 +80,7 @@ test("first-time onboarding stays human-run, pinned, and free of install lifecyc
   assert.match(documents["INSTALL.md"], /^npx dotaios@[^\s]+ skills doctor$/m, "INSTALL must lead with human-readable skill verification");
   assert.match(documents["INSTALL.md"], /Do not use this for your personal installation/i, "INSTALL must separate test automation from personal setup");
   assert.match(documents["INSTALL.md"], /github\.com\/filocosta46\/dotaios\/issues/, "INSTALL must provide a support handoff");
-  assert.match(documents["INSTALL.md"], /1\.28\.2 removal contract/i, "INSTALL must scope removal instructions to the installed release");
+  assert.match(documents["INSTALL.md"], new RegExp(`${pkg.version.replaceAll(".", "\\.")} removal contract`, "i"), "INSTALL must scope removal instructions to the installed release");
   assert.match(documents["INSTALL.md"], /doctor --path <aios-path>/i, "INSTALL must make custom-path removal inspectable");
   assert.match(documents["INSTALL.md"], /retired `~\/\.cursor\/skills`.*`~\/\.gemini\/skills`.*`~\/\.gemini\/config\/skills`/is, "INSTALL must cover retired global skill targets");
   assert.match(documents["INSTALL.md"], /\.cursor\/rules\/dotaios\.mdc.*remove only that block/is, "INSTALL must cover the retired project Cursor bridge");
@@ -119,6 +120,46 @@ test("first-time onboarding stays human-run, pinned, and free of install lifecyc
     /remote\s+URL inputs are refused/i,
     "the security guide must state the executable remote-source boundary"
   );
+});
+
+test("public update guidance reviews metadata before one exact-version upgrade", async () => {
+  const documents = Object.fromEntries(await Promise.all(
+    ["README.md", "INSTALL.md"].map(async (relativePath) => [
+      relativePath,
+      await fs.readFile(path.join(repoRoot, relativePath), "utf8")
+    ])
+  ));
+  const updateSections = {
+    "README.md": documents["README.md"].split("## Updating")[1]?.split(/\n## /)[0] || "",
+    "INSTALL.md": documents["INSTALL.md"].split("## Update")[1]?.split(/\n## /)[0] || ""
+  };
+
+  for (const [relativePath, section] of Object.entries(updateSections)) {
+    assert.match(
+      section,
+      /npm view dotaios@latest version dist\.integrity dist\.tarball gitHead scripts dependencies/,
+      `${relativePath} must inspect registry metadata before executing a release`
+    );
+    assert.doesNotMatch(section, /npx(?: -y)? dotaios@latest/, `${relativePath} must never execute mutable @latest during an upgrade`);
+    assert.doesNotMatch(section, /npx -y/, `${relativePath} must retain npm's confirmation in the trust-critical upgrade flow`);
+    for (const command of [
+      "--version",
+      "doctor",
+      "migrate",
+      "migrate --apply <plan-id>",
+      "activate",
+      "skills doctor",
+      "capture enable claude-code",
+      "mcp config --agent <agent>"
+    ]) {
+      assert.match(
+        section,
+        new RegExp(`^npx dotaios@<version> ${command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+        `${relativePath} must document exact-version ${command}`
+      );
+    }
+    assert.match(section, /MCP.*does not.*edit.*client config/is, `${relativePath} must require the printed MCP fragment to be reapplied manually`);
+  }
 });
 
 test("commercial delivery and internal launch gates stay outside the public core", async () => {

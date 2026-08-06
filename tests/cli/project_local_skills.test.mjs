@@ -29,6 +29,16 @@ function run(args, { home = sandboxHome } = {}) {
   return `${result.stdout}\n${result.stderr}`;
 }
 
+function runFailure(args, { home = sandboxHome } = {}) {
+  const result = spawnSync(process.execPath, [cli, ...args], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, HOME: home }
+  });
+  assert.notEqual(result.status, 0, `Command unexpectedly passed: dotaios ${args.join(" ")}`);
+  return `${result.stdout}\n${result.stderr}`;
+}
+
 function setupProject({ withSkills = true } = {}) {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-project-skills-"));
   const aiosPath = path.join(tempRoot, "aios");
@@ -461,9 +471,10 @@ test("attach does not overwrite foreign symlinked bridge files", () => {
   fs.symlinkSync(externalCursor, path.join(projectPath, ".cursor", "rules", "dotaios.mdc"), "file");
 
   try {
-    const output = run(["attach", projectPath, "--path", aiosPath]);
+    const output = runFailure(["attach", projectPath, "--path", aiosPath]);
 
     assert.match(output, /unsafe.*target|target.*unsafe/i);
+    assert.match(output, /Attach needs attention/i);
     assert.equal(fs.readFileSync(externalAgents, "utf8"), foreignAgents);
     assert.equal(fs.readFileSync(externalCursor, "utf8"), foreignCursor);
   } finally {

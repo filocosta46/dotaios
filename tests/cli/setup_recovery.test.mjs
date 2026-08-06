@@ -160,10 +160,91 @@ test("an activation failure exits non-zero and records a failed install", () => 
   assert.equal(installEnd?.outcome, "fail", "a failed activation is a failed install, not a warning");
   assert.equal(
     fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
-    false,
-    "a handled activation failure that directs the user to activate must close the setup transaction"
+    true,
+    "a failed activation must retain the exact setup ownership marker for a safe identical retry"
   );
-  assert.match(result.stderr, /dotaios activate/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /re-run the identical `dotaios setup` command/i);
+
+  fs.unlinkSync(invalidHomePath);
+  fs.mkdirSync(invalidHomePath);
+  const retry = runSetup(sandbox, ["--yes", "--all", "--home", invalidHomePath]);
+  assert.equal(retry.status, 0, `${retry.stdout}\n${retry.stderr}`);
+  assert.match(retry.stdout, /Recovered an unfinished folder/);
+  assert.equal(
+    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    false,
+    "the successful identical retry must close the setup transaction"
+  );
+});
+
+test("a raced skill catalog is preserved and the identical setup recovers after repair", () => {
+  const sandbox = makeSandbox("setup-catalog-race");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_RACE_SETUP_CATALOGS: "1"
+  });
+  const markerPath = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const indexPath = path.join(sandbox.aiosPath, "skills", "INDEX.md");
+  const resolverPath = path.join(sandbox.aiosPath, "skills", "RESOLVER.md");
+
+  assert.notEqual(first.status, 0);
+  assert.match(first.stderr, /skill catalog changed while init was running/i);
+  assert.equal(fs.readFileSync(indexPath, "utf8"), "foreign index bytes\n");
+  assert.equal(fs.readFileSync(resolverPath, "utf8"), "foreign resolver bytes\n");
+  assert.equal(fs.existsSync(markerPath), true, "setup ownership must survive the rejected race");
+
+  fs.unlinkSync(indexPath);
+  fs.unlinkSync(resolverPath);
+  const retry = runSetup(sandbox, ["--yes"]);
+
+  assert.equal(retry.status, 0, `${retry.stdout}\n${retry.stderr}`);
+  assert.match(retry.stdout, /Recovered an unfinished folder/);
+  assert.equal(fs.existsSync(markerPath), false, "a completed identical retry closes ownership");
+  assert.match(fs.readFileSync(indexPath, "utf8"), /# Installed Skills/);
+  assert.match(fs.readFileSync(resolverPath, "utf8"), /# Skill Resolver/);
+});
+
+test("a raced generated entrypoint blocks activation and recovers without overwriting it", () => {
+  const sandbox = makeSandbox("setup-entrypoint-race");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_RACE_SETUP_ENTRYPOINT: "1"
+  });
+  const markerPath = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const entrypointPath = path.join(sandbox.aiosPath, "AGENTS.md");
+
+  assert.notEqual(first.status, 0);
+  assert.match(first.stderr, /setup-owned path changed while setup was running/i);
+  assert.equal(fs.readFileSync(entrypointPath, "utf8"), "foreign entrypoint bytes\n");
+  assert.equal(fs.existsSync(markerPath), true);
+  assert.equal(fs.existsSync(path.join(sandbox.homePath, ".claude", "CLAUDE.md")), false);
+
+  fs.unlinkSync(entrypointPath);
+  const retry = runSetup(sandbox, ["--yes"]);
+
+  assert.equal(retry.status, 0, `${retry.stdout}\n${retry.stderr}`);
+  assert.match(retry.stdout, /Recovered an unfinished folder/);
+  assert.equal(fs.existsSync(markerPath), false);
+  assert.match(fs.readFileSync(entrypointPath, "utf8"), /# My AIOS/);
+});
+
+test("a generated entrypoint changed after init is revalidated before activation", () => {
+  const sandbox = makeSandbox("setup-post-init-entrypoint-race");
+  const first = runSetup(sandbox, ["--yes"], {
+    DOTAIOS_TEST_RACE_SETUP_AFTER_INIT_ENTRYPOINT: "1"
+  });
+  const markerPath = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+  const entrypointPath = path.join(sandbox.aiosPath, "AGENTS.md");
+
+  assert.notEqual(first.status, 0);
+  assert.match(first.stderr, /setup-owned path changed while setup was running/i);
+  assert.equal(fs.readFileSync(entrypointPath, "utf8"), "foreign bytes after init\n");
+  assert.equal(fs.existsSync(markerPath), true);
+  assert.equal(fs.existsSync(path.join(sandbox.homePath, ".claude", "CLAUDE.md")), false);
+
+  fs.unlinkSync(entrypointPath);
+  const retry = runSetup(sandbox, ["--yes"]);
+  assert.equal(retry.status, 0, `${retry.stdout}\n${retry.stderr}`);
+  assert.equal(fs.existsSync(markerPath), false);
+  assert.match(fs.readFileSync(entrypointPath, "utf8"), /# My AIOS/);
 });
 
 test("the retry after a failed setup reports the original error, not a folder collision", () => {

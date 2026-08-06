@@ -83,10 +83,13 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
     setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle);
+    await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
+    if (setupTransactionActive) {
+      await assertCompletedSetupTransactionTree(aiosPath, setupTransactionActive.transaction, passthrough);
+    }
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
     await emitReliabilityMetric(aiosPath, { type: "install_start", command: "setup", run_id: runId });
-    await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
   } catch (err) {
     // createAios: false — a metric must never be the thing that creates the
     // folder a failed install did not. Otherwise the retry this very message
@@ -105,9 +108,8 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
       }, dropIfMissing);
     }
     console.error(`Step 1 failed: ${err.message}`);
-    console.error("Re-run: dotaios init to retry this step.");
     console.error("");
-    console.error("Setup could not complete. Fix the error above, then re-run: dotaios setup");
+    console.error("Setup could not complete. Fix the error above, then re-run the identical `dotaios setup` command.");
     process.exitCode = 1;
     return;
   }
@@ -115,23 +117,56 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   // Step 2: activate (requires aios.json from init)
   let activateOk = true;
   let configuredContextCount = 0;
+  let detectedClientCount = 0;
+  let blockedContextCount = 0;
+  let blockedCatalogCount = 0;
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
   console.log("");
   await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "activate", run_id: runId });
   try {
-    const activation = await activateCommand(passthrough, { lifecycle: lifecycle.activation });
+    const activation = await activateCommand(passthrough, {
+      lifecycle: {
+        ...lifecycle.activation,
+        skillsIndexWriteMode: passthrough.includes("--overwrite") ? "overwrite" : "preserve"
+      }
+    });
+    detectedClientCount = activation.detectedClientCount;
     configuredContextCount = activation.configuredContextCount;
-    const outcome = configuredContextCount > 0 ? "ok" : "warn";
+    blockedContextCount = activation.blockedContextCount;
+    blockedCatalogCount = activation.blockedCatalogCount;
+    if (blockedContextCount > 0 || blockedCatalogCount > 0) {
+      activateOk = false;
+      process.exitCode = 1;
+    }
+    const outcome = activateOk ? (configuredContextCount > 0 ? "ok" : "warn") : "fail";
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome });
   } catch (err) {
     activateOk = false;
     process.exitCode = 1;
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
     console.error(`Step 2 failed: ${err.message}`);
-    console.error("Re-run: dotaios activate to retry connecting your tools.");
+    console.error("Fix the reported problem, then re-run the identical `dotaios setup` command.");
     console.error("");
   }
+  if (!activateOk) {
+    console.log("");
+    console.log("Folder created. Tool connection needs attention; setup stopped before optional features.");
+    if (blockedContextCount > 0 || blockedCatalogCount > 0) {
+      console.log(`Preserved ${blockedContextCount} client bridge collision(s) and ${blockedCatalogCount} skill catalog collision(s).`);
+    }
+    console.log("Fix the reported collision, then re-run the identical `dotaios setup` command.");
+    await emitReliabilityMetric(aiosPath, {
+      type: "install_end",
+      command: "setup",
+      outcome: "fail",
+      phase: "activate",
+      run_id: runId,
+      duration_ms: Date.now() - startedAt
+    });
+    return;
+  }
+
   if (setupTransactionActive) {
     if (!await unlinkSetupMarkerTempIfSameFile(
       setupTransactionPath(aiosPath),
@@ -223,12 +258,13 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   }
 
   console.log("");
-  if (!activateOk) {
-    console.log("Folder created. Tool connection needs attention — run `dotaios activate` to finish.");
-    console.log("Once connected, to get started:");
-  } else if (configuredContextCount === 0) {
+  if (configuredContextCount === 0) {
     console.log("Folder ready. No supported local AI app was connected yet.");
-    console.log("Install Claude Code, Codex, or Gemini CLI, then run `dotaios activate`.");
+    if (detectedClientCount === 0) {
+      console.log("Install Claude Code, Codex, or Gemini CLI, then run `dotaios activate`.");
+    } else {
+      console.log("Detected tools use native or project-specific configuration; review `dotaios skills doctor`.");
+    }
     console.log("To explore the folder now:");
   } else {
     console.log(`Folder ready. Connected context for ${configuredContextCount} local AI app${configuredContextCount === 1 ? "" : "s"}.`);
@@ -411,6 +447,9 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
         if (transactionStarted) await lifecycle.afterCreateBaseTree?.({ aiosPath });
       }
     });
+    if (transactionStarted) {
+      await assertCompletedSetupTransactionTree(aiosPath, transactionStarted.transaction, passthrough);
+    }
     return transactionStarted;
   } catch (error) {
     if (!/exists and is not empty/i.test(error.message)) throw error;
@@ -420,8 +459,9 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
         plan: transaction.transaction.plan,
         allowSetupTransactionRecovery: true
       });
+      await assertCompletedSetupTransactionTree(aiosPath, transaction.transaction, passthrough);
       console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
-      return { markerStats: transaction.markerStats };
+      return { markerStats: transaction.markerStats, transaction: transaction.transaction };
     }
     if (!(await isFailedSetupResidue(aiosPath))) throw error;
     await initCommand([...passthrough, "--force"]);
@@ -507,7 +547,7 @@ async function beginSetupTransaction(aiosPath, passthrough, plan, lifecycle = {}
   if (entries.length !== 1 || entries[0] !== SETUP_TRANSACTION_FILE) {
     throw new Error(`Target changed while setup was preparing it: ${aiosPath}`);
   }
-  return { markerStats: temporaryMarkerStats };
+  return { markerStats: temporaryMarkerStats, transaction };
 }
 
 async function cleanupPrepublicationSetupMarkerTemps(aiosPath, passthrough) {
@@ -586,15 +626,7 @@ async function readRecoverableSetupTransaction(aiosPath, passthrough) {
   const extra = actual.filter((entry) => !expectedByPath.has(entry.path));
   let activationConfigEntry = null;
   try {
-    const configPatch = plannedActivationConfigPatch(passthrough);
-    if (configPatch) {
-      const content = `${JSON.stringify({ ...transaction.plan.config, ...configPatch }, null, 2)}\n`;
-      activationConfigEntry = {
-        path: "aios.json",
-        type: "file",
-        sha256: createHash("sha256").update(content).digest("hex")
-      };
-    }
+    activationConfigEntry = plannedActivationManifestEntry(transaction, passthrough);
   } catch {
     return null;
   }
@@ -608,6 +640,41 @@ async function readRecoverableSetupTransaction(aiosPath, passthrough) {
   if (!(await isRecoverableSetupMetrics(aiosPath, extra))) return null;
 
   return { transaction, markerStats };
+}
+
+async function assertCompletedSetupTransactionTree(aiosPath, transaction, passthrough) {
+  const actual = await treeManifest(aiosPath, { ignoreRoot: SETUP_TRANSACTION_FILE });
+  const expectedByPath = new Map(transaction.manifest.map((entry) => [entry.path, entry]));
+  const actualByPath = new Map(actual.map((entry) => [entry.path, entry]));
+  const activationConfigEntry = plannedActivationManifestEntry(transaction, passthrough);
+
+  for (const expected of transaction.manifest) {
+    const observed = actualByPath.get(expected.path);
+    const matchesExpected = JSON.stringify(observed) === JSON.stringify(expected);
+    const matchesActivationConfig = expected.path === "aios.json"
+      && activationConfigEntry
+      && JSON.stringify(observed) === JSON.stringify(activationConfigEntry);
+    if (!matchesExpected && !matchesActivationConfig) {
+      throw new Error(`Setup-owned path changed while setup was running; preserved: ${path.join(aiosPath, expected.path)}`);
+    }
+  }
+
+  const extra = actual.filter((entry) => !expectedByPath.has(entry.path));
+  if (!await isRecoverableSetupMetrics(aiosPath, extra)) {
+    const firstExtra = extra[0]?.path || "unknown path";
+    throw new Error(`Unexpected path appeared while setup was running; preserved: ${path.join(aiosPath, firstExtra)}`);
+  }
+}
+
+function plannedActivationManifestEntry(transaction, passthrough) {
+  const configPatch = plannedActivationConfigPatch(passthrough);
+  if (!configPatch) return null;
+  const content = `${JSON.stringify({ ...transaction.plan.config, ...configPatch }, null, 2)}\n`;
+  return {
+    path: "aios.json",
+    type: "file",
+    sha256: createHash("sha256").update(content).digest("hex")
+  };
 }
 
 async function cleanupLinkedSetupMarkerTemps(aiosPath, markerStats) {
@@ -723,8 +790,8 @@ function isRecoverableTransactionMetricSequence(metrics) {
   }
 
   return groups.every((group) => {
-    const [start, initEnd, install, activateStart, activateEnd] = group;
-    if (group.length > 5) return false;
+    const [start, initEnd, install, activateStart, activateEnd, installEnd] = group;
+    if (group.length > 6) return false;
     if (!hasMetricKeys(start, ["ts", "type", "phase", "run_id"])) return false;
     if (start.type !== "setup_phase_start" || start.phase !== "init") return false;
     if (!initEnd) return true;
@@ -750,10 +817,20 @@ function isRecoverableTransactionMetricSequence(metrics) {
     if (!hasMetricKeys(activateStart, ["ts", "type", "phase", "run_id"])) return false;
     if (activateStart.type !== "setup_phase_start" || activateStart.phase !== "activate") return false;
     if (!activateEnd) return true;
-    return hasMetricKeys(activateEnd, ["ts", "type", "phase", "run_id", "outcome"])
+    const validActivateEnd = hasMetricKeys(activateEnd, ["ts", "type", "phase", "run_id", "outcome"])
       && activateEnd.type === "setup_phase_end"
       && activateEnd.phase === "activate"
       && ["ok", "warn", "fail"].includes(activateEnd.outcome);
+    if (!validActivateEnd) return false;
+    if (!installEnd) return true;
+    return activateEnd.outcome === "fail"
+      && hasMetricKeys(installEnd, ["ts", "type", "command", "outcome", "phase", "run_id", "duration_ms"])
+      && installEnd.type === "install_end"
+      && installEnd.command === "setup"
+      && installEnd.outcome === "fail"
+      && installEnd.phase === "activate"
+      && Number.isFinite(installEnd.duration_ms)
+      && installEnd.duration_ms >= 0;
   });
 }
 

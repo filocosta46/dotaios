@@ -15,12 +15,25 @@ async function pauseAtBarrier(barrierPath) {
 }
 
 const lifecycle = {
-  afterCreateBaseTree: process.env.DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE === "1"
-    ? async () => { throw new Error("injected setup interruption after createBaseTree"); }
-    : undefined,
-  afterInit: process.env.DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT === "1"
-    ? async () => { process.kill(process.pid, "SIGKILL"); }
-    : undefined,
+  afterCreateBaseTree: process.env.DOTAIOS_TEST_RACE_SETUP_ENTRYPOINT === "1"
+    ? async ({ aiosPath }) => {
+        await fs.writeFile(`${aiosPath}/AGENTS.md`, "foreign entrypoint bytes\n", { flag: "wx" });
+      }
+    : process.env.DOTAIOS_TEST_RACE_SETUP_CATALOGS === "1"
+      ? async ({ aiosPath }) => {
+          await fs.writeFile(`${aiosPath}/skills/INDEX.md`, "foreign index bytes\n", { flag: "wx" });
+          await fs.writeFile(`${aiosPath}/skills/RESOLVER.md`, "foreign resolver bytes\n", { flag: "wx" });
+        }
+      : process.env.DOTAIOS_TEST_FAIL_SETUP_AFTER_CREATE_BASE_TREE === "1"
+        ? async () => { throw new Error("injected setup interruption after createBaseTree"); }
+        : undefined,
+  afterInit: process.env.DOTAIOS_TEST_RACE_SETUP_AFTER_INIT_ENTRYPOINT === "1"
+    ? async ({ aiosPath }) => {
+        await fs.writeFile(`${aiosPath}/AGENTS.md`, "foreign bytes after init\n");
+      }
+    : process.env.DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_INIT === "1"
+      ? async () => { process.kill(process.pid, "SIGKILL"); }
+      : undefined,
   beforePublishMarker: process.env.DOTAIOS_TEST_INTERRUPT_SETUP_BEFORE_MARKER_LINK === "1"
     ? async () => { process.kill(process.pid, "SIGKILL"); }
     : process.env.DOTAIOS_TEST_RACE_SETUP_MARKER === "1"

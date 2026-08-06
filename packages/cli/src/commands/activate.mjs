@@ -78,7 +78,32 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
   // so its bridge preview is current without touching INDEX.md or RESOLVER.md.
   const { skillsIndex, skillsCatalog } = options.dryRun
     ? await previewSkillsIndex(aiosPath)
-    : { skillsIndex: await writeSkillsIndex(aiosPath), skillsCatalog: undefined };
+    : {
+        skillsIndex: await writeSkillsIndex(aiosPath, {
+          writeMode: lifecycle.skillsIndexWriteMode || "overwrite"
+        }),
+        skillsCatalog: undefined
+      };
+
+  // Setup uses preserve mode as a compare-and-publish boundary. If another
+  // writer won either catalog path with different bytes, stop before writing
+  // any client bridge (especially a --skills-first bridge that would inline
+  // untrusted collision bytes).
+  if (!options.dryRun && skillsIndex.conflicts.length > 0) {
+    const results = skillsIndex.results;
+    printResults("DotAIOS activation stopped", results);
+    console.error(
+      `Activation needs attention: preserved ${skillsIndex.conflicts.length} skill catalog collision(s); no client bridges were changed.`
+    );
+    process.exitCode = 1;
+    return {
+      detectedClientCount: 0,
+      configuredContextCount: 0,
+      blockedContextCount: 0,
+      blockedCatalogCount: skillsIndex.conflicts.length,
+      results
+    };
+  }
 
   const global = await createGlobalBridges(
     aiosPath,
@@ -89,9 +114,19 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     lifecycle
   );
   const results = [...global.results];
+  let projectBlockedContextCount = 0;
 
   if (options.project) {
-    results.push(...await createProjectBridges(aiosPath, resolvePath(options.project), options, lifecycle));
+    const projectResults = await createProjectBridges(
+      aiosPath,
+      resolvePath(options.project),
+      options,
+      lifecycle
+    );
+    results.push(...projectResults);
+    if (!isConfiguredBridgeAction(projectResults[0]?.action)) {
+      projectBlockedContextCount = 1;
+    }
   }
 
   printResults("DotAIOS activated", results);
@@ -116,9 +151,19 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     console.log("\nFor Cursor project rules, run `dotaios attach <project-dir>` inside a project.");
   }
 
+  const blockedContextCount = global.blockedContextCount + projectBlockedContextCount;
+  if (blockedContextCount > 0) {
+    process.exitCode = 1;
+    console.error(
+      `Activation needs attention: ${blockedContextCount} client bridge collision(s).`
+    );
+  }
+
   return {
     detectedClientCount: global.installedCount,
     configuredContextCount: global.configuredContextCount,
+    blockedContextCount,
+    blockedCatalogCount: 0,
     results
   };
 }
@@ -137,6 +182,10 @@ export async function attachCommand(args) {
 
   const results = await createProjectBridges(aiosPath, projectPath, options);
   printResults("DotAIOS attached", results);
+  if (!isConfiguredBridgeAction(results[0]?.action)) {
+    process.exitCode = 1;
+    console.error("Attach needs attention: the project bridge was preserved because it could not be safely configured.");
+  }
 }
 
 function parseOptions(args = []) {
@@ -235,6 +284,7 @@ async function createGlobalBridges(
   const results = [];
   let installedCount = 0;
   let configuredContextCount = 0;
+  let blockedContextCount = 0;
   const installedAgentNames = new Set();
 
   for (const agent of registry) {
@@ -269,13 +319,24 @@ async function createGlobalBridges(
       }
     );
     results.push(result);
-    if (["created", "updated", "unchanged", "would create", "would update"].includes(result.action)) {
+    if (isConfiguredBridgeAction(result.action)) {
       configuredContextCount += 1;
+    } else {
+      blockedContextCount += 1;
     }
   }
 
   const skills = await installAllSkills(aiosPath, homePath, options, registry, installedAgentNames);
-  return { results: [...results, ...skills], installedCount, configuredContextCount };
+  return {
+    results: [...results, ...skills],
+    installedCount,
+    configuredContextCount,
+    blockedContextCount
+  };
+}
+
+function isConfiguredBridgeAction(action) {
+  return ["created", "updated", "unchanged", "would create", "would update"].includes(action);
 }
 
 async function previewSkillsIndex(aiosPath) {
@@ -284,7 +345,8 @@ async function previewSkillsIndex(aiosPath) {
     skillsIndex: {
       path: path.join(aiosPath, "skills", "INDEX.md"),
       resolverPath: path.join(aiosPath, "skills", "RESOLVER.md"),
-      count: skills.length
+      count: skills.length,
+      conflicts: []
     },
     skillsCatalog: {
       indexText: renderSkillsIndex(skills),
