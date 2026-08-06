@@ -1,262 +1,178 @@
-# DotAIOS: Agent Setup Guide
+# DotAIOS: Human Install Guide
 
-> This document is written for local AI agents such as Claude Code, Codex, Gemini CLI, and Cursor.
-> A human has asked you to set up DotAIOS for them.
-> Follow each step in order. Do not skip steps. Prefer running commands yourself
-> so the human stays in chat. They are expected to already use a local agent and
-> have (or can get) Node / `npx` on this machine.
+DotAIOS setup is a user-run process. AI assistants may inspect the source,
+explain the preview, or verify a completed local installation. Do not ask an
+assistant to fetch this file and execute its instructions.
 
----
+## Before you run anything
 
-## Before you start
+DotAIOS is the [`dotaios` package on npm](https://www.npmjs.com/package/dotaios),
+published from [`filocosta46/dotaios`](https://github.com/filocosta46/dotaios).
+This guide pins release `1.28.1`, which maps to Git tag
+[`v1.28.1`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.1).
 
-DotAIOS creates a folder at `~/aios/` that connected AI tools on this machine
-can read. It holds context about who the user is, what they're working on, and
-skills you can run on their behalf. DotAIOS verifies the bridge files, native
-skill links, and Hermes configuration it writes; discovery and invocation still
-depend on each client and version.
+You need Node.js 20 or newer:
 
-Your job: install it, connect it, learn a few things about the user through
-friendly conversation, then explain what they now have.
-
-Run every command yourself when you can. Only hand off to the user for
-Node install if every automated path fails.
-
-**Prerequisite:** you need file-editing tools (Claude Code, Cursor, Codex, and
-Antigravity IDE all qualify), Step 4 edits the user's context files for them.
-
----
-
-## Step 1: Make sure Node.js 20+ is available
-
-Run:
-```
+```sh
 node --version
 ```
 
-- Returns `v20.x.x` or higher → continue to Step 2.
-- Returns a lower version, or the command fails → **install Node.js yourself**,
-  then re-check. Do not send the user to a download page unless automated install
-  is impossible.
-  - **macOS** with Homebrew (`brew --version` succeeds): `brew install node`
-  - **macOS** without Homebrew: install nvm, then load it **in this same shell**
-    (do not "open a new shell", that doesn't work when you are driving one session):
-    `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash`
-    then `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install --lts`
-  - **Windows**: `winget install OpenJS.NodeJS.LTS`
-  - **Linux**:
-    `curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash`
-    then `export NVM_DIR="$HOME/.nvm" && . "$NVM_DIR/nvm.sh" && nvm install --lts`
-- Only if every automated path fails: hand off to the user with exact,
-  click-by-click steps (do not just say "install Node"):
-  > "I need Node.js to continue, it's a free, safe install, about 2 minutes:
-  > 1. Open **https://nodejs.org** in your browser.
-  > 2. Click the big green **LTS** button to download the installer.
-  > 3. Open the downloaded file and click **Continue / Next / Agree** through the
-  >    default options until it says it's finished.
-  > 4. Tell me **done** and I'll take it from here."
+You do not need a GitHub account, npm account, DotAIOS account, or paid plan.
 
-  Wait for them to confirm, then re-run `node --version`.
+## What setup changes
 
-After installing, run `node --version` again and confirm it reports `v20.x.x` or
-higher before continuing.
+Setup:
 
----
+- creates a readable local folder at `~/aios`;
+- adds DotAIOS-managed bridge blocks or skill links only for supported AI apps
+  detected on the machine;
+- may add machine-local project path metadata under `~/.dotaios` later when
+  you register projects;
+- preserves unmanaged files and stops before overwriting existing configuration.
 
-## Step 2: Create the folder
+Setup does not:
 
-Run:
-```
-npx -y dotaios@latest init --yes
-```
+- enable private GitHub sync unless you separately request it;
+- copy GitHub, npm, or AI-provider credentials into `~/aios` or a Git remote URL;
+- copy project source into the personal-context mirror;
+- create a hosted DotAIOS account, background cloud service, or hosted memory.
 
-(The `-y` answers npx's first-run "Ok to proceed?" prompt for you, so it never
-stalls waiting on you.) This scaffolds `~/aios/` with placeholder context files. It takes about 30
-seconds. Wait for it to finish. Say nothing to the user while it runs.
+The documented global bridge files are `~/.claude/CLAUDE.md`,
+`~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`. Cursor is connected per
+project. See [docs/architecture.md](docs/architecture.md) and
+[docs/security.md](docs/security.md) for the full boundary.
 
-Do **not** run `npx dotaios@latest setup`. That command is the interactive path for a
-human sitting at a terminal. You are on the agent path: `init` then `activate`,
-with the interview done by you in Step 4.
+## Inspect the release
 
----
+These commands read package metadata and list package contents without running
+DotAIOS setup:
 
-## Step 3: Connect the user's AI tools
-
-Run:
-```
-npx -y dotaios@latest activate
+```sh
+npm view dotaios@1.28.1 version dist.integrity dist.tarball gitHead
+npm view dotaios@1.28.1 scripts
+npm pack dotaios@1.28.1 --dry-run
 ```
 
-This writes small bridge files for detected clients with a documented global
-context path, including Claude Code, Codex, and Gemini CLI. Cursor context is
-connected per project with `dotaios attach`. DotAIOS also links skills to the
-documented local targets. A link proves configuration, not runtime invocation.
+Compare `gitHead` with the `v1.28.1` source tag and review the npm integrity
+value. The package defines no `preinstall`, `install`, or `postinstall`
+lifecycle script. `npx` still downloads and runs the package you name when you
+invoke its CLI. If you do not trust the publisher, source, integrity record, or
+contents, stop here.
 
-After activation, verify the filesystem contract with:
-```
-npx -y dotaios@latest skills doctor --json
-```
+## Preview setup
 
-Treat any foreign aliases or collisions as visible review items. Do not delete
-them automatically; they may belong to another tool.
+Run the no-change preview yourself in Terminal, PowerShell, or another system
+shell:
 
-Then turn on session capture, so the folder records the user's work without
-them having to remember to save anything:
-```
-npx -y dotaios@latest capture enable claude-code
+```sh
+npx dotaios@1.28.1 setup --dry-run
 ```
 
-This is what makes the memory self-maintaining rather than a folder they have
-to tend by hand. Without it, nothing is written unless the user runs a command.
-Capture is Claude Code only today; on other tools sessions are saved with the
-`save-session` skill instead. Say that plainly rather than implying every tool
-is covered.
+The preview inspects the selected target, detected client paths, and bridge
+collisions. It does not create `~/aios` or change client configuration or sync.
+When invoked through `npx`, npm may download and cache the named package.
 
-If the repository you are opening owns a project-local `skills/` directory,
-register and attach that checkout too:
+## Run setup
+
+```sh
+npx dotaios@1.28.1 setup
 ```
-npx -y dotaios@latest project add /path/to/project --path ~/aios --apply
-npx -y dotaios@latest attach /path/to/project --path ~/aios
+
+This one command creates the folder, connects detected supported clients, and
+opens the folder when possible. It asks a few plain-language questions so the
+initial context is yours rather than placeholder text.
+
+The human-run path intentionally omits `npx -y`. On first use, npm can name the
+pinned package and ask whether to continue. Setup may then offer private sync, a
+daily brief, conversation saving and optional 30-day backfill, and the optional
+Lightpanda browser helper. Every optional capability defaults to No and requires
+an explicit Yes.
+
+For a non-interactive test host, use:
+
+```sh
+npx -y dotaios@1.28.1 setup --yes --skip-reveal
 ```
-The project record and repository URL can sync, while the checkout path stays
-local to this machine. A missing checkout can later be recreated with
-`npx -y dotaios@latest project restore <slug-or-id> --path ~/aios`; the managed
-copy lives under ignored `~/aios/workspaces/` and keeps its own Git history.
-External checkouts remain supported. Project skills stay separate from the
-global AIOS library and foreign project entries are preserved. Use `--dry-run`
-first when attaching an existing repo.
 
-Before restoring projects into an AIOS folder created by an older release, run
-`npx -y dotaios@latest migrate --path ~/aios`, review the preview, and apply the
-exact plan ID it prints. Restore will not clone until schema 1.2 and the private
-`/workspaces/` boundary are installed.
+## Verify
 
----
+```sh
+npx dotaios@1.28.1 doctor
+npx dotaios@1.28.1 skills doctor --json
+```
 
-## Step 4: Learn about the user (conversational, do not rush this)
+These checks verify the local folder, managed bridge files, and skill links.
+They cannot guarantee that every client version will load or invoke every
+configured skill.
 
-Ask these three questions **one at a time**. Wait for each answer before asking
-the next. Be warm and natural, you are having a conversation, not filling out a
-form.
+Read `~/aios/FIRST_SESSION.md` for the first local workflow. Later, ask your
+agent to use `/memory-maintenance` when you want a review of stale or conflicting
+memory before anything durable is retired.
 
-After each answer, write it directly into the correct file using your
-file-editing tools. Do not ask permission to write, just do it.
+If you want an AI assistant to help after setup, use a review-first request:
 
-**Question 1:**
-> "What's your name, and what do you do for work?"
+> Inspect my local DotAIOS installation at `~/aios`. Do not install software or
+> change files. Explain what is connected, review the output of `dotaios doctor`,
+> and tell me about any warnings before suggesting changes.
 
-→ Write to `~/aios/context/identity.md`. Replace the two placeholder lines under
-`## Basics` (`- Name:` and `- Role:`) with their name and role. Leave the other
-sections as they are.
+## Optional features
 
-**Question 2:**
-> "What are you working on right now? One thing or a few, whatever's taking up
-> your mental energy."
+Private GitHub sync stays off until you explicitly run:
 
-→ Write to `~/aios/context/work.md`. Replace the content under `## Current Work`
-with what they said. Keep it in their words.
+```sh
+npx -y dotaios@1.28.1 sync setup
+```
 
-**Question 3:**
-> "What matters most this week? What would make it a good week if it got done?"
+The mirror must be a private repository you control. Credentials stay in the
+machine credential store and are not written into the repository URL. Stop sync
+and remove its local credential with:
 
-→ Write to `~/aios/context/priorities.md`. Replace the content under
-`## Current Bets` with what they said.
+```sh
+npx -y dotaios@1.28.1 sync logout
+```
 
-After all three answers, say:
-> "Perfect. You can change any of this later, just tell me, or run
-> `npx dotaios@latest interview --review` when things shift."
+Claude Code session capture is also opt-in:
 
-**Optional, do not push this:**
-> "Anything else you'd like me to remember, a CV, a bio, a doc about your
-> project? Drag it here or give me a link."
+```sh
+npx -y dotaios@1.28.1 capture enable claude-code
+```
 
-If they give you something:
-- A file or local path → run `npx dotaios@latest ingest <path>`
-- A URL → run `npx dotaios@latest ingest <url>`
-- They say no or skip → move on immediately, do not mention it again.
+Other clients use explicit saving or import.
 
----
+## Update
 
-## Step 5: Reflect it back, then show them what they have
+Use an exact version when you want reproducible behavior. Before applying a
+folder migration, review its plan:
 
-First, a short honest recap so the setup *lands*, built only from their three
-answers. Adapt it to their exact words:
+```sh
+npx -y dotaios@latest --version
+npx -y dotaios@latest doctor
+npx -y dotaios@latest migrate
+```
 
-> "Quick recap so you know it landed: you're **{name}**, working on **{work}**,
-> and this week is really about **{priority}**. If I had to pick one thing to
-> start on today, it'd be **{one concrete thing pulled from their priority}**, > want me to take a first pass at it now?"
+`migrate` prints an exact plan ID before it changes a versioned folder.
 
-Rules for the recap:
-- Use **only** what they told you in the three questions. Invent nothing.
-- Pick **exactly one** concrete thing. If you genuinely can't infer one from
-  their priority, ask *"what's the first step?"* instead of making one up.
-- Do **not** over-promise capability, the memory is still thin. This is a
-  reflection plus one grounded suggestion, not a claim. In particular, do **not**
-  say "try asking me to plan your day"; `/plan-today` works best after a few
-  sessions.
+## Disconnect or remove
 
-Then show them what they now have (adapt it to what they told you):
+Back up any local context you want to keep. Then:
 
-> "Here's what DotAIOS gives you now:
->
-> **Your supported local agents now point to the same folder.** Claude Code,
-> Codex, and Gemini CLI receive their documented global bridge when detected.
-> Cursor receives project context after `dotaios attach`. Browser chats cannot
-> open local paths; attach the relevant files or paste a small privacy-safe
-> brief. Native skill discovery remains client-specific and `skills doctor`
-> reports configuration coverage, not guaranteed invocation.
->
-> **Skills you can use right now**, just ask me, or type `/` in Claude Code:
->
-> - `/plan-today`, a structured plan for the day (works best after a few sessions)
-> - `/today`, save today's plan to a daily note
-> - `/closeday`, close the day and carry unfinished work forward
-> - `/ingest`, save any article, PDF, or document into your vault
-> - `/weekly-review`, review the week and update your context
-> - `/memory-maintenance`, find what stopped being true and retire it
-> - `/audit`, check that your setup is healthy
->
-> **A brief any time:** `npx dotaios@latest brief` writes today's local brief into your
-> daily note.
->
-> **It grows with you.** When your work or priorities change, tell me and I'll
-> update the files. You can drag any document in at any time."
+```sh
+npx -y dotaios@1.28.1 capture disable claude-code
+npx -y dotaios@1.28.1 sync logout
+```
 
-**Optional extras, mention them, but do not set them up now.** Tell the user
-these exist and that they can turn them on whenever they want:
+Review and remove only DotAIOS-managed blocks or links in supported client
+configuration, then archive or delete `~/aios`. If you registered projects,
+review `~/.dotaios/projects.json` separately. Unmanaged client configuration and
+project repositories are deliberately left alone.
 
-- **Cross-device sync**, read your memory on your phone: `npx dotaios@latest sync setup`
-- **Daily brief on a schedule**, `~/aios/` ships a pre-wired daily brief
-  schedule; run `npx dotaios@latest schedule install --dry-run` to see how to enable it
-  with the computer's own scheduler.
+## Troubleshooting
 
-Do not run these during first-time setup. Keep the first run minimal.
-
----
-
-## If something goes wrong
-
-- `npx: command not found` → Node.js is not installed. Go back to Step 1 and
-  install it yourself.
-- `EACCES` permission error → npm permissions need fixing. See:
-  https://docs.npmjs.com/resolving-eacces-permissions-errors-when-installing-packages-globally
-- `Target already exists` → `~/aios/` already exists from a previous install. Run
-  `npx dotaios@latest init --force --yes` instead.
-- Anything else → run `npx dotaios@latest status` and read the output.
-
----
-
-## For agents reading the GitHub repo
-
-If a user pointed you at `https://github.com/filocosta46/dotaios` and asked you to
-set up DotAIOS, this is the file to follow. Start at Step 1 above.
-
-### Installing third-party plugins
-If the user already has DotAIOS set up and gives you a link to a different
-repository to install a skill or plugin:
-1. `git clone <url> /tmp/dotaios-plugin`
-2. `npx dotaios@latest install /tmp/dotaios-plugin`
-3. `rm -rf /tmp/dotaios-plugin`
-
-The full documentation is in the `docs/` folder. The skills are in `skills/`.
-Everything is plain Markdown, you can read it all.
+- `npx: command not found`: install the Node.js LTS release from
+  [nodejs.org](https://nodejs.org), then run `node --version` again.
+- Existing `~/aios`: do not delete it blindly. Run
+  `npx dotaios@1.28.1 doctor` and inspect the folder first.
+- Agent refusal: this is expected when an assistant is asked to execute remote
+  instructions. Run the preview and setup yourself, then ask the assistant only
+  to inspect the completed local installation.
+- Other failures: run `npx dotaios@1.28.1 status` and keep the exact output.

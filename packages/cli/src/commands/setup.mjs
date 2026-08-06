@@ -12,6 +12,14 @@ import { schemaVersion } from "../../../core/src/schema.mjs";
 import { processBirthToken, processRecordIsAlive } from "../../../core/src/process-identity.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import {
+  MANAGED_END,
+  MANAGED_START,
+  bridgePath,
+  isAgentInstalled,
+  loadAgentRegistry
+} from "../../../core/src/bridges.mjs";
+import { wellKnownSymlinkTargets } from "../../../core/src/skill-targets.mjs";
+import {
   LIGHTPANDA_VERSION,
   downloadLightpanda,
   lightpandaPlatformBinary,
@@ -36,6 +44,7 @@ Options:
   --path <dir>        Create AIOS somewhere other than ~/aios
   --vault-path <dir>  Use an external vault for long-term knowledge
   --yes, -y           Use placeholder answers for non-interactive setup
+  --dry-run           Preview files, trust boundaries, and removal without changes
   --skip-reveal       Do not open the folder when finished
   --install-lightpanda
                       Install the optional verified browser helper
@@ -54,11 +63,15 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
 
   assertUniqueOptions(args, ["--path", "--vault-path"]);
 
-  const passthrough = args.filter((arg) => !["--skip-reveal", "--install-lightpanda"].includes(arg));
+  const passthrough = args.filter((arg) => !["--dry-run", "--skip-reveal", "--install-lightpanda"].includes(arg));
   const skipReveal = args.includes("--skip-reveal");
   const installLightpandaRequested = args.includes("--install-lightpanda");
   const nonInteractive = args.includes("--yes") || args.includes("-y");
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
+  if (args.includes("--dry-run")) {
+    await printSetupPreview(aiosPath, args);
+    return;
+  }
   const startedAt = Date.now();
   const runId = randomUUID();
   let setupTransactionActive = false;
@@ -149,10 +162,8 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     let wantsSync = false;
     const rl = readline.createInterface({ input, output });
     try {
-      const answer = (await rl.question("\nConnect to GitHub for cross-device access? This is optional. (y/N): "))
-        .trim()
-        .toLowerCase();
-      wantsSync = answer === "y" || answer === "yes";
+      const answer = await rl.question("\nConnect to GitHub for cross-device access? This is optional. (y/N): ");
+      wantsSync = explicitOptIn(answer);
     } finally {
       rl.close();
     }
@@ -176,9 +187,9 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     try {
       console.log("");
       const briefAnswer = await rl.question(
-        "Set up a daily brief? It runs every morning and shows your priorities and active work. (Y/n): "
+        "Set up a daily brief? It runs every morning and shows your priorities and active work. (y/N): "
       );
-      if (!briefAnswer.trim() || briefAnswer.trim().toLowerCase() === "y") {
+      if (explicitOptIn(briefAnswer)) {
         const enabled = await enableSchedule(aiosPath, "daily-brief");
         if (enabled) {
           console.log("Daily brief enabled. Your agent will find it in memory/daily/ each morning.");
@@ -233,6 +244,152 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     run_id: runId,
     duration_ms: Date.now() - startedAt
   });
+}
+
+async function printSetupPreview(aiosPath, args) {
+  const unsupported = [
+    "--all",
+    "--force",
+    "--install-lightpanda",
+    "--no-skills-first",
+    "--overwrite",
+    "--project",
+    "--prune-aliases",
+    "--skills-first",
+    "--vault-path"
+  ].find((option) => args.includes(option));
+  if (unsupported) {
+    console.error(`Setup --dry-run cannot safely preview the ${unsupported} option.`);
+    console.error("Preview the default first-time setup with only --path and --home, or run the relevant advanced command's own preview.");
+    process.exitCode = 1;
+    return;
+  }
+
+  const homePath = path.resolve(expandHome(extractOption(args, "--home") || os.homedir()));
+  const target = await previewSetupTarget(aiosPath, args);
+
+  console.log("DotAIOS Setup preview - no DotAIOS-managed changes made");
+  console.log("Scope: AIOS target, detected global bridge files, and managed skill-link directories.");
+  console.log("");
+  console.log("Target:");
+  console.log(`${target.action} ${aiosPath}${target.note ? ` (${target.note})` : ""}`);
+
+  console.log("");
+  console.log("Detected client actions:");
+  if (target.blocked) {
+    console.log("[would skip] activation because setup would stop at the target check above");
+    process.exitCode = 1;
+  } else {
+    await printClientPreview(aiosPath, homePath);
+  }
+
+  console.log("");
+  console.log("Safety boundaries:");
+  console.log("- Setup preserves unmanaged files; bridge collisions are reported instead of replaced.");
+  console.log("- Private GitHub sync stays off unless you explicitly run `dotaios sync setup` later.");
+  console.log("- DotAIOS does not copy credentials into the AIOS folder or a Git remote URL.");
+  console.log("- DotAIOS does not start a hosted account or upload context to a DotAIOS service.");
+  console.log("- This command does not create the AIOS folder or change client configuration or sync.");
+  console.log("- When invoked through npx, npm may download and cache the named package.");
+  console.log("");
+  console.log("Optional prompts after core setup (all default No):");
+  console.log("- Private GitHub sync: creates and connects a private mirror you control.");
+  console.log("- Daily brief: enables the bundled local schedule entry.");
+  console.log("- Conversation saving: may add a managed client hook; 30-day backfill reads local history into ~/aios.");
+  console.log(`- Lightpanda ${LIGHTPANDA_VERSION}: downloads an optional SHA-256-verified local browser binary.`);
+  console.log("");
+  console.log("After setup, verify with: dotaios doctor");
+  console.log("To remove it, first disable capture and sync, then remove only DotAIOS-managed bridges and archive or delete the AIOS folder. Unmanaged client configuration is left alone.");
+}
+
+async function previewSetupTarget(aiosPath, args) {
+  let stats;
+  try {
+    stats = await fs.lstat(aiosPath);
+  } catch (error) {
+    if (error.code === "ENOENT") return { action: "[would create]" };
+    return { action: "[would stop]", note: error.message, blocked: true };
+  }
+
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    return { action: "[would stop]", note: "target is not a safe directory", blocked: true };
+  }
+
+  const entries = await fs.readdir(aiosPath);
+  if (entries.length === 0) return { action: "[would populate]", note: "existing empty directory" };
+
+  if (!args.includes("--force") && !args.includes("--overwrite")) {
+    return {
+      action: "[would stop]",
+      note: "target already exists and is not empty; inspect it with `dotaios doctor`",
+      blocked: true
+    };
+  }
+
+  return {
+    action: args.includes("--overwrite") ? "[would preflight replacement]" : "[would preflight missing files]",
+    note: "existing content requires the command's full safety checks"
+  };
+}
+
+async function printClientPreview(aiosPath, homePath) {
+  const registry = await loadAgentRegistry(null);
+  const activeSkillDirs = new Set(wellKnownSymlinkTargets().map((target) => target.dir));
+
+  for (const agent of registry) {
+    const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
+    const installed = await isAgentInstalled(homePath, agent);
+    if (!installed) {
+      console.log(`[would skip] ${destination} (${agent.name} not detected)`);
+      continue;
+    }
+
+    if (agent.skills?.mode === "symlink" && agent.skills.dir) {
+      activeSkillDirs.add(agent.skills.dir);
+    }
+
+    if (!agent.bridge) {
+      console.log(`[detected] ${destination} (${agent.name} uses native or project-specific configuration; external config is outside this preview)`);
+      continue;
+    }
+
+    console.log(await previewManagedBridge(destination));
+  }
+
+  for (const relativeDir of activeSkillDirs) {
+    const targetDir = path.join(homePath, relativeDir);
+    const stats = await lstatIfPresent(targetDir);
+    if (!stats) {
+      console.log(`[would create managed skill links] ${targetDir}`);
+    } else if (!stats.isDirectory() || stats.isSymbolicLink()) {
+      console.log(`[would preserve collision] ${targetDir} (not a regular directory)`);
+    } else {
+      console.log(`[would add missing managed skill links] ${targetDir} (existing unmanaged entries preserved)`);
+    }
+  }
+}
+
+async function previewManagedBridge(destination) {
+  const stats = await lstatIfPresent(destination);
+  if (!stats) return `[would create managed bridge] ${destination}`;
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    return `[would preserve collision] ${destination} (not a regular file)`;
+  }
+
+  const current = await fs.readFile(destination, "utf8");
+  if (current.includes(MANAGED_START) && current.includes(MANAGED_END)) {
+    return `[would update managed block] ${destination} (content outside the block preserved)`;
+  }
+  return `[would preserve collision] ${destination} (existing unmanaged file; no overwrite)`;
+}
+
+async function lstatIfPresent(target) {
+  try {
+    return await fs.lstat(target);
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 // Setup owns a partial scaffold only when it started from an empty target,
@@ -800,7 +957,7 @@ async function setupLightpanda({ nonInteractive, installRequested }) {
       const answer = await rl.question(
         `Install optional Lightpanda ${LIGHTPANDA_VERSION} for JavaScript-rendered pages? The download is SHA-256 verified. (y/N): `
       );
-      approved = ["y", "yes"].includes(answer.trim().toLowerCase());
+      approved = explicitOptIn(answer);
     } finally {
       rl.close();
     }
@@ -851,8 +1008,8 @@ async function promptSessionMemory(rl, aiosPath, nonInteractive) {
   console.log(`Save AI conversations locally so other agents can remember them?`);
   console.log(`  Found on this machine: ${foundParts.join(", ")}`);
 
-  const answer = await rl.question("  Enable conversation saving? (Y/n): ");
-  if (answer.trim() && answer.trim().toLowerCase() !== "y") return;
+  const answer = await rl.question("  Enable conversation saving? (y/N): ");
+  if (!explicitOptIn(answer)) return;
 
   for (const name of autoSave) {
     try {
@@ -865,7 +1022,7 @@ async function promptSessionMemory(rl, aiosPath, nonInteractive) {
 
   if (autoSave.length > 0) {
     const backfillAnswer = await rl.question("  Import past conversations from the last 30 days? (y/N): ");
-    if (backfillAnswer.trim().toLowerCase() === "y") {
+    if (explicitOptIn(backfillAnswer)) {
       for (const name of autoSave) {
         try {
           if (name === "claude-code") {
@@ -926,3 +1083,7 @@ async function enableSchedule(aiosPath, scheduleName) {
 }
 
 export { enableSchedule };
+
+export function explicitOptIn(answer) {
+  return ["y", "yes"].includes(String(answer || "").trim().toLowerCase());
+}
