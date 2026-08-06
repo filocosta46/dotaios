@@ -151,7 +151,16 @@ export async function initCommand(args, lifecycle = {}) {
   ));
   results.push(...await copySkills(target, writeMode));
   results.push(...await createStarterFiles(target, data, writeMode));
-  await writeSkillsIndex(target);
+  const skillsIndex = await writeSkillsIndex(target, { writeMode });
+  results.push(...skillsIndex.results);
+  if (
+    skillsIndex.conflicts.length > 0
+    && (!options.force || lifecycle.allowSetupTransactionRecovery)
+  ) {
+    throw new Error(
+      `Skill catalog changed while init was running; preserved: ${skillsIndex.conflicts.map(({ path: file }) => file).join(", ")}`
+    );
+  }
 
   if (!lifecycle.quiet) {
     printSuccess(target, resolveVaultPath(config, target), results);

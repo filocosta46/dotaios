@@ -23,8 +23,8 @@ You need Node.js 20 or newer. You do not need a GitHub or DotAIOS account.
 Run these commands yourself in Terminal, PowerShell, or another system shell. The first command previews the selected folder, detected clients, and collisions without creating `~/aios` or changing client configuration or sync. npm may download and cache the named package. The second command runs the same pinned release and guides you through setup:
 
 ```sh
-npx dotaios@1.28.2 setup --dry-run
-npx dotaios@1.28.2 setup
+npx dotaios@1.28.3 setup --dry-run
+npx dotaios@1.28.3 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
@@ -32,19 +32,19 @@ Setup creates `~/aios`, then connects supported AI apps detected on the machine.
 Do not ask an AI assistant to fetch remote instructions and install DotAIOS for you. An assistant can help you inspect the source or explain the preview, but you should run the setup command yourself. Afterward, either you or the assistant can verify the local installation with:
 
 ```sh
-npx dotaios@1.28.2 doctor
+npx dotaios@1.28.3 doctor
 ```
 
 ### Verify before running
 
-The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `1.28.2` maps to Git tag [`v1.28.2`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.2).
+The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `1.28.3` maps to Git tag [`v1.28.3`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.3).
 
 These commands inspect registry provenance and packaged contents without running DotAIOS setup:
 
 ```sh
-npm view dotaios@1.28.2 version dist.integrity dist.tarball gitHead
-npm view dotaios@1.28.2 scripts
-npm pack dotaios@1.28.2 --dry-run
+npm view dotaios@1.28.3 version dist.integrity dist.tarball gitHead
+npm view dotaios@1.28.3 scripts
+npm pack dotaios@1.28.3 --dry-run
 ```
 
 The published package defines no `preinstall`, `install`, or `postinstall` lifecycle script. `npx` still downloads and runs the named npm package when you invoke its CLI. The human-run commands intentionally omit `npx -y`, so npm can show its first-run confirmation for the pinned package. If you do not trust the source, publisher, integrity record, or package contents, do not approve it. Interactive setup may then offer private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every optional capability defaults to No. Read [INSTALL.md](INSTALL.md) for the complete human-run sequence and [the security model](docs/security.md) for package and permission boundaries.
@@ -100,15 +100,33 @@ Credentials stay on the machine and are not written into the Git remote URL. Man
 
 ## Updating
 
-Run the current CLI, then check the installed folder before applying a folder migration:
+First inspect the newest release metadata without executing it:
 
 ```sh
-npx -y dotaios@latest --version
-npx -y dotaios@latest doctor
-npx -y dotaios@latest migrate
+npm view dotaios@latest version dist.integrity dist.tarball gitHead scripts dependencies
 ```
 
-`npx ...@latest` selects the newest published CLI; use an exact version when you need reproducibility. `migrate` previews versioned folder changes and asks for the exact plan before applying them. Your existing `~/aios` remains readable local data across releases. Re-run `activate` after changing clients or repairing managed bridges.
+Review the returned source tag, integrity, scripts, and dependencies. Replace
+`<version>` below with that exact reviewed version and keep it identical in
+every command:
+
+```sh
+npx dotaios@<version> --version
+npx dotaios@<version> doctor
+npx dotaios@<version> migrate
+npx dotaios@<version> migrate --apply <plan-id>
+npx dotaios@<version> activate
+npx dotaios@<version> skills doctor
+npx dotaios@<version> capture enable claude-code
+npx dotaios@<version> mcp config --agent <agent>
+```
+
+`migrate` is a read-only preview. Run the `migrate --apply <plan-id>` line only
+when the preview prints that exact plan, using the same release. Re-run capture
+only if Claude Code capture was already enabled. For every configured MCP
+client, run `mcp config --agent <agent>`, merge the printed fragment into that
+client's existing configuration, and restart it. DotAIOS MCP does not edit
+client config automatically. Do not replace `<version>` with `latest`.
 
 ## Disconnecting or removing
 

@@ -4,6 +4,23 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [1.28.3] - 2026-08-06
+
+### Fixed
+
+- Doctor now validates one complete, correctly ordered managed bridge block.
+  Duplicate, reversed, or incomplete markers can no longer appear healthy.
+- Setup and initialization preserve concurrent foreign changes to generated
+  skill catalogs and stop with a non-zero result instead of overwriting them or
+  reporting a partial client connection as complete.
+- Upgrade guidance now reviews registry metadata first, keeps one exact version
+  through migration and activation, re-verifies skills, refreshes an enabled
+  Claude Code capture hook, and regenerates version-pinned MCP fragments for
+  manual reapplication.
+
+This release also includes all setup, plugin-source, removal, and Windows
+distribution safety changes listed under 1.28.1 and 1.28.2 below.
+
 ## [1.28.2] - 2026-08-06
 
 ### Fixed

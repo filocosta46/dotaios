@@ -61,9 +61,10 @@ test("activate preserves unmanaged files by default", () => {
   fs.mkdirSync(path.dirname(codexPath), { recursive: true });
   fs.writeFileSync(codexPath, "# Existing\n\nKeep me.\n");
 
-  run(["activate", "--path", aiosPath, "--home", homePath]);
+  const result = runFail(["activate", "--path", aiosPath, "--home", homePath]);
 
   assert.equal(read(codexPath), "# Existing\n\nKeep me.\n");
+  assert.match(result.stderr, /Activation needs attention: 1 client bridge collision/i);
 });
 
 test("init generates a skills index every agent can read", () => {

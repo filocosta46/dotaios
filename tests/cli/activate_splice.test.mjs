@@ -32,11 +32,13 @@ async function activate(args, commandOptions) {
     path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
   );
   const originalLog = console.log;
+  const originalExitCode = process.exitCode;
   console.log = () => {};
   try {
     return await activateCommand(args, commandOptions);
   } finally {
     console.log = originalLog;
+    process.exitCode = originalExitCode;
   }
 }
 

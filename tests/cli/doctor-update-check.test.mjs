@@ -11,7 +11,7 @@ async function fixture(t) {
   return root;
 }
 
-test("doctor warns, with the exact upgrade command, when a newer version exists", async (t) => {
+test("doctor warns with metadata-first exact-version upgrade instructions", async (t) => {
   await fixture(t);
   const check = await checkLatestVersion({
     currentVersion: "1.25.0",
@@ -19,7 +19,9 @@ test("doctor warns, with the exact upgrade command, when a newer version exists"
   });
   assert.equal(check.status, "warn");
   assert.match(check.detail, /1\.26\.0/);
-  assert.match(check.fix, /npx dotaios@latest/, "must tell the user exactly how to upgrade");
+  assert.match(check.fix, /npm view dotaios@1\.26\.0 .*dist\.integrity.*gitHead/);
+  assert.match(check.fix, /npx dotaios@1\.26\.0 <command>/, "must pin the reviewed release");
+  assert.doesNotMatch(check.fix, /dotaios@latest/);
 });
 
 test("doctor reports ok when already on the newest version", async (t) => {

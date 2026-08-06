@@ -272,23 +272,49 @@ export async function writeResolver(aiosPath) {
 // Regenerate the agent-facing skill files (INDEX.md + RESOLVER.md) from the
 // skills currently on disk. Called after any operation that can change the
 // installed skill set.
-export async function writeSkillsIndex(aiosPath) {
+export async function writeSkillsIndex(aiosPath, { writeMode = "overwrite" } = {}) {
+  if (!["overwrite", "preserve"].includes(writeMode)) {
+    throw new Error(`Unsupported skill catalog write mode: ${writeMode}`);
+  }
   const skillsDir = await ensureRealSkillsDirectory(aiosPath);
   const skills = await collectSkills(aiosPath);
   const indexPath = path.join(skillsDir, "INDEX.md");
   const resolverPath = path.join(skillsDir, "RESOLVER.md");
   await assertSafeCatalogFiles([indexPath, resolverPath]);
-  await writeFileSafe(
+  const indexResult = await writeCatalogFile(
     indexPath,
     `${renderSkillsIndex(skills)}\n`,
-    "overwrite",
-    { boundaryRoot: aiosPath }
+    writeMode,
+    aiosPath
   );
-  await writeFileSafe(
+  const resolverResult = await writeCatalogFile(
     resolverPath,
     `${renderResolver(skills)}\n`,
-    "overwrite",
-    { boundaryRoot: aiosPath }
+    writeMode,
+    aiosPath
   );
-  return { path: indexPath, resolverPath, count: skills.length };
+  const results = [indexResult, resolverResult];
+  return {
+    path: indexPath,
+    resolverPath,
+    count: skills.length,
+    results,
+    conflicts: results.filter(({ action }) => action === "kept")
+  };
+}
+
+async function writeCatalogFile(filePath, content, writeMode, boundaryRoot) {
+  const result = await writeFileSafe(filePath, content, writeMode, { boundaryRoot });
+  if (result.action !== "kept") return result;
+
+  // Preserve mode is also used as a compare-and-publish boundary during setup.
+  // An identical winner is harmless; different bytes belong to another writer
+  // and must survive for the caller to report as a collision.
+  try {
+    return await fs.readFile(filePath, "utf8") === content
+      ? { action: "unchanged", path: filePath }
+      : result;
+  } catch {
+    return result;
+  }
 }
