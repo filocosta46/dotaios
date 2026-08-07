@@ -4,6 +4,34 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [1.28.4] - 2026-08-06
+
+### Added
+
+- An AI assistant can walk you through installation again. `INSTALL.md` now
+  carries a section addressed to the assistant that tells it to preview first,
+  explain in plain language, and ask before anything on your computer changes —
+  and to follow you rather than this repository if the two ever disagree. A
+  tester's assistant previously refused the install, correctly, because the old
+  guide told it to write without asking while the user had asked it not to.
+- `dotaios activate --merge` keeps an existing global instructions file and adds
+  the DotAIOS block below it. Anyone who has ever asked their assistant to
+  remember a preference already has one of these files; activation left it alone
+  and, unless they found `--overwrite`, the assistant was never told who they
+  were. The default is unchanged: a file DotAIOS does not own is still left
+  untouched and reported, and project bridges still fail closed.
+
+### Fixed
+
+- Setup opens the folder after printing what to do next, instead of before four
+  optional questions. The window used to appear while the terminal was still
+  waiting behind it, so people believed setup had finished and never saw the
+  remaining steps.
+- Re-running setup on a finished installation reports that it is already set up
+  and changes nothing, instead of failing and offering a destructive option
+  beside a safe one. Interrupted installations still resume, and a folder that
+  needs a migration still says so.
+
 ## [1.28.3] - 2026-08-06
 
 ### Fixed
