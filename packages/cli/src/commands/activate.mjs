@@ -157,6 +157,12 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     console.error(
       `Activation needs attention: ${blockedContextCount} client bridge collision(s).`
     );
+    // Without this line the only documented way forward was --overwrite, which
+    // replaces the file and silently stops the user's own instructions from
+    // applying. Name the non-destructive option first.
+    console.error(
+      "Those files already existed and were left untouched. To keep what they say and add DotAIOS below it, run `dotaios activate --merge`."
+    );
   }
 
   return {
@@ -193,6 +199,7 @@ function parseOptions(args = []) {
     all: false,
     dryRun: false,
     home: null,
+    merge: false,
     overwrite: false,
     pruneAliases: false,
     path: null,
@@ -207,6 +214,8 @@ function parseOptions(args = []) {
       options.all = true;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--merge") {
+      options.merge = true;
     } else if (arg === "--overwrite") {
       options.overwrite = true;
     } else if (arg === "--prune-aliases") {
@@ -251,6 +260,7 @@ Options:
   --project <dir>       Also attach DotAIOS to a project folder
   --all                 Connect every known AI tool, even ones not detected yet
   --dry-run             Show what would be written without changing files
+  --merge               Keep an existing bridge file and add DotAIOS below it
   --overwrite           Replace existing unmanaged bridge files
   --prune-aliases       Remove only exact DotAIOS frontmatter alias links
   --skills-first        Inline the skill catalog (INDEX+RESOLVER) into every bridge
@@ -268,6 +278,7 @@ Options:
   --path <dir>     Use an AIOS folder other than ~/aios
   --project <dir>  Attach this project directory explicitly
   --dry-run        Show what would be written without changing files
+  --merge          Keep an existing bridge file and add DotAIOS below it
   --overwrite      Replace existing unmanaged bridge files
 `);
 }
@@ -336,7 +347,18 @@ async function createGlobalBridges(
 }
 
 function isConfiguredBridgeAction(action) {
-  return ["created", "updated", "unchanged", "would create", "would update"].includes(action);
+  // "appended" belongs here: the client really is configured afterwards. The
+  // user's own instructions were kept and the DotAIOS block was added below
+  // them, so this is a success, not a collision to report.
+  return [
+    "created",
+    "updated",
+    "unchanged",
+    "appended",
+    "would create",
+    "would update",
+    "would append"
+  ].includes(action);
 }
 
 async function previewSkillsIndex(aiosPath) {
@@ -586,6 +608,7 @@ async function writeManagedFile(
   content,
   {
     dryRun = false,
+    merge = false,
     overwrite = false,
     projectRoot = null,
     boundaryRoot = projectRoot,
@@ -627,7 +650,47 @@ async function writeManagedFile(
       };
     }
     if (!overwrite) {
-      return { action: "kept", path: destination, note: "existing unmanaged file" };
+      // The default has always been to leave a file DotAIOS does not own
+      // completely alone, and that promise stays. `--merge` is the explicit
+      // opt-in for the common case below.
+      //
+      // Appending is only ever offered for the user's OWN home. A project
+      // bridge lives in a repository that may be shared, reviewed, and
+      // committed by other people, so a foreign one always fails closed.
+      if (!merge || projectRoot) {
+        return { action: "kept", path: destination, note: "existing unmanaged file" };
+      }
+      // Anyone who has ever asked their assistant to remember a preference
+      // already has one of these files. Refusing to touch it left the most
+      // common user in the worst state available: skills linked, exit 0, no
+      // error, and their assistant never told who they are. The managed block
+      // is delimited, so appending it below their own text loses nothing and
+      // stays precisely removable. Replacing the file outright is still an
+      // explicit --overwrite decision.
+      const appendBlock = findManagedBlock(content);
+      if (!appendBlock) {
+        throw new Error("generated bridge content is missing its managed block");
+      }
+      if (dryRun) {
+        return { action: "would append", path: destination };
+      }
+      const separator = current.endsWith("\n\n") ? "" : current.endsWith("\n") ? "\n" : "\n\n";
+      const appended = `${current}${separator}${appendBlock.text}\n`;
+      const result = await replaceFileIfUnchanged(destination, current, appended, {
+        boundaryRoot,
+        beforeReplace,
+        beforePublish,
+        beforeCommit,
+        expectedStats: stats,
+        mode: stats.mode & 0o777
+      });
+      return result.replaced
+        ? {
+            action: "appended",
+            path: destination,
+            note: "added the DotAIOS block below your existing instructions"
+          }
+        : concurrentBridgeResult(destination, result.preservedPath);
     }
     if (dryRun) {
       return { action: "would update", path: destination };

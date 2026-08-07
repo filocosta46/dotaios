@@ -738,19 +738,31 @@ test("setup refuses failed-run residue when any extra file is present", () => {
   assert.equal(fs.readFileSync(extraFile, "utf8"), "keep me\n");
 });
 
-test("setup refuses to auto-force a complete AIOS folder", () => {
+test("setup over a complete AIOS folder changes nothing and says so", () => {
+  // The guarantee here is that a second run never forces anything through. It
+  // used to be expressed as a non-zero exit plus "already exists and is not
+  // empty", which told someone with a perfectly healthy install that setup had
+  // failed, and offered --force beside --overwrite with nothing marking the
+  // second as destructive. Re-running an installer is not an error. The
+  // guarantee is now asserted directly — the folder is byte-for-byte
+  // untouched — which is stronger than asserting an exit code.
   const sandbox = makeSandbox("setup-healthy");
   const first = runSetup(sandbox, ["--yes"]);
   assert.equal(first.status, 0, `first setup should succeed:\n${first.stdout}\n${first.stderr}`);
 
+  const identity = path.join(sandbox.aiosPath, "context", "identity.md");
+  fs.appendFileSync(identity, "\nI am a consultant in Milan.\n");
+  const before = fs.readFileSync(identity, "utf8");
+  const listedBefore = fs.readdirSync(sandbox.aiosPath).sort();
+
   const second = runSetup(sandbox, ["--yes"]);
-  assert.notEqual(
-    second.status,
-    0,
-    "a second setup over a working AIOS must not be silently forced through"
-  );
-  assert.match(second.stderr, /already exists and is not empty/);
+
+  assert.equal(second.status, 0, "a healthy re-run is not a failure");
+  assert.match(second.stdout, /already set up/i);
+  assert.doesNotMatch(`${second.stdout}${second.stderr}`, /could not complete/i);
   assert.doesNotMatch(`${second.stdout}${second.stderr}`, /unfinished folder/i);
+  assert.equal(fs.readFileSync(identity, "utf8"), before, "nothing the user wrote was touched");
+  assert.deepEqual(fs.readdirSync(sandbox.aiosPath).sort(), listedBefore, "no files added or removed");
 });
 
 test("setup refuses to auto-force a folder holding foreign content", () => {

@@ -7,6 +7,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { assertUniqueOptions, hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
+import { previewMigration } from "../../../core/src/migrations.mjs";
 import { parseJsonlLine } from "../../../core/src/jsonl.mjs";
 import { schemaVersion } from "../../../core/src/schema.mjs";
 import { processBirthToken, processRecordIsAlive } from "../../../core/src/process-identity.mjs";
@@ -76,6 +77,21 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   const startedAt = Date.now();
   const runId = randomUUID();
   let setupTransactionActive = false;
+
+  // Running an installer twice is the most ordinary thing a nervous person does.
+  // Before this, the second run failed on "Target already exists and is not
+  // empty" and offered --force (safe) beside --overwrite (which replaces the
+  // context files they just answered interview questions to create), with
+  // nothing distinguishing the two. A finished install is not an error.
+  if (await isCompletedInstall(aiosPath)) {
+    console.log(`DotAIOS is already set up at ${aiosPath}.`);
+    console.log("");
+    console.log("Nothing was changed. To check that it is healthy, run:");
+    console.log("  dotaios doctor");
+    console.log("To reconnect your AI tools after installing a new one, run:");
+    console.log("  dotaios activate");
+    return;
+  }
 
   console.log("DotAIOS setup — step 1 of 3: create your folder");
   console.log("");
@@ -176,23 +192,6 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     }
   }
 
-  // Step 3: reveal (best-effort, never blocks)
-  await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "reveal", run_id: runId });
-  if (!skipReveal) {
-    console.log("");
-    console.log("DotAIOS setup — step 3 of 3: open the folder");
-    console.log("");
-    try {
-      await revealCommand(passthrough);
-      await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "ok" });
-    } catch (error) {
-      await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "fail" });
-      console.error(`(skipped reveal: ${error.message})`);
-    }
-  } else {
-    await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "skipped" });
-  }
-
   // GitHub cross-device sync prompt — skip in non-interactive or non-TTY mode
   if (!nonInteractive && process.stdin.isTTY) {
     let wantsSync = false;
@@ -274,6 +273,29 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log("  2. Open the ~/aios folder or make it your working directory.");
   console.log('  3. Ask: "Read my context and tell me what I am working on."');
   console.log("  4. Update context any time: dotaios interview --review");
+
+  // Opening Finder pulls the foreground away from this terminal, so it has to be
+  // the very last thing that happens. It used to run before four optional y/N
+  // prompts, which meant the window appeared while the terminal was still
+  // waiting behind it — people reasonably concluded setup had finished and never
+  // saw the instructions above.
+  // Step 3: reveal (best-effort, never blocks)
+  await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "reveal", run_id: runId });
+  if (!skipReveal) {
+    console.log("");
+    console.log("DotAIOS setup — step 3 of 3: open the folder");
+    console.log("");
+    try {
+      await revealCommand(passthrough);
+      await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "ok" });
+    } catch (error) {
+      await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "fail" });
+      console.error(`(skipped reveal: ${error.message})`);
+    }
+  } else {
+    await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "reveal", run_id: runId, outcome: "skipped" });
+  }
+
   await emitReliabilityMetric(aiosPath, {
     type: "install_end",
     command: "setup",
@@ -281,6 +303,35 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     run_id: runId,
     duration_ms: Date.now() - startedAt
   });
+}
+
+// A finished install is one DotAIOS itself completed: a readable aios.json with
+// a schema version AND no in-flight setup transaction. The marker is what
+// separates "already done" from "interrupted halfway" — an interrupted run also
+// leaves an aios.json behind, and re-running the identical command is exactly
+// how it recovers, so that path must stay open.
+async function isCompletedInstall(aiosPath) {
+  try {
+    const raw = await fs.readFile(path.join(aiosPath, "aios.json"), "utf8");
+    const config = JSON.parse(raw);
+    if (typeof config?.schema_version !== "string" || config.schema_version.length === 0) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  if (await pathExists(setupTransactionPath(aiosPath))) return false;
+
+  // A folder on an older schema also has a valid aios.json. Calling that
+  // "already set up" would hide the migration the user actually needs, so defer
+  // to init, which owns that message.
+  try {
+    const migration = await previewMigration({ aiosPath });
+    if (migration.status === "ready" || migration.status === "recovery_required") return false;
+  } catch {
+    return false;
+  }
+  return true;
 }
 
 async function printSetupPreview(aiosPath, args) {
