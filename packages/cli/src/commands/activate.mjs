@@ -448,7 +448,7 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
   }
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = [
-    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
+    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, resolvePath(options.home || os.homedir())), {
       ...options,
       projectRoot: projectPath,
       beforeReplace: lifecycle.beforeBridgeReplace,
@@ -942,16 +942,27 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
   };
 }
 
-function projectAgentsBridge(aiosPath, project) {
+function projectAgentsBridge(aiosPath, project, homePath) {
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
     `At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
     ...(project.registered ? [] : ["This checkout is not in the project catalog yet; run `dotaios project add <repo-path>` to enable automatic writer attribution."]),
     "",
-    `Before personal recommendations or cross-project planning, read: ${path.join(aiosPath, "AGENTS.md")}`,
+    `Before personal recommendations or cross-project planning, read: ${portableAiosPointer(aiosPath, homePath)}`,
     "",
     "Keep project-specific instructions in this file short. Durable personal context belongs in DotAIOS."
   ]);
+}
+
+// This bridge lands in a shared checkout that teammates clone, so an absolute
+// path would both publish the author's username and point every other reader
+// at a directory that does not exist on their machine.
+export function portableAiosPointer(aiosPath, homePath = os.homedir()) {
+  const relative = path.relative(homePath, aiosPath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return path.join(aiosPath, "AGENTS.md");
+  }
+  return `~/${path.join(relative, "AGENTS.md")}`;
 }
 
 function bridgeFile(title, lines) {
