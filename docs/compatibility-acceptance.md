@@ -30,7 +30,6 @@ tested only when the current release has a fresh invocation receipt.
 |---|---|---|---|
 | Claude Code | `~/.claude/CLAUDE.md`, global and project skill links | Start a fresh session and confirm `/context` lists the DotAIOS memory file | Run `dotaios skills probe --client claude-code --run --json`; pass only when `produced=yes` |
 | Codex | `~/.codex/AGENTS.md`, `.agents/skills` | Start from a disposable project and inspect the loaded instruction chain | Run `dotaios skills probe --client codex --run --json`; pass only when `produced=yes` |
-| Gemini CLI | `~/.gemini/GEMINI.md`, `.agents/skills` | Run `/memory show` in a fresh session and confirm the DotAIOS bridge | Run `dotaios skills probe --client gemini --run --json`; pass only when `produced=yes` |
 | Cursor | Project `AGENTS.md`, project skill links | Open the attached project and confirm the root instructions are active | Ask a fresh project agent to return a disposable marker; preserve the transcript or screenshot |
 
 The live probe requires the relevant client to be installed and authenticated.
@@ -43,10 +42,24 @@ automated invocation coverage as Tier 1.
 
 | Host | Adapter | Required acceptance evidence |
 |---|---|---|
-| Antigravity IDE | Global skills under `~/.gemini/antigravity/skills`, project skills under `.agents/skills`; optional MCP in `~/.gemini/config/mcp_config.json` | Confirm the skill or MCP server appears, then return a unique skill marker or deterministic `read_working_context` value |
+| Gemini CLI | `~/.gemini/GEMINI.md`, `.agents/skills` | Google ended Gemini Code Assist for individual accounts, so the CLI exits with `IneligibleTierError` and cannot produce a receipt on such an account. Re-test only on an account that still has access. |
+| Antigravity IDE | Global skills under `~/.gemini/antigravity/skills`, project skills under `.agents/skills`; optional MCP in `~/.gemini/antigravity/mcp_config.json` | Confirm the skill or MCP server appears, then return a unique skill marker or deterministic `read_working_context` value |
 | Hermes | `skills.external_dirs` in `.hermes/config.yaml` | Start a fresh bounded session with a read-only toolset and invoke a disposable project skill |
 | Kimi Code CLI | Shared `~/.agents/skills`; optional MCP in `~/.kimi-code/mcp.json` | Confirm a DotAIOS skill or the `dotaios` MCP server appears, then invoke one and preserve the output |
 | OpenCode | Shared `~/.agents/skills`; optional MCP at `mcp.dotaios` in `~/.config/opencode/opencode.json` | Confirm the skill or MCP server appears, invoke one deterministic DotAIOS capability, and preserve the output |
+
+Do not remove the `Gemini` entry from `packages/core/src/agents.json` as part of
+demoting Gemini CLI. Antigravity carries `bridge: null` and receives its context
+only because that entry writes `~/.gemini/GEMINI.md`, which is Antigravity's own
+documented global rules file. Deleting the entry would silently strip
+Antigravity's entire context layer.
+
+Antigravity also has three separately versioned surfaces with three different
+global skills roots: the IDE (`~/.gemini/antigravity/skills`, the one DotAIOS
+writes), Antigravity 2.0 (`~/.gemini/config/skills`), and the CLI
+(`~/.gemini/antigravity-cli/skills`). Promoting it to Tier 1 requires covering
+the roots the installed version actually reads and adding an invocation probe;
+none exists today.
 
 Use `dotaios mcp install --dry-run --agent <client>` for the client-specific
 MCP fragment, including OpenCode. The command does not edit client

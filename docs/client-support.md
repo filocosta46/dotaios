@@ -13,7 +13,7 @@ A successful file write proves only configured. Public support requires a reprod
 |---|---|---|---|
 | Claude Code | Global `~/.claude/CLAUDE.md` bridge | Global and project `skills/` links | Configured locally; verify invocation in the client |
 | Codex | Global `~/.codex/AGENTS.md` bridge | Native shared Agent Skills links | Configured locally; verify invocation in the client |
-| Gemini CLI | Global `~/.gemini/GEMINI.md` bridge | Native shared Agent Skills links | Configured locally; optional session hook has separate setup |
+| Gemini CLI | Global `~/.gemini/GEMINI.md` bridge | Native shared Agent Skills links | Configured locally; individual accounts now hit `IneligibleTierError` since Google ended Gemini Code Assist for individuals |
 | Cursor | Project `AGENTS.md` from `dotaios attach` | Project Agent Skills links | Configured locally; project-scoped production is not proven by the bounded probe |
 | Antigravity IDE | No always-on context bridge | Global `.gemini/antigravity/skills`, project `.agents/skills`; optional MCP | Documented adapter; requires an invocation receipt |
 | Hermes | No always-on context bridge | `skills.external_dirs` in Hermes config | Documented adapter; requires a bounded read-only invocation receipt |
