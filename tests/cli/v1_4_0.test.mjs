@@ -43,7 +43,7 @@ const {
   slugify,
   disambiguateSlug
 } = await import(path.join(ingestDir, "frontmatter.mjs"));
-const { ingestUrl, IngestError } = await import(path.join(ingestDir, "web.mjs"));
+const { ingestUrl, IngestError, detectBlockedExtraction } = await import(path.join(ingestDir, "web.mjs"));
 const { ingestDocument, detectMarker } = await import(path.join(ingestDir, "pdf.mjs"));
 const { ingestText } = await import(path.join(ingestDir, "text.mjs"));
 const { ingestBinary } = await import(path.join(ingestDir, "binary.mjs"));
@@ -485,6 +485,44 @@ test("ingestUrl raises READABILITY_NULL on empty SPA shell (no silent body-dump)
     (err) => err instanceof IngestError && err.code === "READABILITY_NULL"
   );
   assert.equal(fs.existsSync(ws.rawDir) && fs.readdirSync(ws.rawDir).length > 0, false, "no file should be written");
+});
+
+// A consent wall parses into a valid, non-empty article, so READABILITY_NULL
+// never fires and the boilerplate reaches the vault wearing the real page's
+// title and URL. 29 captures in the wild were saved this way.
+test("ingestUrl raises EXTRACTION_BLOCKED on a cookie-consent wall (no silent save)", async () => {
+  const ws = makeWorkspace();
+  const html = await fsp.readFile(path.join(fixturesDir, "sample-consent-wall.html"), "utf8");
+  const fetchImpl = makeFakeFetch({ body: html });
+  await assert.rejects(
+    () =>
+      ingestUrl("https://x.com/amasad/status/2077802290304684404", {
+        rawDir: ws.rawDir,
+        eventsPath: ws.eventsPath,
+        fetchImpl,
+        ...NO_LIGHTPANDA
+      }),
+    (err) => err instanceof IngestError && err.code === "EXTRACTION_BLOCKED"
+  );
+  assert.equal(fs.existsSync(ws.rawDir) && fs.readdirSync(ws.rawDir).length > 0, false, "no file should be written");
+});
+
+test("detectBlockedExtraction flags known walls and shells but spares short real captures", () => {
+  assert.ok(detectBlockedExtraction("X and its partners use cookies to provide you"));
+  assert.ok(detectBlockedExtraction("Did someone say … cookies?"));
+  assert.ok(detectBlockedExtraction("Before you continue to YouTube"));
+  assert.ok(detectBlockedExtraction("If playback doesn't begin shortly, try restarting your device."));
+  assert.ok(detectBlockedExtraction("If playback doesn’t begin shortly, try restarting your device."));
+  assert.ok(detectBlockedExtraction("Your browser can't play this video"));
+
+  // A real 452-byte capture from the wild. Any byte floor able to catch the
+  // 480-byte Garry Tan wall would have discarded this, which is why the guard
+  // matches signatures instead of length.
+  assert.equal(
+    detectBlockedExtraction("Anson Lin (@ansonlin) on X\n\nthe best founders I know all share one trait: they ship before they feel ready."),
+    null
+  );
+  assert.equal(detectBlockedExtraction(""), null);
 });
 
 // --- Path B document parser ---

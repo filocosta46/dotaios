@@ -262,7 +262,37 @@ async function extractArticle(html, sourceUrl) {
   const markdown = turndown.turndown(article.content);
   const title = (article.title || fallbackTitle || sourceUrl).trim();
 
+  const blocked = detectBlockedExtraction(markdown);
+  if (blocked) {
+    throw new IngestError(
+      `Page returned ${blocked} instead of content. Nothing was saved. Open the page in a browser, save it as PDF, and re-ingest that file.`,
+      "EXTRACTION_BLOCKED"
+    );
+  }
+
   return { title, markdown };
+}
+
+// Readability parses a consent wall or a video-player shell into a perfectly
+// valid, non-empty article, so the null check above passes and the boilerplate
+// lands in the vault wearing the real page's title and URL. Length cannot
+// separate the two: a genuine short capture runs ~450 bytes while a YouTube
+// consent wall runs ~1,700, so any byte floor that caught the walls would
+// discard real captures.
+const BLOCKED_EXTRACTION_SIGNATURES = [
+  [/X and its partners use cookies/i, "a cookie-consent wall"],
+  [/Did someone say\s*(?:…|\.\.\.)?\s*cookies\?/i, "a cookie-consent wall"],
+  [/Before you continue to YouTube/i, "a cookie-consent wall"],
+  [/If playback doesn.{0,3}t begin shortly/i, "a video-player shell"],
+  [/Your browser can.{0,3}t play this video/i, "a video-player error"]
+];
+
+export function detectBlockedExtraction(markdown) {
+  const text = String(markdown || "");
+  for (const [pattern, reason] of BLOCKED_EXTRACTION_SIGNATURES) {
+    if (pattern.test(text)) return reason;
+  }
+  return null;
 }
 
 function extractFallbackTitle(document) {
