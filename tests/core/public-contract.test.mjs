@@ -42,7 +42,7 @@ test("public claims stay inside the verified product boundary", async () => {
 
 test("first-time onboarding stays human-run, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "1.28.3", "the public onboarding contract must target the release candidate");
+  assert.equal(pkg.version, "1.28.4", "the public onboarding contract must target the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
   }

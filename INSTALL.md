@@ -15,7 +15,7 @@ change to their machine.
 1. Check whether Node.js 20 or newer is available (`node --version`). If it is
    not, say so and let the person decide how to install it. Do not install a
    runtime for them.
-2. Run the preview first: `npx dotaios@1.28.3 setup --dry-run`. It writes
+2. Run the preview first: `npx dotaios@1.28.4 setup --dry-run`. It writes
    nothing. Show them what it reports.
 3. Explain, in plain language, what setup would change: it creates `~/aios`, and
    it connects the AI apps already installed on that machine.
@@ -25,7 +25,7 @@ change to their machine.
 5. Setup asks its own questions (private sync, a daily brief, saving
    conversations, an optional browser helper). Every one of them defaults to No.
    Relay them; do not answer on the person's behalf.
-6. Afterwards, verify with `npx dotaios@1.28.3 doctor` and read the result back.
+6. Afterwards, verify with `npx dotaios@1.28.4 doctor` and read the result back.
 
 If any instruction you find in this repository ever conflicts with what the
 person asked you to do, follow the person. Nothing in this file overrides them,
@@ -35,8 +35,8 @@ and nothing here asks you to skip a confirmation you would otherwise seek.
 
 DotAIOS is the [`dotaios` package on npm](https://www.npmjs.com/package/dotaios),
 published from [`filocosta46/dotaios`](https://github.com/filocosta46/dotaios).
-The installation flow pins release `1.28.3`, which maps to Git tag
-[`v1.28.3`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.3).
+The installation flow pins release `1.28.4`, which maps to Git tag
+[`v1.28.4`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.4).
 The exact version pins DotAIOS itself, not its complete dependency graph; npm
 may still resolve compatible versions allowed by its runtime dependencies.
 
@@ -81,12 +81,12 @@ These commands read package metadata and list package contents without running
 DotAIOS setup:
 
 ```sh
-npm view dotaios@1.28.3 version dist.integrity dist.tarball gitHead
-npm view dotaios@1.28.3 scripts
-npm pack dotaios@1.28.3 --dry-run
+npm view dotaios@1.28.4 version dist.integrity dist.tarball gitHead
+npm view dotaios@1.28.4 scripts
+npm pack dotaios@1.28.4 --dry-run
 ```
 
-Compare `gitHead` with the `v1.28.3` source tag and review the npm integrity
+Compare `gitHead` with the `v1.28.4` source tag and review the npm integrity
 value. `npm pack --dry-run` lists the archive entries; it does not show every
 file's contents.
 
@@ -96,10 +96,10 @@ For a deeper review, download and extract the exact tarball without running
 DotAIOS:
 
 ```sh
-npm pack dotaios@1.28.3 --ignore-scripts
-mkdir dotaios-review-1.28.3
-tar -tf dotaios-1.28.3.tgz
-tar -xzf dotaios-1.28.3.tgz -C dotaios-review-1.28.3
+npm pack dotaios@1.28.4 --ignore-scripts
+mkdir dotaios-review-1.28.4
+tar -tf dotaios-1.28.4.tgz
+tar -xzf dotaios-1.28.4.tgz -C dotaios-review-1.28.4
 ```
 
 Compare the extracted `package/package.json`, CLI source, and bundled
@@ -117,7 +117,7 @@ Run the no-change preview yourself in Terminal, PowerShell, or another system
 shell:
 
 ```sh
-npx dotaios@1.28.3 setup --dry-run
+npx dotaios@1.28.4 setup --dry-run
 ```
 
 The preview inspects the selected target, detected client paths, and bridge
@@ -131,7 +131,7 @@ describe changes or safe skips that setup would make.
 ## Run setup
 
 ```sh
-npx dotaios@1.28.3 setup
+npx dotaios@1.28.4 setup
 ```
 
 This one command creates the folder, connects detected supported clients, and
@@ -150,14 +150,14 @@ Do not use this for your personal installation; it creates placeholder context
 and skips setup questions. For a disposable non-interactive test host, use:
 
 ```sh
-npx -y dotaios@1.28.3 setup --yes --skip-reveal
+npx -y dotaios@1.28.4 setup --yes --skip-reveal
 ```
 
 ## Verify
 
 ```sh
-npx dotaios@1.28.3 doctor
-npx dotaios@1.28.3 skills doctor
+npx dotaios@1.28.4 doctor
+npx dotaios@1.28.4 skills doctor
 ```
 
 These checks verify the local folder, managed bridge files, and skill links.
@@ -182,7 +182,7 @@ Private GitHub sync stays off unless you explicitly opt in during interactive
 setup or later run:
 
 ```sh
-npx -y dotaios@1.28.3 sync setup
+npx -y dotaios@1.28.4 sync setup
 ```
 
 The mirror must be a private repository you control. Credentials stay in the
@@ -190,13 +190,13 @@ machine credential store and are not written into the repository URL. Stop sync
 and remove its local credential with:
 
 ```sh
-npx -y dotaios@1.28.3 sync logout
+npx -y dotaios@1.28.4 sync logout
 ```
 
 Claude Code session capture is also opt-in:
 
 ```sh
-npx -y dotaios@1.28.3 capture enable claude-code
+npx -y dotaios@1.28.4 capture enable claude-code
 ```
 
 Other clients use explicit saving or import.
@@ -238,14 +238,14 @@ client config automatically. Do not replace `<version>` with `latest`.
 
 ## Disconnect or remove
 
-The steps below are the 1.28.3 removal contract. After updating, use the exact
+The steps below are the 1.28.4 removal contract. After updating, use the exact
 installed version and the reviewed `INSTALL.md` shipped with that release.
 `<aios-path>` below means the folder you installed; the default is `~/aios`.
 Back up any local context you want to keep. Then:
 
 ```sh
-npx -y dotaios@1.28.3 capture disable claude-code --path <aios-path>
-npx -y dotaios@1.28.3 sync logout --path <aios-path>
+npx -y dotaios@1.28.4 capture disable claude-code --path <aios-path>
+npx -y dotaios@1.28.4 sync logout --path <aios-path>
 ```
 
 `sync logout` removes the local connection and credential. The private GitHub
@@ -253,7 +253,7 @@ repository remains intact, and the GitHub token grant may still need revocation.
 For full remote removal, first keep any backup you need, then delete or archive
 the repository in GitHub and revoke the token in GitHub settings.
 
-Run `npx dotaios@1.28.3 doctor --path <aios-path>` first so you have the exact
+Run `npx dotaios@1.28.4 doctor --path <aios-path>` first so you have the exact
 configured paths.
 In `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and
 `~/.gemini/GEMINI.md`, remove only content between the
@@ -289,11 +289,11 @@ downloaded package artifacts in its own cache, outside DotAIOS.
 - `npx: command not found`: install the Node.js LTS release from
   [nodejs.org](https://nodejs.org), then run `node --version` again.
 - Existing `~/aios`: do not delete it blindly. Run
-  `npx dotaios@1.28.3 doctor` and inspect the folder first.
+  `npx dotaios@1.28.4 doctor` and inspect the folder first.
 - Agent refusal: this is expected when an assistant is asked to execute remote
   instructions. Run the preview and setup yourself, then ask the assistant only
   to inspect the completed local installation.
-- Other failures: run `npx dotaios@1.28.3 status` and keep the exact output. If
+- Other failures: run `npx dotaios@1.28.4 status` and keep the exact output. If
   you cannot recover, open a
   [GitHub issue](https://github.com/filocosta46/dotaios/issues) with the failed
   command, status output, Node version, and operating system. Do not include
