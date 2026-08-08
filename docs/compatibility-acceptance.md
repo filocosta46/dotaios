@@ -43,7 +43,7 @@ automated invocation coverage as Tier 1.
 | Host | Adapter | Required acceptance evidence |
 |---|---|---|
 | Gemini CLI | `~/.gemini/GEMINI.md`, `.agents/skills` | Google ended Gemini Code Assist for individual accounts, so the CLI exits with `IneligibleTierError` and cannot produce a receipt on such an account. Re-test only on an account that still has access. |
-| Antigravity IDE | Global skills under `~/.gemini/antigravity/skills`, project skills under `.agents/skills`; optional MCP in `~/.gemini/antigravity/mcp_config.json` | Confirm the skill or MCP server appears, then return a unique skill marker or deterministic `read_working_context` value |
+| Antigravity IDE | Global skills under `~/.gemini/antigravity/skills`, project skills under `.agents/skills`; optional MCP in `~/.gemini/config/mcp_config.json` | Confirm the skill or MCP server appears, then return a unique skill marker or deterministic `read_working_context` value |
 | Hermes | `skills.external_dirs` in `.hermes/config.yaml` | Start a fresh bounded session with a read-only toolset and invoke a disposable project skill |
 | Kimi Code CLI | Shared `~/.agents/skills`; optional MCP in `~/.kimi-code/mcp.json` | Confirm a DotAIOS skill or the `dotaios` MCP server appears, then invoke one and preserve the output |
 | OpenCode | Shared `~/.agents/skills`; optional MCP at `mcp.dotaios` in `~/.config/opencode/opencode.json` | Confirm the skill or MCP server appears, invoke one deterministic DotAIOS capability, and preserve the output |
@@ -60,6 +60,14 @@ writes), Antigravity 2.0 (`~/.gemini/config/skills`), and the CLI
 (`~/.gemini/antigravity-cli/skills`). Promoting it to Tier 1 requires covering
 the roots the installed version actually reads and adding an invocation probe;
 none exists today.
+
+The MCP path is unresolved for the same reason. `dotaios mcp install --dry-run
+--agent antigravity` prints `~/.gemini/config/mcp_config.json`, which is what
+this table and `docs/mcp.md` state. On at least one machine running the IDE
+surface that file is empty and the runtime instead reads
+`~/.gemini/antigravity/mcp_config.json`. Confirm which one your installed
+version reads before relying on either. Do not change the printed path without
+evidence from more than one machine.
 
 Use `dotaios mcp install --dry-run --agent <client>` for the client-specific
 MCP fragment, including OpenCode. The command does not edit client
