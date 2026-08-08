@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendEvent } from "../../../core/src/memory.mjs";
+import { MANAGED_END, MANAGED_START, findManagedBlock } from "../../../core/src/bridges.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { mcpLauncher } from "../lib/mcp-launcher.mjs";
@@ -410,16 +411,49 @@ async function connectGemini(aiosPath, options) {
   console.log("check the start of your next session to confirm your context arrives.");
 }
 
-async function writeGeminiBridge(filePath, aiosPath) {
-  const content = `# DotAIOS Context
-
+export function geminiBridgeBlock(aiosPath) {
+  return `${MANAGED_START}
 Your personal AI operating system is at \`${aiosPath}\`.
 
 - Full context guide: \`${aiosPath}/AGENTS.md\`
 - Skills index: \`${aiosPath}/skills/INDEX.md\`
 - Working memory: run \`dotaios brief --compact\`
-`;
-  await fs.writeFile(filePath, content, "utf8");
+${MANAGED_END}`;
+}
+
+// Anyone who has ever asked Gemini to remember a preference already has this
+// file. Overwriting it destroys work the user did by hand, which is the one
+// thing the whole product promises not to do. Own a marked block and nothing
+// else: update it in place when it is there, append below existing content when
+// it is not, and never rewrite what someone else wrote.
+async function writeGeminiBridge(filePath, aiosPath) {
+  const block = geminiBridgeBlock(aiosPath);
+  let existing = null;
+  try {
+    existing = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      throw new Error(
+        `Could not read existing ${filePath} (${error?.code || "read error"}). Refusing to overwrite it.`
+      );
+    }
+  }
+
+  if (existing === null) {
+    await fs.writeFile(filePath, `# DotAIOS Context\n\n${block}\n`, "utf8");
+    return { action: "created" };
+  }
+
+  const managed = findManagedBlock(existing);
+  if (managed) {
+    const updated = existing.slice(0, managed.start) + block + existing.slice(managed.end);
+    if (updated === existing) return { action: "unchanged" };
+    await fs.writeFile(filePath, updated, "utf8");
+    return { action: "updated" };
+  }
+
+  await fs.writeFile(filePath, `${existing.trimEnd()}\n\n${block}\n`, "utf8");
+  return { action: "appended" };
 }
 
 // Wrap a value in single quotes for safe use as a POSIX shell word. Any embedded
