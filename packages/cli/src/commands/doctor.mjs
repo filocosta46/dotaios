@@ -111,12 +111,26 @@ function tag(status) {
 export function checkTrackedGitlinks(target, { runGit = readGitIndex } = {}) {
   const name = "No nested Git repositories tracked in the AIOS folder";
   const index = runGit(target);
-  if (index === null) return { name, status: "ok", detail: "Folder is not a Git repository; nothing to check." };
+  if (index.kind === "not-a-repo") {
+    return { name, status: "ok", detail: "Folder is not a Git repository; nothing to check." };
+  }
+  // Anything else — git missing, index too large for the buffer, a timeout —
+  // means the check did not run. Reporting that as a pass would state a
+  // specific thing we did not verify, on the folders most likely to have
+  // accumulated a vendored repository.
+  if (index.kind === "unavailable") {
+    return {
+      name,
+      status: "warn",
+      detail: `Could not read the Git index (${index.reason}); this check did not run.`,
+      fix: "Ensure `git` is installed and the folder is readable, then re-run `dotaios doctor`."
+    };
+  }
 
-  const gitlinks = index
-    .split("\n")
-    .filter((line) => line.startsWith("160000 "))
-    .map((line) => line.slice(line.indexOf("\t") + 1))
+  const gitlinks = index.entries
+    .split("\0")
+    .filter((entry) => entry.startsWith("160000 "))
+    .map((entry) => entry.slice(entry.indexOf("\t") + 1))
     .filter(Boolean);
   if (gitlinks.length === 0) return { name, status: "ok" };
 
@@ -129,12 +143,24 @@ export function checkTrackedGitlinks(target, { runGit = readGitIndex } = {}) {
 }
 
 function readGitIndex(target) {
-  const result = spawnSync("git", ["-C", target, "ls-files", "-s"], {
+  // -z turns off git's octal quoting of non-ASCII paths, so a reported path can
+  // be pasted straight into the suggested `git rm --cached` fix. The buffer is
+  // raised well past spawnSync's 1MB default, which a folder of a few thousand
+  // tracked files already exceeds.
+  const result = spawnSync("git", ["-C", target, "ls-files", "-s", "-z"], {
     encoding: "utf8",
-    timeout: 15_000
+    timeout: 15_000,
+    maxBuffer: 64 * 1024 * 1024
   });
-  if (result.error || result.status !== 0) return null;
-  return result.stdout || "";
+  if (result.error) {
+    return { kind: "unavailable", reason: result.error.code || "git could not be run" };
+  }
+  if (result.status !== 0) {
+    const stderr = String(result.stderr || "");
+    if (/not a git repository/i.test(stderr)) return { kind: "not-a-repo" };
+    return { kind: "unavailable", reason: stderr.trim().split("\n")[0] || `git exited ${result.status}` };
+  }
+  return { kind: "index", entries: result.stdout || "" };
 }
 
 function checkNodeVersion() {
