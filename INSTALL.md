@@ -56,6 +56,9 @@ Setup:
 - creates or reconciles DotAIOS-owned skill links in the shared
   `~/.agents/skills` directory, then adds client-specific managed bridge blocks
   or skill targets only for supported AI apps detected on the machine;
+- if Hermes is present, may add the exact `~/aios/skills` path to
+  `skills.external_dirs` in its existing root config and every discovered
+  profile config under `~/.hermes/profiles/`;
 - may add machine-local project path metadata under `~/.dotaios` later when
   you register projects;
 - preserves unmanaged files and stops before overwriting existing configuration.
@@ -262,20 +265,22 @@ directories, remove only links whose resolved target is inside
 `<aios-path>/skills`;
 preserve every other entry. Check the retired `~/.cursor/skills`,
 `~/.gemini/skills`, and `~/.gemini/config/skills` directories under the same
-rule: remove only links into `<aios-path>/skills`. If enabled, remove only the
-`<aios-path>/skills` entry from Hermes `skills.external_dirs`. The optional
-browser binary is `~/.dotaios/bin/lightpanda`.
+rule: remove only links into `<aios-path>/skills`. If enabled, inspect the root
+Hermes config and each discovered profile config, then remove only the exact
+`<aios-path>/skills` entry from `skills.external_dirs`. The optional browser
+binary is `~/.dotaios/bin/lightpanda`.
 
 For each attached checkout listed in `~/.dotaios/projects.json`, remove only the
 DotAIOS-managed block from its root `AGENTS.md`. In that checkout's
 `.claude/skills` and `.agents/skills` directories, remove only links whose
 resolved target is inside the checkout's own `skills` directory. If its
 `.hermes/config.yaml` lists that same `skills` directory under
-`skills.external_dirs`, remove only that entry. Apply the same link rule to the
-retired `.cursor/skills`, `.gemini/skills`, and `.gemini/config/skills`
-directories. If `.cursor/rules/dotaios.mdc` contains a DotAIOS managed block,
-remove only that block and preserve all surrounding content. Then review or
-remove the machine-local project record and archive or delete `<aios-path>`.
+`skills.external_dirs`, remove only that exact entry. Apply the same link rule
+to the retired `.cursor/skills`, `.gemini/skills`, and
+`.gemini/config/skills` directories. If `.cursor/rules/dotaios.mdc` contains a
+DotAIOS managed block, remove only that block and preserve all surrounding
+content. Then review or remove the machine-local project record and archive or
+delete `<aios-path>`.
 
 DotAIOS does not yet automate this destructive final step, so unmanaged client
 configuration and project repositories remain yours.

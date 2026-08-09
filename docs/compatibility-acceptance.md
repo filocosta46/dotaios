@@ -44,9 +44,18 @@ automated invocation coverage as Tier 1.
 |---|---|---|
 | Gemini CLI | `~/.gemini/GEMINI.md`, `.agents/skills` | Google ended Gemini Code Assist for individual accounts, so the CLI exits with `IneligibleTierError` and cannot produce a receipt on such an account. Re-test only on an account that still has access. |
 | Antigravity IDE | Global skills under `~/.gemini/antigravity/skills`, project skills under `.agents/skills`; optional MCP in `~/.gemini/config/mcp_config.json` | Confirm the skill or MCP server appears, then return a unique skill marker or deterministic `read_working_context` value |
-| Hermes | `skills.external_dirs` in `.hermes/config.yaml` | Start a fresh bounded session with a read-only toolset and invoke a disposable project skill |
+| Hermes | Global `skills.external_dirs` in `~/.hermes/config.yaml`; no bundled project target | Invoke a disposable global skill only after a safe bounded host mode exists; until then keep invocation and production unverified |
 | Kimi Code CLI | Shared `~/.agents/skills`; optional MCP in `~/.kimi-code/mcp.json` | Confirm a DotAIOS skill or the `dotaios` MCP server appears, then invoke one and preserve the output |
 | OpenCode | Shared `~/.agents/skills`; optional MCP at `mcp.dotaios` in `~/.config/opencode/opencode.json` | Confirm the skill or MCP server appears, invoke one deterministic DotAIOS capability, and preserve the output |
+
+Hermes project-local configuration is not a Tier 2 surface. Hermes reads
+`$HERMES_HOME/config.yaml`, while `dotaios attach` does not set that selector or
+install a launcher. A checkout-local file is therefore not discovery evidence.
+Re-entry requires an owned selector contract, a version/capability policy for
+relative path semantics, a safe host mode that does not auto-bypass approvals,
+a bounded receipt that proves the selected host loaded and invoked the expected
+skill, and one resolver shared by production attachment, health inspection,
+and the probe.
 
 Do not remove the `Gemini` entry from `packages/core/src/agents.json` as part of
 demoting Gemini CLI. Antigravity carries `bridge: null` and receives its context

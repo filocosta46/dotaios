@@ -8,12 +8,14 @@ import assert from "node:assert/strict";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
-function runCli(args) {
+function runCli(args, { allowNonZero = false } = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: repoRoot,
     encoding: "utf8"
   });
-  assert.equal(result.status, 0, `dotaios ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`);
+  if (!allowNonZero) {
+    assert.equal(result.status, 0, `dotaios ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`);
+  }
   return result;
 }
 
@@ -40,7 +42,7 @@ test("activation resolves native skill targets from a project-owned registry", (
           skills: {
             mode: "config-external-dir",
             configFile: ".custom-hermes/config.yaml",
-            key: "skills.external_dirs"
+            key: "runner.skill_paths"
           }
         }
       ]
@@ -49,7 +51,7 @@ test("activation resolves native skill targets from a project-owned registry", (
   fs.mkdirSync(path.join(homePath, ".custom-hermes"), { recursive: true });
   fs.writeFileSync(
     path.join(homePath, ".custom-hermes", "config.yaml"),
-    "skills:\n  external_dirs: []\n"
+    "runner:\n  skill_paths: []\n"
   );
 
   runCli(["activate", "--path", aiosPath, "--home", homePath, "--all"]);
@@ -58,4 +60,29 @@ test("activation resolves native skill targets from a project-owned registry", (
   assert.equal(fs.readlinkSync(link), path.join(aiosPath, "skills", "audit"));
   const config = fs.readFileSync(path.join(homePath, ".custom-hermes", "config.yaml"), "utf8");
   assert.match(config, new RegExp(`- ${aiosPath.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}/skills`));
+  assert.match(config, /runner:\n  skill_paths:/);
+  assert.doesNotMatch(config, /^skills:/m);
+
+  const doctor = runCli(
+    ["skills", "doctor", "--json", "--path", aiosPath, "--home", homePath],
+    { allowNonZero: true }
+  );
+  const report = JSON.parse(doctor.stdout);
+  const customConfig = report.hermes.configs.find((entry) => entry.path.endsWith(".custom-hermes/config.yaml"));
+  assert.equal(customConfig.key, "runner.skill_paths");
+  assert.equal(customConfig.status, "healthy");
+
+  fs.writeFileSync(
+    path.join(homePath, ".custom-hermes", "config.yaml"),
+    `skills:\n  external_dirs:\n    - ${path.join(aiosPath, "skills")}\nrunner:\n  skill_paths: []\n`
+  );
+  const mismatchedDoctor = runCli(
+    ["skills", "doctor", "--json", "--path", aiosPath, "--home", homePath],
+    { allowNonZero: true }
+  );
+  const mismatchedReport = JSON.parse(mismatchedDoctor.stdout);
+  const customRuntime = mismatchedReport.runtimes.find((entry) => entry.name === "Custom Hermes");
+  assert.equal(customRuntime.capabilities.configured, "no");
+  assert.equal(customRuntime.capabilities.discoverable, "no");
+  assert.deepEqual(customRuntime.evidence.hermesConfigs.map((entry) => entry.key), ["runner.skill_paths"]);
 });

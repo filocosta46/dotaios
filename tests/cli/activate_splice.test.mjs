@@ -207,7 +207,7 @@ describe("activate — managed block splicing", () => {
     }
   });
 
-  it("never overwrites a concurrent edit recreated at the publication boundary", async () => {
+  it("preserves a concurrent edit injected at the guarded publication checkpoint", async () => {
     const dirs = await makeTmpDirs();
     try {
       const { bridge, original } = await seedManagedBridge(dirs.homePath);
@@ -240,7 +240,7 @@ describe("activate — managed block splicing", () => {
     }
   });
 
-  it("restores the original bridge when activation stops after claiming it", async () => {
+  it("keeps the original bridge visible when activation stops after preserving it", async () => {
     const dirs = await makeTmpDirs();
     try {
       const { bridge, original } = await seedManagedBridge(dirs.homePath);
@@ -254,22 +254,56 @@ describe("activate — managed block splicing", () => {
               beforeBridgeCommit: async ({ destination, preservedPath }) => {
                 if (destination !== bridge) return;
                 claimed = true;
-                assert.equal(await exists(destination), false);
+                assert.equal(await fs.readFile(destination, "utf8"), original);
                 assert.equal(await fs.readFile(preservedPath, "utf8"), original);
-                throw new Error("simulated interruption after claim");
+                throw new Error("simulated interruption after preservation");
               }
             }
           }
         ),
-        /simulated interruption after claim/
+        /simulated interruption after preservation/
       );
 
-      assert.equal(claimed, true, "the test must stop after the old inode is preserved");
+      assert.equal(claimed, true, "the test must stop after the old bytes are preserved");
       assert.equal(await fs.readFile(bridge, "utf8"), original);
       const preserved = (await fs.readdir(path.dirname(bridge)))
         .filter((name) => name.startsWith("CLAUDE.md.dotaios-backup-"));
       assert.equal(preserved.length, 1);
       assert.equal(await fs.readFile(path.join(path.dirname(bridge), preserved[0]), "utf8"), original);
+    } finally {
+      await fs.rm(dirs.base, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a guarded Hermes config conflict as activation attention", async () => {
+    const dirs = await makeTmpDirs();
+    try {
+      const configPath = path.join(dirs.homePath, ".hermes", "config.yaml");
+      const concurrent = "skills:\n  external_dirs:\n    - /concurrent/skills\n";
+      await fs.mkdir(path.dirname(configPath), { recursive: true });
+      await fs.writeFile(configPath, "skills:\n  external_dirs: []\n");
+      let edited = false;
+
+      const activation = await activate(
+        ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
+        {
+          lifecycle: {
+            beforeHermesReplace: async ({ destination }) => {
+              if (destination !== configPath || edited) return;
+              edited = true;
+              await fs.writeFile(destination, concurrent);
+            }
+          }
+        }
+      );
+
+      assert.equal(edited, true);
+      assert.equal(activation.blockedHermesCount, 1);
+      assert.equal(
+        activation.results.find((entry) => entry.path === configPath)?.action,
+        "hermes:conflict"
+      );
+      assert.equal(await fs.readFile(configPath, "utf8"), concurrent);
     } finally {
       await fs.rm(dirs.base, { recursive: true, force: true });
     }

@@ -200,7 +200,7 @@ flowchart TB
 This plan owns the first measurable continuity slice; the surrounding breakdown is the current programme understanding, not a committed roadmap.
 
 - **Enables:** Host reliability gates can verify that native adapters expose the same canonical evidence contract.
-  - **Can proceed independently of this slice:** Gemini bridge preservation, Hermes path deduplication, migration-warning parity, onboarding consistency, and real Windows runtime evidence.
+  - **Can proceed independently of this slice:** Gemini bridge preservation, global Hermes YAML safety with explicit project-support demotion, migration-warning parity, onboarding consistency, and real Windows runtime evidence.
 - **Enables:** Personal replication work can later carry the same canonical knowledge to another device without redefining what continuity means.
   - **Depends on separate decisions:** Writer authority, conflict preservation, and staged restore.
 - **Shares:** Source-folder revisit and project-skill invocation use the same receipt discipline but retain their own user flows and acceptance fixtures.

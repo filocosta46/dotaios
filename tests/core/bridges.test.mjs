@@ -119,3 +119,42 @@ test("user Antigravity overrides replace the bundled adapter by stable name", as
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("registry normalization rejects malformed external-dir keys and control-character paths", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-invalid-registry-"));
+  try {
+    await fs.writeFile(
+      path.join(root, "agents.json"),
+      JSON.stringify({
+        agents: [
+          {
+            name: "Bad Key Runtime",
+            detect: ".bad-key",
+            bridge: null,
+            skills: {
+              mode: "config-external-dir",
+              configFile: ".bad-key/config.yaml",
+              key: "runner..skill_paths"
+            }
+          },
+          {
+            name: "Bad Path Runtime",
+            detect: ".bad-path",
+            bridge: null,
+            skills: {
+              mode: "config-external-dir",
+              configFile: ".bad-path\0/config.yaml",
+              key: "runner.skill_paths"
+            }
+          }
+        ]
+      })
+    );
+
+    const registry = await loadAgentRegistry(root);
+    assert.equal(registry.find((agent) => agent.name === "Bad Key Runtime").skills, undefined);
+    assert.equal(registry.find((agent) => agent.name === "Bad Path Runtime").skills, undefined);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});

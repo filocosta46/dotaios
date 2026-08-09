@@ -119,6 +119,19 @@ test("inspectSkillHealth does not fail for agents and Hermes that are not instal
   assert.equal(report.hermes.available, false);
 });
 
+test("inspectSkillHealth reports a Hermes config behind a symlinked ancestor as unsafe", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  const hermesPath = path.join(homePath, ".hermes");
+  const outsidePath = path.join(path.dirname(homePath), "outside-hermes");
+  await fs.rename(hermesPath, outsidePath);
+  await fs.symlink(outsidePath, hermesPath);
+
+  const report = await inspectSkillHealth({ aiosPath, homePath });
+
+  assert.equal(report.hermes.configs[0].status, "unsafe");
+  assert.equal(report.healthy, false);
+});
+
 test("inspectSkillHealth enumerates stale extra native links", async () => {
   const { aiosPath, homePath } = await makeAios();
   const targetDir = path.join(homePath, ".agents", "skills");

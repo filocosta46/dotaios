@@ -4,6 +4,30 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Project attachment no longer writes `<project>/.hermes/config.yaml`. Hermes
+  loads the config selected through `HERMES_HOME`, and DotAIOS does not own that
+  selector, so the earlier project target could look configured while remaining
+  inert in an ordinary launch. Existing checkout Hermes files are preserved.
+  Global `~/.hermes/config.yaml` and discovered profile registration remain
+  available as configuration evidence only.
+
+### Fixed
+
+- The global Hermes YAML adapter now fails closed on invalid or ambiguous
+  documents, preserves comments and indentation, quotes punctuation-heavy
+  paths, rejects multiline injection and unsupported YAML shapes, and validates
+  the exact resulting path before writing. It rejects symlinked or non-regular
+  config targets and invalid UTF-8, serializes competing DotAIOS writers, and
+  detects external changes observed at guarded checkpoints. The live config
+  remains visible until an atomic replacement, and an exact-byte backup is
+  retained. An external editor that does not honor the DotAIOS lock still has a
+  narrow final check-to-rename race. Health inspection uses the same safe YAML
+  reader and registry key as activation. Custom external-directory adapters
+  now reject malformed dotted keys and control-character config paths instead
+  of normalizing a typo into a different key or crashing health inspection.
+
 ## [1.28.4] - 2026-08-06
 
 ### Added

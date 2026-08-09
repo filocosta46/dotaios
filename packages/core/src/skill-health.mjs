@@ -11,7 +11,7 @@ import {
 } from "./bridges.mjs";
 import { renderResolver, renderSkillsIndex, collectSkills } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
-import { discoverHermesConfigPaths } from "./hermes-config.mjs";
+import { discoverHermesConfigTargets, inspectExternalSkillsDirs } from "./hermes-config.mjs";
 import { findManagedSkillAliases } from "./skills-install.mjs";
 
 export async function inspectSkillHealth({ aiosPath, homePath = os.homedir(), detection = {} }) {
@@ -132,22 +132,26 @@ function configuredStatus({ agent, installed, bridge, homePath, targetByDir, her
   }
   if (agent.skills?.mode === "config-external-dir") {
     const expected = path.resolve(homePath, agent.skills.configFile);
-    return hermes.configs.some((entry) => entry.path === expected && entry.status === "healthy") ? "yes" : "no";
+    const key = agent.skills.key || "skills.external_dirs";
+    return hermes.configs.some((entry) => (
+      entry.path === expected && entry.key === key && entry.status === "healthy"
+    )) ? "yes" : "no";
   }
   if (!installed) return "not-detected";
   return bridge?.status === "not-applicable" ? "not-declared" : "no";
 }
 
-function discoverableStatus({ agent, installed, bridge, targetByDir, hermes }) {
+function discoverableStatus({ agent, installed, bridge, homePath, targetByDir, hermes }) {
   if (agent.skills?.mode === "symlink") {
     const target = targetByDir.get(agent.skills.dir);
     if (!target || target.status !== "active") return installed ? "no" : "not-detected";
     return target.canonicalPresent ? "path-ready" : "no";
   }
   if (agent.skills?.mode === "config-external-dir") {
-    return hermes.configs.length > 0 && hermes.configs.every((entry) => entry.status === "healthy")
-      ? "path-ready"
-      : (installed ? "no" : "not-detected");
+    const expected = path.resolve(homePath, agent.skills.configFile);
+    const key = agent.skills.key || "skills.external_dirs";
+    const target = hermes.configs.find((entry) => entry.path === expected && entry.key === key);
+    return target?.status === "healthy" ? "path-ready" : (installed ? "no" : "not-detected");
   }
   if (bridge?.status === "healthy") return "not-proven";
   return installed ? "no" : "not-detected";
@@ -174,8 +178,10 @@ function skillTargetEvidence(agent, targetByDir) {
 function hermesEvidence(agent, homePath, hermes) {
   if (agent.skills?.mode !== "config-external-dir") return [];
   const expected = path.resolve(homePath, agent.skills.configFile);
-  return hermes.configs.filter((entry) => entry.path === expected).map((entry) => ({
+  const key = agent.skills.key || "skills.external_dirs";
+  return hermes.configs.filter((entry) => entry.path === expected && entry.key === key).map((entry) => ({
     path: entry.path,
+    key: entry.key,
     status: entry.status
   }));
 }
@@ -350,9 +356,9 @@ async function inspectBridges({ aiosPath, homePath, detection }) {
 
 async function inspectHermes({ aiosPath, homePath, registry = [] }) {
   const hermesRoot = path.join(homePath, ".hermes");
-  const configPaths = await discoverHermesConfigPaths(homePath, registry);
+  const configTargets = await discoverHermesConfigTargets(homePath, registry);
   const hasConfigSurface = await pathExists(hermesRoot)
-    || await Promise.all(configPaths.map((configPath) => pathExists(configPath)))
+    || await Promise.all(configTargets.map(({ configPath }) => pathExists(configPath)))
       .then((values) => values.some(Boolean));
   if (!hasConfigSurface) {
     return { available: false, canonical: path.resolve(path.join(aiosPath, "skills")), configs: [] };
@@ -360,15 +366,21 @@ async function inspectHermes({ aiosPath, homePath, registry = [] }) {
 
   const expected = path.resolve(path.join(aiosPath, "skills"));
   const configs = [];
-  for (const configPath of configPaths) {
-    const values = await readExternalDirs(configPath);
-    if (!values) {
-      configs.push({ path: configPath, status: "missing", externalDirs: [] });
+  for (const { configPath, key } of configTargets) {
+    const inspection = await inspectExternalSkillsDirs(configPath, key, homePath);
+    if (inspection.status === "missing") {
+      configs.push({ path: configPath, key, status: "missing", externalDirs: [] });
       continue;
     }
-    const externalDirs = values.map((value) => normalizePath(value, homePath));
+    if (inspection.status !== "readable") {
+      configs.push({ path: configPath, key, status: inspection.status, externalDirs: [] });
+      continue;
+    }
+    const values = inspection.values;
+    const externalDirs = values.map((value) => normalizeHermesPath(value, homePath));
     configs.push({
       path: configPath,
+      key,
       status: externalDirs.includes(expected) ? "healthy" : "missing-canonical",
       externalDirs
     });
@@ -400,40 +412,12 @@ async function pathExists(value) {
   }
 }
 
-async function readExternalDirs(configPath) {
-  let text;
-  try {
-    text = await fs.readFile(configPath, "utf8");
-  } catch {
-    return null;
+function normalizeHermesPath(value, homePath) {
+  const normalized = String(value || "").trim();
+  if (normalized === "~") return path.resolve(homePath);
+  if (normalized.startsWith(`~${path.sep}`) || normalized.startsWith("~/")) {
+    return path.resolve(homePath, normalized.slice(2));
   }
-  const lines = text.split(/\r?\n/);
-  const skillsIndex = lines.findIndex((line) => /^skills:\s*$/.test(line));
-  if (skillsIndex === -1) return [];
-  const externalIndex = lines.findIndex((line, index) =>
-    index > skillsIndex && /^\S/.test(line) ? false : index > skillsIndex && /^\s{2}external_dirs:/.test(line)
-  );
-  if (externalIndex === -1) return [];
-  const value = lines[externalIndex].replace(/^\s{2}external_dirs:\s*/, "").trim();
-  if (!value) {
-    const values = [];
-    for (let index = externalIndex + 1; index < lines.length; index += 1) {
-      const match = lines[index].match(/^\s+-\s+(.+)\s*$/);
-      if (!match) break;
-      values.push(unquoteScalar(match[1]));
-    }
-    return values;
-  }
-  if (value === "[]") return [];
-  return [unquoteScalar(value)];
-}
-
-function normalizePath(value, homePath) {
-  const normalized = unquoteScalar(value);
-  if (normalized.startsWith("~")) return path.resolve(homePath, normalized.slice(1));
-  return path.resolve(normalized);
-}
-
-function unquoteScalar(value) {
-  return String(value || "").trim().replace(/^(['"])(.*)\1$/, "$2");
+  if (path.isAbsolute(normalized)) return path.resolve(normalized);
+  return path.resolve(homePath, ".hermes", normalized);
 }

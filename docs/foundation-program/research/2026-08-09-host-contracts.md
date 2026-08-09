@@ -38,7 +38,10 @@ Only `produced` supports a public “works with” claim. File presence, a valid
 - The common portable denominator is a short committed instruction file, usually `AGENTS.md`, plus host-native project skill directories where official support exists.
 - Startup instructions are context, not enforcement. Trust, approvals, hook policy, tool exposure, and MCP permission are host-specific.
 - The first-slice acceptance must test the same user job through the core seam and at least one fresh host; adapter tests may not redefine selection or budgets.
-- A host probe must reproduce production path normalization and configuration scope. The current Hermes probe does not.
+- A host probe must reproduce production path normalization and configuration
+  scope. The prelaunch Hermes probe did not; the accepted disposition now
+  removes that unselected project surface and reports it as unsupported rather
+  than manufacturing discovery evidence.
 - Cursor and OpenCode can be documented as compatible before they are publicly validated, but they cannot share the same badge/wording as a produced host.
 - Gemini support cannot be reconciled from the iMac branch alone because the live remote contains the unique user-file preservation fix.
 

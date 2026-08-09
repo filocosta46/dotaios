@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { acquireOperationLock, releaseOperationLock } from "./operation-lock.mjs";
+
+const FILE_REPLACEMENT_LOCK_FORMAT = "dotaios-file-replacement-lock/v1";
 
 export async function pathExists(filePath) {
   try {
@@ -90,10 +93,10 @@ async function createOrKeepWithTemporaryFile(destination, createTemporary) {
   }
 }
 
-async function ensureDestinationParent(destination, boundaryRoot) {
+async function validateDestinationParent(destination, boundaryRoot, { createMissing = false } = {}) {
   const parent = path.dirname(destination);
   if (!boundaryRoot) {
-    await fs.mkdir(parent, { recursive: true });
+    if (createMissing) await fs.mkdir(parent, { recursive: true });
     return;
   }
 
@@ -118,16 +121,30 @@ async function ensureDestinationParent(destination, boundaryRoot) {
   let current = root;
   for (const segment of relativeParent.split(path.sep).filter(Boolean)) {
     current = path.join(current, segment);
-    try {
-      await fs.mkdir(current);
-    } catch (error) {
-      if (error.code !== "EEXIST") throw error;
+    if (createMissing) {
+      try {
+        await fs.mkdir(current);
+      } catch (error) {
+        if (error.code !== "EEXIST") throw error;
+      }
     }
     const stats = await lstatIfPresent(current);
     if (!stats || !stats.isDirectory() || stats.isSymbolicLink()) {
       throw new Error(`Cannot write through unsafe managed directory: ${current}`);
     }
   }
+}
+
+async function ensureDestinationParent(destination, boundaryRoot) {
+  await validateDestinationParent(destination, boundaryRoot, { createMissing: true });
+}
+
+export async function validateManagedFilePath(destination, boundaryRoot) {
+  await validateDestinationParent(destination, boundaryRoot);
+  const stats = await lstatIfPresent(destination);
+  if (!stats) return null;
+  assertSafeOverwriteTarget(destination, stats);
+  return stats;
 }
 
 export async function writeFileSafe(
@@ -155,6 +172,126 @@ export async function writeFileSafe(
     if (existing) await fs.chmod(temporary, fileMode);
   });
   return { action: existing ? "updated" : "created", path: destination };
+}
+
+export async function replaceFileIfUnchanged(
+  destination,
+  expected,
+  content,
+  {
+    boundaryRoot = null,
+    mode = 0o666,
+    beforeReplace = null,
+    beforePublish = null,
+    beforeCommit = null,
+    beforeRename = null,
+    expectedStats = null,
+    expectedBytes = null
+  } = {}
+) {
+  const comparisonBytes = expectedBytes == null
+    ? Buffer.from(expected)
+    : Buffer.from(expectedBytes);
+  const token = `${process.pid}-${randomUUID()}`;
+  const basename = path.basename(destination);
+  const staged = path.join(path.dirname(destination), `.${basename}.dotaios-${token}.next`);
+  const preservedPath = `${destination}.dotaios-backup-${token}`;
+  const lockPath = `${destination}.dotaios-write.lock`;
+  await ensureDestinationParent(lockPath, boundaryRoot);
+  assertSafeOverwriteTarget(lockPath, await lstatIfPresent(lockPath));
+  const lock = await acquireOperationLock(lockPath, {
+    format: FILE_REPLACEMENT_LOCK_FORMAT,
+    ownsParent: false
+  });
+  if (!lock) return { replaced: false, preservedPath: null };
+
+  try {
+    const stagedWrite = await writeFileSafe(staged, content, "preserve", { boundaryRoot, mode });
+    if (stagedWrite.action !== "created") {
+      throw new Error(`Cannot stage a unique replacement for ${destination}`);
+    }
+    await fs.chmod(staged, mode);
+
+    try {
+      await beforeReplace?.({ destination, current: expected, next: content, staged });
+      if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
+        return { replaced: false, preservedPath: null };
+      }
+
+      await beforePublish?.({ destination, current: expected, next: content, staged });
+      if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
+        return { replaced: false, preservedPath: null };
+      }
+
+      if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
+        return { replaced: false, preservedPath: null };
+      }
+
+      // Publish an exact byte-for-byte backup while the live destination stays
+      // in place. The later rename is atomic, so readers observe either the old
+      // file or the complete replacement—even if the process stops mid-update.
+      const backup = await writeFileSafe(preservedPath, comparisonBytes, "preserve", {
+        boundaryRoot,
+        mode
+      });
+      if (backup.action !== "created") {
+        throw new Error(`Cannot preserve a unique backup for ${destination}`);
+      }
+      await fs.chmod(preservedPath, mode);
+
+      if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
+        return { replaced: false, preservedPath };
+      }
+
+      await beforeCommit?.({ destination, current: expected, next: content, staged, preservedPath });
+      if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
+        return { replaced: false, preservedPath };
+      }
+
+      await beforeRename?.({ destination, current: expected, next: content, staged, preservedPath });
+      await validateManagedFilePath(destination, boundaryRoot);
+      if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
+        return { replaced: false, preservedPath };
+      }
+
+      // DotAIOS writers are serialized by the recoverable per-file lock. The
+      // final rename keeps readers on a complete old-or-new file. Editors that
+      // do not honor that lock still have a narrow final check-to-rename race,
+      // so callers must describe this as guarded replacement, not filesystem
+      // compare-and-swap.
+      await fs.rename(staged, destination);
+      return { replaced: true, preservedPath };
+    } finally {
+      await fs.rm(staged, { force: true });
+    }
+  } finally {
+    await releaseOperationLock(lock);
+  }
+}
+
+async function fileStillMatches(destination, expectedBytes, expectedStats) {
+  const before = await lstatIfPresent(destination);
+  if (!sameRegularFile(before, expectedStats)) return false;
+
+  let current;
+  try {
+    current = await fs.readFile(destination);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  const after = await lstatIfPresent(destination);
+  return current.equals(expectedBytes) && sameRegularFile(after, before);
+}
+
+function sameRegularFile(actual, expected) {
+  if (!actual?.isFile() || actual.isSymbolicLink() || !expected) return false;
+  return actual.dev === expected.dev
+    && actual.ino === expected.ino
+    && actual.size === expected.size
+    && actual.mtimeMs === expected.mtimeMs
+    && actual.ctimeMs === expected.ctimeMs
+    && (actual.mode & 0o777) === (expected.mode & 0o777);
 }
 
 export async function copyFileSafe(

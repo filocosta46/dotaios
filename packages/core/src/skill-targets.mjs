@@ -67,17 +67,3 @@ export function projectSymlinkTargets(registry = bundledRegistry) {
   for (const target of projectWellKnownFrom(registry)) push(target);
   return out;
 }
-
-export function projectHermesConfigTargets(registry = bundledRegistry) {
-  const seen = new Set();
-  const out = [];
-  for (const agent of agentsFrom(registry)) {
-    const target = projectFrom(agent);
-    if (target?.mode !== "config-external-dir" || !target.configFile || !target.key) continue;
-    const key = `${target.configFile}\0${target.key}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push({ configFile: target.configFile, key: target.key });
-  }
-  return out;
-}

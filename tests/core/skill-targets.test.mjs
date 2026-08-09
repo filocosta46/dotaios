@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { symlinkTargets, retiredSymlinkTargets, hermesConfigTargets } from "../../packages/core/src/skill-targets.mjs";
+import {
+  symlinkTargets,
+  retiredSymlinkTargets,
+  hermesConfigTargets
+} from "../../packages/core/src/skill-targets.mjs";
 
 test("symlinkTargets includes Claude dir and the shared .agents/skills standard", () => {
   const dirs = symlinkTargets().map((t) => t.dir);
@@ -21,6 +25,15 @@ test("hermesConfigTargets returns the Hermes external-dir target", () => {
   assert.equal(t.length, 1);
   assert.equal(t[0].configFile, ".hermes/config.yaml");
   assert.equal(t[0].key, "skills.external_dirs");
+});
+
+test("bundled Hermes has no project target without a runtime selector contract", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { fileURLToPath } = await import("node:url");
+  const registryPath = fileURLToPath(new URL("../../packages/core/src/agents.json", import.meta.url));
+  const registry = JSON.parse(await readFile(registryPath, "utf8"));
+  const hermes = registry.agents.find((agent) => agent.name === "Hermes");
+  assert.equal(hermes.skills.project, undefined);
 });
 
 test("shared user Agent Skills coverage names documented clients", async () => {

@@ -138,6 +138,20 @@ function assertForeignEntriesPreserved(projectPath) {
 test("activate --project and attach expose project skills natively and preserve foreign entries", () => {
   const { tempRoot, aiosPath, homePath, projectPath } = setupProject();
   addForeignEntries(projectPath);
+  const hermesPath = path.join(projectPath, ".hermes", "config.yaml");
+  const projectSkillsPath = path.join(projectPath, "skills");
+  fs.writeFileSync(
+    hermesPath,
+    [
+      "skills:",
+      "  external_dirs:",
+      "    - /foreign/project/skills",
+      `    - ${projectSkillsPath}`,
+      "    - ./skills",
+      ""
+    ].join("\n")
+  );
+  const hermesBefore = fs.readFileSync(hermesPath, "utf8");
 
   try {
     run([
@@ -151,11 +165,8 @@ test("activate --project and attach expose project skills natively and preserve 
     assertProjectSkillLinks(projectPath);
     assertForeignEntriesPreserved(projectPath);
 
-    const hermesPath = path.join(projectPath, ".hermes", "config.yaml");
-    const projectSkillsPath = path.join(projectPath, "skills");
     const firstConfig = fs.readFileSync(hermesPath, "utf8");
-    assert.match(firstConfig, /- \/foreign\/project\/skills/);
-    assert.match(firstConfig, new RegExp(`- ${projectSkillsPath.replaceAll("/", "\\/")}`));
+    assert.equal(firstConfig, hermesBefore, "attach must not mutate an inert project Hermes config");
 
     const firstSnapshot = projectSnapshot(projectPath);
     run(["attach", projectPath, "--path", aiosPath]);
@@ -164,7 +175,19 @@ test("activate --project and attach expose project skills natively and preserve 
     assertProjectSkillLinks(projectPath);
     assertForeignEntriesPreserved(projectPath);
     const secondConfig = fs.readFileSync(hermesPath, "utf8");
-    assert.equal(secondConfig.split(projectSkillsPath).length - 1, 1);
+    assert.equal(secondConfig, hermesBefore);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("attach does not create an inert project Hermes config", () => {
+  const { tempRoot, aiosPath, projectPath } = setupProject();
+  const hermesPath = path.join(projectPath, ".hermes", "config.yaml");
+
+  try {
+    run(["attach", projectPath, "--path", aiosPath]);
+    assert.equal(fs.existsSync(hermesPath), false);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }
@@ -352,7 +375,7 @@ test("attach --dry-run previews project-local skill wiring without changing file
 
     assert.deepEqual(projectSnapshot(projectPath), before);
     assert.match(output, /project-skill/);
-    assert.match(output, /Hermes config action/i);
+    assert.doesNotMatch(output, /Hermes config action/i);
     for (const targetDir of [
       ".claude/skills",
       ".agents/skills"
@@ -545,7 +568,7 @@ test("attach cleans owned dangling project links after skills are removed", () =
   }
 });
 
-test("project-local custom targets are registry-driven and reject unsafe paths", () => {
+test("project-local symlink targets are registry-driven while config targets require a selector contract", () => {
   const { tempRoot, aiosPath, projectPath } = setupProject();
   fs.writeFileSync(
     path.join(aiosPath, "agents.json"),
@@ -605,8 +628,11 @@ test("project-local custom targets are registry-driven and reject unsafe paths",
       path.join(projectPath, ".custom-hermes", "config.yaml"),
       "utf8"
     );
-    assert.match(customHermesConfig, /- \/foreign\/project\/skills/);
-    assert.match(customHermesConfig, new RegExp(`- ${path.join(projectPath, "skills").replaceAll("/", "\\/")}`));
+    assert.equal(
+      customHermesConfig,
+      "runner:\n  skill_paths:\n    - /foreign/project/skills\n",
+      "custom config-external-dir targets need an explicit runtime selector contract"
+    );
     assert.equal(fs.existsSync(path.join(projectPath, "outside", "project-skill")), false);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

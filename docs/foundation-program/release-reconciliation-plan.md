@@ -45,10 +45,16 @@ Authority: planning only; no merge, fetch from the iMac, version bump, push, or 
 
 ### Hermes project skills
 
-- Normalize a foreign entry, a legacy absolute project-skills entry, and `./skills` to exactly one preferred managed relative entry while preserving foreign entries.
-- Use the same `./skills` plus project `baseDir` semantics in production attachment and the probe.
-- Repeated activation and probing must be idempotent.
-- Keep Hermes below produced support until a bounded real invocation receipt exists.
+- The original normalization contract is rejected: both spellings targeted a
+  checkout config that ordinary Hermes does not load unless a separate actor
+  selects it through `HERMES_HOME`.
+- Remove the bundled project target and keep existing checkout Hermes files
+  byte-identical.
+- Report project Hermes configuration and discovery as `no`, with invocation
+  and production `not-run`; retain only the global configuration adapter.
+- Re-entry requires the selector, version/capability, safe-probe, shared
+  resolution, and produced-receipt gates in
+  `decisions/2026-08-09-hermes-support-boundary.md`.
 
 ### Migration projection parity
 
@@ -74,6 +80,7 @@ Authority: planning only; no merge, fetch from the iMac, version bump, push, or 
 - Full test suite on Node 20 and Node 22.
 - Repository smoke test and packed-artifact/public-contract checks.
 - Windows runtime receipt.
-- Hermes produced-result receipt or an explicit public-support demotion.
+- Explicit project-Hermes support demotion in registry, receipts, tests, and
+  every public support document; global invocation remains unverified.
 - Isolated iMac validation of the relevant continuity and host paths.
 - No publish, version bump, GitHub Release, npm action, or public-claim expansion before every applicable receipt passes.

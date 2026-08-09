@@ -6,8 +6,7 @@ import { spawnSync } from "node:child_process";
 import { installSymlinkSkills } from "../../../core/src/skills-install.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import { loadAgentRegistry } from "../../../core/src/bridges.mjs";
-import { projectHermesConfigTargets, projectSymlinkTargets } from "../../../core/src/skill-targets.mjs";
-import { ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
+import { projectSymlinkTargets } from "../../../core/src/skill-targets.mjs";
 import {
   createInvocationReceipt,
   markerWasProduced,
@@ -120,7 +119,7 @@ export const PROBE_CLIENTS = {
     label: "Hermes",
     binary: "hermes",
     runnable: false,
-    limitation: "Hermes one-shot mode auto-bypasses approvals; prove a read-only toolset before invoking it.",
+    limitation: "Hermes has no verified project-local config selector, and one-shot mode auto-bypasses approvals; global skill registration remains supported.",
     build: null
   },
   cursor: {
@@ -332,39 +331,18 @@ async function prepareProjectTargets({ sourceAiosPath, projectPath, client }) {
     });
   }
 
-  for (const target of projectHermesConfigTargets(registry)) {
-    const configPath = path.join(projectPath, target.configFile);
-    await fs.mkdir(path.dirname(configPath), { recursive: true });
-    try {
-      await fs.access(configPath);
-    } catch {
-      await fs.writeFile(configPath, "skills:\n  external_dirs: []\n", "utf8");
-    }
-    await ensureExternalSkillsDir({
-      configPath,
-      skillsPath: sourceDir,
-      key: target.key,
-      createMissing: true
-    });
-  }
-
   const agent = registry.find((entry) =>
     entry.name.toLowerCase() === clientAgentName(client).toLowerCase()
   );
   if (!agent?.skills) throw new Error(`No project skill target is registered for ${client}`);
-  const project = agent.skills.project || agent.skills;
+  const project = agent.skills.project;
+  if (!project) return { path: null, configured: false, discoverable: false };
 
-  if (project.mode === "symlink") {
-    const targetDir = path.join(projectPath, project.dir);
-    const targetSkillPath = path.join(targetDir, PROBE_SKILL, "SKILL.md");
-    const readable = await isReadableFile(targetSkillPath);
-    return { path: targetDir, configured: readable, discoverable: readable };
-  }
-
-  const configPath = path.join(projectPath, project.configFile);
-  const config = await fs.readFile(configPath, "utf8");
-  const configured = config.includes(sourceDir);
-  return { path: configPath, configured, discoverable: configured };
+  if (project.mode !== "symlink") return { path: null, configured: false, discoverable: false };
+  const targetDir = path.join(projectPath, project.dir);
+  const targetSkillPath = path.join(targetDir, PROBE_SKILL, "SKILL.md");
+  const readable = await isReadableFile(targetSkillPath);
+  return { path: targetDir, configured: readable, discoverable: readable };
 }
 
 function clientAgentName(client) {

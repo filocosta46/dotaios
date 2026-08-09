@@ -73,10 +73,11 @@ There are two skill scopes. AIOS skills are authored in `~/aios/skills` and
 propagated globally. Project skills are authored in `<project>/skills` and
 propagated only inside that checkout by `dotaios attach`. Both scopes use the
 same `SKILL.md` contract; the registry declares their native targets. Symlinks,
-Hermes external directories, dry-runs, idempotency, and preservation of foreign
-entries are tested at the CLI seam. Native client discovery and invocation are
-not inferred from a successful filesystem check and require separate acceptance
-evidence.
+global Hermes external directories, dry-runs, idempotency, and preservation of
+foreign entries are tested at the CLI seam. Hermes has no project-local target:
+DotAIOS does not own the `HERMES_HOME` selector that would make a checkout-local
+config authoritative. Native client discovery and invocation are not inferred
+from a successful filesystem check and require separate acceptance evidence.
 
 Plugins are trusted local folders. Permission declarations are visible to users but are not sandbox enforcement. Remote/plugin marketplace installs are intentionally out of scope until provenance and stronger install controls exist.
 

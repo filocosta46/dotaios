@@ -64,3 +64,13 @@ Current code passes a relative target and selects `junction` on Windows. Five te
 - Migration: stale and interrupted fixtures; compare compact CLI, JSON hook, and MCP results, budgets, latency, and file write effects.
 - Onboarding: a disposable account follows only the chosen documented route and records prompts, approvals, refusal points, and resulting files.
 - Gemini: user-authored file, absent file, stale block, malformed block, symlink/non-regular target, repeated connect, and live client loading.
+
+## Post-audit disposition
+
+Later runtime inspection invalidated the audit's proposed project-path repair.
+Hermes reads the config selected through `HERMES_HOME`; DotAIOS did not own that
+selector, so aligning two checkout-file spellings would only make production
+and the probe consistently wrong. The accepted disposition is an explicit
+project-support demotion with global-only configuration support. See
+`../decisions/2026-08-09-hermes-support-boundary.md`. The historical findings
+above remain unchanged as the evidence that triggered the deeper check.

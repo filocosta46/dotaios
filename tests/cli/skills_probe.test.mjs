@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { runSkillInvocationProbe } from "../../packages/cli/src/lib/skill-invocation-probe.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -106,12 +107,37 @@ test("skills probe records a limitation without claiming invocation for Hermes",
       "skills", "probe", "--client", "hermes", "--json", "--path", aiosPath
     ]);
     const receipt = JSON.parse(result.stdout);
-    assert.equal(receipt.evidence.configured, "yes");
-    assert.equal(receipt.evidence.discoverable, "path-ready");
+    assert.equal(receipt.evidence.configured, "no");
+    assert.equal(receipt.evidence.discoverable, "no");
     assert.equal(receipt.evidence.invoked, "not-run");
     assert.equal(receipt.evidence.produced, "not-run");
-    assert.match(receipt.limitation, /read-only toolset/i);
+    assert.match(receipt.limitation, /no verified project-local config selector/i);
+    assert.match(receipt.limitation, /global skill registration remains supported/i);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Hermes probe does not stage or bless an inert project config", async () => {
+  const { root, aiosPath } = setupAios();
+  let fixturePath = null;
+  try {
+    const result = await runSkillInvocationProbe({
+      client: "hermes",
+      aiosPath,
+      keep: true
+    });
+    fixturePath = result.fixturePath;
+    const projectPath = path.join(fixturePath, "project");
+    const configPath = path.join(projectPath, ".hermes", "config.yaml");
+    assert.equal(result.receipt.evidence.configured, "no");
+    assert.equal(result.receipt.evidence.discoverable, "no");
+    assert.equal(result.receipt.evidence.invoked, "not-run");
+    assert.equal(result.receipt.evidence.produced, "not-run");
+    assert.equal(result.receipt.targetPath, null);
+    assert.equal(fs.existsSync(configPath), false);
+  } finally {
+    if (fixturePath) fs.rmSync(fixturePath, { recursive: true, force: true });
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
