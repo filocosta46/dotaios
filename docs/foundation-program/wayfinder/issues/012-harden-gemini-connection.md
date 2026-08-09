@@ -1,7 +1,7 @@
 ---
 title: Harden Gemini connection as a guarded three-artifact activation
 label: wayfinder:issue
-status: in_progress
+status: closed
 created: 2026-08-09
 ---
 
@@ -32,3 +32,18 @@ local `dotaios` binary to shadow the intended package.
 - Complete local suite, syntax, package, and diff checks.
 - Independent exact-commit validation on the iMac without modifying its product
   checkout.
+
+## Closure evidence
+
+- Exact implementation commit: `78313d8476e6da7b568b10fbb1d815f6c8956fc9`.
+- Local focused suite: 53/53; complete suite: 1,240 passed, zero failed,
+  one intentional skip; syntax, check, smoke, package dry-run, and diff checks
+  passed.
+- Adversarial validation covered 409 Unicode/CRLF/mode/marker fixtures,
+  guarded-write races, invalid UTF-8, malformed JSON and ownership, exact
+  recovery bytes/modes, missing-file contention, disabled hooks, and a matching
+  project-local package shadow. No reproducible launch blocker remained.
+- Independent iMac exact-bundle validation passed syntax/check, 53/53 focused
+  tests, and the complete 1,240/0/1 suite. The product checkout remained clean
+  and unchanged at `40e417087afd8d92db9da7ff2b6186591bf57cb5`.
+- Receipt: `../../audits/2026-08-09-imac-gemini-validation.md`.
