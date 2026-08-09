@@ -6,12 +6,12 @@ Updated: 2026-08-09
 
 - Programme worktree: `/Users/filo/Code/dotaios/.worktrees/codex/foundation-reliability`
 - Programme branch: `codex/foundation-reliability`
-- Current committed checkpoint: `ed6f6d2` (`merge: preserve reviewed prelaunch fixes`)
+- Current committed checkpoint: `8a2a49d` (`fix: enforce truthful Hermes support boundary`)
 - Original base: `origin/main` at `f0d72f7`
 - Protected prelaunch checkout: `/Users/filo/Code/dotaios`, branch `launch/2026-08-08-prelaunch-fixes` at `fa08b69`, clean and untouched
 - Archived iMac head: local ref `refs/archive/imac/2026-08-09-40e4170`
 - Wayfinder map: `docs/foundation-program/wayfinder/map.md`
-- Current frontier: finish review/commit/iMac validation of the Hermes support correction, then harden Gemini managed-file writes; the proposed continuity slice remains separately blocked on the named product-contract approval
+- Current frontier: harden Gemini managed-file writes; the Hermes correction is committed and independently validated, while the proposed continuity slice remains separately blocked on the named product-contract approval
 
 ## Completed checkpoint
 
@@ -33,15 +33,15 @@ Updated: 2026-08-09
 - Committed the Foundation documentation checkpoint, merged the full reviewed PR #59 line without rewriting its commits, and archived the divergent iMac head under a read-only local ref.
 - Runtime-tested Hermes v0.18.2 and falsified the proposed checkout-config repair: ordinary Hermes reads the config selected by `HERMES_HOME`, which `attach` does not own. Removed the bundled project target, made the probe report the unsupported surface honestly, retained the global adapter, and recorded explicit re-entry gates.
 - Hardened the global Hermes YAML path with semantic preflight and candidate post-validation. Invalid/ambiguous YAML, invalid UTF-8, malformed custom keys and config paths, aliases/maps, block and multiline scalars, punctuation/path injection, comment trivia, arbitrary valid indentation, CRLF, dry-run, and idempotence now have focused coverage. Health inspection consumes the same safe parser and registry key. The shared guarded writer rejects unsafe paths, serializes DotAIOS writers with a recoverable lock, detects external edits at guarded checkpoints, preserves exact-byte backups, and atomically replaces the live file without a missing-path window. A non-cooperating external editor retains a documented narrow final race.
+- Committed that correction at `8a2a49d` and validated the exact commit in a disposable iMac bundle clone: syntax and check passed, the focused selection passed 166/166, and the complete suite passed 1,213 tests with zero failures and one intentional skip. The original iMac checkout and Git state remained untouched.
 
 ## Next unblocked actions
 
-1. Close the Hermes slice with full verification, adversarial review, a local commit, and an independent iMac checkpoint; do not publish it.
-2. Harden Gemini managed-file writes against malformed markers, symlink/non-regular targets, byte loss, and concurrent edits while preserving the four PR #59 regressions.
-3. Resolve migration-envelope parity, the remaining onboarding contract audit, and honest Windows runtime evidence.
-4. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`.
-5. Enrich the approved artifact with `ce-plan`, convert it into tracer-bullet tickets, implement the acceptance slice, and run the selected host receipt.
-6. Keep publication blocked until every applicable receipt passes and the release metadata is advanced atomically; the pinned 1.28.4 install/removal contract must remain historically truthful meanwhile.
+1. Harden Gemini managed-file writes against malformed markers, symlink/non-regular targets, byte loss, and concurrent edits while preserving the four PR #59 regressions.
+2. Resolve migration-envelope parity, the remaining onboarding contract audit, and honest Windows runtime evidence.
+3. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`.
+4. Enrich the approved artifact with `ce-plan`, convert it into tracer-bullet tickets, implement the acceptance slice, and run the selected host receipt.
+5. Keep publication blocked until every applicable receipt passes and the release metadata is advanced atomically; the pinned 1.28.4 install/removal contract must remain historically truthful meanwhile.
 
 ## Guardrails
 

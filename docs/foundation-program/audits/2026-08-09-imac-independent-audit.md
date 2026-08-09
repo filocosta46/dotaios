@@ -74,3 +74,24 @@ and the probe consistently wrong. The accepted disposition is an explicit
 project-support demotion with global-only configuration support. See
 `../decisions/2026-08-09-hermes-support-boundary.md`. The historical findings
 above remain unchanged as the evidence that triggered the deeper check.
+
+## Exact-commit validation receipt
+
+The accepted Hermes correction was independently validated on the iMac at
+exact commit `8a2a49dd4cad8b8e0123f0c7c8585e8d25a2b8fa`. A local archive and the iMac
+copy had matching SHA-256 `08a168e44619baf287ad35abaa96c24f140dfb841dee2b5a2c08ee88fdf79d8e`,
+and `git get-tar-commit-id` returned the exact commit. Because the public
+contract suite intentionally calls `git ls-files`, the validator also cloned
+an exact-ref bundle only inside a disposable `/tmp` directory and verified its
+HEAD before and after execution.
+
+On Node v22.22.3 and npm 10.9.8:
+
+- syntax-check passed for 105 source files;
+- `npm run check` passed;
+- the focused Hermes/regression selection passed 166/166;
+- the complete suite passed 1,213 tests with zero failures and one intentional
+  skip.
+
+The original iMac checkout, refs, credentials, commits, and remote were not
+changed. Both local and remote disposable validation directories were removed.
