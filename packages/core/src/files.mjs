@@ -181,6 +181,7 @@ export async function replaceFileIfUnchanged(
   {
     boundaryRoot = null,
     mode = 0o666,
+    backupMode = mode,
     beforeReplace = null,
     beforePublish = null,
     beforeCommit = null,
@@ -232,12 +233,12 @@ export async function replaceFileIfUnchanged(
       // file or the complete replacement—even if the process stops mid-update.
       const backup = await writeFileSafe(preservedPath, comparisonBytes, "preserve", {
         boundaryRoot,
-        mode
+        mode: backupMode
       });
       if (backup.action !== "created") {
         throw new Error(`Cannot preserve a unique backup for ${destination}`);
       }
-      await fs.chmod(preservedPath, mode);
+      await fs.chmod(preservedPath, backupMode);
 
       if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
         return { replaced: false, preservedPath };

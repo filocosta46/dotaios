@@ -6,6 +6,10 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Changed
 
+- `dotaios connect gemini` now preflights all three managed artifacts and writes
+  `settings.json` last as the SessionStart activation point. Its generated hook
+  invokes the exact shipped DotAIOS package version instead of allowing an
+  opened project's local `dotaios` binary to shadow the command.
 - Project attachment no longer writes `<project>/.hermes/config.yaml`. Hermes
   loads the config selected through `HERMES_HOME`, and DotAIOS does not own that
   selector, so the earlier project target could look configured while remaining
@@ -15,6 +19,13 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Fixed
 
+- Gemini connection now preserves every byte outside its one managed
+  `GEMINI.md` block, refuses malformed ownership markers, unsafe paths, foreign
+  hook scripts, invalid UTF-8 and incompatible settings shapes, and detects
+  concurrent edits before atomic replacement. It quotes hook paths containing
+  spaces, repairs one stale named DotAIOS hook, refuses ambiguous duplicates or
+  legacy MCP entries, preserves recovery-file permissions, and surfaces hook
+  failures instead of silently returning empty context.
 - The global Hermes YAML adapter now fails closed on invalid or ambiguous
   documents, preserves comments and indentation, quotes punctuation-heavy
   paths, rejects multiline injection and unsupported YAML shapes, and validates

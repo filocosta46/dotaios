@@ -23,13 +23,17 @@ An approved, testable Foundation reliability specification for the defined knowl
 - [Sync/recovery research](issues/004-research-sync-recovery.md): call the scope personal replication, serialize writers, fail closed on divergence, preserve both sides, and stage verified restore; do not imply collaboration or backup.
 - [Prelaunch reconciliation](issues/010-reconcile-prelaunch-branches.md): preserve the full green PR #59 line, archive the iMac head through read-only transport, review its six commits individually, and reimplement mixed changes behind failing tests instead of merging the iMac branch wholesale.
 - [Hermes support contract](issues/011-resolve-hermes-support-contract.md): retain the global configuration adapter, remove the inert project target, and require an owned runtime selector plus a safe produced-result receipt before project support can return.
+- [Gemini connection safety](issues/012-harden-gemini-connection.md): treat
+  `settings.json` as the activation point, guard all three artifacts, preserve
+  proven ownership boundaries, and pin the runtime command so an opened project
+  cannot shadow DotAIOS.
 
 ## Not yet specified
 
 - Whether the first proof targets cross-agent continuity on one device or cross-device continuity after replication.
 - Which non-Hermes supported-host tiers can honestly be claimed after current official documentation and fresh-host probes are reconciled.
 - Whether a derived lexical index or metadata view earns its cost after baseline measurements; no vector, graph, or cloud store is assumed.
-- Which independent prelaunch gate follows the closed Hermes correction; Gemini managed-file safety is next.
+- Which independent prelaunch gate follows the Gemini connection correction.
 
 ## Out of scope
 

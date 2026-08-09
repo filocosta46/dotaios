@@ -34,11 +34,22 @@ dotaios connect gemini
 ```
 
 Installs three things in `~/.gemini/`:
-- a `GEMINI.md` bridge pointing Gemini at your `~/aios` folder,
-- a **SessionStart hook** configured to inject your working-memory digest (`dotaios brief --compact`) at session start — discovery and invocation remain client-version dependent, and
-- native workflow links shared with supported local agents.
+- a `GEMINI.md` bridge that preserves surrounding user instructions and points
+  Gemini at your AIOS folder,
+- a version-pinned `dotaios-context-hook.sh` command that produces the bounded
+  working-context JSON, and
+- a guarded `settings.json` merge that activates that command as a
+  **SessionStart hook**. Discovery and invocation remain client-version
+  dependent.
 
-If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses to overwrite a file that is not valid JSON (no partial install).
+DotAIOS preflights all three files before writing and activates settings last.
+It refuses unsafe or ambiguous paths, malformed managed markers, foreign hook
+scripts, invalid UTF-8 or JSON, incompatible hook shapes, and concurrent edits.
+Existing settings fields and bytes outside the one managed `GEMINI.md` block
+are preserved; a failed preflight leaves every artifact untouched.
+
+Native workflow links are installed separately by `dotaios activate` and
+checked with `dotaios skills doctor`.
 
 ### OpenCode
 
