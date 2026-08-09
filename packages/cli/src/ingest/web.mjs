@@ -262,7 +262,52 @@ async function extractArticle(html, sourceUrl) {
   const markdown = turndown.turndown(article.content);
   const title = (article.title || fallbackTitle || sourceUrl).trim();
 
+  const blocked = detectBlockedExtraction(markdown, title);
+  if (blocked) {
+    throw new IngestError(
+      `Page returned ${blocked} instead of content. Nothing was saved. Open the page in a browser, save it as PDF, and re-ingest that file.`,
+      "EXTRACTION_BLOCKED"
+    );
+  }
+
   return { title, markdown };
+}
+
+// Readability parses a consent wall or a video-player shell into a perfectly
+// valid, non-empty article, so the null check above passes and the boilerplate
+// lands in the vault wearing the real page's title and URL. Length cannot
+// separate the two: a genuine short capture runs ~450 bytes while a YouTube
+// consent wall runs ~1,700, so any byte floor that caught the walls would
+// discard real captures.
+// A wall announces itself in its opening words. Across every known poisoned
+// capture the signature sat within the first 28 bytes, so only the lead of the
+// document is examined. That keeps a real article which merely quotes a banner
+// once — a GDPR explainer, a piece about consent dark patterns — ingestable,
+// and it bounds the regex work on remote input that we do not control.
+const LEAD_WINDOW = 400;
+
+const BLOCKED_EXTRACTION_SIGNATURES = [
+  [/X and its partners use cookies/i, "a cookie-consent wall"],
+  // The ellipsis is required: "Did someone say cookies?" on its own is ordinary
+  // English and appears in real writing.
+  [/Did someone say\s{0,4}(?:…|\.\.\.)\s{0,4}cookies\?/i, "a cookie-consent wall"],
+  [/Before you continue to YouTube/i, "a cookie-consent wall"],
+  [/If playback doesn.{0,3}t begin shortly/i, "a video-player shell"],
+  [/Your browser can.{0,3}t play this video/i, "a video-player error"],
+  [/Drop files here to upload/i, "an app's upload chrome"],
+  [/Join .{1,80} on Substack/i, "a newsletter signup wall"],
+  [/shared this with you\./i, "a newsletter share stub"]
+];
+
+// The title is included because Readability routinely puts the wall's own words
+// there and nowhere in the body: the canonical 1,764-byte YouTube consent
+// capture carries "Before you continue to YouTube" only in article.title.
+export function detectBlockedExtraction(markdown, title = "") {
+  const head = `${String(title || "")}\n${String(markdown || "")}`.slice(0, LEAD_WINDOW);
+  for (const [pattern, reason] of BLOCKED_EXTRACTION_SIGNATURES) {
+    if (pattern.test(head)) return reason;
+  }
+  return null;
 }
 
 function extractFallbackTitle(document) {

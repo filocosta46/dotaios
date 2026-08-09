@@ -1,0 +1,35 @@
+{
+  "schema": "dotaios.skill-invocation.v1",
+  "client": "Claude Code",
+  "clientVersion": "2.1.220 (Claude Code)",
+  "targetPath": "<temporary-project>/.claude/skills",
+  "skill": {
+    "name": "dotaios-probe",
+    "path": "<temporary-project>/skills/dotaios-probe/SKILL.md",
+    "sha256": "f826a200956d8e3e9ace83354d6eb0d4704ffb80cd558815f09b65a7528973c7"
+  },
+  "evidence": {
+    "configured": "yes",
+    "discoverable": "path-ready",
+    "invoked": "yes",
+    "produced": "yes"
+  },
+  "command": [
+    "claude",
+    "--print",
+    "--no-session-persistence",
+    "--permission-mode",
+    "plan",
+    "--tools",
+    "Skill",
+    "--setting-sources",
+    "project",
+    "<probe-prompt>"
+  ],
+  "marker": "DOTAIOS_PROBE_OK_f0ff5a3ca309a111",
+  "exitCode": 0,
+  "limitation": null,
+  "error": null,
+  "startedAt": "2026-08-07T22:30:03.938Z",
+  "finishedAt": "2026-08-07T22:30:31.984Z"
+}

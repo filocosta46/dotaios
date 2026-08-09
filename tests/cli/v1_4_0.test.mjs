@@ -43,7 +43,7 @@ const {
   slugify,
   disambiguateSlug
 } = await import(path.join(ingestDir, "frontmatter.mjs"));
-const { ingestUrl, IngestError } = await import(path.join(ingestDir, "web.mjs"));
+const { ingestUrl, IngestError, detectBlockedExtraction } = await import(path.join(ingestDir, "web.mjs"));
 const { ingestDocument, detectMarker } = await import(path.join(ingestDir, "pdf.mjs"));
 const { ingestText } = await import(path.join(ingestDir, "text.mjs"));
 const { ingestBinary } = await import(path.join(ingestDir, "binary.mjs"));
@@ -485,6 +485,83 @@ test("ingestUrl raises READABILITY_NULL on empty SPA shell (no silent body-dump)
     (err) => err instanceof IngestError && err.code === "READABILITY_NULL"
   );
   assert.equal(fs.existsSync(ws.rawDir) && fs.readdirSync(ws.rawDir).length > 0, false, "no file should be written");
+});
+
+// A consent wall parses into a valid, non-empty article, so READABILITY_NULL
+// never fires and the boilerplate reaches the vault wearing the real page's
+// title and URL. 29 captures in the wild were saved this way.
+test("ingestUrl raises EXTRACTION_BLOCKED on a cookie-consent wall (no silent save)", async () => {
+  const ws = makeWorkspace();
+  const html = await fsp.readFile(path.join(fixturesDir, "sample-consent-wall.html"), "utf8");
+  const fetchImpl = makeFakeFetch({ body: html });
+  await assert.rejects(
+    () =>
+      ingestUrl("https://x.com/amasad/status/2077802290304684404", {
+        rawDir: ws.rawDir,
+        eventsPath: ws.eventsPath,
+        fetchImpl,
+        ...NO_LIGHTPANDA
+      }),
+    (err) => err instanceof IngestError && err.code === "EXTRACTION_BLOCKED"
+  );
+  assert.equal(fs.existsSync(ws.rawDir) && fs.readdirSync(ws.rawDir).length > 0, false, "no file should be written");
+});
+
+test("detectBlockedExtraction flags known walls and shells but spares short real captures", () => {
+  assert.ok(detectBlockedExtraction("X and its partners use cookies to provide you"));
+  assert.ok(detectBlockedExtraction("Did someone say … cookies?"));
+  assert.ok(detectBlockedExtraction("If playback doesn't begin shortly, try restarting your device."));
+  assert.ok(detectBlockedExtraction("If playback doesn’t begin shortly, try restarting your device."));
+  assert.ok(detectBlockedExtraction("Your browser can't play this video"));
+  assert.ok(detectBlockedExtraction("Drop files here to upload"));
+  assert.ok(detectBlockedExtraction("Join Filippo Costa on Substack"));
+  assert.ok(detectBlockedExtraction("Filippo Costa shared this with you."));
+
+  // A real 452-byte capture from the wild. Any byte floor able to catch the
+  // 480-byte Garry Tan wall would have discarded this, which is why the guard
+  // matches signatures instead of length.
+  assert.equal(
+    detectBlockedExtraction("Anson Lin (@ansonlin) on X\n\nthe best founders I know all share one trait: they ship before they feel ready."),
+    null
+  );
+  assert.equal(detectBlockedExtraction(""), null);
+});
+
+// Readability puts the YouTube wall's words in article.title and nothing
+// identifying in the body, so a guard reading only the body never fires on the
+// one capture the YouTube signature exists to catch.
+test("detectBlockedExtraction reads the title, not only the body", () => {
+  const body = "Sign in to confirm your choices\n\nWe use cookies and data to deliver and maintain Google services.";
+  assert.equal(detectBlockedExtraction(body), null, "the body alone does not identify this wall");
+  assert.ok(
+    detectBlockedExtraction(body, "Before you continue to YouTube"),
+    "the wall is only identifiable from the title"
+  );
+});
+
+test("detectBlockedExtraction ignores a banner quoted deep inside a real article", () => {
+  const article = `${"An analysis of consent design across major platforms. ".repeat(40)}
+As the banner itself puts it: X and its partners use cookies to provide you with a better service.
+${"The regulatory picture continues to shift. ".repeat(40)}`;
+  assert.equal(detectBlockedExtraction(article, "Consent dark patterns, reviewed"), null);
+});
+
+test("detectBlockedExtraction does not treat ordinary English as a wall", () => {
+  assert.equal(
+    detectBlockedExtraction("These brown-butter chocolate chunk cookies are the best thing I baked this year.", "Did someone say cookies?"),
+    null,
+    "the wall says 'Did someone say … cookies?' with an ellipsis; the plain sentence is ordinary English"
+  );
+});
+
+// The guard runs on markup fetched from an arbitrary remote host, so a pattern
+// that backtracks on adversarial whitespace is a denial of service.
+test("detectBlockedExtraction is not vulnerable to adversarial whitespace", () => {
+  const hostile = `Did someone say${" ".repeat(400_000)}cookies?`;
+  const started = process.hrtime.bigint();
+  detectBlockedExtraction(hostile);
+  const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+  assert.ok(elapsedMs < 250, `guard took ${elapsedMs.toFixed(0)}ms on hostile input`);
 });
 
 // --- Path B document parser ---
