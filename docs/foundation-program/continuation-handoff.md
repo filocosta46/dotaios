@@ -1,17 +1,26 @@
 # Foundation Reliability Programme — Continuation Handoff
 
-Updated: 2026-08-09
+Updated: 2026-08-10
+
+> Freshness rule: read this handoff, then inspect the branch HEAD, working-tree
+> status, and diff before acting. This file is a checkpoint, not authority over
+> newer committed or uncommitted work.
 
 ## Exact state
 
 - Programme worktree: `/Users/filo/Code/dotaios/.worktrees/codex/foundation-reliability`
 - Programme branch: `codex/foundation-reliability`
-- Current implementation checkpoint: `78313d8` (`fix: make Gemini connection fail closed`)
+- Current implementation checkpoint: `bc8bd2d` (`docs: sequence the remaining launch blockers`)
+- Canonical projection implementation: `f804957` (`fix: contain canonical working-context reads`)
 - Original base: `origin/main` at `f0d72f7`
 - Protected prelaunch checkout: `/Users/filo/Code/dotaios`, branch `launch/2026-08-08-prelaunch-fixes` at `fa08b69`, clean and untouched
 - Archived iMac head: local ref `refs/archive/imac/2026-08-09-40e4170`
 - Wayfinder map: `docs/foundation-program/wayfinder/map.md`
-- Current frontier: unify the working-context operational envelope and close its read-only/privacy gaps; Hermes and Gemini corrections are committed and independently validated, while the proposed continuity slice remains separately blocked on the named product-contract approval
+- Current frontier: contain and bound the two remaining MCP readers, then make
+  session memory authoritative before aligning replication, onboarding/doctor,
+  host receipts, and exact-artifact release certification. The proposed
+  continuity slice remains separately blocked on the named product-contract
+  approval.
 
 ## Completed checkpoint
 
@@ -40,16 +49,48 @@ Updated: 2026-08-09
   fail closed; the generated package command cannot resolve from an opened
   project. Exact commit `78313d8` passed 53/53 focused and 1,240/0/1 complete
   tests independently on the iMac, whose product checkout remained untouched.
+- Committed the canonical working-context projection boundary at `f804957`.
+  Compact CLI, hook JSON, and MCP now share one read-only operational envelope;
+  projected files are contained and bounded; unsafe project attribution fails
+  closed; path-free MCP errors and response budgets are enforced; and read-only
+  commands cannot spawn sync. The projection's valid-input selection, ordering,
+  and visible-character budget semantics remain unchanged.
+- Independently validated the projection working tree on the iMac through a
+  read-only pull into an isolated `git init` checkout with Node v22.22.3:
+  1,345 passed, 0 failed, 1 intentionally skipped, exit 0. The MacBook run
+  immediately around the moving-tree checkpoint reported 1,344 passed, 0
+  failed, and 1 skipped; the one-test difference is explained by the tree
+  moving between runs, not a result discrepancy.
+- Converted the whole-system audit frontier into eight explicit Wayfinder
+  slices at `bc8bd2d`: remaining MCP containment, SessionStore authority,
+  replication policy, installation/health, artifact-bound host receipts,
+  exact-artifact lifecycle, measured skill routing, and platform evidence.
+- The iMac audit-shell PATH limitation is resolved via `~/.zshenv` as of
+  2026-08-09. Node, npm, and Git are available over non-interactive SSH for
+  future read-only independent validation.
 
 ## Next unblocked actions
 
-1. Resolve migration-envelope parity without recursively inspecting protected
-   shelves, and fix the canonical projection's read-only, containment, and MCP
-   response-budget gaps before claiming adapter parity.
-2. Resolve the remaining onboarding contract audit and honest Windows runtime evidence.
-3. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`.
-4. Enrich the approved artifact with `ce-plan`, convert it into tracer-bullet tickets, implement the acceptance slice, and run the selected host receipt.
-5. Keep publication blocked until every applicable receipt passes and the release metadata is advanced atomically; the pinned 1.28.4 install/removal contract must remain historically truthful meanwhile.
+1. Mark issues 013 and 014 complete against `f804957`, then implement issue 015:
+   contain and bound `search_aios` and `resolve_skill` without changing valid
+   ordering or ranking.
+2. Resolve the memory-authority decision and implement issue 016 so session
+   Markdown is canonical evidence behind one transactional `SessionStore`.
+3. Implement issue 018's single human-run installation and truthful doctor
+   contract, then align experimental replication posture through issue 017.
+4. Bind host receipts to the immutable candidate artifact (issue 019) and
+   certify its complete disposable lifecycle without publishing (issue 020).
+5. Remove the redundant adjacent `fileStillMatches` check in
+   `packages/core/src/files.mjs` when next editing that module, and guard the
+   `git` probe in `tests/core/public-contract.test.mjs` so extracted source
+   archives can run the suite without `.git` metadata.
+6. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in
+   `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`; then enrich it
+   with `ce-plan`, create tracer-bullet tickets, implement the acceptance slice,
+   and run the selected host receipt.
+7. Keep publication blocked until every applicable exact-artifact receipt
+   passes and release metadata can advance atomically. The pinned 1.28.4
+   install/removal contract remains historically truthful meanwhile.
 
 ## Guardrails
 
