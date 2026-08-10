@@ -34,9 +34,9 @@ An approved, testable Foundation reliability specification for the defined knowl
 - [Working-context read boundary](issues/014-make-working-context-read-only-and-contained.md):
   compact CLI, hook JSON, and MCP now read the same bounded projection through
   a contained, strict-UTF-8, non-mutating boundary with path-free failures.
-- [Remaining MCP readers](issues/015-contain-remaining-mcp-readers.md): deepen
-  the same bounded evidence-reader seam for `search_aios` and `resolve_skill`;
-  neither may quarantine corrupt input or traverse an unbounded corpus.
+- [Remaining MCP readers](issues/015-contain-remaining-mcp-readers.md): resolved
+  at exact commit `beb76f8`; `search_aios` and `resolve_skill` now use the same
+  bounded evidence-reader seam.
 - [Authoritative session store](issues/016-make-session-store-authoritative.md):
   serialize canonical Markdown and index publication, validate every stored
   path, and make crash/recovery behavior explicit before replication relies on
@@ -44,10 +44,8 @@ An approved, testable Foundation reliability specification for the defined knowl
 
 ## Current execution frontier
 
-1. Make the reviewed Issue 015 working tree durable, validate that exact commit
-   independently on the iMac, and close the remaining-reader containment gate.
-2. Make the session Markdown/index pair one authoritative transactional store
-   after Issue 015 closes.
+1. Make the session Markdown/index pair one authoritative transactional store.
+2. Align plugin/onboarding lifecycle writes with one ownership transaction.
 3. Align replication with that authority, then unify install/health and bind
    host receipts to the immutable packed candidate.
 4. Certify clean, drifted, update, rollback, removal, and packed-doc lifecycle

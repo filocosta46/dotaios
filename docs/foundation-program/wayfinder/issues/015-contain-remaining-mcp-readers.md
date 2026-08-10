@@ -1,7 +1,7 @@
 ---
 title: Contain and bound the remaining MCP readers
 label: wayfinder:issue
-status: in_progress
+status: resolved
 created: 2026-08-10
 blocked_by:
   - 014-make-working-context-read-only-and-contained
@@ -40,10 +40,9 @@ resolution reads every complete `SKILL.md` before returning unbounded metadata.
 
 ## Implementation checkpoint
 
-The working tree on top of `f36fa92` contains the reviewed implementation and
-has passed the complete local gate plus the final independent adversarial
-replay. It is ready for one durability commit; read the live status and diff
-before resuming.
+Exact commit `beb76f80ef2c01bbe996eb1eaceeb85f9ac45359` contains the reviewed
+implementation and passed the complete local gate plus the final independent
+adversarial replay.
 
 - `search_aios` and `resolve_skill` share one request evidence reader. The
   search authority config is itself contained, strict UTF-8, per-file bounded,
@@ -70,5 +69,16 @@ before resuming.
 Local evidence: 78 focused checks pass with zero failures; syntax, CLI check,
 smoke, packed-content dry run, public packed-content policy, and diff checks
 pass. The complete current suite reports 1,388 pass, zero failures, and one
-intentional skip. Independent exact-commit iMac validation remains the closure
-gate after this tree is committed.
+intentional skip.
+
+Independent iMac closure evidence: exact tree
+`bdb083def465dc815a84074d49fa4208c837a747` was transferred in a complete
+history bundle with SHA-256
+`df37ce3e298b1af56921e42a61078fffc197449efff5b43ac270cc01910a3703`.
+The disposable clone passed 78/78 focused checks, 1,388/0/1 complete tests,
+syntax over 109 source files, CLI check, smoke, 8/8 public-contract checks, and
+an npm pack dry run with 172 files. Live CLI/MCP probes preserved corrupt JSONL,
+authorized the configured external vault, refused an escaping Markdown link
+with path-free errors, produced no quarantine, and left read-only fixture hashes
+unchanged. The protected iMac checkout stayed byte-identical and no disposable
+residue remained. Issue 015 is resolved at this exact commit.

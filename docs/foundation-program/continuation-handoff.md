@@ -10,14 +10,13 @@ Updated: 2026-08-10
 
 - Programme worktree: `/Users/filo/Code/dotaios/.worktrees/codex/foundation-reliability`
 - Programme branch: `codex/foundation-reliability`
-- Current committed checkpoint: `f36fa92` (`docs: record exact projection validation`)
+- Current committed checkpoint: `beb76f8` (`fix: contain search and skill evidence reads`)
 - Canonical projection implementation: `f804957` (`fix: contain canonical working-context reads`)
 - Original base: `origin/main` at `f0d72f7`
 - Protected prelaunch checkout: `/Users/filo/Code/dotaios`, branch `launch/2026-08-08-prelaunch-fixes` at `fa08b69`, clean and untouched
 - Archived iMac head: local ref `refs/archive/imac/2026-08-09-40e4170`
 - Wayfinder map: `docs/foundation-program/wayfinder/map.md`
-- Current frontier: make the reviewed Issue 015 working tree durable and obtain
-  its exact-commit iMac receipt, then make session memory authoritative before
+- Current frontier: make session memory authoritative, then
   aligning replication, onboarding/doctor, host receipts, and exact-artifact
   release certification. The proposed continuity slice remains separately
   blocked on the named product-contract approval.
@@ -91,27 +90,25 @@ Updated: 2026-08-10
 - Removed the redundant adjacent `fileStillMatches` check and made the public
   contract suite tolerate source copies without `.git`, closing both minor
   independent-observer items.
-- Durability checkpoint: the Issue 015 candidate's final independent diff
-  review is green. Commit this exact tree and obtain its iMac receipt before
-  starting Issue 016.
+- Issue 015 is closed at exact commit `beb76f8`. Its tree
+  `bdb083def465dc815a84074d49fa4208c837a747` passed 78/78 focused and
+  1,388/0/1 complete checks independently on the iMac, plus smoke, package,
+  public-contract, and live CLI/MCP containment probes. The protected checkout
+  and read-only fixtures remained unchanged.
 
 ## Next unblocked actions
 
-1. Stage the explicit Issue 015 paths and create one conventional commit; do
-   not change the green tree before making it durable.
-2. Bundle and validate that exact commit read-only on the iMac, record the full
-   receipt, and close Issue 015 only if the exact commit is green.
-3. Resolve the memory-authority decision and implement issue 016 so session
+1. Resolve the memory-authority decision and implement issue 016 so session
    Markdown is canonical evidence behind one transactional `SessionStore`.
-4. Implement issue 018's single human-run installation and truthful doctor
+2. Implement issue 018's single human-run installation and truthful doctor
    contract, then align experimental replication posture through issue 017.
-5. Bind host receipts to the immutable candidate artifact (issue 019) and
+3. Bind host receipts to the immutable candidate artifact (issue 019) and
    certify its complete disposable lifecycle without publishing (issue 020).
-6. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in
+4. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in
    `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`; then enrich it
    with `ce-plan`, create tracer-bullet tickets, implement the acceptance slice,
    and run the selected host receipt.
-7. Keep publication blocked until every applicable exact-artifact receipt
+5. Keep publication blocked until every applicable exact-artifact receipt
    passes and release metadata can advance atomically. The pinned 1.28.4
    install/removal contract remains historically truthful meanwhile.
 
