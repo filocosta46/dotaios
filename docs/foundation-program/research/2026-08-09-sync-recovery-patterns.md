@@ -7,7 +7,7 @@ Status: primary-source research synthesis for product decisions; not an adoption
 
 The bounded six-lane report is preserved at:
 
-`/Users/filo/aios/vault/research/deep/2026-08-09-as-of-august-2026-what-primary-source-patterns-should-a-loca.md`
+`<aios>/vault/research/deep/2026-08-09-as-of-august-2026-what-primary-source-patterns-should-a-loca.md`
 
 It covers Git, Syncthing, Obsidian Sync, restic, Automerge/local-first CRDTs, and a smallest-pattern synthesis. The report's tool-adoption suggestions are hypotheses; accepted DotAIOS decisions and current failure evidence remain the product authority.
 

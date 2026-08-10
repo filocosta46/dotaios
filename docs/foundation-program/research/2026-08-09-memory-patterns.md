@@ -7,7 +7,7 @@ Status: primary-source research synthesis for product decisions; not an implemen
 
 The bounded six-lane research run covered Graphiti, Cognee, Mem0, MemOS, Hindsight, OpenViking, and heavyweight graph/RAG counterexamples. Its final automated synthesis failed, but the cited raw findings were preserved at:
 
-`/Users/filo/aios/vault/research/deep/2026-08-09-as-of-august-2026-which-concrete-patterns-from-graphiti-cogn.md`
+`<aios>/vault/research/deep/2026-08-09-as-of-august-2026-which-concrete-patterns-from-graphiti-cogn.md`
 
 This note manually normalizes those findings. Product claims below are intentionally narrower than vendor benchmark claims.
 

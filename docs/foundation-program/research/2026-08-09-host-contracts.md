@@ -7,7 +7,7 @@ Status: official-source synthesis; public support still requires live receipts
 
 The bounded six-host source report is preserved at:
 
-`/Users/filo/aios/vault/research/deep/2026-08-09-as-of-august-2026-what-are-the-official-current-native-contr.md`
+`<aios>/vault/research/deep/2026-08-09-as-of-august-2026-what-are-the-official-current-native-contr.md`
 
 Its automated synthesis failed, but every host lane retained cited raw findings from official documentation, repositories, schemas, and release notes.
 
