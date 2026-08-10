@@ -36,6 +36,24 @@ and that every workspace is registered, complete, and bound to the expected
 safe remote. This prevents project contents, Gitlinks, and clone residue from
 entering the personal-context mirror.
 
+## Project source consent and receipts
+
+Project-source paths, grants, revocation state, and access receipts are
+machine-local. A portable declaration carries only source identity, label,
+type, and purpose beneath its owning project. Add, bind, and grant commands
+preview by default; apply requires the displayed operation ID and plan
+fingerprint from that exact state. An explicit future expiry and exact purpose
+are mandatory. Neither task text nor the read-only MCP adapter can grant
+consent.
+
+Retrieval opens no source-content bytes and returns no absolute roots or local
+state paths. It emits only complete source-relative metadata after containment
+and identity rechecks, then syncs one guarded append-only receipt before
+returning. Receipt uncertainty poisons later access rather than repairing or
+truncating historical bytes. Node's portable checks detect changes at observed
+boundaries; they are not a claim of native directory-handle-relative race
+immunity.
+
 ## Optional Connections
 
 Google Workspace auth remains inside `gws`. DotAIOS requests the fixed read-only Gmail, Calendar, and Drive service set, and does not expose full, custom-scope, or custom-service login options. `gws auth status` does not verify the scopes of an existing grant, so broader grants must be revoked or re-authorized in `gws`. Google and `gws` process requested Workspace data. DotAIOS connection records contain neither OAuth material nor absolute binary paths. Google commands are not exposed through the read-only DotAIOS MCP adapter.

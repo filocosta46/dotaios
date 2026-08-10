@@ -31,6 +31,23 @@ changing the durable record. The sync boundary rejects every outer-index entry
 under `workspaces/`, unregistered or partial workspaces, remote mismatches, and
 other nested repositories. See [ADR 0002](adr/0002-managed-project-workspaces.md).
 
+Portable project-source declarations are also project-scoped, one file per
+source under `projects/<slug>/sources/`. The public workflow policy lives in
+`project-sources.mjs`; machine-local binding/grant persistence uses one
+versioned file per project/source coordinate so selected-project reads do not
+observe or contend with sibling authority. Guarded receipt publication remains
+private. A capability-passed identity
+resolver reads bounded project README frontmatter before either search or
+source discovery constructs a corpus. Only the selected project directory can
+then participate.
+
+Local-folder retrieval enumerates contained metadata with raw UTF-8 name
+validation, finite depth/entry/file/path/output bounds, identity rechecks, and
+no source-content reads. It records the complete decision in the local guarded
+append-only ledger before returning references. Portable Node containment is
+observation-boundary detection; it does not claim kernel-relative `openat2`
+immunity to an unobservable swap-away-and-restore.
+
 ## Memory
 
 `memory/` is operational state. Agents should not preload `events.jsonl`,
@@ -96,7 +113,8 @@ audit and search remain opt-in operations.
 The optional MCP adapter exposes exactly `read_working_context`, `search_aios`,
 and `resolve_skill`. `read_working_context` returns the same core projection plus
 a bounded `operational.migration` sibling;
-`search_aios` is the bounded on-demand search path, and `resolve_skill` routes
+`search_aios` is the bounded on-demand search path with canonical project-corpus
+selection, and `resolve_skill` routes
 workflow intent. There are no compatibility aliases.
 
 ## Vault

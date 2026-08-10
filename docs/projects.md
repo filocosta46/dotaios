@@ -12,6 +12,51 @@ For each project, three things are stored separately:
 
 The project source code remains in its own repository with its own Git history.
 
+## Retrieve references from a local project source
+
+A project may declare the meaning of a local folder without putting its path or
+contents into the portable AIOS. Source declarations live beneath the owning
+project at `projects/<slug>/sources/<source-id>.md`; the absolute binding,
+finite grant, and access receipts remain beneath
+`~/.dotaios/project-sources/` on this machine.
+
+Registering a source is preview-first:
+
+```bash
+dotaios project source add acme-campaign /path/to/assets \
+  --source-id campaign-assets \
+  --label "Campaign assets" \
+  --purpose "Launch campaign assets" \
+  --json
+```
+
+The preview writes nothing and returns `operation_id` and
+`plan_fingerprint`. Apply only that exact plan by repeating the command with
+both values and `--apply`. Grant read access the same way with an explicit
+future UTC expiry:
+
+```bash
+dotaios project source grant acme-campaign campaign-assets \
+  --purpose "Launch campaign assets" \
+  --expires-at 2099-01-01T00:00:00.000Z \
+  --json
+```
+
+Ordinary task text never grants consent. Once the exact grant preview is
+applied by the same shell user, retrieval remains an explicit CLI operation:
+
+```bash
+dotaios project source retrieve acme-campaign \
+  --task "retrieve the campaign assets for that client." \
+  --json
+```
+
+Retrieval returns sorted source-relative regular-file references with size,
+nanosecond freshness, project/source identity, resolution time, and receipt
+identity. It reads metadata rather than file contents, never copies or edits
+the source, and publishes one machine-local receipt before exposing success.
+The MCP adapter deliberately has no retrieval or consent tool.
+
 ## Add a project
 
 Start with a preview:

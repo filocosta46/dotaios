@@ -436,6 +436,95 @@ export async function readProjectCatalog(options = {}) {
   return records.map(toProjectCatalogRecord);
 }
 
+/** Validate the canonical selector shared by project-scoped CLI and MCP reads. */
+export function validateProjectSelector(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_INVALID", "project selector must be a non-empty string");
+  }
+  const codePoints = Array.from(value);
+  if (codePoints.length > 200) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_INVALID", "project selector must contain at most 200 code points");
+  }
+  if (
+    value.trim() !== value
+    || /[\p{Cc}\/\\]/u.test(value)
+    || /[\uD800-\uDFFF]/u.test(value)
+    || value === "."
+    || value === ".."
+    || path.isAbsolute(value)
+    || !/^[\p{L}\p{N}](?:[\p{L}\p{N}:._-]*[\p{L}\p{N}])?$/u.test(value)
+  ) {
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_SELECTOR_INVALID",
+      "project selector must be a safe project slug or stable id"
+    );
+  }
+  return value;
+}
+
+/**
+ * Resolve one portable project identity from bounded README frontmatter only.
+ * The caller supplies the request-scoped evidence capability so catalog work
+ * and the later corpus share one observation budget.
+ */
+export async function resolvePortableProjectIdentity({
+  aiosPath,
+  projectSelector,
+  evidenceReader
+} = {}) {
+  const selector = validateProjectSelector(projectSelector);
+  if (!evidenceReader) {
+    throw new TypeError("resolvePortableProjectIdentity requires an evidence reader");
+  }
+  const resolvedAiosPath = path.resolve(aiosPath);
+  const projectsPath = path.join(resolvedAiosPath, "projects");
+  const projectDirectories = await evidenceReader.listDirectories(resolvedAiosPath, projectsPath);
+  let matches = [];
+  for (const projectDirectory of projectDirectories) {
+    const identity = await readPortableProjectIdentity(resolvedAiosPath, projectDirectory, evidenceReader);
+    if (identity && (selector === identity.slug || selector === identity.id)) {
+      matches = [...matches, identity];
+    }
+  }
+
+  if (matches.length === 0) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_UNKNOWN", "project selector is unknown");
+  }
+  if (matches.length > 1) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_AMBIGUOUS", "project selector is ambiguous; use its stable id");
+  }
+  return matches[0];
+}
+
+async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceReader) {
+  const slug = path.basename(projectDirectory);
+  try {
+    validateSlug(slug);
+  } catch {
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project catalog contains an invalid slug");
+  }
+  const frontmatter = await evidenceReader.readFrontmatter(
+    aiosPath,
+    path.join(projectDirectory, "README.md"),
+    { maxBytes: 16 * 1024, maxFileBytes: 1024 * 1024 }
+  );
+  if (frontmatter === null) return null;
+  const match = FRONTMATTER_RE.exec(frontmatter);
+  if (!match) {
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
+  }
+  const document = parseDocument(match[1], { strict: true, uniqueKeys: true });
+  if (document.errors.length > 0) {
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
+  }
+  const metadata = document.toJS();
+  const id = readOptionalString(metadata?.id) || readOptionalString(metadata?.project_id);
+  if (!id) {
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity requires a stable id");
+  }
+  return Object.freeze({ id, slug });
+}
+
 /** Resolve a project id or slug to an existing path on this machine. */
 export async function resolveProject(referenceOrOptions, additionalOptions = {}) {
   const project = await resolveProjectRecord(referenceOrOptions, additionalOptions);
@@ -1280,6 +1369,12 @@ function validateSlug(value) {
     throw new Error("slug must use lowercase letters, numbers, and single hyphens");
   }
   return slug;
+}
+
+function projectSelectorError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 function slugify(value) {

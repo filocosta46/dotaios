@@ -87,6 +87,38 @@ export async function inspectContainedFile(root, filePath, options = {}) {
   return readContainedFile(root, filePath, { ...options, snapshotOnly: true });
 }
 
+/** Snapshot regular-file metadata without opening or reading source bytes. */
+export async function inspectContainedFileMetadata(root, filePath, options = {}) {
+  const filesystem = options.filesystem || localFilesystem;
+  if (!isPathWithinLexically(root, filePath)) throw new ContainedReadError();
+  const before = await filesystem.lstat(filePath, { bigint: true });
+  if (
+    !before.isFile()
+    || before.isSymbolicLink()
+    || before.nlink !== 1n
+    || !await isPathWithin(root, filePath, { fileSystem: filesystem })
+  ) {
+    throw new ContainedReadError("DOTAIOS_EVIDENCE_NOT_REGULAR_FILE");
+  }
+  const ancestors = await inspectContainedAncestors(root, filePath, filesystem);
+  const after = await filesystem.lstat(filePath, { bigint: true });
+  if (!sameBigIntFile(before, after)) {
+    throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+  }
+  await assertContainedAncestorsUnchanged(root, filePath, filesystem, ancestors);
+  return Object.freeze({ stats: after, ancestors });
+}
+
+/** Compare two metadata-only regular-file observations. */
+export function sameContainedFileMetadataSnapshot(left, right) {
+  return Boolean(
+    left
+    && right
+    && sameBigIntFile(left.stats, right.stats)
+    && sameAncestorSnapshots(left.ancestors, right.ancestors)
+  );
+}
+
 /** Compare two handle-bound file/ancestor snapshots from the same path. */
 export function sameContainedFileSnapshot(left, right) {
   return Boolean(
@@ -184,8 +216,10 @@ export async function readContainedFile(root, filePath, options = {}) {
           ? opened.size
           : Math.min(opened.size, prefixBytes);
       options.budget?.reserveFile(reservedBytes);
-      const bytes = prefixBytes !== null
-        ? await readHandlePrefix(handle, prefixBytes, opened.size)
+      const bytes = options.frontmatterOnly === true
+        ? await readHandleFrontmatter(handle, prefixBytes ?? opened.size)
+        : prefixBytes !== null
+          ? await readHandlePrefix(handle, prefixBytes, opened.size)
         : Number.isFinite(options.maxBytes)
           ? await readBoundedHandle(
             handle,
@@ -231,7 +265,9 @@ export async function readContainedDirectory(root, directoryPath, options = {}) 
   if (Number.isFinite(options.maxEntries)) {
     let directory;
     try {
-      directory = await filesystem.opendir(directoryPath);
+      directory = await filesystem.opendir(directoryPath, {
+        encoding: options.nameEncoding || "utf8"
+      });
     } catch (error) {
       if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
         throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
@@ -278,6 +314,11 @@ export async function inspectContainedDirectory(root, directoryPath, options = {
   const snapshot = await inspectContainedDirectorySnapshot(root, directoryPath, options);
   if (options.returnSnapshot) return snapshot;
   return snapshot?.stats || null;
+}
+
+/** Compare two contained directory observations from the same path. */
+export function sameContainedDirectorySnapshot(left, right) {
+  return sameDirectorySnapshot(left, right);
 }
 
 async function inspectContainedDirectorySnapshot(root, directoryPath, options = {}) {
@@ -424,6 +465,16 @@ function sameFile(left, right) {
     && left.ctimeMs === right.ctimeMs;
 }
 
+function sameBigIntFile(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
+}
+
 function normalizeFiniteLimit(value) {
   const normalized = Number(value);
   if (!Number.isSafeInteger(normalized) || normalized < 0) {
@@ -486,6 +537,37 @@ async function readHandlePrefix(handle, maximumBytes, expectedBytes = null) {
     total += bytesRead;
   }
   return Buffer.concat(chunks, total);
+}
+
+async function readHandleFrontmatter(handle, maximumBytes) {
+  if (typeof handle.read !== "function") {
+    throw new ContainedReadError("DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE");
+  }
+  const limit = Math.max(0, Math.floor(maximumBytes));
+  let bytes = "";
+  const singleByte = Buffer.allocUnsafe(1);
+  while (bytes.length < limit) {
+    const { bytesRead } = await handle.read(singleByte, 0, 1, null);
+    if (bytesRead === 0) break;
+    bytes += String.fromCharCode(singleByte[0]);
+    if (bytes.length >= 5) {
+      const opening = bytes.charCodeAt(3) === 0x0a
+        || (bytes.charCodeAt(3) === 0x0d && bytes.charCodeAt(4) === 0x0a);
+      if (opening && (
+        endsWithBytes(bytes, [0x0a, 0x2d, 0x2d, 0x2d, 0x0a])
+        || endsWithBytes(bytes, [0x0a, 0x2d, 0x2d, 0x2d, 0x0d, 0x0a])
+      )) {
+        break;
+      }
+    }
+  }
+  return Buffer.from(bytes, "latin1");
+}
+
+function endsWithBytes(value, suffix) {
+  if (value.length < suffix.length) return false;
+  const offset = value.length - suffix.length;
+  return suffix.every((byte, index) => value.charCodeAt(offset + index) === byte);
 }
 
 function missingPathError() {

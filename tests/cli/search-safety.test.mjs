@@ -5,6 +5,10 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import {
+  createProjectSourceRetrievalFixture
+} from "../fixtures/project-source-retrieval.mjs";
+
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
@@ -66,6 +70,32 @@ test("CLI search refuses a linked aios.json before authorizing an external vault
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /OUTSIDE_VAULT_CANARY/);
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(outside));
   assert.deepEqual(snapshotTree(tempRoot), before);
+});
+
+test("CLI project search keeps corpus selection separate from session attribution", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const bySlug = run([
+      "search", "Launch work",
+      "--scope", "all",
+      "--project", "acme-campaign",
+      "--session-project", "unrelated-session-tag",
+      "--path", fixture.aiosPath
+    ]);
+    const byId = run([
+      "search", "Launch work",
+      "--scope", "all",
+      "--project", "project-acme-001",
+      "--session-project", "unrelated-session-tag",
+      "--path", fixture.aiosPath
+    ]);
+
+    assert.match(bySlug.stdout, /Acme Campaign|Launch work/);
+    assert.match(byId.stdout, /Acme Campaign|Launch work/);
+    assert.doesNotMatch(`${bySlug.stdout}\n${byId.stdout}`, /OTHER_CLIENT_PRIVATE_CANARY|other-client/);
+  } finally {
+    fixture.cleanup();
+  }
 });
 
 function run(args) {

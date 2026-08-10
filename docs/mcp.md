@@ -12,11 +12,12 @@ The adapter is useful only when a local MCP-capable client cannot use those simp
   operational notices and non-Markdown response metadata are separately capped
   at 1,024 characters.
 - Machine-specific paths are removed from returned search results.
-- Project filters must be nonblank after trimming, contain no Unicode `Cc`
-  control characters, and be at most 200 Unicode code points. Opaque stable IDs
-  within those bounds remain valid, including spaces, punctuation, and Unicode;
-  supplied wrong-type, control-bearing, or ambiguous selectors are specific
-  input errors rather than unscoped reads.
+- Working-context project filters must be nonblank after trimming, contain no
+  Unicode `Cc` control characters, and be at most 200 Unicode code points.
+  Search project selectors use the narrower canonical slug/stable-ID contract:
+  no separators, dot segments, controls, malformed Unicode, or surrounding
+  whitespace. Supplied wrong-type, malformed, unknown, or ambiguous selectors
+  are specific input errors rather than unscoped reads.
 - Tool arguments are runtime-validated as the advertised object shape: integer
   fields are not coerced from strings or booleans, unknown keys are rejected,
   and error messages never echo an unbounded key.
@@ -31,12 +32,18 @@ The adapter is useful only when a local MCP-capable client cannot use those simp
 The adapter exposes exactly these three read-only tool names:
 
 - `read_working_context`: return the same bounded, project-filtered projection as `dotaios brief --compact`; accepts optional `project`, session `limit`, and character `budget`
-- `search_aios`: search bounded local results by `query`, with optional `scope`, result `limit`, and character `budget`
+- `search_aios`: search bounded local results by `query`, with optional `scope`,
+  canonical project `project`, result `limit`, and character `budget`; project-only
+  scope requires the selector, while all-scope search without it omits projects
+  and reports that omission
 - `resolve_skill`: match an `intent` to installed workflows, with an optional
   result `limit` and character `budget` from 256 to 32,000 (default 6,000);
   the complete serialized response, including budget metadata, stays within it
 
 There are no compatibility aliases or additional MCP tools.
+External project-source retrieval and finite consent remain CLI-only because
+they publish machine-local receipts and require the same user's explicit shell
+apply. Task text and MCP calls cannot approve a grant.
 
 For `read_working_context`, `budget` describes the canonical Markdown
 working-context projection, not operational compatibility metadata. The

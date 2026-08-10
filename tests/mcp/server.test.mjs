@@ -53,7 +53,7 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
-      params: { name: "search_aios", arguments: { query: "gateway", scope: "projects", budget: 1000 } },
+      params: { name: "search_aios", arguments: { query: "gateway", scope: "projects", project: "demo-id", budget: 1000 } },
     },
     {
       jsonrpc: "2.0",
@@ -96,6 +96,47 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
 
   assert.equal(fs.readFileSync(sessionsPath, "utf8"), sessionsBefore);
   assert.equal(fs.readFileSync(eventsPath, "utf8"), eventsBefore);
+});
+
+test("search_aios matches CLI project selection by slug and stable id without widening the tool allowlist", () => {
+  const { aiosPath } = setupAios();
+  for (const [slug, id, canary] of [
+    ["acme-campaign", "project-acme-001", "ACME_MCP_SEARCH_CANARY"],
+    ["other-client", "project-other-002", "OTHER_MCP_SEARCH_CANARY"]
+  ]) {
+    const projectPath = path.join(aiosPath, "projects", slug);
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      `---\nid: ${id}\nproject: ${slug}\n---\n# ${slug}\n\n${canary} campaign assets\n`
+    );
+  }
+  const responses = runMcp(aiosPath, [
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "acme-campaign", budget: 2000 } }
+    },
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "project-acme-001", budget: 2000 } }
+    }
+  ]);
+
+  assert.deepEqual(
+    responses[0].result.tools.map((tool) => tool.name),
+    ["read_working_context", "search_aios", "resolve_skill"]
+  );
+  const bySlug = JSON.parse(toolText(responses[1]));
+  const byId = JSON.parse(toolText(responses[2]));
+  assert.deepEqual(bySlug.results, byId.results);
+  assert.equal(bySlug.scope_selection.project, "acme-campaign");
+  assert.match(JSON.stringify(bySlug), /ACME_MCP_SEARCH_CANARY/);
+  assert.doesNotMatch(JSON.stringify(bySlug), /OTHER_MCP_SEARCH_CANARY|other-client/);
 });
 
 test("mcp search budgets bound the exact serialized response at minimum, default, and maximum", () => {

@@ -12,6 +12,7 @@ import { buildSessionDigest } from "../../../core/src/digest.mjs";
 import { createProjectGitAdapter } from "../project-git.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { createGit } from "../sync/git.mjs";
+import { projectSourceCommand } from "./project-source.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios project add <repo-path> [options]
@@ -20,6 +21,7 @@ const HELP_TEXT = `Usage:
   dotaios project resolve <slug-or-id> [options]
   dotaios project doctor [options]
   dotaios project context <slug-or-id> [options]
+  dotaios project source <add|bind|grant|retrieve> [options]
 
 Keep portable project metadata under projects/<slug>/README.md. Existing
 external repositories stay where they are; restored repositories use the
@@ -60,6 +62,10 @@ export async function projectCommand(args = [], dependencies = {}) {
   if (hasHelpFlag(args)) {
     output.log(HELP_TEXT);
     return;
+  }
+
+  if (args[0] === "source") {
+    return projectSourceCommand(args.slice(1), dependencies);
   }
 
   const { subcommand, positionals, options, addOptions } = parseOptions(args);

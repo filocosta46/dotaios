@@ -2,6 +2,7 @@ import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { createEvidenceReader } from "../../../core/src/evidence-reader.mjs";
 import { markMatches, SEARCH_SCOPES, searchAios } from "../../../core/src/search.mjs";
+import { validateProjectSelector } from "../../../core/src/projects.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const validScopes = new Set(SEARCH_SCOPES);
@@ -20,6 +21,13 @@ export async function searchCommand(args) {
     throw new Error("Usage: dotaios search <query> [--scope memory|vault|context|sessions|skills|references|plugins|all]");
   }
 
+  const scope = options.scope || "all";
+  const limit = options.limit;
+  validateScope(scope);
+  validateLimit(limit);
+  if (scope === "projects" && !options.projectSelector) validateProjectSelector(null);
+  if (options.projectSelector) validateProjectSelector(options.projectSelector);
+
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
 
@@ -30,16 +38,11 @@ export async function searchCommand(args) {
   });
   const vaultPath = resolveVaultPath(config, target);
   reader = reader.withAuthorizedRoots([vaultPath]);
-  const scope = options.scope || "all";
-  const limit = options.limit;
-  validateScope(scope);
-  validateLimit(limit);
-
   console.log(`Searching for "${query}" in ${scope}...\n`);
 
   const sessionFilters = {};
   if (options.agent) sessionFilters.agent = options.agent;
-  if (options.project) sessionFilters.project = options.project;
+  if (options.sessionProject) sessionFilters.project = options.sessionProject;
   if (options.since) sessionFilters.since = options.since;
 
   let totalResults = 0;
@@ -49,9 +52,13 @@ export async function searchCommand(args) {
     query,
     scope,
     limit,
+    projectSelector: options.projectSelector,
     sessionFilters,
     evidenceReader: reader
   });
+  if (groups.scope.projects_omitted) {
+    console.log("Project corpus omitted because no --project selector was supplied.\n");
+  }
   for (const group of groups) {
     if (group.results.length === 0) continue;
     printGroup(group.scope, group.results, query);
@@ -66,7 +73,16 @@ export async function searchCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { limit: 20, path: null, positionals: [], scope: null, agent: null, project: null, since: null };
+  const options = {
+    limit: 20,
+    path: null,
+    positionals: [],
+    scope: null,
+    agent: null,
+    projectSelector: null,
+    sessionProject: null,
+    since: null
+  };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -84,7 +100,10 @@ function parseOptions(args = []) {
       options.agent = readOptionValue(args, index, "--agent");
       index += 1;
     } else if (arg === "--project") {
-      options.project = readOptionValue(args, index, "--project");
+      options.projectSelector = readOptionValue(args, index, "--project");
+      index += 1;
+    } else if (arg === "--session-project") {
+      options.sessionProject = readOptionValue(args, index, "--session-project");
       index += 1;
     } else if (arg === "--since") {
       options.since = readOptionValue(args, index, "--since");
@@ -132,7 +151,9 @@ Examples:
 Options:
   --scope <s>      Limit search: sessions, memory, vault, context, skills, references, plugins, or all (default: all)
   --agent <name>   Filter sessions by agent (e.g. claude-code, manual)
-  --project <name> Filter sessions by project tag
+  --project <id>   Select the portable project corpus by slug or stable id
+  --session-project <name>
+                   Filter sessions by arbitrary project tag
   --since <n>d     Filter sessions by age (e.g. 7d, 30d, 2w)
   --limit <n>      Max results per scope (default: 20)
   --path <dir>     Use an AIOS folder other than ~/aios

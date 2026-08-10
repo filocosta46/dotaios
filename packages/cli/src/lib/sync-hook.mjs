@@ -12,6 +12,9 @@ export function skipsPortableMirrorSync(command, args = []) {
   if (command === "skill" && args[0] === "list") return true;
   if (command === "migrate" && !args.includes("--apply") && !args.includes("--recover")) return true;
   if (command === "project") {
+    if (args[0] === "source") {
+      return !(args[1] === "add" && args.includes("--apply"));
+    }
     return !(args[0] === "add" && (args.includes("--apply") || args.includes("--yes")));
   }
   return false;

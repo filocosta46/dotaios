@@ -1,6 +1,7 @@
 import path from "node:path";
 import { createEvidenceReader } from "./evidence-reader.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
+import { resolvePortableProjectIdentity, validateProjectSelector } from "./projects.mjs";
 
 export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "decisions", "skills", "references", "plugins", "sessions", "all"];
 
@@ -87,6 +88,7 @@ export async function searchAios({
   scope = "all",
   limit = DEFAULT_LIMIT,
   sessionFilters = {},
+  projectSelector = null,
   evidenceReader = null
 }) {
   const resolvedAiosPath = path.resolve(aiosPath);
@@ -95,13 +97,31 @@ export async function searchAios({
     ? resolvedAiosPath
     : resolvedVaultPath;
   const reader = evidenceReader || createEvidenceReader({ roots: [resolvedAiosPath, vaultRoot] });
+  if (scope === "projects" && !projectSelector) validateProjectSelector(projectSelector);
+  const projectIdentity = projectSelector
+    ? await resolvePortableProjectIdentity({
+        aiosPath: resolvedAiosPath,
+        projectSelector,
+        evidenceReader: reader
+      })
+    : null;
   const scopes = scope === "all"
-    ? ["sessions", "context", "memory", "vault", "projects", "decisions", "skills", "references", "plugins"]
+    ? [
+        "sessions",
+        "context",
+        "memory",
+        "vault",
+        ...(projectIdentity ? ["projects"] : []),
+        "decisions",
+        "skills",
+        "references",
+        "plugins"
+      ]
     : [scope];
 
   // Scopes are independent; run them concurrently. Promise.all preserves input
   // order, so the returned groups stay in the same order as before.
-  return Promise.all(
+  const groups = await Promise.all(
     scopes.map(async (name) => ({
       scope: name,
       results: await searchScope(name, {
@@ -110,11 +130,25 @@ export async function searchAios({
         vaultRoot,
         query,
         limit,
+        projectIdentity,
         sessionFilters,
         reader
       })
     }))
   );
+  return new Proxy(groups, {
+    get(target, property, receiver) {
+      if (property === "scope") {
+        return Object.freeze({
+          requested: scope,
+          project: projectIdentity?.slug || null,
+          project_id: projectIdentity?.id || null,
+          projects_omitted: scope === "all" && projectIdentity === null
+        });
+      }
+      return Reflect.get(target, property, receiver);
+    }
+  });
 }
 
 async function searchScope(scope, {
@@ -123,6 +157,7 @@ async function searchScope(scope, {
   vaultRoot,
   query,
   limit = DEFAULT_LIMIT,
+  projectIdentity = null,
   sessionFilters = {},
   reader
 }) {
@@ -153,9 +188,10 @@ async function searchScope(scope, {
     });
   }
   if (scope === "projects") {
-    return searchMarkdownDir(path.join(aiosPath, "projects"), query, {
+    if (!projectIdentity) validateProjectSelector(null);
+    return searchMarkdownDir(path.join(aiosPath, "projects", projectIdentity.slug), query, {
       limit,
-      sourcePrefix: "projects",
+      sourcePrefix: `projects/${projectIdentity.slug}`,
       reader,
       root: aiosPath
     });

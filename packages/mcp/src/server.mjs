@@ -12,6 +12,7 @@ import {
 import { createEvidenceReader } from "../../core/src/evidence-reader.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
+import { validateProjectSelector } from "../../core/src/projects.mjs";
 import { rankSkills } from "../../core/src/skill-resolver.mjs";
 import { collectSkills } from "../../core/src/skills.mjs";
 
@@ -111,7 +112,7 @@ class DotaiosMcpServer {
       return this.readWorkingContext(args);
     }
     if (name === "search_aios") {
-      assertAllowedArguments(args, ["query", "scope", "limit", "budget"]);
+      assertAllowedArguments(args, ["query", "scope", "project", "limit", "budget"]);
       return this.searchAios(args);
     }
     if (name === "resolve_skill") {
@@ -202,6 +203,7 @@ class DotaiosMcpServer {
 
   async searchAios(args) {
     const query = requireString(args.query, "query", 500);
+    const project = optionalString(args.project, "project", 200);
     const limit = args.limit === undefined ? 10 : boundedInteger(args.limit, "limit", 1, 20);
     const budget = args.budget === undefined
       ? DEFAULT_RESULT_BUDGET
@@ -210,19 +212,48 @@ class DotaiosMcpServer {
     if (!SEARCH_SCOPES.includes(scope)) {
       throw protocolError(-32602, `scope must be one of: ${SEARCH_SCOPES.join(", ")}`);
     }
+    if (scope === "projects" && !project) {
+      throw protocolError(-32602, "project is required when scope is projects");
+    }
+    if (project) {
+      try {
+        validateProjectSelector(project);
+      } catch (error) {
+        throw protocolError(-32602, error.message);
+      }
+    }
     let reader = createEvidenceReader({ roots: [this.aiosPath] });
     const config = await this.readConfig(reader);
     const vaultPath = resolveVaultPath(config, this.aiosPath);
     reader = reader.withAuthorizedRoots([vaultPath]);
-    const groups = await searchAios({
-      aiosPath: this.aiosPath,
-      vaultPath,
+    let groups;
+    try {
+      groups = await searchAios({
+        aiosPath: this.aiosPath,
+        vaultPath,
+        query,
+        scope,
+        limit,
+        projectSelector: project,
+        evidenceReader: reader
+      });
+    } catch (error) {
+      if (String(error?.code || "").startsWith("DOTAIOS_PROJECT_SELECTOR_")) {
+        throw protocolError(-32602, error.message);
+      }
+      throw error;
+    }
+    return serializeBoundedSearchResults({
       query,
       scope,
-      limit,
-      evidenceReader: reader
+      scopeDetail: groups.scope.project
+        ? { project: groups.scope.project, project_id: groups.scope.project_id }
+        : groups.scope.projects_omitted
+          ? { projects: "omitted" }
+          : null,
+      groups,
+      limit: budget
     });
-    return serializeBoundedSearchResults({ query, scope, groups, limit: budget });
   }
 
   write(payload) {
@@ -266,6 +297,13 @@ function tools() {
         properties: {
           query: { type: "string", minLength: 1, maxLength: 500 },
           scope: { type: "string", enum: SEARCH_SCOPES, default: "all" },
+          project: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            pattern: "^[^\\u0000-\\u001F\\u007F-\\u009F/\\\\]+$",
+            description: "Optional canonical project slug or stable id. Required for project-only scope."
+          },
           limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
           budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000 },
         },
@@ -290,14 +328,14 @@ function tools() {
   ];
 }
 
-function serializeBoundedSearchResults({ query, scope, groups, limit }) {
+function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, limit }) {
   const selected = [];
   let truncated = false;
   outer: for (const group of groups) {
     for (const rawResult of group.results || []) {
       const result = sanitizeResultValue(rawResult);
       const candidate = [...selected, { scope: group.scope, ...result }];
-      const candidateText = serializeSearchEnvelope({ query, scope, results: candidate, limit, truncated: false });
+      const candidateText = serializeSearchEnvelope({ query, scope, scopeDetail, results: candidate, limit, truncated: false });
       if (candidateText.length > limit) {
         truncated = true;
         break outer;
@@ -307,11 +345,11 @@ function serializeBoundedSearchResults({ query, scope, groups, limit }) {
   }
 
   let boundedQuery = query;
-  let serialized = serializeSearchEnvelope({ query: boundedQuery, scope, results: selected, limit, truncated });
+  let serialized = serializeSearchEnvelope({ query: boundedQuery, scope, scopeDetail, results: selected, limit, truncated });
   while (serialized.length > limit && selected.length > 0) {
     selected.pop();
     truncated = true;
-    serialized = serializeSearchEnvelope({ query: boundedQuery, scope, results: selected, limit, truncated });
+    serialized = serializeSearchEnvelope({ query: boundedQuery, scope, scopeDetail, results: selected, limit, truncated });
   }
 
   if (serialized.length > limit) {
@@ -324,6 +362,7 @@ function serializeBoundedSearchResults({ query, scope, groups, limit }) {
       serialize: (candidate) => serializeSearchEnvelope({
         query: candidate,
         scope,
+        scopeDetail,
         results: selected,
         limit,
         truncated
@@ -402,12 +441,13 @@ function serializeSkillEnvelope({ intent, matches, limit, truncated }) {
   throw new Error("Could not stabilize skill response budget metadata");
 }
 
-function serializeSearchEnvelope({ query, scope, results, limit, truncated }) {
+function serializeSearchEnvelope({ query, scope, scopeDetail, results, limit, truncated }) {
   let used = 0;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const serialized = JSON.stringify({
       query,
       scope,
+      ...(scopeDetail ? { scope_selection: scopeDetail } : {}),
       results,
       budget: { limit, used, truncated },
     }, null, 2);

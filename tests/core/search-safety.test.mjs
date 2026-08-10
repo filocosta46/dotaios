@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { searchAios, searchMarkdownDir } from "../../packages/core/src/search.mjs";
+import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-search-safety-"));
@@ -129,4 +130,57 @@ test("search rejects a special eligible file before opening it", {
     () => searchMarkdownDir(root, "needle"),
     (error) => error?.code === "DOTAIOS_EVIDENCE_NOT_REGULAR_FILE"
   );
+});
+
+test("project search resolves slug and stable id before constructing only that project's corpus", async () => {
+  const root = tmpDir();
+  for (const [slug, id, canary] of [
+    ["acme-campaign", "project-acme-001", "ACME_PROJECT_SEARCH_CANARY"],
+    ["other-client", "project-other-002", "OTHER_PROJECT_SEARCH_CANARY"]
+  ]) {
+    const projectPath = path.join(root, "projects", slug);
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      `---\nid: ${id}\nproject: ${slug}\n---\n# ${slug}\n\n${canary} campaign assets\n`
+    );
+  }
+
+  const search = (projectSelector) => searchAios({
+    aiosPath: root,
+    query: "campaign assets",
+    scope: "projects",
+    projectSelector,
+    evidenceReader: createEvidenceReader({ roots: [root] })
+  });
+  const bySlug = await search("acme-campaign");
+  const byId = await search("project-acme-001");
+
+  assert.deepEqual(bySlug, byId);
+  assert.equal(bySlug.scope.project, "acme-campaign");
+  assert.equal(bySlug.scope.projects_omitted, false);
+  assert.match(JSON.stringify(bySlug), /ACME_PROJECT_SEARCH_CANARY/);
+  assert.doesNotMatch(JSON.stringify(bySlug), /OTHER_PROJECT_SEARCH_CANARY|other-client/);
+  await assert.rejects(
+    () => searchAios({ aiosPath: root, query: "campaign", scope: "projects" }),
+    (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_INVALID"
+  );
+});
+
+test("all-scope search without a project selector omits the project corpus and reports it", async () => {
+  const root = tmpDir();
+  fs.mkdirSync(path.join(root, "context"), { recursive: true });
+  fs.mkdirSync(path.join(root, "projects", "private-client"), { recursive: true });
+  fs.writeFileSync(path.join(root, "context", "work.md"), "# Work\n\nSHARED_SEARCH_CANARY\n");
+  fs.writeFileSync(
+    path.join(root, "projects", "private-client", "README.md"),
+    "---\nid: private-client-id\nproject: private-client\n---\n# Private\n\nPRIVATE_PROJECT_CANARY\n"
+  );
+
+  const groups = await searchAios({ aiosPath: root, query: "CANARY", scope: "all" });
+
+  assert.equal(groups.scope.project, null);
+  assert.equal(groups.scope.projects_omitted, true);
+  assert.equal(groups.some((group) => group.scope === "projects"), false);
+  assert.doesNotMatch(JSON.stringify(groups), /PRIVATE_PROJECT_CANARY/);
 });

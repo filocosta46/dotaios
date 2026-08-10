@@ -10,6 +10,7 @@ const aiosPath = path.join(tempRoot, "aios");
 const vaultPath = path.join(tempRoot, "vault");
 const homePath = path.join(tempRoot, "home");
 const projectPath = path.join(tempRoot, "project");
+const projectSourcePath = path.join(tempRoot, "campaign-assets");
 const importPath = path.join(tempRoot, "import.json");
 
 run(["--help"]);
@@ -37,6 +38,64 @@ run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--p
 run(["install", path.join(repoRoot, "examples", "plugins", "hello-memory"), "--dry-run"]);
 run(["search", "smoke", "--path", aiosPath]);
 run(["search", "cloud-safe", "--scope", "skills", "--path", aiosPath]);
+fs.mkdirSync(path.join(aiosPath, "projects", "acme-campaign"), { recursive: true });
+fs.writeFileSync(
+  path.join(aiosPath, "projects", "acme-campaign", "README.md"),
+  "---\nid: smoke-acme-id\nproject: acme-campaign\n---\n# Acme Campaign\n\nLaunch campaign assets.\n"
+);
+fs.mkdirSync(projectSourcePath);
+fs.writeFileSync(path.join(projectSourcePath, "hero.png"), "smoke asset");
+const sourcePreview = runJson([
+  "project", "source", "add", "acme-campaign", projectSourcePath,
+  "--source-id", "campaign-assets",
+  "--label", "Campaign assets",
+  "--purpose", "Launch campaign assets",
+  "--path", aiosPath,
+  "--home", homePath,
+  "--json"
+]);
+run([
+  "project", "source", "add", "acme-campaign", projectSourcePath,
+  "--source-id", "campaign-assets",
+  "--label", "Campaign assets",
+  "--purpose", "Launch campaign assets",
+  "--operation-id", sourcePreview.operation_id,
+  "--plan-fingerprint", sourcePreview.plan_fingerprint,
+  "--apply",
+  "--path", aiosPath,
+  "--home", homePath,
+  "--json"
+]);
+const grantPreview = runJson([
+  "project", "source", "grant", "smoke-acme-id", "campaign-assets",
+  "--purpose", "Launch campaign assets",
+  "--expires-at", "2099-01-01T00:00:00.000Z",
+  "--path", aiosPath,
+  "--home", homePath,
+  "--json"
+]);
+run([
+  "project", "source", "grant", "smoke-acme-id", "campaign-assets",
+  "--purpose", "Launch campaign assets",
+  "--expires-at", "2099-01-01T00:00:00.000Z",
+  "--operation-id", grantPreview.operation_id,
+  "--plan-fingerprint", grantPreview.plan_fingerprint,
+  "--apply",
+  "--path", aiosPath,
+  "--home", homePath,
+  "--json"
+]);
+const retrieval = runJson([
+  "project", "source", "retrieve", "acme-campaign",
+  "--task", "retrieve the campaign assets for that client.",
+  "--path", aiosPath,
+  "--home", homePath,
+  "--json"
+]);
+if (retrieval.decision !== "allowed" || retrieval.references.length !== 1) {
+  throw new Error("project source smoke journey did not return its complete reference set");
+}
+run(["search", "Launch campaign", "--scope", "projects", "--project", "smoke-acme-id", "--path", aiosPath]);
 run(["index", "--path", aiosPath]);
 run(["index", "--path", aiosPath, "--dry-run"]);
 run(["mcp", "status", "--path", aiosPath]);
@@ -67,4 +126,9 @@ function run(args, env = process.env) {
     process.stderr.write(result.stderr);
     process.exit(result.status || 1);
   }
+  return result;
+}
+
+function runJson(args) {
+  return JSON.parse(run(args).stdout);
 }
