@@ -10,7 +10,7 @@ Updated: 2026-08-10
 
 - Programme worktree: `/Users/filo/Code/dotaios/.worktrees/codex/foundation-reliability`
 - Programme branch: `codex/foundation-reliability`
-- Current implementation checkpoint: `bc8bd2d` (`docs: sequence the remaining launch blockers`)
+- Current implementation checkpoint: `75c28d9` (`docs: refresh foundation continuation checkpoint`)
 - Canonical projection implementation: `f804957` (`fix: contain canonical working-context reads`)
 - Original base: `origin/main` at `f0d72f7`
 - Protected prelaunch checkout: `/Users/filo/Code/dotaios`, branch `launch/2026-08-08-prelaunch-fixes` at `fa08b69`, clean and untouched
@@ -55,12 +55,12 @@ Updated: 2026-08-10
   closed; path-free MCP errors and response budgets are enforced; and read-only
   commands cannot spawn sync. The projection's valid-input selection, ordering,
   and visible-character budget semantics remain unchanged.
-- Independently validated the projection working tree on the iMac through a
-  read-only pull into an isolated `git init` checkout with Node v22.22.3:
-  1,345 passed, 0 failed, 1 intentionally skipped, exit 0. The MacBook run
-  immediately around the moving-tree checkpoint reported 1,344 passed, 0
-  failed, and 1 skipped; the one-test difference is explained by the tree
-  moving between runs, not a result discrepancy.
+- Independently validated exact projection commit `f804957` on the iMac through
+  a complete-history bundle whose SHA-256 matched on both hosts. The exact
+  disposable clone passed 210 focused checks and the complete suite (1,345
+  passed, 0 failed, 1 intentionally skipped). Compact CLI, hook JSON, and MCP
+  returned identical 466-character Markdown; the 89-entry fixture tree hash
+  stayed unchanged. The protected iMac checkout and Git state were untouched.
 - Converted the whole-system audit frontier into eight explicit Wayfinder
   slices at `bc8bd2d`: remaining MCP containment, SessionStore authority,
   replication policy, installation/health, artifact-bound host receipts,
@@ -71,9 +71,9 @@ Updated: 2026-08-10
 
 ## Next unblocked actions
 
-1. Mark issues 013 and 014 complete against `f804957`, then implement issue 015:
-   contain and bound `search_aios` and `resolve_skill` without changing valid
-   ordering or ranking.
+1. Implement issue 015: contain and bound `search_aios` and `resolve_skill`
+   without changing valid ordering or ranking. Issues 013 and 014 are closed
+   against the exact local and independent `f804957` receipt.
 2. Resolve the memory-authority decision and implement issue 016 so session
    Markdown is canonical evidence behind one transactional `SessionStore`.
 3. Implement issue 018's single human-run installation and truthful doctor

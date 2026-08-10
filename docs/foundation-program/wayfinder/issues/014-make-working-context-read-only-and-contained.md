@@ -1,7 +1,7 @@
 ---
 title: Make the canonical working-context projection read-only and contained
 label: wayfinder:issue
-status: complete
+status: closed
 created: 2026-08-09
 ---
 
@@ -49,5 +49,19 @@ errors can also expose absolute machine paths.
 
 ## Completion
 
-Implemented at `f804957`. The branch working tree was independently validated
-on the iMac with Node v22.22.3: 1,345 passed, 0 failed, 1 intentionally skipped.
+Implemented at exact commit
+`f804957adb2dd5d6d9ca1aba621131eb4f210a24`. Local adversarial coverage includes
+all projected shelves, strict UTF-8, linked and special files, source and
+ancestor replacement, missing-tail state changes, bounded directories/files,
+configured-root authority, corrupt JSONL, project attribution, MCP input and
+output bounds, and zero sync-hook spawning. The complete local suite passed
+1,345/0/1.
+
+An independent disposable iMac bundle clone at the same commit and tree
+(`b5285a19830e3bab788f416a3416cf2b76f14062`) passed 210 focused checks and the
+complete 1,346-test suite with zero failures and one intentional skip. Its live
+CLI/hook/MCP smoke preserved the exact fixture tree hash
+`c85cb5eb3dce6c346a663fb0dd20359d903be23fe8f32ab16b646b5e3c7442e3`.
+Portable Node containment is deliberately snapshot/CAS-style rather than a
+claim of kernel `openat2`/`NtCreateFile` traversal; that residual is public and
+does not weaken the tested supported-path contract.

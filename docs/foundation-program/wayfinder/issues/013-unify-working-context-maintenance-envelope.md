@@ -1,7 +1,7 @@
 ---
 title: Unify working-context migration state across CLI, hooks, and MCP
 label: wayfinder:issue
-status: complete
+status: closed
 created: 2026-08-09
 blocked_by:
   - 014-make-working-context-read-only-and-contained
@@ -45,5 +45,18 @@ need the notice.
 
 ## Completion
 
-Implemented at `f804957`. The branch working tree was independently validated
-on the iMac with Node v22.22.3: 1,345 passed, 0 failed, 1 intentionally skipped.
+Implemented at exact commit
+`f804957adb2dd5d6d9ca1aba621131eb4f210a24`. Local validation passed the
+1,346-test suite with zero failures and one intentional platform skip, syntax,
+CLI contract, package-content, smoke, and diff gates. Fifty local envelope
+reads measured 3.080 ms median, 4.253 ms p95, and 5.918 ms maximum.
+
+Independent validation transferred a complete-history single-ref bundle whose
+SHA-256 matched on both hosts
+(`3656fcd96e9479eb804139ab3b4fa4783aec915ca3e9367886ceb16b22025866`). A
+disposable iMac clone at the exact commit passed 210 focused checks and the
+complete suite (1,345 passed, 0 failed, 1 intentional skip). Compact CLI, hook
+JSON, and MCP returned identical 466-character Markdown inside a 512-character
+budget with equivalent `current` migration state. The 89-entry fixture tree
+hash was unchanged before and after all three reads. The protected iMac checkout
+and its Git state remained untouched; every disposable artifact was removed.
