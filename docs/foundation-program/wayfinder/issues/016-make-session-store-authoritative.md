@@ -1,7 +1,7 @@
 ---
 title: Make session memory an authoritative transactional store
 label: wayfinder:issue
-status: blocked
+status: open
 created: 2026-08-10
 blocked_by:
   - 002-define-memory-domains-authority
