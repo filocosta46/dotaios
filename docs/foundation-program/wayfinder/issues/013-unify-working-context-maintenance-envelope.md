@@ -1,7 +1,7 @@
 ---
 title: Unify working-context migration state across CLI, hooks, and MCP
 label: wayfinder:issue
-status: in_progress
+status: complete
 created: 2026-08-09
 blocked_by:
   - 014-make-working-context-read-only-and-contained
@@ -42,3 +42,8 @@ need the notice.
 - Deterministic file/byte/entry limits plus a local access-path timing receipt.
 - Complete suite, syntax, package, smoke, and diff checks.
 - Independent exact-commit validation after implementation review.
+
+## Completion
+
+Implemented at `f804957`. The branch working tree was independently validated
+on the iMac with Node v22.22.3: 1,345 passed, 0 failed, 1 intentionally skipped.

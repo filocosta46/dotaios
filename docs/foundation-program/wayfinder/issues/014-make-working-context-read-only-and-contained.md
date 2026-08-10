@@ -1,7 +1,7 @@
 ---
 title: Make the canonical working-context projection read-only and contained
 label: wayfinder:issue
-status: in_progress
+status: complete
 created: 2026-08-09
 ---
 
@@ -46,3 +46,8 @@ errors can also expose absolute machine paths.
 - Cross-channel project slug/id, conflicting-field, malformed-field, and
   ambiguous-alias attribution tests.
 - Complete local and independent exact-commit validation.
+
+## Completion
+
+Implemented at `f804957`. The branch working tree was independently validated
+on the iMac with Node v22.22.3: 1,345 passed, 0 failed, 1 intentionally skipped.

@@ -1,7 +1,7 @@
 ---
 title: Contain and bound the remaining MCP readers
 label: wayfinder:issue
-status: blocked
+status: in_progress
 created: 2026-08-10
 blocked_by:
   - 014-make-working-context-read-only-and-contained
