@@ -207,7 +207,7 @@ export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skil
   }
 
   lines.push("Working memory: route events, signals, and saved sessions only through the canonical bounded projection. Run `dotaios brief --compact` at session start; for project work, add `--project <slug-or-id>`. Do not load those memory stores directly or invent another recency window.");
-  lines.push("Optional MCP: `read_working_context` returns that same projection. The adapter exposes exactly `read_working_context`, `search_aios`, and `resolve_skill`; it has no compatibility aliases.");
+  lines.push("Optional MCP: `read_working_context` returns that same projection plus bounded operational compatibility state beside it. The adapter exposes exactly `read_working_context`, `search_aios`, and `resolve_skill`; it has no compatibility aliases.");
   lines.push(MANAGED_END, "");
 
   return lines.join("\n");

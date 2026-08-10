@@ -12,6 +12,7 @@ async function fixture(t) {
   const homePath = path.join(root, "home");
   const statePath = path.join(root, "local-state", "projects.json");
   await fs.mkdir(path.join(aiosPath, "projects"), { recursive: true });
+  await fs.writeFile(path.join(aiosPath, "aios.json"), '{"schema_version":"1.2.0"}\n');
   await fs.mkdir(homePath, { recursive: true });
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return { aiosPath, homePath, statePath };

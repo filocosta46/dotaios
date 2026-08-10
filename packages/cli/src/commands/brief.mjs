@@ -5,7 +5,7 @@ import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src
 import { readSection, replaceSection } from "../../../core/src/sections.mjs";
 import { selectWorkingContext } from "../../../core/src/working-context.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { buildSessionDigest } from "../../../core/src/digest.mjs";
+import { buildWorkingContextEnvelope } from "../../../core/src/working-context-envelope.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios brief [daily] [options]
@@ -17,9 +17,12 @@ external services required.
 Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Print the brief without writing the daily note
-  --compact     Print a compact working-memory digest to stdout (no file write)
-  --project <slug-or-id>  With --compact: include only continuity for this project
-  --budget <n>    With --compact: visible character budget (default 6000)
+  --compact     Print the canonical working-context projection (no file write)
+  --project <slug-or-id>  With --compact: include only continuity for this project.
+                          Must be nonblank, contain no control characters, and
+                          be at most 200 Unicode code points.
+  --budget <n>    With --compact: projection character budget (default 6000;
+                  a fixed operational notice may appear before the projection)
   --lean        Print a small high-signal surface to stdout: identity, priorities,
                 north-star, today's daily note, and the first active project
                 README. The rest of memory/ stays opt-in. No file write.
@@ -39,17 +42,18 @@ export async function briefCommand(args) {
   await ensureAiosFolder(target);
 
   if (options.compact) {
-    const { digest, budget } = await buildSessionDigest(target, {
+    const { digest, budget, notice } = await buildWorkingContextEnvelope(target, {
       project: options.project,
       visibleCharacterBudget: options.budget
     });
+    const additionalContext = notice ? `${notice}\n\n${digest}` : digest;
     if (options.json) {
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { additionalContext: digest },
+        hookSpecificOutput: { additionalContext },
         contextBudget: budget
       }) + "\n");
     } else {
-      process.stdout.write(digest + "\n");
+      process.stdout.write(additionalContext + "\n");
     }
     return;
   }

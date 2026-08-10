@@ -5,7 +5,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
-import { buildSessionDigest } from "../../core/src/digest.mjs";
+import {
+  WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT,
+  buildWorkingContextEnvelope
+} from "../../core/src/working-context-envelope.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
 import { rankSkills } from "../../core/src/skill-resolver.mjs";
@@ -56,7 +59,13 @@ class DotaiosMcpServer {
       const result = await this.handleRequest(message);
       this.write({ jsonrpc: "2.0", id: message.id, result });
     } catch (error) {
-      this.writeError(message.id, error.code || -32603, error.message || "Internal error");
+      const protocolCode = Number.isInteger(error?.code) && error.code < 0 ? error.code : -32603;
+      const messageText = protocolCode !== -32603
+        ? error.message
+        : error?.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+          ? "DotAIOS could not read working context safely."
+          : "DotAIOS request failed safely.";
+      this.writeError(message.id, protocolCode, messageText);
     }
   }
 
@@ -86,7 +95,8 @@ class DotaiosMcpServer {
     if (message.method === "tools/list") return { tools: tools() };
     if (message.method === "tools/call") {
       const name = message.params?.name;
-      const args = message.params?.arguments || {};
+      const rawArguments = message.params?.arguments;
+      const args = rawArguments === undefined ? {} : requireArgumentsObject(rawArguments);
       return textResult(await this.callTool(name, args));
     }
     throw protocolError(-32601, `Method not found: ${message.method}`);
@@ -94,9 +104,18 @@ class DotaiosMcpServer {
 
   async callTool(name, args) {
     await this.assertAios();
-    if (name === "read_working_context") return this.readWorkingContext(args);
-    if (name === "search_aios") return this.searchAios(args);
-    if (name === "resolve_skill") return this.resolveSkill(args);
+    if (name === "read_working_context") {
+      assertAllowedArguments(args, ["project", "limit", "budget"]);
+      return this.readWorkingContext(args);
+    }
+    if (name === "search_aios") {
+      assertAllowedArguments(args, ["query", "scope", "limit", "budget"]);
+      return this.searchAios(args);
+    }
+    if (name === "resolve_skill") {
+      assertAllowedArguments(args, ["intent", "limit"]);
+      return this.resolveSkill(args);
+    }
     throw protocolError(-32602, `Unknown tool: ${name}`);
   }
 
@@ -104,7 +123,7 @@ class DotaiosMcpServer {
     try {
       await fs.access(path.join(this.aiosPath, "aios.json"));
     } catch {
-      throw protocolError(-32602, `No AIOS folder found at ${this.aiosPath}`);
+      throw protocolError(-32602, "No AIOS folder found at the configured path");
     }
   }
 
@@ -117,22 +136,41 @@ class DotaiosMcpServer {
   }
 
   async readWorkingContext(args) {
-    const project = optionalString(args.project);
+    const project = optionalString(args.project, "project", 200);
+    if (project && /\p{Cc}/u.test(project)) {
+      throw protocolError(-32602, "project must be a project slug or stable id");
+    }
     const limit = args.limit === undefined ? 3 : boundedInteger(args.limit, "limit", 1, 10);
     const visibleCharacterBudget = args.budget === undefined
       ? undefined
       : boundedInteger(args.budget, "budget", 256, 32000);
-    const { digest, budget, generatedAt, projectFilter } = await buildSessionDigest(this.aiosPath, {
-      project,
-      limit,
-      visibleCharacterBudget,
-    });
-    return JSON.stringify({
-      markdown: digest,
+    let envelope;
+    try {
+      envelope = await buildWorkingContextEnvelope(this.aiosPath, {
+        project,
+        limit,
+        visibleCharacterBudget,
+      });
+    } catch (error) {
+      if (
+        error?.code === "DOTAIOS_AMBIGUOUS_PROJECT"
+        || error?.cause?.code === "DOTAIOS_AMBIGUOUS_PROJECT"
+      ) {
+        throw protocolError(-32602, "project selector is ambiguous; use its stable id");
+      }
+      throw error;
+    }
+    const { digest, budget, generatedAt, projectFilter, operational } = envelope;
+    const metadata = {
       scope: { project: projectFilter },
       generated_at: generatedAt,
       budget,
-    }, null, 2);
+      operational,
+    };
+    if (JSON.stringify(metadata, null, 2).length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
+      throw new Error("Working-context metadata exceeded its fixed operational bound.");
+    }
+    return JSON.stringify({ markdown: digest, ...metadata }, null, 2);
   }
 
   async resolveSkill(args) {
@@ -183,14 +221,20 @@ function tools() {
     {
       name: "read_working_context",
       title: "Read Working Context",
-      description: "Read the same bounded, project-filtered working context produced by dotaios brief --compact. This tool has no write side effects.",
+      description: "Read the same bounded, project-filtered working-context projection produced by dotaios brief --compact plus fixed operational compatibility state beside it. This tool has no write side effects.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          project: { type: "string", description: "Optional project slug or stable id." },
+          project: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            pattern: "^(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            description: "Optional project slug or stable id. Opaque identifiers without Unicode control characters are accepted within the 200-code-point bound."
+          },
           limit: { type: "integer", minimum: 1, maximum: 10, default: 3 },
-          budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000 },
+          budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000, description: "Character budget for canonical Markdown; bounded operational metadata is separate." },
         },
       },
     },
@@ -333,22 +377,45 @@ function requireString(value, name, maximumLength) {
   if (typeof value !== "string" || value.trim() === "") {
     throw protocolError(-32602, `${name} must be a non-empty string`);
   }
-  if (maximumLength && value.length > maximumLength) {
+  if (maximumLength && Array.from(value).length > maximumLength) {
     throw protocolError(-32602, `${name} must be at most ${maximumLength} characters`);
   }
   return value;
 }
 
-function optionalString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+function optionalString(value, name = "value", maximumLength = null) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw protocolError(-32602, `${name} must be a non-empty string`);
+  }
+  if (/\p{Cc}/u.test(value)) {
+    throw protocolError(-32602, `${name} must not contain control characters`);
+  }
+  if (maximumLength && Array.from(value).length > maximumLength) {
+    throw protocolError(-32602, `${name} must be at most ${maximumLength} characters`);
+  }
+  const result = value.trim();
+  return result;
+}
+
+function requireArgumentsObject(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw protocolError(-32602, "tool arguments must be an object");
+  }
+  return value;
+}
+
+function assertAllowedArguments(args, allowedNames) {
+  const allowed = new Set(allowedNames);
+  const unknown = Object.keys(args).find((name) => !allowed.has(name));
+  if (unknown) throw protocolError(-32602, "Unknown tool argument");
 }
 
 function boundedInteger(value, name, minimum, maximum) {
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < minimum || number > maximum) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
     throw protocolError(-32602, `${name} must be an integer from ${minimum} to ${maximum}`);
   }
-  return number;
+  return value;
 }
 
 function protocolError(code, message) {

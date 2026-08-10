@@ -312,6 +312,7 @@ test("search over a memory dir with a corrupt line still works and quarantines i
 
 test("memory audit reports preserved corrupt lines", async () => {
   const dir = tmpDir();
+  fs.writeFileSync(path.join(dir, "aios.json"), '{"schema_version":"1.2.0"}\n');
   const memoryDir = path.join(dir, "memory");
   fs.mkdirSync(memoryDir, { recursive: true });
   fs.writeFileSync(path.join(memoryDir, "events.jsonl"), '{"ts":"2026-01-01T00:00:00Z","type":"note","summary":"ok"}\nbroken{\n');

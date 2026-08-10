@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatJsonlEntry, parseJsonlLine, readJsonl } from "./jsonl.mjs";
+import { ContainedReadError, readContainedDirectory, readContainedFile } from "./contained-read.mjs";
 import { refreshLiveOkf, writeProjectLog } from "./okf-live.mjs";
 import { searchMarkdownDir, searchMemoryDir } from "./search.mjs";
 
@@ -29,17 +30,57 @@ export async function readSignals(signalsDir, fromDate, toDate, options = {}) {
   const transform = typeof options.transform === "function" ? options.transform : null;
   let entries;
   try {
-    entries = await fileSystem.readdir(signalsDir);
-  } catch {
+    entries = options.boundaryRoot
+      ? await readContainedDirectory(options.boundaryRoot, signalsDir, {
+          budget: options.budget,
+          filesystem: fileSystem,
+          maxEntries: options.maxDirectoryEntries,
+          tooManyCode: "DOTAIOS_SIGNAL_DIRECTORY_LIMIT_EXCEEDED"
+        })
+      : await fileSystem.readdir(signalsDir);
+  } catch (error) {
+    if (options.boundaryRoot && error?.code !== "ENOENT" && error?.code !== "ENOTDIR") {
+      throw error;
+    }
     return [];
+  }
+  if (entries === null) return [];
+
+  const selectedFiles = entries
+    .filter((file) => file.endsWith(".jsonl"))
+    .sort()
+    .filter((file) => {
+      const date = signalFileDate(file);
+      return date >= fromDate && date <= toDate;
+    });
+  if (Number.isFinite(options.maxFiles) && selectedFiles.length > options.maxFiles) {
+    throw new ContainedReadError("DOTAIOS_SIGNAL_FILE_LIMIT_EXCEEDED");
   }
 
   const signals = [];
-  for (const file of entries.filter((f) => f.endsWith(".jsonl")).sort()) {
+  for (const file of selectedFiles) {
     const date = signalFileDate(file);
-    if (date < fromDate || date > toDate) continue;
     const filePath = path.join(signalsDir, file);
-    const lines = await readJsonl(filePath, { filesystem: fileSystem });
+    const readFilesystem = options.boundaryRoot
+      ? {
+          readFile: async (candidate, encoding) => {
+            const content = await readContainedFile(options.boundaryRoot, candidate, {
+              budget: options.budget,
+              filesystem: fileSystem,
+              encoding: typeof encoding === "string" ? encoding : encoding?.encoding,
+              maxBytes: options.maxFileBytes
+            });
+            if (content === null) {
+              throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+            }
+            return content;
+          }
+        }
+      : fileSystem;
+    const lines = await readJsonl(filePath, {
+      filesystem: readFilesystem,
+      quarantine: options.quarantine !== false
+    });
     for (const [index, entry] of lines.entries()) {
       signals.push(transform
         ? transform(entry, {

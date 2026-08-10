@@ -21,6 +21,27 @@ test("project commands only request outer sync after an applied catalog change",
   assert.equal(skipsPortableMirrorSync("project", ["add", "/tmp/client", "--yes"]), false);
 });
 
+test("compact, hook JSON, and lean briefs are classified read-only and never spawn sync", async () => {
+  for (const args of [
+    ["--compact"],
+    ["--compact", "--json"],
+    ["--lean"]
+  ]) {
+    const readOnly = skipsPortableMirrorSync("brief", args);
+    assert.equal(readOnly, true, args.join(" "));
+    let spawned = false;
+    await fireSyncHook({
+      allowAutoSync: true,
+      command: "brief",
+      isSyncEnabled: async () => true,
+      readOnly,
+      spawnImpl: () => { spawned = true; },
+      testContext: null
+    });
+    assert.equal(spawned, false, args.join(" "));
+  }
+});
+
 test("fireSyncHook returns immediately when sync not enabled", async () => {
   let spawned = false;
   await fireSyncHook({

@@ -40,7 +40,11 @@ export async function readJsonl(filePath, options = {}) {
       badLines.push(line);
     }
   }
-  if (badLines.length > 0 && !String(filePath).endsWith(".bad.jsonl")) {
+  if (
+    options.quarantine !== false
+    && badLines.length > 0
+    && !String(filePath).endsWith(".bad.jsonl")
+  ) {
     await quarantineBadLines(filePath, badLines, fileSystem);
   }
   return entries;

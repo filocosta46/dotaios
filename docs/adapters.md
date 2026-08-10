@@ -24,6 +24,8 @@ context in* automatically.
 When connected tools request startup continuity, events, signals, and saved
 sessions come through the same bounded projection produced by
 `dotaios brief --compact`; adapters do not define their own raw-memory window.
+Compatibility state stays in a fixed operational envelope beside that user
+memory, never inside the canonical projection or its budget.
 Where the optional MCP adapter is used, it exposes exactly
 `read_working_context`, `search_aios`, and `resolve_skill`.
 

@@ -69,6 +69,13 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
     responses[1].result.tools.map((tool) => tool.name),
     ["read_working_context", "search_aios", "resolve_skill"],
   );
+  const projectSchema = responses[1].result.tools
+    .find((tool) => tool.name === "read_working_context")
+    .inputSchema.properties.project;
+  assert.equal(projectSchema.minLength, 1);
+  assert.equal(new RegExp(projectSchema.pattern, "u").test("demo-id"), true);
+  assert.equal(new RegExp(projectSchema.pattern, "u").test("   "), false);
+  assert.equal(new RegExp(projectSchema.pattern, "u").test("demo\n"), false);
 
   const workingContext = JSON.parse(toolText(responses[2]));
   assert.equal(workingContext.scope.project, "demo");
@@ -144,6 +151,387 @@ test("mcp enforces runtime bounds and rejects removed write tools", () => {
   assert.match(responses[2].error.message, /Unknown tool/);
 });
 
+test("MCP returns the same actionable migration state beside the unchanged bounded markdown", () => {
+  const { aiosPath } = setupAios();
+  const currentSnapshot = snapshotTree(aiosPath);
+  const before = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 512 } },
+  }]);
+  const current = JSON.parse(toolText(before[0]));
+  assert.equal(current.operational.migration.status, "current");
+  assert.deepEqual(snapshotTree(aiosPath), currentSnapshot);
+
+  const configPath = path.join(aiosPath, "aios.json");
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  config.schema_version = "1.1.0";
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const snapshot = snapshotTree(aiosPath);
+
+  const after = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 512 } },
+  }]);
+  const stale = JSON.parse(toolText(after[0]));
+
+  assert.equal(stale.markdown, current.markdown);
+  assert.deepEqual(stale.budget, current.budget);
+  assert.deepEqual(stale.operational.migration, {
+    status: "schema_outdated",
+    folder_schema_version: "1.1.0",
+    supported_schema_version: "1.2.0",
+    severity: "notice",
+    action: { command: "dotaios migrate", path_scope: "configured_aios" }
+  });
+  assert.deepEqual(snapshotTree(aiosPath), snapshot);
+  assert.doesNotMatch(JSON.stringify(stale.operational), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.ok(workingContextMetadataText(stale).length <= 1024, "non-memory metadata must have a fixed bound");
+
+  const migrationsRoot = path.join(aiosPath, ".dotaios", "migrations");
+  fs.mkdirSync(path.join(migrationsRoot, "transactions", "migrate-1_1_0-to-1_2_0-0123456789abcdef"), { recursive: true });
+  fs.writeFileSync(path.join(migrationsRoot, "owner.json"), `${JSON.stringify({ schema: "dotaios.migrations.v1" }, null, 2)}\n`);
+  const transactionSnapshot = snapshotTree(aiosPath);
+  const [transactionResponse] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 3,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 512 } },
+  }]);
+  const transaction = JSON.parse(toolText(transactionResponse));
+  assert.equal(transaction.operational.migration.status, "transaction_present");
+  assert.doesNotMatch(JSON.stringify(transaction.operational), /migrate-1_1_0|recover/);
+  assert.deepEqual(snapshotTree(aiosPath), transactionSnapshot);
+
+  fs.writeFileSync(configPath, '{"schema_version":"invalid"}\n');
+  const failedSnapshot = snapshotTree(aiosPath);
+  const [failedResponse] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 4,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 512 } },
+  }]);
+  const failed = JSON.parse(toolText(failedResponse));
+  assert.deepEqual(failed.operational.migration, {
+    status: "inspection_failed",
+    code: "INVALID_SCHEMA",
+    severity: "warning",
+    action: { command: "dotaios doctor", path_scope: "configured_aios" }
+  });
+  assert.equal(failed.markdown, current.markdown);
+  assert.doesNotMatch(JSON.stringify(failed), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.deepEqual(snapshotTree(aiosPath), failedSnapshot);
+});
+
+test("read_working_context is byte-read-only on corrupt signals and emits no machine path", () => {
+  const { aiosPath } = setupAios();
+  const today = localDate();
+  const signalPath = path.join(aiosPath, "memory", "signals", `${today}.jsonl`);
+  fs.mkdirSync(path.dirname(signalPath), { recursive: true });
+  fs.writeFileSync(
+    signalPath,
+    `{not-json}\n${JSON.stringify({ ts: `${today}T12:00:00.000Z`, summary: "CORRUPT_FIXTURE_SELECTED" })}\n`
+  );
+  const before = snapshotTree(aiosPath);
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 6000 } },
+  }]);
+
+  assert.equal(result.status, 0);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  assert.match(JSON.parse(toolText(response)).markdown, /CORRUPT_FIXTURE_SELECTED/);
+  assert.deepEqual(snapshotTree(aiosPath), before);
+  assert.equal(fs.existsSync(`${signalPath}.bad.jsonl`), false);
+  assert.doesNotMatch(result.stderr, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("read_working_context rejects oversized project filters before they inflate output", () => {
+  const { aiosPath } = setupAios();
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { project: "x".repeat(201), budget: 256 } },
+  }]);
+
+  assert.equal(response.error.code, -32602);
+  assert.match(response.error.message, /project.*at most 200/i);
+  assert.ok(JSON.stringify(response).length < 512);
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("read_working_context rejects present non-string project filters", () => {
+  const { aiosPath } = setupAios();
+  const invalidValues = [42, true, null, {}, []];
+  const responses = runMcp(aiosPath, invalidValues.map((project, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { project, budget: 256 } },
+  })));
+
+  for (const response of responses) {
+    assert.equal(response.error.code, -32602);
+    assert.match(response.error.message, /project must be a non-empty string/i);
+    assert.equal(response.result, undefined);
+  }
+});
+
+test("read_working_context rejects non-object and unknown arguments instead of widening scope", () => {
+  const { aiosPath } = setupAios();
+  const invalidArguments = [
+    42,
+    true,
+    "demo",
+    [],
+    null,
+    { projet: "demo" },
+    { project: "demo", extra: true },
+    { ["x".repeat(100_000)]: true }
+  ];
+  const responses = runMcp(aiosPath, invalidArguments.map((argumentsValue, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: argumentsValue },
+  })));
+
+  for (const response of responses) {
+    assert.equal(response.error.code, -32602);
+    assert.equal(response.result, undefined);
+    assert.ok(JSON.stringify(response).length < 512);
+    assert.doesNotMatch(JSON.stringify(response), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
+test("MCP integer arguments reject schema-invalid coercions", () => {
+  const { aiosPath } = setupAios();
+  const invalidArguments = [
+    { limit: "3", budget: 256 },
+    { limit: true, budget: 256 },
+    { limit: 3, budget: "256" },
+    { limit: [], budget: 256 }
+  ];
+  const responses = runMcp(aiosPath, invalidArguments.map((argumentsValue, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: argumentsValue },
+  })));
+
+  for (const response of responses) {
+    assert.equal(response.error.code, -32602);
+    assert.equal(response.result, undefined);
+  }
+});
+
+test("read_working_context reports an ambiguous project selector as a safe input error", () => {
+  const { aiosPath } = setupAios();
+  for (const [slug, id] of [["alpha", "id-alpha"], ["beta", "id-beta"]]) {
+    const projectDir = path.join(aiosPath, "projects", slug);
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "README.md"),
+      `---\nid: ${id}\nproject: shared\n---\n# ${slug}\n`,
+    );
+  }
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { project: "shared", budget: 256 } },
+  }]);
+
+  assert.equal(response.error.code, -32602);
+  assert.match(response.error.message, /ambiguous.*stable id/i);
+  assert.doesNotMatch(response.error.message, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("read_working_context preserves opaque stable project identifiers", () => {
+  const { aiosPath } = setupAios();
+  const projectDir = path.join(aiosPath, "projects", "client-work");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, "README.md"),
+    "---\nid: café:client/01\nproject: client-work\n---\n# Client Work\n",
+  );
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "read_working_context",
+      arguments: { project: "café:client/01", budget: 512 }
+    },
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.equal(payload.scope.project, "client-work");
+  assert.match(payload.markdown, /Client Work/);
+});
+
+test("maximum project input and operational metadata stay inside the fixed metadata bound", () => {
+  const { aiosPath } = setupAios();
+  for (const project of ["x".repeat(200), "🚀".repeat(200)]) {
+    const [response] = runMcp(aiosPath, [{
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "read_working_context", arguments: { project, budget: 256 } },
+    }]);
+    const text = toolText(response);
+    const payload = JSON.parse(text);
+
+    assert.equal(Array.from(payload.scope.project).length, 200);
+    assert.ok(payload.markdown.length <= 256);
+    assert.ok(workingContextMetadataText(payload).length <= 1024);
+  }
+});
+
+test("project input rejects 201 Unicode code points", () => {
+  const { aiosPath } = setupAios();
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "read_working_context",
+      arguments: { project: "🚀".repeat(201), budget: 256 }
+    },
+  }]);
+
+  assert.equal(response.error.code, -32602);
+  assert.match(response.error.message, /project.*at most 200/i);
+});
+
+test("working-context budgets survive JSON escaping at minimum, default, and maximum sizes", () => {
+  const { aiosPath } = setupAios();
+  const date = localDate();
+  const noisy = '"\\';
+  fs.writeFileSync(
+    path.join(aiosPath, "context", "identity.md"),
+    `# Identity\n\n${'"\\\n'.repeat(12000)}`
+  );
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    `${Array.from({ length: 3 }, (_, index) => JSON.stringify({
+      captured_at: `${date}T12:0${index}:00.000Z`,
+      agent: "test",
+      session_id: `session-${index}`,
+      title: noisy.repeat(3500),
+      turns: 1
+    })).join("\n")}\n`
+  );
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "signals", `${date}.jsonl`),
+    `${Array.from({ length: 8 }, (_, index) => JSON.stringify({
+      ts: `${date}T13:0${index}:00.000Z`,
+      summary: noisy.repeat(350)
+    })).join("\n")}\n`
+  );
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    `${Array.from({ length: 8 }, (_, index) => JSON.stringify({
+      ts: `${date}T14:0${index}:00.000Z`,
+      summary: noisy.repeat(350)
+    })).join("\n")}\n`
+  );
+
+  let representationExceededOperationalBound = false;
+  for (const budget of [256, 6000, 32000]) {
+    const [response] = runMcp(aiosPath, [{
+      jsonrpc: "2.0",
+      id: budget,
+      method: "tools/call",
+      params: { name: "read_working_context", arguments: { budget } },
+    }]);
+    const text = toolText(response);
+    const payload = JSON.parse(text);
+    assert.ok(payload.markdown.length <= budget);
+    if (budget >= 6000) {
+      assert.ok(
+        payload.markdown.length >= budget * 0.8,
+        `expected an escaping-heavy near-budget projection at ${budget}, received ${payload.markdown.length}`
+      );
+    }
+    assert.ok(workingContextMetadataText(payload).length <= 1024);
+    if (text.length > payload.markdown.length + 1024) {
+      representationExceededOperationalBound = true;
+    }
+  }
+  assert.equal(
+    representationExceededOperationalBound,
+    true,
+    "JSON escaping is representation cost and must not be mistaken for operational metadata"
+  );
+});
+
+test("control characters are rejected as project input errors, not internal envelope failures", () => {
+  const { aiosPath } = setupAios();
+  const responses = runMcp(aiosPath, ["x\u0000y", "alpha\n", "alpha\u007f", "alpha\u0085"].map(
+    (project, index) => ({
+      jsonrpc: "2.0",
+      id: index + 1,
+      method: "tools/call",
+      params: { name: "read_working_context", arguments: { project, budget: 256 } },
+    })
+  ));
+
+  for (const response of responses) {
+    assert.equal(response.error.code, -32602);
+    assert.match(response.error.message, /project slug or stable id|control/i);
+  }
+});
+
+test("internal projection failures return one path-free MCP error", () => {
+  const { aiosPath } = setupAios();
+  const projectDir = path.join(aiosPath, "projects", "broken");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, "README.md"), "---\nid: [unterminated\n---\n# Broken\n");
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: {} },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(response.error.code, -32603);
+  assert.equal(response.error.message, "DotAIOS could not read working context safely.");
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("oversized projection sources return one path-free read error without mutation", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(
+    path.join(aiosPath, "context", "identity.md"),
+    Buffer.alloc(1024 * 1024 + 1, 0x61)
+  );
+  const before = snapshotTree(aiosPath);
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 256 } },
+  }]);
+
+  assert.equal(response.error.code, -32603);
+  assert.equal(response.error.message, "DotAIOS could not read working context safely.");
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.deepEqual(snapshotTree(aiosPath), before);
+});
+
 function setupAios() {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-mcp-test-"));
   const aiosPath = path.join(tempRoot, "aios");
@@ -156,15 +544,48 @@ function setupAios() {
 }
 
 function runMcp(aiosPath, messages) {
-  const result = spawnSync(process.execPath, [server, "--path", aiosPath], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    input: `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`,
-  });
+  const result = runMcpResult(aiosPath, messages);
   if (result.status !== 0) throw new Error(`mcp failed\n${result.stdout}\n${result.stderr}`);
   return result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
 }
 
+function runMcpResult(aiosPath, messages) {
+  return spawnSync(process.execPath, [server, "--path", aiosPath], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    input: `${messages.map((message) => JSON.stringify(message)).join("\n")}\n`,
+  });
+}
+
 function toolText(response) {
   return response.result.content[0].text;
+}
+
+function workingContextMetadataText(payload) {
+  const { markdown: _markdown, ...metadata } = payload;
+  return JSON.stringify(metadata, null, 2);
+}
+
+function localDate(value = new Date()) {
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function snapshotTree(root) {
+  const result = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    const absolute = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      result.push([entry.name, "directory"]);
+      for (const [nested, kind, bytes] of snapshotTree(absolute)) {
+        result.push([path.posix.join(entry.name, nested), kind, bytes]);
+      }
+    } else {
+      result.push([entry.name, "file", fs.readFileSync(absolute).toString("base64")]);
+    }
+  }
+  return result;
 }

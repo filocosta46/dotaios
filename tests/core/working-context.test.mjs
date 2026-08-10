@@ -16,6 +16,7 @@ const FIXED_NOW = new Date("2026-07-15T10:00:00.000Z");
 
 function tmpAios() {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-working-context-test-"));
+  fs.writeFileSync(path.join(directory, "aios.json"), '{"schema_version":"1.2.0"}\n');
   for (const relative of ["memory/daily", "memory/sessions", "memory/signals"]) {
     fs.mkdirSync(path.join(directory, relative), { recursive: true });
   }
@@ -130,6 +131,101 @@ test("scoped views retain unattributed evidence without leaking another project"
   assert.equal((unscoped.rendered.match(/Unscoped update/g) || []).length, 1);
 });
 
+test("scoped views authorize project and project_id attribution consistently", async () => {
+  const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "projects", "alpha"), { recursive: true });
+  fs.mkdirSync(path.join(aiosPath, "projects", "beta"), { recursive: true });
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "alpha", "README.md"),
+    "---\nid: alpha-id\nproject: alpha\n---\n# Alpha\n",
+  );
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "beta", "README.md"),
+    "---\nid: beta-id\nproject: beta\n---\n# Beta\n",
+  );
+
+  const scopedRows = [
+    { project: "alpha", project_id: "alpha-id", label: "ALPHA_BOTH" },
+    { project_id: "alpha-id", label: "ALPHA_ID_ONLY" },
+    { project: "alpha-id", label: "ALPHA_LEGACY_ID_IN_PROJECT" },
+    { label: "GLOBAL_ROW" },
+    { project_id: "beta-id", label: "BETA_ID_ONLY_SECRET" },
+    { project: "alpha", project_id: "beta-id", label: "CONFLICTING_SECRET" },
+    { project_id: "", label: "MALFORMED_EMPTY_SECRET" },
+  ];
+
+  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), scopedRows.map((row, index) => ({
+    ...row,
+    session_id: `session-${index}`,
+    captured_at: `2026-07-15T0${index}:00:00.000Z`,
+    title: row.label,
+  })));
+  writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), scopedRows.map((row, index) => ({
+    ...row,
+    ts: `2026-07-15T0${index}:00:00.000Z`,
+    summary: row.label,
+  })));
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), scopedRows.map((row, index) => ({
+    ...row,
+    ts: `2026-07-15T0${index}:00:00.000Z`,
+    summary: row.label,
+  })));
+
+  for (const selector of ["alpha", "alpha-id"]) {
+    const context = await selectWorkingContext(aiosPath, { project: selector }, { clock: fixedClock });
+    const visible = [
+      ...context.sessions.map((entry) => entry.title),
+      ...context.signals.map((entry) => entry.summary),
+      ...context.events.map((entry) => entry.summary),
+    ];
+
+    for (const label of ["BETA_ID_ONLY_SECRET", "CONFLICTING_SECRET", "MALFORMED_EMPTY_SECRET"]) {
+      assert.equal(visible.includes(label), false, `${selector} must exclude ${label}`);
+    }
+    for (const label of ["ALPHA_BOTH", "ALPHA_ID_ONLY", "ALPHA_LEGACY_ID_IN_PROJECT", "GLOBAL_ROW"]) {
+      assert.ok(visible.includes(label), `${selector} must include ${label}`);
+    }
+    assert.ok(context.sessions.find((entry) => entry.title === "GLOBAL_ROW")?.unscoped);
+    assert.equal(context.sessions.find((entry) => entry.title === "ALPHA_ID_ONLY")?.unscoped, undefined);
+  }
+});
+
+test("an ambiguous project alias requires a matching unique project_id", async () => {
+  const aiosPath = tmpAios();
+  for (const [slug, id] of [["alpha", "alpha-id"], ["beta", "beta-id"]]) {
+    fs.mkdirSync(path.join(aiosPath, "projects", slug), { recursive: true });
+    fs.writeFileSync(
+      path.join(aiosPath, "projects", slug, "README.md"),
+      `---\nid: ${id}\nproject: shared\n---\n# ${slug}\n`,
+    );
+  }
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    {
+      ts: "2026-07-15T09:00:00.000Z",
+      project: "shared",
+      summary: "AMBIGUOUS_ALIAS_SECRET",
+    },
+    {
+      ts: "2026-07-15T08:00:00.000Z",
+      project: "shared",
+      project_id: "alpha-id",
+      summary: "QUALIFIED_ALPHA_ALIAS",
+    },
+    {
+      ts: "2026-07-15T07:00:00.000Z",
+      project: "alpha",
+      summary: "UNIQUE_ALPHA_SLUG",
+    },
+  ]);
+
+  const context = await selectWorkingContext(aiosPath, { project: "alpha-id" }, { clock: fixedClock });
+
+  assert.deepEqual(
+    context.events.map((entry) => entry.summary),
+    ["QUALIFIED_ALPHA_ALIAS", "UNIQUE_ALPHA_SLUG"],
+  );
+});
+
 test("scoped views dedupe update channels like unscoped views", async () => {
   const aiosPath = tmpAios();
   writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), [
@@ -176,10 +272,11 @@ test("projection reads durable project metadata from the local README", async ()
   ].join("\n"));
   const readPaths = [];
   const filesystem = {
-    async readFile(filePath, encoding) {
+    async open(filePath, flags) {
       readPaths.push(filePath);
-      return fs.promises.readFile(filePath, encoding);
+      return fs.promises.open(filePath, flags);
     },
+    opendir: (...args) => fs.promises.opendir(...args),
     readdir: (...args) => fs.promises.readdir(...args),
     lstat: (...args) => fs.promises.lstat(...args),
     realpath: (...args) => fs.promises.realpath(...args),
@@ -229,6 +326,62 @@ test("stable project id resolves to the canonical slug before filtering", async 
   assert.equal(context.projectFilter, "project-a");
   assert.deepEqual(context.sessions.map((session) => session.session_id), ["matching-session"]);
   assert.equal(context.activeProject.slug, "project-a");
+});
+
+test("existing stable project id characters remain valid selectors", async () => {
+  const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "projects", "project-a"), { recursive: true });
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "project-a", "README.md"),
+    "---\nid: café:client/01\nproject: project-a\n---\n# Project A\n",
+  );
+  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [{
+    session_id: "matching-session",
+    project: "project-a",
+    captured_at: "2026-07-15T09:00:00.000Z",
+    title: "Canonical project session",
+  }]);
+
+  const context = await selectWorkingContext(
+    aiosPath,
+    { project: "café:client/01" },
+    { clock: fixedClock },
+  );
+
+  assert.equal(context.projectFilter, "project-a");
+  assert.deepEqual(context.sessions.map((session) => session.session_id), ["matching-session"]);
+});
+
+test("supplied project selectors reject blank, non-string, oversized, and control input", async () => {
+  const aiosPath = tmpAios();
+  const invalid = [42, "   ", "x".repeat(201), "alpha\n", "alpha\u007f", "alpha\u0085"];
+
+  for (const project of invalid) {
+    await assert.rejects(
+      selectWorkingContext(aiosPath, { project }, { clock: fixedClock }),
+      TypeError,
+      `expected selector ${JSON.stringify(project)} to fail`
+    );
+  }
+
+  const unscoped = await selectWorkingContext(aiosPath, {}, { clock: fixedClock });
+  assert.equal(unscoped.projectFilter, null);
+});
+
+test("project selector character limits count Unicode code points", async () => {
+  const aiosPath = tmpAios();
+  const maximum = "🚀".repeat(200);
+
+  const accepted = await selectWorkingContext(
+    aiosPath,
+    { project: maximum },
+    { clock: fixedClock }
+  );
+  assert.equal(accepted.projectFilter, maximum);
+  await assert.rejects(
+    selectWorkingContext(aiosPath, { project: `${maximum}🚀` }, { clock: fixedClock }),
+    TypeError
+  );
 });
 
 test("visible character budget bounds the canonical renderer and selected items", async () => {

@@ -27,6 +27,14 @@ An approved, testable Foundation reliability specification for the defined knowl
   `settings.json` as the activation point, guard all three artifacts, preserve
   proven ownership boundaries, and pin the runtime command so an opened project
   cannot shadow DotAIOS.
+- [Working-context maintenance envelope](issues/013-unify-working-context-maintenance-envelope.md):
+  inspect migration state without traversing memory, then expose the same
+  actionable facts through compact CLI text, hook JSON, and MCP without changing
+  the canonical working-context projection or its budget.
+- [Working-context read boundary](issues/014-make-working-context-read-only-and-contained.md):
+  block envelope closure until corrupt input is non-mutating, every projected
+  source is contained inside AIOS, MCP errors are path-free, and non-projection
+  metadata is explicitly bounded.
 
 ## Not yet specified
 

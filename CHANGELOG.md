@@ -6,6 +6,13 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Changed
 
+- Compact CLI, Gemini hook JSON, and MCP working-context reads now share one
+  operational migration envelope beside the unchanged canonical working-context
+  projection. The cheap session-start inspector reads only compatibility
+  metadata, reports
+  `current`, `schema_outdated`, `transaction_present`, or path-free
+  `inspection_failed`,
+  and never inventories protected memory shelves.
 - `dotaios connect gemini` now preflights all three managed artifacts and writes
   `settings.json` last as the SessionStart activation point. Its generated hook
   invokes the exact shipped DotAIOS package version instead of allowing an
@@ -19,6 +26,26 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Fixed
 
+- Canonical working-context reads no longer create corrupt-JSONL quarantine
+  files, follow projected sources outside the AIOS boundary, echo unbounded
+  project filters, or return absolute machine paths in internal MCP errors.
+  Source work is capped at 16 MiB and 512 files with fixed per-shelf and
+  directory limits; concurrent path-component changes and unsafe path-only
+  filesystem adapters fail closed. Opaque project IDs within the nonblank,
+  control-free, 200-Unicode-code-point boundary remain valid, while invalid or
+  ambiguous selectors can no longer silently widen scope. MCP integer fields
+  reject coercion and unknown argument names return one bounded generic error.
+  Scoped timeline rows are global only when both `project` and `project_id` are
+  absent; malformed or conflicting attribution is excluded, and an ambiguous
+  catalog alias requires a matching unique stable project id.
+  A handle-bound `aios.json` authority snapshot brackets each selection;
+  initially missing optional sources remain valid only under unchanged contained
+  ancestors. Compact, hook-JSON, and lean reads cannot launch the optional sync
+  hook after producing output.
+  Projection budgets retain their existing meaning; rendered operational notices
+  and non-projection MCP metadata have a separate fixed 1,024-character bound.
+  JSON escaping and protocol framing are representation costs, not operational
+  context, and are not subtracted from the projection budget.
 - Gemini connection now preserves every byte outside its one managed
   `GEMINI.md` block, refuses malformed ownership markers, unsafe paths, foreign
   hook scripts, invalid UTF-8 and incompatible settings shapes, and detects

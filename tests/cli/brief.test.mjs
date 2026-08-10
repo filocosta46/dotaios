@@ -178,6 +178,77 @@ test("brief --dry-run does not write today's note", () => {
   assert.equal(fs.existsSync(path.join(aiosPath, "memory", "daily", `${today()}.md`)), false);
 });
 
+test("compact brief rejects a supplied blank project selector", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [cli, "brief", "--compact", "--project", "   ", "--path", aiosPath],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /project filter must not be blank/i);
+    assert.doesNotMatch(result.stdout, /## Active Context/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("compact CLI documents and enforces the shared project selector contract", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  try {
+    const help = run(["brief", "--help"]);
+    assert.match(help.stdout, /nonblank.*no control characters.*200 Unicode code points/is);
+
+    const projectDir = path.join(aiosPath, "projects", "client-work");
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectDir, "README.md"),
+      "---\nid: café:client/01\nproject: client-work\nstatus: active\n---\n# Client Work\n"
+    );
+    const accepted = run([
+      "brief", "--compact", "--project", "café:client/01", "--path", aiosPath
+    ]);
+    assert.match(accepted.stdout, /Client Work/);
+
+    for (const project of ["🚀".repeat(201), "bad\u0007id"]) {
+      const rejected = spawnSync(
+        process.execPath,
+        [cli, "brief", "--compact", "--project", project, "--path", aiosPath],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      assert.notEqual(rejected.status, 0);
+      assert.doesNotMatch(rejected.stdout, /## Active Context/);
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("compact CLI and hook reads fail safely on oversized source input", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  try {
+    const identityPath = path.join(aiosPath, "context", "identity.md");
+    fs.writeFileSync(identityPath, Buffer.alloc(1024 * 1024 + 1, 0x61));
+    const before = snapshotTree(aiosPath);
+
+    for (const extra of [[], ["--json"]]) {
+      const result = spawnSync(
+        process.execPath,
+        [cli, "brief", "--compact", ...extra, "--path", aiosPath],
+        { cwd: repoRoot, encoding: "utf8" }
+      );
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stderr.trim(), "DotAIOS could not read working context safely.");
+      assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+      assert.deepEqual(snapshotTree(aiosPath), before);
+    }
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("init ships the daily brief schedule disabled by default", () => {
   const { aiosPath } = setupAios();
   const schedules = fs.readFileSync(path.join(aiosPath, "schedules.yml"), "utf8");
@@ -191,3 +262,115 @@ test("init ships the daily brief schedule disabled by default", () => {
   assert.match(list.stdout, /daily-brief/);
   assert.match(list.stdout, /dotaios brief/);
 });
+
+test("compact text and Gemini hook JSON expose the same stale-schema action without changing the digest budget", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  try {
+    const currentJson = JSON.parse(run(["brief", "--compact", "--json", "--budget", "512", "--path", aiosPath]).stdout);
+    const configPath = path.join(aiosPath, "aios.json");
+    const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    config.schema_version = "1.1.0";
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+
+    const plain = run(["brief", "--compact", "--budget", "512", "--path", aiosPath]).stdout;
+    const hook = JSON.parse(run(["brief", "--compact", "--json", "--budget", "512", "--path", aiosPath]).stdout);
+
+    assert.match(plain, /\[DotAIOS\].*schema 1\.1\.0.*1\.2\.0.*dotaios migrate/s);
+    assert.match(hook.hookSpecificOutput.additionalContext, /\[DotAIOS\].*schema 1\.1\.0.*1\.2\.0.*dotaios migrate/s);
+    assert.match(plain, /dotaios migrate --path <this-aios-folder>/);
+    assert.match(hook.hookSpecificOutput.additionalContext, /dotaios migrate --path <this-aios-folder>/);
+    assert.doesNotMatch(`${plain}\n${JSON.stringify(hook)}`, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.deepEqual(hook.contextBudget, currentJson.contextBudget);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("compact output surfaces transaction and failed inspection state but stays silent when current", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  try {
+    const current = run(["brief", "--compact", "--path", aiosPath]).stdout;
+    assert.doesNotMatch(current, /\[DotAIOS\]/);
+
+    const migrationsRoot = path.join(aiosPath, ".dotaios", "migrations");
+    const planId = "migrate-1_1_0-to-1_2_0-0123456789abcdef";
+    fs.mkdirSync(path.join(migrationsRoot, "transactions", planId), { recursive: true });
+    fs.writeFileSync(path.join(migrationsRoot, "owner.json"), `${JSON.stringify({ schema: "dotaios.migrations.v1" }, null, 2)}\n`);
+    const transaction = run(["brief", "--compact", "--path", aiosPath]).stdout;
+    assert.match(transaction, /\[DotAIOS\].*transaction metadata.*liveness is not verified.*dotaios doctor/s);
+    const transactionHook = JSON.parse(run(["brief", "--compact", "--json", "--path", aiosPath]).stdout);
+    assert.match(transactionHook.hookSpecificOutput.additionalContext, /transaction metadata.*liveness is not verified.*dotaios doctor/s);
+    assert.doesNotMatch(transactionHook.hookSpecificOutput.additionalContext, /migrate --recover/);
+
+    fs.rmSync(path.join(aiosPath, ".dotaios"), { recursive: true, force: true });
+    fs.writeFileSync(path.join(aiosPath, "aios.json"), "{\"schema_version\":\"invalid\"}\n");
+    const failed = run(["brief", "--compact", "--path", aiosPath]).stdout;
+    assert.match(failed, /\[DotAIOS\].*could not be verified.*dotaios doctor/s);
+    assert.match(failed, /## Active Context/);
+    assert.doesNotMatch(failed, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    const failedHook = JSON.parse(run(["brief", "--compact", "--json", "--path", aiosPath]).stdout);
+    assert.match(failedHook.hookSpecificOutput.additionalContext, /could not be verified.*dotaios doctor/s);
+    assert.doesNotMatch(JSON.stringify(failedHook), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("compact CLI text and hook JSON are byte-read-only in every migration state", () => {
+  const fixtures = [
+    ["current", () => {}],
+    ["schema_outdated", (aiosPath) => {
+      const configPath = path.join(aiosPath, "aios.json");
+      const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+      config.schema_version = "1.1.0";
+      fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+    }],
+    ["transaction_present", (aiosPath) => {
+      const migrationsRoot = path.join(aiosPath, ".dotaios", "migrations");
+      const planId = "migrate-1_1_0-to-1_2_0-0123456789abcdef";
+      fs.mkdirSync(path.join(migrationsRoot, "transactions", planId), { recursive: true });
+      fs.writeFileSync(
+        path.join(migrationsRoot, "owner.json"),
+        `${JSON.stringify({ schema: "dotaios.migrations.v1" }, null, 2)}\n`
+      );
+    }],
+    ["inspection_failed", (aiosPath) => {
+      fs.writeFileSync(path.join(aiosPath, "aios.json"), '{"schema_version":"invalid"}\n');
+    }],
+    ["corrupt_signal", (aiosPath) => {
+      const signalPath = path.join(aiosPath, "memory", "signals", `${today()}.jsonl`);
+      fs.mkdirSync(path.dirname(signalPath), { recursive: true });
+      fs.writeFileSync(signalPath, "{not-json}\n");
+    }]
+  ];
+
+  for (const [name, arrange] of fixtures) {
+    const { aiosPath, tempRoot } = setupAios();
+    try {
+      arrange(aiosPath);
+      const before = snapshotTree(aiosPath);
+      run(["brief", "--compact", "--path", aiosPath]);
+      run(["brief", "--compact", "--json", "--path", aiosPath]);
+      assert.deepEqual(snapshotTree(aiosPath), before, `${name} access mutated the AIOS tree`);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }
+});
+
+function snapshotTree(root) {
+  const result = [];
+  for (const entry of fs.readdirSync(root, { withFileTypes: true }).sort((left, right) => left.name.localeCompare(right.name))) {
+    const absolute = path.join(root, entry.name);
+    const mode = fs.lstatSync(absolute).mode & 0o777;
+    if (entry.isDirectory()) {
+      result.push([entry.name, "directory", mode]);
+      for (const [nested, kind, nestedMode, bytes] of snapshotTree(absolute)) {
+        result.push([path.posix.join(entry.name, nested), kind, nestedMode, bytes]);
+      }
+    } else {
+      result.push([entry.name, "file", mode, fs.readFileSync(absolute).toString("base64")]);
+    }
+  }
+  return result;
+}

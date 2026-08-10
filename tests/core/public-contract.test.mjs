@@ -258,7 +258,7 @@ test("public context guidance documents only the current MCP tools and one memor
   const contents = await Promise.all(
     relativeFiles.map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8"))
   );
-  const [mcpDocumentation, , , , agentsTemplate] = contents;
+  const [mcpDocumentation, adaptersDocumentation, sessionsDocumentation, architectureDocumentation, agentsTemplate] = contents;
   const toolsSection = mcpDocumentation.split("## Tools")[1].split(/\n## /)[0];
   const documentedTools = [...toolsSection.matchAll(/^- `([a-z_]+)`:/gm)]
     .map((match) => match[1]);
@@ -272,6 +272,26 @@ test("public context guidance documents only the current MCP tools and one memor
 
   assert.deepEqual(documentedTools, ["read_working_context", "search_aios", "resolve_skill"]);
   assert.equal(retiredToolNames.some((name) => corpus.includes(name)), false);
+  assert.match(
+    mcpDocumentation,
+    /`current`, `schema_outdated`, `transaction_present`, or\s+`inspection_failed`/,
+    "the public MCP contract must freeze the four migration states"
+  );
+  assert.match(
+    mcpDocumentation,
+    /`path_scope: "configured_aios"`/,
+    "operational actions must target the same configured AIOS without leaking its path"
+  );
+  assert.match(
+    mcpDocumentation,
+    /1,024-character allowance[\s\S]*non-`markdown` metadata[\s\S]*JSON escaping and protocol framing are representation/i,
+    "the public budget contract must separate operational metadata from JSON representation cost"
+  );
+  assert.doesNotMatch(
+    [mcpDocumentation, adaptersDocumentation, sessionsDocumentation, architectureDocumentation].join("\n"),
+    /canonical (?:memory )?digest|startup digest|digest budget/i,
+    "public guidance must use the canonical working-context projection vocabulary"
+  );
   assert.match(
     agentsTemplate,
     /Do not preload `memory\/events\.jsonl`, `memory\/signals\/`, or `memory\/sessions\/`/,
