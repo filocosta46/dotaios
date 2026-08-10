@@ -40,11 +40,27 @@ entering the personal-context mirror.
 
 Project-source paths, grants, revocation state, and access receipts are
 machine-local. A portable declaration carries only source identity, label,
-type, and purpose beneath its owning project. Add, bind, and grant commands
-preview by default; apply requires the displayed operation ID and plan
+type, and purpose beneath its owning project. Add, bind, grant, and revoke
+commands preview by default; apply requires the displayed operation ID and plan
 fingerprint from that exact state. An explicit future expiry and exact purpose
 are mandatory. Neither task text nor the read-only MCP adapter can grant
 consent.
+
+Each grant is limited to one project, source, read operation, purpose, portable
+source revision, binding generation, and root identity. Missing, mismatched,
+expired, stale, or revoked authorization refuses before the external root is
+opened. Those decisions append one bounded, path-free machine-local receipt;
+receipt publication failure withholds the refusal result as well as successful
+references. Unknown future authorization-state versions are refused in place
+and are never rewritten as an older format.
+
+Local authorization and receipt state accepts only same-user regular files and
+directories with restrictive permissions and stable identities. Links, special
+nodes, extra-linked files, unsafe owners or modes, unknown lock fields, and
+replaced lock owners fail closed without permission repair. Grant/revoke and
+receipt publication keep a durable in-flight guard; directory-sync uncertainty
+reinstates that guard or retains a non-reclaimable poisoned owner lock before
+authorization can resume.
 
 Retrieval opens no source-content bytes and returns no absolute roots or local
 state paths. It emits only complete source-relative metadata after containment

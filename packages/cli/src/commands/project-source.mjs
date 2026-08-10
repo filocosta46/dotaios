@@ -5,6 +5,7 @@ import {
   addProjectSource,
   bindProjectSource,
   grantProjectSource,
+  revokeProjectSource,
   retrieveProjectSource
 } from "../../../core/src/project-sources.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -13,9 +14,10 @@ const HELP_TEXT = `Usage:
   dotaios project source add <project> <folder> --source-id <id> --label <label> --purpose <purpose>
   dotaios project source bind <project> <source-id> <folder>
   dotaios project source grant <project> <source-id> --purpose <purpose> --expires-at <UTC>
+  dotaios project source revoke <project> <source-id> --grant-id <id>
   dotaios project source retrieve [project] --task <text>
 
-Source add, bind, and grant preview by default. Apply an exact preview with:
+Source add, bind, grant, and revoke preview by default. Apply an exact preview with:
   --operation-id <id> --plan-fingerprint <sha256> --apply
 
 Common options:
@@ -53,6 +55,7 @@ async function dispatchSourceCommand(parsed, common) {
   if (parsed.subcommand === "add") return runAdd(parsed, common);
   if (parsed.subcommand === "bind") return runBind(parsed, common);
   if (parsed.subcommand === "grant") return runGrant(parsed, common);
+  if (parsed.subcommand === "revoke") return runRevoke(parsed, common);
   if (parsed.subcommand === "retrieve") return runRetrieve(parsed, common);
   throw new Error(`Unknown project source subcommand: ${parsed.subcommand || "(missing)"}.`);
 }
@@ -62,7 +65,7 @@ function runAdd(parsed, common) {
   requireOption(parsed.sourceId, "--source-id");
   requireOption(parsed.label, "--label");
   requireOption(parsed.purpose, "--purpose");
-  rejectOptions(parsed, ["expiresAt", "task"]);
+  rejectOptions(parsed, ["expiresAt", "grantId", "task"]);
   return addProjectSource({
     ...common,
     projectSelector: parsed.positionals[0],
@@ -75,7 +78,7 @@ function runAdd(parsed, common) {
 
 function runBind(parsed, common) {
   assertPositionals(parsed.positionals, 3, "dotaios project source bind <project> <source-id> <folder>");
-  rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt", "task"]);
+  rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt", "grantId", "task"]);
   return bindProjectSource({
     ...common,
     projectSelector: parsed.positionals[0],
@@ -88,7 +91,7 @@ function runGrant(parsed, common) {
   assertPositionals(parsed.positionals, 2, "dotaios project source grant <project> <source-id>");
   requireOption(parsed.purpose, "--purpose");
   requireOption(parsed.expiresAt, "--expires-at");
-  rejectOptions(parsed, ["sourceId", "label", "task"]);
+  rejectOptions(parsed, ["sourceId", "label", "grantId", "task"]);
   return grantProjectSource({
     ...common,
     projectSelector: parsed.positionals[0],
@@ -98,12 +101,24 @@ function runGrant(parsed, common) {
   });
 }
 
+function runRevoke(parsed, common) {
+  assertPositionals(parsed.positionals, 2, "dotaios project source revoke <project> <source-id>");
+  requireOption(parsed.grantId, "--grant-id");
+  rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt", "task"]);
+  return revokeProjectSource({
+    ...common,
+    projectSelector: parsed.positionals[0],
+    sourceId: parsed.positionals[1],
+    grantId: parsed.grantId
+  });
+}
+
 function runRetrieve(parsed, common) {
   if (parsed.positionals.length > 1) {
     throw new Error("Usage: dotaios project source retrieve [project] --task <text>");
   }
   requireOption(parsed.task, "--task");
-  rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt"]);
+  rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt", "grantId"]);
   if (parsed.apply || parsed.operationId || parsed.planFingerprint) {
     throw new Error("Retrieval cannot authorize or apply project source consent.");
   }
@@ -125,6 +140,7 @@ function parseOptions(args, index = 0, parsed = null) {
     label: null,
     purpose: null,
     expiresAt: null,
+    grantId: null,
     task: null,
     operationId: null,
     planFingerprint: null,
@@ -157,6 +173,7 @@ const OPTION_KEYS = Object.freeze({
   "--label": "label",
   "--purpose": "purpose",
   "--expires-at": "expiresAt",
+  "--grant-id": "grantId",
   "--task": "task",
   "--operation-id": "operationId",
   "--plan-fingerprint": "planFingerprint"
@@ -178,6 +195,7 @@ function publicResult(result) {
     ...(result.purpose ? { purpose: result.purpose } : {}),
     ...(result.scope ? { scope: result.scope } : {}),
     ...(Object.hasOwn(result, "approved_at") ? { approved_at: result.approved_at } : {}),
+    ...(Object.hasOwn(result, "revoked_at") ? { revoked_at: result.revoked_at } : {}),
     ...(result.expires_at ? { expires_at: result.expires_at } : {}),
     ...(result.recovery ? { recovery: true } : {}),
     ...(result.portable_path ? { portable: { path: result.portable_path } } : {}),

@@ -19,13 +19,20 @@ import {
 } from "./projects.mjs";
 import {
   projectSourceStatePaths,
+  projectSourceOwnedDirectories,
   markBindingPortablePublished,
   publishBinding,
   publishGrant,
+  publishGrantRevocation,
+  readProjectSourceAuthorizationSnapshotUnderLock,
   readProjectSourceState,
   sourceStateLockPath
 } from "./project-source-state.mjs";
-import { appendAccessReceipt, createAccessReceipt } from "./receipt-ledger.mjs";
+import {
+  appendAccessReceipt,
+  assertAccessReceiptStoreAvailable,
+  createAccessReceipt
+} from "./receipt-ledger.mjs";
 import { matchQuery } from "./search.mjs";
 
 const TASK_MAX_CODE_POINTS = 500;
@@ -253,7 +260,8 @@ async function planProjectSourceBind(options = {}) {
 
 export async function grantProjectSource(options = {}) {
   return executeMutation(options, planProjectSourceGrant, async (current) => {
-    if (Date.parse(current.expires_at) <= current.now().getTime()) {
+    const approvedAt = current.now().toISOString();
+    if (Date.parse(current.expires_at) <= Date.parse(approvedAt)) {
       throw sourceError("grant-expired", "Grant expiry must remain in the future at apply time.");
     }
     const grant = await publishGrant({
@@ -265,7 +273,7 @@ export async function grantProjectSource(options = {}) {
       grantId: current.grant_id,
       purpose: current.purpose,
       expiresAt: current.expires_at,
-      approvedAt: current.now().toISOString(),
+      approvedAt,
       binding: current.binding,
       sourceRevision: current.source_revision,
       filesystem: options.filesystem || fs
@@ -277,6 +285,89 @@ export async function grantProjectSource(options = {}) {
       approved_at: grant.approved_at
     });
   });
+}
+
+export async function revokeProjectSource(options = {}) {
+  return executeMutation(options, planProjectSourceRevoke, async (current) => {
+    const revokedAt = current.now().toISOString();
+    const grant = await publishGrantRevocation({
+      homePath: current.home_path,
+      projectId: current.project_id,
+      sourceId: current.source_id,
+      operationId: current.operation_id,
+      planFingerprint: current.plan_fingerprint,
+      grantId: current.grant_id,
+      revokedAt,
+      filesystem: options.filesystem || fs
+    });
+    return publicMutationResult(current, {
+      applied: true,
+      grant_revision: grant.revision,
+      revoked_at: grant.revoked_at
+    });
+  });
+}
+
+async function planProjectSourceRevoke(options = {}) {
+  const sourceId = validateSourceId(options.sourceId);
+  const grantId = validateGrantId(options.grantId);
+  const context = await sourceContext(options);
+  const operationId = validateOperationId(options.operationId || randomUUID());
+  const source = await readSourceDeclaration(context, sourceId);
+  const state = await readProjectSourceState({
+    homePath: context.homePath,
+    projectId: context.project.id,
+    sourceId,
+    recoveryOperationId: options.operationId,
+    recoveryPlanFingerprint: options.planFingerprint,
+    filesystem: options.filesystem || fs
+  });
+  const grant = state.grant;
+  if (!grant) throw sourceError("grant-missing", "Project source grant is missing.");
+  if (grant.grant_id !== grantId) throw sourceError("grant-id-mismatch", "Project source grant id does not match.");
+  if (grant.revoked_at) throw sourceError("grant-revoked", "Project source grant is already revoked.");
+  return createRevokePlan({ context, grant, operationId, options, source, sourceId, state });
+}
+
+function createRevokePlan({ context, grant, operationId, options, source, sourceId, state }) {
+  const planFingerprint = sha256(stableJson(revokeFingerprintFields({
+    context, grant, operationId, source, sourceId, state
+  })));
+  return Object.freeze({
+    version: 1,
+    operation: "revoke",
+    applied: false,
+    operation_id: operationId,
+    plan_fingerprint: planFingerprint,
+    grant_id: grant.grant_id,
+    project_id: context.project.id,
+    project: context.project.slug,
+    source_id: sourceId,
+    purpose: grant.purpose,
+    scope: grant.scope,
+    approved_at: grant.approved_at,
+    expires_at: grant.expires_at,
+    revoked_at: null,
+    home_path: context.homePath,
+    now: options.now || (() => new Date())
+  });
+}
+
+function revokeFingerprintFields({ context, grant, operationId, source, sourceId, state }) {
+  return {
+    operation: "revoke",
+    operation_id: operationId,
+    project_id: context.project.id,
+    source_id: sourceId,
+    source_revision: source.revision,
+    binding_generation: state.binding?.generation || null,
+    root_identity: state.binding?.root_identity || null,
+    grant_id: grant.grant_id,
+    grant_revision: grant.revision,
+    scope: grant.scope,
+    purpose: grant.purpose,
+    expires_at: grant.expires_at
+  };
 }
 
 async function planProjectSourceGrant(options = {}) {
@@ -293,6 +384,8 @@ async function planProjectSourceGrant(options = {}) {
     homePath: context.homePath,
     projectId: context.project.id,
     sourceId,
+    recoveryOperationId: options.operationId,
+    recoveryPlanFingerprint: options.planFingerprint,
     filesystem: options.filesystem || fs
   });
   const binding = state.binding;
@@ -358,15 +451,34 @@ export async function retrieveProjectSource(options = {}) {
   if (options.projectSelector !== undefined && options.projectSelector !== null) {
     validateProjectSelector(options.projectSelector);
   }
+  await assertAccessReceiptStoreAvailable({ homePath, filesystem });
   try {
     if (!options.projectSelector) throw sourceError("project-required", "A project selector is required.");
     const { reader, project } = await resolveRetrievalProject({ ...options, aiosPath, filesystem });
     known = { ...known, projectId: project.id, project: project.slug };
     const source = await selectSource({ aiosPath, project, task, evidenceReader: reader });
     known = { ...known, sourceId: source.source_id };
-    const authorization = await authorizeSelectedSource({ homePath, filesystem, project, source, now: options.now });
+    const stateCoordinates = { homePath, projectId: project.id, sourceId: source.source_id, filesystem };
+    const state = await readAuthorizationSnapshot(stateCoordinates);
+    known = {
+      ...known,
+      grant: state.grantIssue
+        ? state.grantReceipt
+        : state.grant
+          ? publicGrantSnapshot(state.grant)
+          : null
+    };
+    if (state.grantIssue) {
+      throw sourceError(state.grantIssue, "Project source authorization state does not match this operation.");
+    }
+    const authorization = await authorizeSelectedSource({
+      filesystem,
+      source,
+      state,
+      stateCoordinates,
+      now: options.now
+    });
     const { binding, grant } = authorization;
-    known = { ...known, grant: publicGrantSnapshot(grant) };
     const references = await enumerateAndRecheck({
       aiosPath, filesystem, project, source, reader, ...authorization
     });
@@ -389,9 +501,8 @@ async function resolveRetrievalProject({ aiosPath, filesystem, evidenceReader, p
   return Object.freeze({ reader, project });
 }
 
-async function authorizeSelectedSource({ homePath, filesystem, project, source, now }) {
-  const stateCoordinates = { homePath, projectId: project.id, sourceId: source.source_id, filesystem };
-  const { binding, grant } = await readProjectSourceState(stateCoordinates);
+async function authorizeSelectedSource({ filesystem, source, state, stateCoordinates, now }) {
+  const { binding, grant } = state;
   validateAuthorization({ source, binding, grant, now: now || (() => new Date()) });
   const rootBefore = await inspectRootIdentity(binding.root_path, filesystem);
   if (!sameRootIdentity(rootBefore, binding.root_identity)) {
@@ -401,7 +512,7 @@ async function authorizeSelectedSource({ homePath, filesystem, project, source, 
 }
 
 async function enumerateAndRecheck({
-  aiosPath, filesystem, project, source, reader, binding, rootBefore, stateCoordinates
+  aiosPath, filesystem, project, source, reader, binding, grant, rootBefore, stateCoordinates
 }) {
   const references = await enumerateSourceMetadata({
     rootPath: binding.root_path,
@@ -412,10 +523,13 @@ async function enumerateAndRecheck({
   const [rootAfter, sourceAfter, stateAfter] = await Promise.all([
     inspectRootIdentity(binding.root_path, filesystem),
     readSourceDeclaration({ aiosPath, project, evidenceReader: reader }, source.source_id),
-    readProjectSourceState(stateCoordinates)
+    readAuthorizationSnapshot(stateCoordinates)
   ]);
   if (!retrievalStateUnchanged({ rootBefore, rootAfter, source, sourceAfter, binding, stateAfter })) {
     throw sourceError("source-changed", "Project source changed while it was being resolved.");
+  }
+  if (stableJson(stateAfter.grant) !== stableJson(grant)) {
+    throw sourceError("authorization-changed", "Project source authorization changed while it was being resolved.");
   }
   return references;
 }
@@ -604,22 +718,37 @@ async function readSourceDeclaration(context, sourceId) {
 function validateAuthorization({ source, binding, grant, now }) {
   if (!binding) throw sourceError("binding-missing", "Project source binding is missing.");
   if (!grant) throw sourceError("grant-missing", "Project source grant is missing.");
+  if (
+    grant.project_id !== source.project_id
+    || grant.source_id !== source.source_id
+    || grant.scope !== "read"
+  ) {
+    throw sourceError("grant-scope-mismatch", "Project source grant scope does not match this operation.");
+  }
+  if (grant.purpose !== source.purpose) {
+    throw sourceError("purpose-mismatch", "Project source grant purpose no longer matches.");
+  }
+  if (grant.revoked_at) throw sourceError("grant-revoked", "Project source grant was revoked.");
   const expiresAt = Date.parse(grant.expires_at);
   const approvedAt = Date.parse(grant.approved_at);
-  if (
-    grant.scope !== "read"
-    || grant.purpose !== source.purpose
-    || !Number.isFinite(approvedAt)
-    || !Number.isFinite(expiresAt)
-    || new Date(approvedAt).toISOString() !== grant.approved_at
-    || new Date(expiresAt).toISOString() !== grant.expires_at
-    || expiresAt <= now().getTime()
-    || grant.source_revision !== source.revision
-    || grant.binding_generation !== binding.generation
-    || stableJson(grant.root_identity) !== stableJson(binding.root_identity)
-    || grant.revoked_at
-  ) {
+  const evaluatedAt = now().getTime();
+  if (!Number.isFinite(approvedAt) || !Number.isFinite(expiresAt)) {
     throw sourceError("grant-invalid", "Project source grant is not valid for this operation.");
+  }
+  if (expiresAt <= evaluatedAt || expiresAt <= approvedAt) {
+    throw sourceError("grant-expired", "Project source grant has expired.");
+  }
+  if (approvedAt > evaluatedAt) {
+    throw sourceError("grant-invalid", "Project source grant is not valid for this operation.");
+  }
+  if (grant.source_revision !== source.revision) {
+    throw sourceError("source-revision-mismatch", "Project source grant is for another source revision.");
+  }
+  if (
+    grant.binding_generation !== binding.generation
+    || stableJson(grant.root_identity) !== stableJson(binding.root_identity)
+  ) {
+    throw sourceError("binding-revision-mismatch", "Project source grant is for another binding revision.");
   }
 }
 
@@ -803,6 +932,7 @@ function publicMutationResult(plan, additions = {}) {
     ...(plan.purpose ? { purpose: plan.purpose } : {}),
     ...(plan.scope ? { scope: plan.scope } : {}),
     ...(Object.hasOwn(plan, "approved_at") ? { approved_at: additions.approved_at ?? plan.approved_at } : {}),
+    ...(Object.hasOwn(plan, "revoked_at") ? { revoked_at: additions.revoked_at ?? plan.revoked_at } : {}),
     ...(plan.expires_at ? { expires_at: plan.expires_at } : {}),
     ...(plan.recovery ? { recovery: true } : {}),
     ...(plan.portable_path ? { portable: { path: plan.portable_path } } : {}),
@@ -852,11 +982,18 @@ function publicGrantSnapshot(grant) {
 }
 
 async function withSourceLock(plan, options, callback) {
+  const filesystem = options.filesystem || fs;
   try {
     const result = await withOperationLock(
       sourceStateLockPath(plan.home_path, plan.project_id, plan.source_id),
       callback,
-      { filesystem: options.filesystem || fs, format: SOURCE_LOCK_FORMAT }
+      {
+        filesystem,
+        format: SOURCE_LOCK_FORMAT,
+        strictOwnedState: true,
+        ownedDirectories: projectSourceOwnedDirectories(plan.home_path, "locks"),
+        retainOnError: (error) => error?.retainOperationLock === true
+      }
     );
     if (!result.acquired) throw sourceError("source-busy", "Project source is busy.");
     return result.value;
@@ -866,6 +1003,27 @@ async function withSourceLock(plan, options, callback) {
       "DOTAIOS_PROJECT_SOURCE_APPLY_FAILED",
       "Project source change could not be applied safely."
     );
+  }
+}
+
+async function readAuthorizationSnapshot(stateCoordinates) {
+  const { homePath, projectId, sourceId, filesystem } = stateCoordinates;
+  try {
+    const result = await withOperationLock(
+      sourceStateLockPath(homePath, projectId, sourceId),
+      () => readProjectSourceAuthorizationSnapshotUnderLock(stateCoordinates),
+      {
+        filesystem,
+        format: SOURCE_LOCK_FORMAT,
+        strictOwnedState: true,
+        ownedDirectories: projectSourceOwnedDirectories(homePath, "locks")
+      }
+    );
+    if (!result.acquired) throw sourceError("authorization-state-invalid", "Project source authorization is busy.");
+    return result.value;
+  } catch (error) {
+    if (error instanceof ProjectSourceError) throw error;
+    throw sourceError("authorization-state-invalid", "Project source authorization is unavailable.");
   }
 }
 
@@ -882,11 +1040,19 @@ function assertFingerprint(actual, expected) {
   }
 }
 
-function validateOperationId(value) {
+function validateIdentifier(value, field) {
   if (typeof value !== "string" || !/^[a-f0-9-]{1,64}$/.test(value)) {
-    throw sourceError("operation-id-invalid", "operation id is invalid");
+    throw sourceError(`${field}-invalid`, `${field.replaceAll("-", " ")} is invalid`);
   }
   return value;
+}
+
+function validateOperationId(value) {
+  return validateIdentifier(value, "operation-id");
+}
+
+function validateGrantId(value) {
+  return validateIdentifier(value, "grant-id");
 }
 
 function validateBoundedText(value, name, maximum) {
@@ -943,6 +1109,7 @@ function sameRootIdentity(left, right) {
 
 function stableReason(error) {
   if (error instanceof ProjectSourceError) return error.details.reason || error.code.replace(/^DOTAIOS_/, "").toLowerCase();
+  if (error?.code === "DOTAIOS_PROJECT_SOURCE_STATE_INVALID") return "authorization-state-invalid";
   if (typeof error?.code === "string" && error.code.startsWith("DOTAIOS_PROJECT_SELECTOR_")) {
     return error.code.replace("DOTAIOS_PROJECT_SELECTOR_", "project-").toLowerCase();
   }

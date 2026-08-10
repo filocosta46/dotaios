@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   addProjectSource,
   grantProjectSource,
+  revokeProjectSource,
   retrieveProjectSource,
   validateSourceId,
   validateTask
@@ -15,7 +16,8 @@ import {
   projectSourceStatePaths,
   publishBinding,
   publishGrant,
-  readProjectSourceState
+  readProjectSourceState,
+  sourceStateLockPath
 } from "../../packages/core/src/project-source-state.mjs";
 import {
   CAMPAIGN_TASK,
@@ -46,266 +48,684 @@ test("project source syntax bounds fail before project discovery or receipt stat
   );
 });
 
-test("core composes finite consent, metadata-only retrieval, provenance, and one receipt", async () => {
+test("core composes finite consent, metadata-only retrieval, provenance, and one receipt", assertCoreConsentSlice);
+
+async function assertCoreConsentSlice() {
   const fixture = createProjectSourceRetrievalFixture();
   try {
-    const portableBefore = snapshotTree(fixture.aiosPath);
-    const addPreview = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets"
-    });
-    assert.equal(addPreview.applied, false);
-    assert.deepEqual(snapshotTree(fixture.aiosPath), portableBefore);
-
-    await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: addPreview.operation_id,
-      planFingerprint: addPreview.plan_fingerprint,
-      apply: true
-    });
-    const grantPreview = await grantProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "project-acme-001",
-      sourceId: "campaign-assets",
-      purpose: "Launch campaign assets",
-      expiresAt: "2099-01-01T00:00:00.000Z"
-    });
-    const grantApplied = await grantProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "project-acme-001",
-      sourceId: "campaign-assets",
-      purpose: "Launch campaign assets",
-      expiresAt: "2099-01-01T00:00:00.000Z",
-      operationId: grantPreview.operation_id,
-      planFingerprint: grantPreview.plan_fingerprint,
-      apply: true
-    });
-    assert.equal(grantPreview.scope, "read");
-    assert.equal(grantPreview.approved_at, null);
-    assert.equal(grantApplied.scope, "read");
-    assert.match(grantApplied.approved_at, /^\d{4}-\d{2}-\d{2}T/);
-
+    await prepareCoreCampaignGrant(fixture);
     const sourceStats = fs.lstatSync(fixture.sourceRoot, { bigint: true });
-    const otherBinding = await publishBinding({
+    const otherPaths = await seedOtherProjectAuthority(fixture, sourceStats);
+    const instrumentation = metadataOnlyFilesystem(fixture, otherPaths);
+    const result = await retrieveCampaignSourceWithFilesystem(fixture, instrumentation.filesystem);
+    assert.equal(result.decision, "allowed");
+    assert.deepEqual(instrumentation.observations(), []);
+    assert.deepEqual(result.references.map((reference) => reference.path), fixture.expectedPaths);
+    assertCoreAllowedReceipt(fixture, sourceStats);
+    await assertMalformedConsentRefusal(fixture, instrumentation);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function prepareCoreCampaignGrant(fixture) {
+  const portableBefore = snapshotTree(fixture.aiosPath);
+  const addPreview = await addProjectSource({ ...campaignAddOptions(fixture) });
+  assert.equal(addPreview.applied, false);
+  assert.deepEqual(snapshotTree(fixture.aiosPath), portableBefore);
+  await addProjectSource({
+    ...campaignAddOptions(fixture), operationId: addPreview.operation_id,
+    planFingerprint: addPreview.plan_fingerprint, apply: true
+  });
+  const grantOptions = {
+    aiosPath: fixture.aiosPath, homePath: fixture.homePath, projectSelector: "project-acme-001",
+    sourceId: "campaign-assets", purpose: "Launch campaign assets",
+    expiresAt: "2099-01-01T00:00:00.000Z"
+  };
+  const preview = await grantProjectSource(grantOptions);
+  const applied = await grantProjectSource({
+    ...grantOptions, operationId: preview.operation_id, planFingerprint: preview.plan_fingerprint, apply: true
+  });
+  assert.equal(preview.scope, "read");
+  assert.equal(preview.approved_at, null);
+  assert.equal(applied.scope, "read");
+  assert.match(applied.approved_at, /^\d{4}-\d{2}-\d{2}T/);
+}
+
+function campaignAddOptions(fixture) {
+  return {
+    aiosPath: fixture.aiosPath, homePath: fixture.homePath, projectSelector: "acme-campaign",
+    folder: fixture.sourceRoot, sourceId: "campaign-assets", label: "Campaign assets",
+    purpose: "Launch campaign assets"
+  };
+}
+
+function campaignSourceOptions(fixture) {
+  return {
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "acme-campaign",
+    sourceId: "campaign-assets",
+  };
+}
+
+function campaignGrantOptions(fixture) {
+  return {
+    ...campaignSourceOptions(fixture),
+    purpose: "Launch campaign assets",
+  };
+}
+
+async function seedOtherProjectAuthority(fixture, sourceStats) {
+  const binding = await publishBinding({
+    homePath: fixture.homePath, projectId: "project-other-002", sourceId: "campaign-assets",
+    operationId: "a11-b1d", planFingerprint: "a".repeat(64), rootPath: fixture.sourceRoot,
+    rootIdentity: { type: "directory", dev: sourceStats.dev.toString(), ino: sourceStats.ino.toString() }
+  });
+  await publishGrant({
+    homePath: fixture.homePath, projectId: "project-other-002", sourceId: "campaign-assets",
+    operationId: "a11-a12", planFingerprint: "b".repeat(64), grantId: "a11-a12",
+    purpose: "Private launch campaign assets", expiresAt: "2099-01-01T00:00:00.000Z",
+    approvedAt: "2098-01-01T00:00:00.000Z", binding, sourceRevision: 1
+  });
+  return projectSourceStatePaths(fixture.homePath, "project-other-002", "campaign-assets");
+}
+
+function metadataOnlyFilesystem(fixture, otherPaths) {
+  let observed = [];
+  const record = (value) => { observed = [...observed, value]; };
+  const filesystem = Object.create(fsp);
+  filesystem.readFile = async (filePath, ...args) => {
+    const candidate = path.resolve(String(filePath));
+    if ([otherPaths.binding, otherPaths.grant].includes(candidate)) {
+      record(`other-state:${candidate}`);
+      throw new Error("other-project state must not be read");
+    }
+    if (candidate.startsWith(`${path.resolve(fixture.sourceRoot)}${path.sep}`)) {
+      record(`source-content:${candidate}`);
+      throw new Error("source content must not be read");
+    }
+    return fsp.readFile(filePath, ...args);
+  };
+  filesystem.open = async (filePath, ...args) => {
+    const candidate = path.resolve(String(filePath));
+    const other = path.join(fixture.aiosPath, "projects", "other-client", "sources", "campaign-assets.md");
+    if (candidate === other) {
+      record(`other-source:${candidate}`);
+      throw new Error("other-project source must not be opened");
+    }
+    if (candidate.startsWith(`${path.resolve(fixture.sourceRoot)}${path.sep}`)) {
+      record(`source-content:${candidate}`);
+      throw new Error("source content must not be opened");
+    }
+    return fsp.open(filePath, ...args);
+  };
+  return Object.freeze({ filesystem, observations: () => observed });
+}
+
+function assertCoreAllowedReceipt(fixture, sourceStats) {
+  const receiptPath = path.join(fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl");
+  const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(receipts.length, 1);
+  assert.deepEqual(receipts[0].grant.root_identity, {
+    type: "directory", dev: sourceStats.dev.toString(), ino: sourceStats.ino.toString()
+  });
+  assert.equal(receipts[0].grant.revoked_at, null);
+}
+
+async function assertMalformedConsentRefusal(fixture, instrumentation) {
+  const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+  const grant = JSON.parse(fs.readFileSync(paths.grant, "utf8"));
+  writeJsonRecord(paths.grant, { ...grant, expires_at: "not-a-timestamp" });
+  const canonicalRoot = fs.realpathSync(fixture.sourceRoot);
+  instrumentation.filesystem.lstat = async (filePath, ...args) => {
+    const candidate = path.resolve(String(filePath));
+    if (candidate === canonicalRoot || candidate.startsWith(`${canonicalRoot}${path.sep}`)) {
+      throw new Error("invalid consent must refuse before source observation");
+    }
+    return fsp.lstat(filePath, ...args);
+  };
+  const refused = await retrieveCampaignSourceWithFilesystem(fixture, instrumentation.filesystem);
+  assert.equal(refused.decision, "refused");
+  assert.equal(refused.reason, "authorization-state-invalid");
+  assert.deepEqual(refused.references, []);
+  assert.deepEqual(instrumentation.observations(), []);
+}
+
+test(
+  "authorization refusals are distinct, receipted, and stop before the external root",
+  assertAuthorizationRefusalMatrix,
+);
+
+async function assertAuthorizationRefusalMatrix() {
+  const scenarios = [
+    ...missingAuthorizationScenarios(),
+    ...mismatchedAuthorizationScenarios(),
+    ...revisionAuthorizationScenarios(),
+  ];
+  for (const scenario of scenarios) await testAuthorizationRefusal(scenario);
+}
+
+function missingAuthorizationScenarios() {
+  return [
+    {
+      name: "missing binding",
+      reason: "binding-missing",
+      mutate({ paths }) { fs.rmSync(paths.binding); },
+    },
+    {
+      name: "missing grant",
+      reason: "grant-missing",
+      mutate({ paths }) { fs.rmSync(paths.grant); },
+      expectsGrant: false,
+    },
+    {
+      name: "missing scope",
+      reason: "authorization-state-invalid",
+      mutate({ grant, paths }) {
+        const { scope: _scope, ...incompleteGrant } = grant;
+        writeJsonRecord(paths.grant, incompleteGrant);
+      },
+      grantKeys: ["grant_id", "revision"],
+    },
+    {
+      name: "missing purpose",
+      reason: "authorization-state-invalid",
+      mutate({ grant, paths }) {
+        const { purpose: _purpose, ...incompleteGrant } = grant;
+        writeJsonRecord(paths.grant, incompleteGrant);
+      },
+      grantKeys: ["grant_id", "revision"],
+    },
+    {
+      name: "missing duration",
+      reason: "authorization-state-invalid",
+      mutate({ grant, paths }) {
+        const { expires_at: _expiresAt, ...incompleteGrant } = grant;
+        writeJsonRecord(paths.grant, incompleteGrant);
+      },
+      grantKeys: ["grant_id", "revision"],
+    },
+  ];
+}
+
+function mismatchedAuthorizationScenarios() {
+  return [
+    {
+      name: "mismatched purpose",
+      reason: "purpose-mismatch",
+      mutate({ grant, paths }) { writeJsonRecord(paths.grant, { ...grant, purpose: "Another exact purpose" }); },
+    },
+    {
+      name: "expired grant",
+      reason: "grant-expired",
+      mutate({ grant, paths }) { writeJsonRecord(paths.grant, { ...grant, expires_at: "2020-01-01T00:00:00.000Z" }); },
+    },
+    {
+      name: "wrong operation scope",
+      reason: "grant-scope-mismatch",
+      mutate({ grant, paths }) { writeJsonRecord(paths.grant, { ...grant, scope: "write" }); },
+    },
+    {
+      name: "wrong project scope",
+      reason: "grant-scope-mismatch",
+      mutate({ grant, paths }) {
+        writeJsonRecord(paths.grant, {
+          ...grant,
+          project_id: "project-other-002",
+          grant_id: "f0a1-bad",
+          purpose: "WRONG_SCOPE_PRIVATE_PURPOSE",
+        });
+      },
+      expectsGrant: false,
+    },
+    {
+      name: "wrong source scope",
+      reason: "grant-scope-mismatch",
+      mutate({ grant, paths }) { writeJsonRecord(paths.grant, { ...grant, source_id: "private-assets" }); },
+      expectsGrant: false,
+    },
+  ];
+}
+
+function revisionAuthorizationScenarios() {
+  return [
+    {
+      name: "stale source revision",
+      reason: "source-revision-mismatch",
+      mutate({ grant, paths }) { writeJsonRecord(paths.grant, { ...grant, source_revision: grant.source_revision + 1 }); },
+    },
+    {
+      name: "stale binding generation",
+      reason: "binding-revision-mismatch",
+      mutate({ grant, paths }) {
+        writeJsonRecord(paths.grant, { ...grant, binding_generation: grant.binding_generation + 1 });
+      },
+    },
+    {
+      name: "portable purpose drift",
+      reason: "purpose-mismatch",
+      mutate({ fixture }) {
+        const declarationPath = path.join(
+          fixture.aiosPath,
+          "projects",
+          "acme-campaign",
+          "sources",
+          "campaign-assets.md",
+        );
+        const declaration = fs.readFileSync(declarationPath, "utf8")
+          .replace('purpose: "Launch campaign assets"', 'purpose: "Campaign assets for a different launch"')
+          .replace("revision: 1", "revision: 2");
+        fs.writeFileSync(declarationPath, declaration);
+      },
+    },
+  ];
+}
+
+test("grant and revoke mutations refuse a foreign-coordinate record without rewriting it", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { applied, grant } = await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const foreign = `${JSON.stringify({
+      ...grant,
+      project_id: "project-other-002",
+      grant_id: "f0a1-bad",
+      purpose: "WRONG_SCOPE_PRIVATE_PURPOSE",
+    })}\n`;
+    fs.writeFileSync(paths.grant, foreign);
+    await assert.rejects(() => grantProjectSource({
+      aiosPath: fixture.aiosPath,
       homePath: fixture.homePath,
-      projectId: "project-other-002",
+      projectSelector: "acme-campaign",
       sourceId: "campaign-assets",
-      operationId: "a11-b1d",
-      planFingerprint: "a".repeat(64),
-      rootPath: fixture.sourceRoot,
-      rootIdentity: { type: "directory", dev: sourceStats.dev.toString(), ino: sourceStats.ino.toString() }
-    });
-    await publishGrant({
+      purpose: "Launch campaign assets",
+      expiresAt: "2099-06-01T00:00:00.000Z",
+    }), { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" });
+    await assert.rejects(() => revokeProjectSource({
+      aiosPath: fixture.aiosPath,
       homePath: fixture.homePath,
-      projectId: "project-other-002",
+      projectSelector: "acme-campaign",
       sourceId: "campaign-assets",
-      operationId: "a11-a12",
-      planFingerprint: "b".repeat(64),
-      grantId: "a11-a12",
-      purpose: "Private launch campaign assets",
-      expiresAt: "2099-01-01T00:00:00.000Z",
-      approvedAt: "2098-01-01T00:00:00.000Z",
-      binding: otherBinding,
-      sourceRevision: 1
+      grantId: applied.grant_id,
+    }), { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" });
+    assert.equal(fs.readFileSync(paths.grant, "utf8"), foreign);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test(
+  "project and source resolution refusals keep distinct receipts with known fields only",
+  assertProjectSourceResolutionRefusals,
+);
+
+async function assertProjectSourceResolutionRefusals() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    let attempts = await unresolvedProjectSourceAttempts(fixture);
+    seedAmbiguousProjectSources(fixture);
+    attempts = [...attempts, await retrieveCampaignSource(fixture)];
+    seedDuplicateProject(fixture);
+    attempts = [...attempts, await retrieveCampaignSource(fixture)];
+    assertResolutionRefusalReceipts(fixture, attempts);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function unresolvedProjectSourceAttempts(fixture) {
+  const base = { aiosPath: fixture.aiosPath, homePath: fixture.homePath, task: CAMPAIGN_TASK };
+  const projectRequired = await retrieveProjectSource(base);
+  const projectUnknown = await retrieveProjectSource({ ...base, projectSelector: "missing-client" });
+  const sourceNoMatch = await retrieveProjectSource({ ...base, projectSelector: "acme-campaign" });
+  return [projectRequired, projectUnknown, sourceNoMatch];
+}
+
+function seedAmbiguousProjectSources(fixture) {
+  const sourcesPath = path.join(fixture.aiosPath, "projects", "acme-campaign", "sources");
+  fs.mkdirSync(sourcesPath, { recursive: true });
+  for (const sourceId of ["campaign-assets", "launch-assets"]) {
+    fs.writeFileSync(path.join(sourcesPath, `${sourceId}.md`), projectSourceDeclaration(sourceId));
+  }
+}
+
+function seedDuplicateProject(fixture) {
+  const duplicatePath = path.join(fixture.aiosPath, "projects", "duplicate-client");
+  fs.mkdirSync(duplicatePath, { recursive: true });
+  fs.writeFileSync(
+    path.join(duplicatePath, "README.md"),
+    "---\nid: acme-campaign\nproject: duplicate-client\nstatus: active\n---\n",
+  );
+}
+
+function assertResolutionRefusalReceipts(fixture, attempts) {
+  assert.deepEqual(attempts.map((attempt) => attempt.reason), [
+    "project-required", "project-unknown", "source-no-match", "source-ambiguous", "project-ambiguous",
+  ]);
+  const receiptPath = path.join(fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl");
+  const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+  assert.deepEqual(receipts.map((receipt) => receipt.reason), attempts.map((attempt) => attempt.reason));
+  assert.equal(receipts.every((receipt) => receipt.task === CAMPAIGN_TASK), true);
+  assert.equal(Object.hasOwn(receipts[0], "project_id"), false);
+  assert.equal(Object.hasOwn(receipts[1], "project_id"), false);
+  assert.equal(receipts[2].project_id, "project-acme-001");
+  assert.equal(receipts[3].project_id, "project-acme-001");
+  assert.equal(Object.hasOwn(receipts[4], "project_id"), false);
+  assert.equal(receipts.every((receipt) => !Object.hasOwn(receipt, "grant")), true);
+}
+
+test("unknown future authorization state refuses without opening the source or rewriting state", async (t) => {
+  await t.test("binding", () => assertUnknownFutureAuthorizationState("binding"));
+  await t.test("grant", () => assertUnknownFutureAuthorizationState("grant"));
+});
+
+test("grant publication sync uncertainty poisons retrieval until exact retry forward-completes", async () => {
+  await assertGrantPublicationRecovery("grant");
+});
+
+test("revoke publication sync uncertainty poisons retrieval until exact retry forward-completes", async () => {
+  await assertGrantPublicationRecovery("revoke");
+});
+
+test("grant guard clear uncertainty re-poisons before releasing source authority", async (t) => {
+  await t.test("guard republish succeeds", () => assertGrantClearFailure(false));
+  await t.test("guard republish failure retains the source lock", () => assertGrantClearFailure(true));
+});
+
+test("exact grant retry refuses a foreign live record without reconstructing or rewriting it", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { preview, paths, apply } = await prepareGrantMutation(fixture, "grant");
+    await assert.rejects(() => apply(failDirectorySyncAfterRecordOperation(
+      paths.grants,
+      paths.grant,
+      preview.operation_id,
+    )));
+    const live = JSON.parse(fs.readFileSync(paths.grant, "utf8"));
+    const foreignBytes = `${JSON.stringify({ ...live, project_id: "project-other-002" })}\n`;
+    fs.writeFileSync(paths.grant, foreignBytes);
+    await assert.rejects(() => apply(), { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" });
+    assert.equal(fs.readFileSync(paths.grant, "utf8"), foreignBytes);
+    assert.equal(fs.existsSync(paths.grantGuard), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("corrupted revoke recovery guards refuse without publishing or rewriting state", async (t) => {
+  await t.test("missing revocation transition", () => assertCorruptRevokeGuard("revoked_at"));
+  await t.test("changed immutable field", () => assertCorruptRevokeGuard("purpose"));
+  await t.test("changed grant approval timestamp", assertCorruptGrantApprovalGuard);
+});
+
+test("owned binding and grant records refuse linked, special, wrong-owner, and permissive state", async (t) => {
+  for (const kind of ["binding", "grant"]) {
+    for (const mutation of ["linked", "symlinked", "special", "wrong-owner", "permissive"]) {
+      await t.test(`${kind} ${mutation}`, () => assertUnsafeAuthorizationRecord(kind, mutation));
+    }
+  }
+});
+
+test("unsafe owned authorization path components refuse without permission repair", async (t) => {
+  for (const scenario of ["permissive-grants", "linked-grants", "special-grants", "wrong-owner-grants"]) {
+    await t.test(scenario, () => assertUnsafeAuthorizationDirectory(scenario));
+  }
+  await t.test("permissive lock directory", assertUnsafeSourceLockDirectory);
+});
+
+test("source lock ownership survives replacement and reclaims PID reuse safely", async (t) => {
+  await t.test("exact-owner release preserves a replacement lock", assertReplacedSourceLockRelease);
+  await t.test("post-poison exact-owner release preserves a replacement lock", assertPostPoisonSourceLockReplacement);
+  await t.test("release parent-sync failure restores a poisoned canonical lock", assertSourceLockReleaseSyncPoison);
+  await t.test("PID reuse does not preserve stale authority", assertSourceLockPidReuse);
+  await t.test("unknown lock fields refuse without rewrite", assertUnknownSourceLockField);
+});
+
+test("revocation during enumeration refuses the in-flight operation before references escape", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const canonicalSourceRoot = fs.realpathSync(fixture.sourceRoot);
+    let revoked = false;
+    const filesystem = Object.create(fsp);
+    Object.defineProperty(filesystem, "opendir", {
+      value: async (directoryPath, ...args) => {
+        const directory = await fsp.opendir(directoryPath, ...args);
+        if (!revoked && path.resolve(String(directoryPath)) === canonicalSourceRoot) {
+          revoked = true;
+          const grant = JSON.parse(fs.readFileSync(paths.grant, "utf8"));
+          writeJsonRecord(paths.grant, {
+            ...grant,
+            revision: grant.revision + 1,
+            operation_id: "a11-dead",
+            plan_fingerprint: "c".repeat(64),
+            revoked_at: "2026-08-10T12:00:00.000Z",
+          });
+        }
+        return directory;
+      },
     });
-    const otherPaths = projectSourceStatePaths(
-      fixture.homePath,
-      "project-other-002",
-      "campaign-assets"
-    );
-    const observations = [];
-    const instrumentedFilesystem = Object.create(fsp);
-    instrumentedFilesystem.readFile = async (filePath, ...args) => {
-      const observedPath = path.resolve(String(filePath));
-      if (observedPath === otherPaths.binding || observedPath === otherPaths.grant) {
-        observations.push(`other-state:${observedPath}`);
-        throw new Error("other-project state must not be read");
-      }
-      if (observedPath.startsWith(`${path.resolve(fixture.sourceRoot)}${path.sep}`)) {
-        observations.push(`source-content:${observedPath}`);
-        throw new Error("source content must not be read");
-      }
-      return fsp.readFile(filePath, ...args);
-    };
-    instrumentedFilesystem.open = async (filePath, ...args) => {
-      const observedPath = path.resolve(String(filePath));
-      const otherDeclaration = path.join(
-        fixture.aiosPath,
-        "projects",
-        "other-client",
-        "sources",
-        "campaign-assets.md"
-      );
-      if (observedPath === otherDeclaration) {
-        observations.push(`other-source:${observedPath}`);
-        throw new Error("other-project source must not be opened");
-      }
-      if (observedPath.startsWith(`${path.resolve(fixture.sourceRoot)}${path.sep}`)) {
-        observations.push(`source-content:${observedPath}`);
-        throw new Error("source content must not be opened");
-      }
-      return fsp.open(filePath, ...args);
-    };
 
     const result = await retrieveProjectSource({
       aiosPath: fixture.aiosPath,
       homePath: fixture.homePath,
       projectSelector: "acme-campaign",
       task: CAMPAIGN_TASK,
-      filesystem: instrumentedFilesystem
+      filesystem,
     });
 
-    assert.equal(result.decision, "allowed");
-    assert.deepEqual(observations, []);
-    assert.deepEqual(result.references.map((reference) => reference.path), fixture.expectedPaths);
-    const receiptPath = path.join(fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl");
-    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
-    assert.equal(receipts.length, 1);
-    assert.deepEqual(receipts[0].grant.root_identity, {
-      type: "directory",
-      dev: sourceStats.dev.toString(),
-      ino: sourceStats.ino.toString()
-    });
-    assert.equal(receipts[0].grant.revoked_at, null);
-
-    const selectedPaths = projectSourceStatePaths(
-      fixture.homePath,
-      "project-acme-001",
-      "campaign-assets"
-    );
-    const malformedGrant = JSON.parse(fs.readFileSync(selectedPaths.grant, "utf8"));
-    fs.writeFileSync(selectedPaths.grant, `${JSON.stringify({
-      ...malformedGrant,
-      expires_at: "not-a-timestamp"
-    })}\n`);
-    instrumentedFilesystem.lstat = async (filePath, ...args) => {
-      const observedPath = path.resolve(String(filePath));
-      if (
-        observedPath === path.resolve(fixture.sourceRoot)
-        || observedPath.startsWith(`${path.resolve(fixture.sourceRoot)}${path.sep}`)
-      ) {
-        observations.push(`source-metadata:${observedPath}`);
-        throw new Error("invalid consent must refuse before source observation");
-      }
-      return fsp.lstat(filePath, ...args);
-    };
-    const refused = await retrieveProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      task: CAMPAIGN_TASK,
-      filesystem: instrumentedFilesystem
-    });
-    assert.equal(refused.decision, "refused");
-    assert.equal(refused.reason, "source-unavailable");
-    assert.deepEqual(refused.references, []);
-    assert.deepEqual(observations, []);
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "authorization-changed");
+    assert.deepEqual(result.references, []);
+    assert.equal(revoked, true);
   } finally {
     fixture.cleanup();
   }
 });
 
-test("binding-first source publication exposes only its operation-owned recovery token", async () => {
+test("retrieval snapshots authorization under the source lock before inspecting the external root", async () => {
+  await assertAuthorizationSnapshotRace();
+});
+
+test("grant update and revocation serialize without lost state or stale resurrection", async (t) => {
+  await t.test("concurrent writers admit one exact revision", assertConcurrentGrantWriters);
+  await t.test("stale exact grant retry cannot resurrect a revocation", assertStaleGrantCannotResurrect);
+});
+
+async function assertConcurrentGrantWriters() {
   const fixture = createProjectSourceRetrievalFixture();
   try {
-    const preview = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets"
-    });
-    const failingFilesystem = Object.create(fsp);
-    failingFilesystem.link = async (source, destination) => {
-      if (String(destination).endsWith(path.join("sources", "campaign-assets.md"))) {
-        throw new Error("forced portable publication barrier");
-      }
-      return fsp.link(source, destination);
-    };
-    await assert.rejects(() => addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: preview.operation_id,
-      planFingerprint: preview.plan_fingerprint,
-      apply: true,
-      filesystem: failingFilesystem
-    }));
+    const { applied } = await applyCampaignGrant(fixture);
+    const plans = await concurrentGrantPlans(fixture, applied.grant_id);
+    const outcomes = await applyConcurrentGrantPlans(fixture, applied.grant_id, plans);
+    assertConcurrentGrantOutcomes(fixture, applied.grant_id, plans.update, outcomes);
+  } finally {
+    fixture.cleanup();
+  }
+}
 
-    const recovery = await addProjectSource({
+async function concurrentGrantPlans(fixture, grantId) {
+  const update = await grantProjectSource({
+    ...campaignGrantOptions(fixture),
+    expiresAt: "2099-06-01T00:00:00.000Z",
+  });
+  const revoke = await revokeProjectSource({
+    ...campaignSourceOptions(fixture),
+    grantId,
+  });
+  return Object.freeze({ update, revoke });
+}
+
+async function applyConcurrentGrantPlans(fixture, grantId, plans) {
+  return Promise.allSettled([
+    grantProjectSource({
+      ...campaignGrantOptions(fixture),
+      expiresAt: "2099-06-01T00:00:00.000Z",
+      operationId: plans.update.operation_id,
+      planFingerprint: plans.update.plan_fingerprint,
+      apply: true,
+    }),
+    revokeProjectSource({
+      ...campaignSourceOptions(fixture),
+      grantId,
+      operationId: plans.revoke.operation_id,
+      planFingerprint: plans.revoke.plan_fingerprint,
+      apply: true,
+    }),
+  ]);
+}
+
+function assertConcurrentGrantOutcomes(fixture, originalGrantId, updatePlan, outcomes) {
+  assert.equal(outcomes.filter((outcome) => outcome.status === "fulfilled").length, 1);
+  assert.equal(outcomes.filter((outcome) => outcome.status === "rejected").length, 1);
+  const rejected = outcomes.find((outcome) => outcome.status === "rejected");
+  assert.ok(["source-busy", "stale-plan"].includes(rejected.reason?.details?.reason));
+  const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+  const grant = JSON.parse(fs.readFileSync(paths.grant, "utf8"));
+  assert.equal(grant.revision, 2);
+  assert.equal(
+    (grant.grant_id === updatePlan.operation_id && grant.revoked_at === null)
+    || (grant.grant_id === originalGrantId && typeof grant.revoked_at === "string"),
+    true,
+  );
+}
+
+async function assertStaleGrantCannotResurrect() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { applied: original } = await applyCampaignGrant(fixture);
+    const staleGrant = await grantProjectSource({
       aiosPath: fixture.aiosPath,
       homePath: fixture.homePath,
       projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
       sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets"
+      purpose: "Launch campaign assets",
+      expiresAt: "2099-06-01T00:00:00.000Z",
     });
+    const revoke = await revokeProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "acme-campaign",
+      sourceId: "campaign-assets",
+      grantId: original.grant_id,
+    });
+    await revokeProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "acme-campaign",
+      sourceId: "campaign-assets",
+      grantId: original.grant_id,
+      operationId: revoke.operation_id,
+      planFingerprint: revoke.plan_fingerprint,
+      apply: true,
+    });
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const revokedBytes = fs.readFileSync(paths.grant, "utf8");
+    await assert.rejects(() => grantProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "acme-campaign",
+      sourceId: "campaign-assets",
+      purpose: "Launch campaign assets",
+      expiresAt: "2099-06-01T00:00:00.000Z",
+      operationId: staleGrant.operation_id,
+      planFingerprint: staleGrant.plan_fingerprint,
+      apply: true,
+    }), (error) => error?.details?.reason === "stale-plan");
+    assert.equal(fs.readFileSync(paths.grant, "utf8"), revokedBytes);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+test("refused receipt publication failure stays fail-closed and path-free", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    fs.rmSync(paths.grant);
+    const canonicalSourceRoot = fs.realpathSync(fixture.sourceRoot);
+    const filesystem = Object.create(fsp);
+    Object.defineProperties(filesystem, {
+      lstat: {
+        value: async (filePath, ...args) => {
+          if (path.resolve(String(filePath)) === canonicalSourceRoot) {
+            throw new Error("refusal reached the external root");
+          }
+          return fsp.lstat(filePath, ...args);
+        },
+      },
+      open: {
+        value: async (filePath, flags, ...args) => {
+          if (String(filePath).endsWith("access-receipts.jsonl") && flags === "a") {
+            throw new Error(`forced receipt failure at ${filePath}`);
+          }
+          return fsp.open(filePath, flags, ...args);
+        },
+      },
+    });
+
+    await assert.rejects(
+      () => retrieveProjectSource({
+        aiosPath: fixture.aiosPath,
+        homePath: fixture.homePath,
+        projectSelector: "acme-campaign",
+        task: CAMPAIGN_TASK,
+        filesystem,
+      }),
+      (error) => (
+        error?.code === "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED"
+        && !error.message.includes(fixture.root)
+        && !error.message.includes(paths.root)
+      ),
+    );
+    assert.equal(fs.existsSync(path.join(paths.root, "access-receipts.inflight.json")), true);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test(
+  "binding-first source publication exposes only its operation-owned recovery token",
+  assertBindingFirstRecoveryToken,
+);
+
+async function assertBindingFirstRecoveryToken() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const preview = await previewCampaignSourceAdd(fixture);
+    await assert.rejects(() => applyCampaignSourceAdd(
+      fixture,
+      preview,
+      { filesystem: portablePublicationFailureFilesystem() },
+    ));
+    const recovery = await previewCampaignSourceAdd(fixture);
     assert.equal(recovery.recovery, true);
     assert.equal(recovery.operation_id, preview.operation_id);
     assert.equal(recovery.plan_fingerprint, preview.plan_fingerprint);
-
-    const applied = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: recovery.operation_id,
-      planFingerprint: recovery.plan_fingerprint,
-      apply: true
-    });
+    const applied = await applyCampaignSourceAdd(fixture, recovery);
     assert.equal(applied.applied, true);
-    const replayed = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: recovery.operation_id,
-      planFingerprint: recovery.plan_fingerprint,
-      apply: true
-    });
+    const replayed = await applyCampaignSourceAdd(fixture, recovery);
     assert.equal(replayed.applied, true);
-    await assert.rejects(() => addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: recovery.operation_id,
-      planFingerprint: "0".repeat(64),
-      apply: true
-    }));
+    const stalePlan = { ...recovery, plan_fingerprint: "0".repeat(64) };
+    await assert.rejects(() => applyCampaignSourceAdd(fixture, stalePlan));
   } finally {
     fixture.cleanup();
   }
-});
+}
+
+function portablePublicationFailureFilesystem() {
+  const filesystem = Object.create(fsp);
+  filesystem.link = async (source, destination) => {
+    if (String(destination).endsWith(path.join("sources", "campaign-assets.md"))) {
+      throw new Error("forced portable publication barrier");
+    }
+    return fsp.link(source, destination);
+  };
+  return filesystem;
+}
 
 test("independent source coordinates do not lose or observe sibling authority", async () => {
   const fixture = createProjectSourceRetrievalFixture();
@@ -356,119 +776,739 @@ test("independent source coordinates do not lose or observe sibling authority", 
   }
 });
 
-test("exact source-add retry forward-completes after portable publication uncertainty", async () => {
+test(
+  "exact source-add retry forward-completes after portable publication uncertainty",
+  assertPortablePublicationRecovery,
+);
+
+async function assertPortablePublicationRecovery() {
   const fixture = createProjectSourceRetrievalFixture();
   try {
-    const preview = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets"
-    });
+    const preview = await previewCampaignSourceAdd(fixture);
     const sourcesDirectory = path.join(fixture.aiosPath, "projects", "acme-campaign", "sources");
-    const failingFilesystem = Object.create(fsp);
-    failingFilesystem.open = async (filePath, flags, mode) => {
-      const handle = await fsp.open(filePath, flags, mode);
-      if (path.resolve(String(filePath)) === sourcesDirectory && flags === "r") {
-        return Object.create(handle, {
-          sync: { value: async () => { throw new Error("forced portable directory sync failure"); } }
-        });
-      }
-      return handle;
-    };
-    await assert.rejects(() => addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: preview.operation_id,
-      planFingerprint: preview.plan_fingerprint,
-      apply: true,
-      filesystem: failingFilesystem
-    }));
+    const filesystem = directorySyncFailureFilesystem(
+      sourcesDirectory, 1, "forced portable directory sync failure",
+    );
+    await assert.rejects(() => applyCampaignSourceAdd(fixture, preview, { filesystem }));
     assert.equal(fs.existsSync(path.join(sourcesDirectory, "campaign-assets.md")), true);
-
-    const completed = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: preview.operation_id,
-      planFingerprint: preview.plan_fingerprint,
-      apply: true
-    });
+    const completed = await applyCampaignSourceAdd(fixture, preview);
     assert.equal(completed.applied, true);
     assert.equal(completed.recovery, true);
   } finally {
     fixture.cleanup();
   }
-});
+}
 
-test("exact source-add retry succeeds after publication-marker sync uncertainty", async () => {
+test(
+  "exact source-add retry succeeds after publication-marker sync uncertainty",
+  assertPublicationMarkerRecovery,
+);
+
+async function assertPublicationMarkerRecovery() {
   const fixture = createProjectSourceRetrievalFixture();
   try {
-    const preview = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets"
-    });
+    const preview = await previewCampaignSourceAdd(fixture);
     const bindingsDirectory = path.join(fixture.homePath, ".dotaios", "project-sources", "bindings");
-    let bindingDirectorySyncs = 0;
-    const failingFilesystem = Object.create(fsp);
-    failingFilesystem.open = async (filePath, flags, mode) => {
-      const handle = await fsp.open(filePath, flags, mode);
-      if (path.resolve(String(filePath)) === bindingsDirectory && flags === "r") {
-        bindingDirectorySyncs += 1;
-        if (bindingDirectorySyncs === 2) {
-          return Object.create(handle, {
-            sync: { value: async () => { throw new Error("forced marker directory sync failure"); } }
-          });
-        }
-      }
-      return handle;
-    };
-    await assert.rejects(() => addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: preview.operation_id,
-      planFingerprint: preview.plan_fingerprint,
-      apply: true,
-      filesystem: failingFilesystem
-    }));
-
-    const completed = await addProjectSource({
-      aiosPath: fixture.aiosPath,
-      homePath: fixture.homePath,
-      projectSelector: "acme-campaign",
-      folder: fixture.sourceRoot,
-      sourceId: "campaign-assets",
-      label: "Campaign assets",
-      purpose: "Launch campaign assets",
-      operationId: preview.operation_id,
-      planFingerprint: preview.plan_fingerprint,
-      apply: true
-    });
+    const filesystem = directorySyncFailureFilesystem(
+      bindingsDirectory, 2, "forced marker directory sync failure",
+    );
+    await assert.rejects(() => applyCampaignSourceAdd(fixture, preview, { filesystem }));
+    const completed = await applyCampaignSourceAdd(fixture, preview);
     assert.equal(completed.applied, true);
     assert.equal(completed.recovery, true);
   } finally {
     fixture.cleanup();
   }
-});
+}
+
+function previewCampaignSourceAdd(fixture) {
+  return addProjectSource(campaignAddOptions(fixture));
+}
+
+function applyCampaignSourceAdd(fixture, plan, overrides = {}) {
+  return addProjectSource({
+    ...campaignAddOptions(fixture),
+    operationId: plan.operation_id,
+    planFingerprint: plan.plan_fingerprint,
+    apply: true,
+    ...overrides,
+  });
+}
+
+function directorySyncFailureFilesystem(targetDirectory, occurrence, message) {
+  let directorySyncs = 0;
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (filePath, flags, mode) => {
+    const handle = await fsp.open(filePath, flags, mode);
+    if (path.resolve(String(filePath)) !== path.resolve(targetDirectory) || flags !== "r") return handle;
+    directorySyncs += 1;
+    if (directorySyncs !== occurrence) return handle;
+    return Object.create(handle, {
+      sync: { value: async () => { throw new Error(message); } },
+    });
+  };
+  return filesystem;
+}
+
+async function testAuthorizationRefusal({ name, reason, mutate, expectsGrant = true, grantKeys = null }) {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { grant } = await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const canonicalSourceRoot = fs.realpathSync(fixture.sourceRoot);
+    await mutate({ fixture, grant, paths });
+    let observations = [];
+    const filesystem = Object.create(fsp);
+    filesystem.lstat = async (filePath, ...args) => {
+      if (path.resolve(String(filePath)) === canonicalSourceRoot) {
+        observations = [...observations, String(filePath)];
+        throw new Error(`${name} reached the external root`);
+      }
+      return fsp.lstat(filePath, ...args);
+    };
+
+    const result = await retrieveProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "acme-campaign",
+      task: CAMPAIGN_TASK,
+      filesystem,
+    });
+
+    assert.equal(result.decision, "refused", name);
+    assert.equal(result.reason, reason, name);
+    assert.deepEqual(result.references, [], name);
+    assert.deepEqual(observations, [], name);
+    const receiptPath = path.join(fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl");
+    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, 1, name);
+    assert.equal(receipts[0].reason, reason, name);
+    assert.equal(receipts[0].task, CAMPAIGN_TASK, name);
+    assert.equal(Object.hasOwn(receipts[0], "grant"), expectsGrant, name);
+    if (grantKeys) assert.deepEqual(Object.keys(receipts[0].grant).sort(), grantKeys.toSorted(), name);
+    assert.deepEqual(receipts[0].references, [], name);
+    const serialized = JSON.stringify({ result, receipts });
+    assert.equal(serialized.includes(fixture.sourceRoot), false, name);
+    assert.equal(serialized.includes("project-other-002"), false, name);
+    assert.equal(serialized.includes("f0a1-bad"), false, name);
+    assert.equal(serialized.includes("WRONG_SCOPE_PRIVATE_PURPOSE"), false, name);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function applyCampaignGrant(fixture) {
+  await applyCampaignSource(fixture);
+  const grantPreview = await grantProjectSource({
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "project-acme-001",
+    sourceId: "campaign-assets",
+    purpose: "Launch campaign assets",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+  });
+  const applied = await grantProjectSource({
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "project-acme-001",
+    sourceId: "campaign-assets",
+    purpose: "Launch campaign assets",
+    expiresAt: "2099-01-01T00:00:00.000Z",
+    operationId: grantPreview.operation_id,
+    planFingerprint: grantPreview.plan_fingerprint,
+    apply: true,
+  });
+  const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+  return { applied, grant: JSON.parse(fs.readFileSync(paths.grant, "utf8")) };
+}
+
+async function applyCampaignSource(fixture) {
+  const addPreview = await addProjectSource({
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "acme-campaign",
+    folder: fixture.sourceRoot,
+    sourceId: "campaign-assets",
+    label: "Campaign assets",
+    purpose: "Launch campaign assets",
+  });
+  await addProjectSource({
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "acme-campaign",
+    folder: fixture.sourceRoot,
+    sourceId: "campaign-assets",
+    label: "Campaign assets",
+    purpose: "Launch campaign assets",
+    operationId: addPreview.operation_id,
+    planFingerprint: addPreview.plan_fingerprint,
+    apply: true,
+  });
+}
+
+async function assertGrantPublicationRecovery(operation) {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { preview, paths, apply } = await prepareGrantMutation(fixture, operation);
+    await assert.rejects(() => apply(failDirectorySyncAfterRecordOperation(
+      paths.grants,
+      paths.grant,
+      preview.operation_id,
+    )));
+    assert.equal(fs.existsSync(paths.grantGuard), true);
+    const guardBytes = fs.readFileSync(paths.grantGuard, "utf8");
+    assert.equal(guardBytes.includes(fixture.sourceRoot), false);
+    assert.equal(guardBytes.includes("root_path"), false);
+    await assert.rejects(
+      () => apply(undefined, { operationId: "f0a1-bad" }),
+      { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" },
+    );
+    const poisoned = await retrieveCampaignSource(fixture);
+    assert.equal(poisoned.reason, "authorization-state-invalid");
+    const completed = await apply();
+    assert.equal(completed.applied, true);
+    assert.equal(fs.existsSync(paths.grantGuard), false);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertGrantClearFailure(failRepublish) {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { preview, paths, apply } = await prepareGrantMutation(fixture, "grant");
+    const filesystem = failGrantGuardClear(paths, preview.operation_id, failRepublish);
+    await assert.rejects(() => apply(filesystem), { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" });
+    const sourceLock = path.join(paths.locks, `${path.basename(paths.grant, ".json")}.lock`);
+    if (failRepublish) {
+      assert.equal(fs.existsSync(paths.grantGuard), false);
+      assert.equal(fs.existsSync(sourceLock), true);
+      assert.equal(JSON.parse(fs.readFileSync(sourceLock, "utf8")).poisoned, true);
+    } else {
+      assert.equal(fs.existsSync(paths.grantGuard), true);
+    }
+    const result = await retrieveCampaignSource(fixture);
+    assert.equal(result.reason, "authorization-state-invalid");
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertCorruptRevokeGuard(field) {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { preview, paths, apply } = await prepareGrantMutation(fixture, "revoke");
+    await assert.rejects(() => apply(failDirectorySyncAfterRecordOperation(
+      paths.grants,
+      paths.grant,
+      preview.operation_id,
+    )));
+    const guard = JSON.parse(fs.readFileSync(paths.grantGuard, "utf8"));
+    writeJsonRecord(paths.grant, guard.previous_record);
+    const corruptIntended = field === "revoked_at"
+      ? { ...guard.intended_record, revoked_at: null }
+      : { ...guard.intended_record, purpose: "Changed but structurally valid purpose" };
+    const corruptBytes = `${JSON.stringify({ ...guard, intended_record: corruptIntended })}\n`;
+    fs.writeFileSync(paths.grantGuard, corruptBytes);
+    const grantBytes = fs.readFileSync(paths.grant, "utf8");
+    await assert.rejects(() => apply(), { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" });
+    assert.equal(fs.readFileSync(paths.grantGuard, "utf8"), corruptBytes);
+    assert.equal(fs.readFileSync(paths.grant, "utf8"), grantBytes);
+    const refused = await retrieveCampaignSource(fixture);
+    assert.equal(refused.reason, "authorization-state-invalid");
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertCorruptGrantApprovalGuard() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { preview, paths, apply } = await prepareGrantMutation(fixture, "grant");
+    await assert.rejects(() => apply(failDirectorySyncAfterRecordOperation(
+      paths.grants,
+      paths.grant,
+      preview.operation_id,
+    )));
+    const guard = JSON.parse(fs.readFileSync(paths.grantGuard, "utf8"));
+    fs.rmSync(paths.grant);
+    const corruptBytes = `${JSON.stringify({
+      ...guard,
+      intended_record: { ...guard.intended_record, approved_at: "2020-01-01T00:00:00.000Z" }
+    })}\n`;
+    fs.writeFileSync(paths.grantGuard, corruptBytes);
+    await assert.rejects(() => apply(), { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" });
+    assert.equal(fs.readFileSync(paths.grantGuard, "utf8"), corruptBytes);
+    assert.equal(fs.existsSync(paths.grant), false);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertUnsafeAuthorizationRecord(kind, mutation) {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const target = paths[kind];
+    let filesystem = fsp;
+    if (mutation === "linked") fs.linkSync(target, `${target}.linked`);
+    if (mutation === "symlinked") {
+      fs.renameSync(target, `${target}.real`);
+      fs.symlinkSync(`${target}.real`, target);
+    }
+    if (mutation === "special") {
+      fs.rmSync(target);
+      fs.mkdirSync(target, { mode: 0o700 });
+    }
+    if (mutation === "permissive") fs.chmodSync(target, 0o644);
+    if (mutation === "wrong-owner") filesystem = wrongOwnerFilesystem(target);
+    const before = snapshotOwnedNode(target);
+    const result = await retrieveCampaignSourceWithFilesystem(fixture, filesystem);
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "authorization-state-invalid");
+    assert.deepEqual(snapshotOwnedNode(target), before);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertUnknownFutureAuthorizationState(kind) {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const target = paths[kind];
+    const futureBytes = fs.readFileSync(target, "utf8").replace('"version":1', '"version":2');
+    fs.writeFileSync(target, futureBytes);
+    const root = fs.realpathSync(fixture.sourceRoot);
+    const filesystem = Object.create(fsp);
+    filesystem.lstat = async (filePath, ...args) => {
+      if (path.resolve(String(filePath)) === root) throw new Error("unknown state reached the external root");
+      return fsp.lstat(filePath, ...args);
+    };
+    const result = await retrieveCampaignSourceWithFilesystem(fixture, filesystem);
+    assert.equal(result.reason, "authorization-state-invalid");
+    assert.deepEqual(result.references, []);
+    assert.equal(fs.readFileSync(target, "utf8"), futureBytes);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertUnsafeAuthorizationDirectory(scenario) {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const target = paths.grants;
+    let filesystem = fsp;
+    if (scenario === "permissive-grants") fs.chmodSync(target, 0o755);
+    if (scenario === "linked-grants") {
+      fs.renameSync(target, `${target}.real`);
+      fs.symlinkSync(`${target}.real`, target);
+    }
+    if (scenario === "special-grants") {
+      fs.renameSync(target, `${target}.real`);
+      fs.writeFileSync(target, "unsafe", { mode: 0o600 });
+    }
+    if (scenario === "wrong-owner-grants") filesystem = wrongOwnerFilesystem(target);
+    const before = snapshotOwnedNode(target);
+    const result = await retrieveCampaignSourceWithFilesystem(fixture, filesystem);
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "authorization-state-invalid");
+    assert.deepEqual(snapshotOwnedNode(target), before);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertUnsafeSourceLockDirectory() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { preview, paths, apply } = await prepareGrantMutation(fixture, "grant");
+    fs.chmodSync(paths.locks, 0o755);
+    await assert.rejects(() => apply(), { code: "DOTAIOS_OWNED_STATE_INVALID" });
+    assert.equal(fs.statSync(paths.locks).mode & 0o777, 0o755);
+    assert.equal(fs.existsSync(paths.grant), false);
+    assert.match(preview.plan_fingerprint, /^[a-f0-9]{64}$/);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertReplacedSourceLockRelease() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { paths, apply } = await prepareGrantMutation(fixture, "grant");
+    const lockPath = path.join(paths.locks, `${path.basename(paths.grant, ".json")}.lock`);
+    const replacement = `${JSON.stringify({
+      format: "dotaios-project-source-lock/v1",
+      pid: process.pid,
+      owner: "f0a1-bad",
+      at: Date.now(),
+    })}\n`;
+    let replaced = false;
+    const filesystem = Object.create(fsp);
+    filesystem.rename = async (source, destination) => {
+      if (!replaced && path.resolve(String(source)) === path.resolve(lockPath) && String(destination).includes(".release.")) {
+        const staged = `${lockPath}.foreign`;
+        fs.writeFileSync(staged, replacement, { mode: 0o600 });
+        fs.renameSync(staged, lockPath);
+        replaced = true;
+      }
+      return fsp.rename(source, destination);
+    };
+    await assert.rejects(() => apply(filesystem), { code: "DOTAIOS_OWNED_STATE_INVALID" });
+    assert.equal(replaced, true);
+    assert.equal(fs.readFileSync(lockPath, "utf8"), replacement);
+    const refused = await retrieveCampaignSource(fixture);
+    assert.equal(refused.reason, "authorization-state-invalid");
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertSourceLockPidReuse() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { paths, apply } = await prepareGrantMutation(fixture, "grant");
+    const lockPath = path.join(paths.locks, `${path.basename(paths.grant, ".json")}.lock`);
+    fs.writeFileSync(lockPath, `${JSON.stringify({
+      format: "dotaios-project-source-lock/v1",
+      pid: process.pid,
+      owner: "a11-stale",
+      at: Date.now(),
+      process_started_at: "definitely-not-this-process",
+    })}\n`, { mode: 0o600 });
+    const applied = await apply();
+    assert.equal(applied.applied, true);
+    assert.equal(fs.existsSync(lockPath), false);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertSourceLockReleaseSyncPoison() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { paths, apply } = await prepareGrantMutation(fixture, "grant");
+    const lockPath = path.join(paths.locks, `${path.basename(paths.grant, ".json")}.lock`);
+    let failed = false;
+    const filesystem = Object.create(fsp);
+    filesystem.open = async (filePath, flags, mode) => {
+      const handle = await fsp.open(filePath, flags, mode);
+      if (path.resolve(String(filePath)) !== path.resolve(paths.locks) || flags !== "r") return handle;
+      return Object.create(handle, { sync: { value: async () => {
+        const poisonStaged = fs.readdirSync(paths.locks).some((name) => name.includes(".poison-release."));
+        if (!failed && poisonStaged && !fs.existsSync(lockPath)) {
+          failed = true;
+          throw new Error("forced source lock release sync failure");
+        }
+        return handle.sync();
+      } } });
+    };
+    await assert.rejects(() => apply(filesystem), { code: "DOTAIOS_PROJECT_SOURCE_APPLY_FAILED" });
+    assert.equal(failed, true);
+    assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).poisoned, true);
+    const result = await retrieveCampaignSource(fixture);
+    assert.equal(result.reason, "authorization-state-invalid");
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertPostPoisonSourceLockReplacement() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { paths, apply } = await prepareGrantMutation(fixture, "grant");
+    const lockPath = path.join(paths.locks, `${path.basename(paths.grant, ".json")}.lock`);
+    const replacement = `${JSON.stringify({
+      format: "dotaios-project-source-lock/v1",
+      pid: process.pid,
+      owner: "f0a1-post-poison",
+      at: Date.now(),
+    })}\n`;
+    let replaced = false;
+    const filesystem = Object.create(fsp);
+    filesystem.rename = async (source, destination) => {
+      if (!replaced && path.resolve(String(source)) === path.resolve(lockPath) && String(destination).includes(".poison-release.")) {
+        const staged = `${lockPath}.foreign`;
+        fs.writeFileSync(staged, replacement, { mode: 0o600 });
+        fs.renameSync(staged, lockPath);
+        replaced = true;
+      }
+      return fsp.rename(source, destination);
+    };
+    await assert.rejects(() => apply(filesystem), { code: "DOTAIOS_OWNED_STATE_INVALID" });
+    assert.equal(replaced, true);
+    assert.equal(fs.readFileSync(lockPath, "utf8"), replacement);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+async function assertUnknownSourceLockField() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const { paths, apply } = await prepareGrantMutation(fixture, "grant");
+    const lockPath = path.join(paths.locks, `${path.basename(paths.grant, ".json")}.lock`);
+    const bytes = `${JSON.stringify({
+      format: "dotaios-project-source-lock/v1",
+      pid: process.pid,
+      owner: "a11-future",
+      at: Date.now(),
+      future_field: 2,
+    })}\n`;
+    fs.writeFileSync(lockPath, bytes, { mode: 0o600 });
+    await assert.rejects(() => apply(), { code: "DOTAIOS_OWNED_STATE_INVALID" });
+    assert.equal(fs.readFileSync(lockPath, "utf8"), bytes);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+function retrieveCampaignSourceWithFilesystem(fixture, filesystem) {
+  return retrieveProjectSource({
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "acme-campaign",
+    task: CAMPAIGN_TASK,
+    filesystem,
+  });
+}
+
+async function assertAuthorizationSnapshotRace() {
+  const fixture = createProjectSourceRetrievalFixture();
+  const mutationAcquired = createDeferred();
+  const releaseMutation = createDeferred();
+  try {
+    const { applied } = await applyCampaignGrant(fixture);
+    const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+    const lockPath = sourceStateLockPath(fixture.homePath, "project-acme-001", "campaign-assets");
+    const preview = await revokeProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "acme-campaign",
+      sourceId: "campaign-assets",
+      grantId: applied.grant_id,
+    });
+    const mutationFilesystem = pausingMutationFilesystem(paths.binding, mutationAcquired, releaseMutation);
+    let mutationPromise = null;
+    const startMutation = async () => {
+      mutationPromise ||= revokeProjectSource({
+        aiosPath: fixture.aiosPath,
+        homePath: fixture.homePath,
+        projectSelector: "acme-campaign",
+        sourceId: "campaign-assets",
+        grantId: applied.grant_id,
+        operationId: preview.operation_id,
+        planFingerprint: preview.plan_fingerprint,
+        apply: true,
+        filesystem: mutationFilesystem,
+      });
+      await mutationAcquired.promise;
+    };
+    const instrumentation = racingRetrievalFilesystem({
+      bindingPath: paths.binding,
+      lockPath,
+      rootPath: fixture.sourceRoot,
+      startMutation,
+    });
+    const result = await retrieveCampaignSourceWithFilesystem(fixture, instrumentation.filesystem);
+    releaseMutation.resolve();
+    await mutationPromise;
+    assert.equal(result.decision, "refused");
+    assert.equal(instrumentation.externalRootObservations(), 0, JSON.stringify(result));
+  } finally {
+    releaseMutation.resolve();
+    fixture.cleanup();
+  }
+}
+
+function pausingMutationFilesystem(bindingPath, acquired, release) {
+  let bindingReads = 0;
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (filePath, flags, mode) => {
+    if (path.resolve(String(filePath)) === path.resolve(bindingPath) && flags === "r") {
+      bindingReads += 1;
+      if (bindingReads === 2) {
+        acquired.resolve();
+        await release.promise;
+      }
+    }
+    return fsp.open(filePath, flags, mode);
+  };
+  return filesystem;
+}
+
+function racingRetrievalFilesystem({ bindingPath, lockPath, rootPath, startMutation }) {
+  const filesystem = Object.create(fsp);
+  const canonicalRoot = fs.realpathSync(rootPath);
+  let interceptedBinding = false;
+  let externalRootObservations = 0;
+  const observeExternalRoot = () => { externalRootObservations += 1; };
+  filesystem.lstat = async (filePath, ...args) => {
+    const resolved = path.resolve(String(filePath));
+    if (resolved === path.resolve(bindingPath) && !interceptedBinding) {
+      interceptedBinding = true;
+      await startMutation();
+    }
+    if (resolved === canonicalRoot) observeExternalRoot();
+    return fsp.lstat(filePath, ...args);
+  };
+  filesystem.link = async (source, destination) => {
+    if (path.resolve(String(destination)) === path.resolve(lockPath)) await startMutation();
+    return fsp.link(source, destination);
+  };
+  filesystem.opendir = async (directoryPath, ...args) => {
+    if (path.resolve(String(directoryPath)) === canonicalRoot) observeExternalRoot();
+    return fsp.opendir(directoryPath, ...args);
+  };
+  filesystem.open = async (filePath, flags, mode) => {
+    if (path.resolve(String(filePath)) === canonicalRoot) observeExternalRoot();
+    return fsp.open(filePath, flags, mode);
+  };
+  return Object.freeze({
+    filesystem,
+    externalRootObservations: () => externalRootObservations,
+  });
+}
+
+function createDeferred() {
+  let resolve;
+  const promise = new Promise((settle) => { resolve = settle; });
+  return Object.freeze({ promise, resolve });
+}
+
+function wrongOwnerFilesystem(target) {
+  const filesystem = Object.create(fsp);
+  filesystem.lstat = async (filePath, ...args) => {
+    const stats = await fsp.lstat(filePath, ...args);
+    if (path.resolve(String(filePath)) !== path.resolve(target)) return stats;
+    return Object.create(stats, { uid: { value: stats.uid + 1 } });
+  };
+  return filesystem;
+}
+
+function snapshotOwnedNode(target) {
+  const stats = fs.lstatSync(target);
+  return Object.freeze({
+    type: stats.isSymbolicLink() ? "symlink" : stats.isDirectory() ? "directory" : "file",
+    mode: stats.mode & 0o777,
+    nlink: stats.nlink,
+    ...(stats.isFile() ? { bytes: fs.readFileSync(target, "utf8") } : {}),
+    ...(stats.isSymbolicLink() ? { target: fs.readlinkSync(target) } : {}),
+  });
+}
+
+async function prepareGrantMutation(fixture, operation) {
+  const existing = operation === "revoke"
+    ? await applyCampaignGrant(fixture)
+    : (await applyCampaignSource(fixture), null);
+  const common = {
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "acme-campaign",
+    sourceId: "campaign-assets",
+  };
+  const preview = operation === "revoke"
+    ? await revokeProjectSource({ ...common, grantId: existing.applied.grant_id })
+    : await grantProjectSource({
+      ...common,
+      purpose: "Launch campaign assets",
+      expiresAt: "2099-01-01T00:00:00.000Z",
+    });
+  const paths = projectSourceStatePaths(fixture.homePath, "project-acme-001", "campaign-assets");
+  const apply = (filesystem, overrides = {}) => (operation === "revoke" ? revokeProjectSource : grantProjectSource)({
+    ...common,
+    ...(operation === "revoke"
+      ? { grantId: existing.applied.grant_id }
+      : { purpose: "Launch campaign assets", expiresAt: "2099-01-01T00:00:00.000Z" }),
+    operationId: preview.operation_id,
+    planFingerprint: preview.plan_fingerprint,
+    apply: true,
+    ...(filesystem ? { filesystem } : {}),
+    ...overrides,
+  });
+  return { preview, paths, apply };
+}
+
+function retrieveCampaignSource(fixture) {
+  return retrieveProjectSource({
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    projectSelector: "acme-campaign",
+    task: CAMPAIGN_TASK,
+  });
+}
+
+function failGrantGuardClear(paths, operationId, failRepublish) {
+  let clearSyncFailed = false;
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (filePath, flags, mode) => {
+    if (
+      failRepublish
+      && clearSyncFailed
+      && flags === "wx"
+      && String(filePath).includes(path.basename(paths.grantGuard))
+    ) throw new Error("forced guard republish failure");
+    const handle = await fsp.open(filePath, flags, mode);
+    if (path.resolve(String(filePath)) !== path.resolve(paths.grants) || flags !== "r") return handle;
+    return Object.create(handle, {
+      sync: { value: async () => {
+        const record = fs.existsSync(paths.grant) ? JSON.parse(fs.readFileSync(paths.grant, "utf8")) : null;
+        if (!clearSyncFailed && record?.operation_id === operationId && !fs.existsSync(paths.grantGuard)) {
+          clearSyncFailed = true;
+          throw new Error("forced guard-clear sync failure");
+        }
+        return handle.sync();
+      } },
+    });
+  };
+  return filesystem;
+}
+
+function failDirectorySyncAfterRecordOperation(directoryPath, recordPath, operationId) {
+  let failed = false;
+  const filesystem = Object.create(fsp);
+  Object.defineProperty(filesystem, "open", {
+    value: async (filePath, flags, mode) => {
+      const handle = await fsp.open(filePath, flags, mode);
+      if (path.resolve(String(filePath)) !== path.resolve(directoryPath) || flags !== "r") return handle;
+      return Object.create(handle, {
+        sync: {
+          value: async () => {
+            const record = fs.existsSync(recordPath) ? JSON.parse(fs.readFileSync(recordPath, "utf8")) : null;
+            if (!failed && record?.operation_id === operationId) {
+              failed = true;
+              throw new Error("forced post-publication directory sync failure");
+            }
+            return handle.sync();
+          },
+        },
+      });
+    },
+  });
+  return filesystem;
+}
+
+function writeJsonRecord(filePath, value) {
+  fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`);
+}
+
+function projectSourceDeclaration(sourceId) {
+  return [
+    "---",
+    "version: 1",
+    "project_id: project-acme-001",
+    "project: acme-campaign",
+    `source_id: ${sourceId}`,
+    "label: Campaign assets",
+    "type: local-folder",
+    "purpose: Launch campaign assets",
+    "revision: 1",
+    "---",
+    "",
+  ].join("\n");
+}

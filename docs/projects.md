@@ -43,7 +43,20 @@ dotaios project source grant acme-campaign campaign-assets \
 ```
 
 Ordinary task text never grants consent. Once the exact grant preview is
-applied by the same shell user, retrieval remains an explicit CLI operation:
+applied by the same shell user, it is bound to the selected project, source,
+read operation, exact portable purpose, source revision, binding generation,
+and explicit expiry. Revoke that grant with its returned `grant_id`; revoke is
+also preview-first and changes only machine-local authorization state:
+
+```bash
+dotaios project source revoke acme-campaign campaign-assets \
+  --grant-id <grant-id> \
+  --json
+```
+
+Apply only the displayed revoke operation ID and plan fingerprint. Revocation
+does not alter earlier access receipts, and every later retrieval refuses.
+Retrieval remains an explicit CLI operation:
 
 ```bash
 dotaios project source retrieve acme-campaign \

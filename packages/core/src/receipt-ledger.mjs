@@ -2,8 +2,24 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 
-import { acquireOperationLock, releaseOperationLock } from "./operation-lock.mjs";
-import { projectSourceStatePaths } from "./project-source-state.mjs";
+import {
+  acquireOperationLock,
+  inspectOperationLock,
+  poisonOperationLock,
+  releaseOperationLock
+} from "./operation-lock.mjs";
+import {
+  projectSourceOwnedDirectories,
+  projectSourceStatePaths
+} from "./project-source-state.mjs";
+import {
+  assertOwnedFileStats,
+  ensureOwnedDirectory,
+  publishOwnedFileExclusive,
+  sameFileIdentity,
+  syncOwnedDirectory,
+  validateOwnedDirectoryIfPresent
+} from "./owned-state.mjs";
 
 const MAX_RECEIPT_BYTES = 32_000;
 const MAX_LEDGER_BYTES = 64 * 1024 * 1024;
@@ -44,15 +60,19 @@ export function createAccessReceipt({
 }
 
 export async function appendAccessReceipt({ homePath, receipt, filesystem = fs } = {}) {
-  const publication = receiptPublication(homePath, receipt);
+  let publication = null;
   let lock = null;
   let outcome = null;
   try {
-    await prepareStateRoot(publication.stateRoot, filesystem);
+    publication = receiptPublication(homePath, receipt);
+    assertReceiptLineValid(publication.line);
+    await prepareStateRoot(publication.ownedDirectories, filesystem);
     lock = await acquireOperationLock(publication.lockPath, {
       filesystem,
       format: LOCK_FORMAT,
-      ownsParent: false
+      ownsParent: false,
+      strictOwnedState: true,
+      ownedDirectories: publication.ownedDirectories
     });
     if (!lock) throw auditError();
     outcome = await publishReceiptUnderLock(publication, filesystem);
@@ -62,7 +82,30 @@ export async function appendAccessReceipt({ homePath, receipt, filesystem = fs }
     if (error?.code === "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED") throw error;
     throw auditError();
   } finally {
-    if (lock && outcome?.retainLock !== true) await releaseReceiptLock(lock, publication, filesystem);
+    if (lock && outcome?.retainLock === true) {
+      await poisonOperationLock(lock, { filesystem, strictOwnedState: true }).catch(() => {});
+    } else if (lock) {
+      await releaseReceiptLock(lock, publication, filesystem);
+    }
+  }
+}
+
+export async function assertAccessReceiptStoreAvailable({ homePath, filesystem = fs } = {}) {
+  const publication = receiptPublication(homePath, { receipt_id: "preflight" });
+  try {
+    for (const directory of publication.ownedDirectories) {
+      if (!await validateOwnedDirectoryIfPresent(directory, { filesystem })) return;
+    }
+    const lock = await inspectOperationLock(publication.lockPath, {
+      filesystem,
+      format: LOCK_FORMAT,
+      strictOwnedState: true
+    });
+    if (lock.exists && (lock.ownerAlive || lock.record.poisoned === true)) throw auditError();
+    await assertLedgerHealthy({ ...publication, filesystem });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED") throw error;
+    throw auditError();
   }
 }
 
@@ -71,6 +114,7 @@ function receiptPublication(homePath, receipt) {
   const line = `${JSON.stringify(receipt)}\n`;
   return Object.freeze({
     stateRoot,
+    ownedDirectories: projectSourceOwnedDirectories(homePath),
     ledgerPath: path.join(stateRoot, "access-receipts.jsonl"),
     guardPath: path.join(stateRoot, "access-receipts.inflight.json"),
     lockPath: path.join(stateRoot, "access-receipts.lock"),
@@ -83,50 +127,67 @@ function receiptPublication(homePath, receipt) {
   });
 }
 
-async function prepareStateRoot(stateRoot, filesystem) {
-  await filesystem.mkdir(stateRoot, { recursive: true, mode: 0o700 });
-  if (process.platform !== "win32") await filesystem.chmod(stateRoot, 0o700);
+async function prepareStateRoot(ownedDirectories, filesystem) {
+  for (const directory of ownedDirectories) {
+    await ensureOwnedDirectory(directory, { filesystem });
+  }
 }
 
 async function publishReceiptUnderLock(publication, filesystem) {
-  let guardCleared = false;
+  await assertLedgerHealthy({ ...publication, filesystem });
+  await assertLedgerFits(publication, filesystem);
+  return attemptReceiptPublication(publication, filesystem);
+}
+
+async function attemptReceiptPublication(publication, filesystem) {
+  let guardPublished = false;
   try {
-    await assertLedgerHealthy({ ...publication, filesystem });
-    await assertReceiptFits(publication, filesystem);
     await publishGuard({ ...publication, filesystem });
+    guardPublished = true;
     await appendSyncedLine(publication, filesystem);
     await filesystem.unlink(publication.guardPath);
-    guardCleared = true;
+    guardPublished = false;
     await syncDirectory(filesystem, publication.stateRoot);
     return Object.freeze({ ok: true, retainLock: false });
   } catch (error) {
-    const poisonPreserved = !guardCleared
+    const poisonPreserved = guardPublished
       || await preservePoisonGuard({ ...publication, filesystem });
     return Object.freeze({ ok: false, error, retainLock: !poisonPreserved });
   }
 }
 
-async function assertReceiptFits({ ledgerPath, line }, filesystem) {
+function assertReceiptLineValid(line) {
+  assertReceiptSchema(JSON.parse(line));
+  if (Buffer.byteLength(line) > MAX_RECEIPT_BYTES) throw auditError();
+}
+
+async function assertLedgerFits({ ledgerPath, line }, filesystem) {
   const lineBytes = Buffer.byteLength(line);
-  if (lineBytes > MAX_RECEIPT_BYTES) throw auditError();
-  const ledgerStats = await lstatIfPresent(filesystem, ledgerPath);
+  const ledgerStats = await ownedFileStatsIfPresent(filesystem, ledgerPath);
   if ((ledgerStats?.size || 0) + lineBytes > MAX_LEDGER_BYTES) throw auditError();
 }
 
 async function appendSyncedLine({ ledgerPath, line }, filesystem) {
   const handle = await filesystem.open(ledgerPath, "a", 0o600);
   try {
+    const opened = await handle.stat();
+    assertOwnedFileStats(opened);
+    const canonical = await filesystem.lstat(ledgerPath);
+    assertOwnedFileStats(canonical);
+    if (!sameFileIdentity(opened, canonical)) throw auditError();
     await handle.writeFile(line, "utf8");
     await handle.sync();
+    const after = await filesystem.lstat(ledgerPath);
+    assertOwnedFileStats(after);
+    if (!sameFileIdentity(opened, after)) throw auditError();
   } finally {
     await handle.close();
   }
-  if (process.platform !== "win32") await filesystem.chmod(ledgerPath, 0o600);
 }
 
 async function releaseReceiptLock(lock, publication, filesystem) {
   try {
-    await releaseOperationLock(lock, { filesystem });
+    await releaseOperationLock(lock, { filesystem, strictOwnedState: true });
   } catch {
     await preservePoisonGuard({ ...publication, filesystem });
     throw auditError();
@@ -134,18 +195,24 @@ async function releaseReceiptLock(lock, publication, filesystem) {
 }
 
 async function assertLedgerHealthy({ ledgerPath, guardPath, filesystem }) {
-  if (await lstatIfPresent(filesystem, guardPath)) throw auditError();
-  const stats = await lstatIfPresent(filesystem, ledgerPath);
+  if (await ownedFileStatsIfPresent(filesystem, guardPath)) throw auditError();
+  const stats = await ownedFileStatsIfPresent(filesystem, ledgerPath);
   if (!stats) return;
-  if (!stats.isFile() || stats.isSymbolicLink() || stats.size > MAX_LEDGER_BYTES) throw auditError();
+  if (stats.size > MAX_LEDGER_BYTES) throw auditError();
   if (stats.size === 0) return;
   const tailLength = Math.min(stats.size, MAX_RECEIPT_BYTES + 1);
   const handle = await filesystem.open(ledgerPath, "r");
   let tail;
   try {
+    const opened = await handle.stat();
+    assertOwnedFileStats(opened);
+    if (!sameFileIdentity(stats, opened)) throw auditError();
     const buffer = Buffer.allocUnsafe(tailLength);
     const { bytesRead } = await handle.read(buffer, 0, tailLength, stats.size - tailLength);
     tail = buffer.subarray(0, bytesRead);
+    const after = await filesystem.lstat(ledgerPath);
+    assertOwnedFileStats(after);
+    if (!sameFileIdentity(opened, after)) throw auditError();
   } finally {
     await handle.close();
   }
@@ -156,15 +223,166 @@ async function assertLedgerHealthy({ ledgerPath, guardPath, filesystem }) {
   if (finalBytes.length < 1 || finalBytes.length + 1 > MAX_RECEIPT_BYTES) throw auditError();
   try {
     const finalLine = new TextDecoder("utf-8", { fatal: true }).decode(finalBytes);
-    JSON.parse(finalLine);
+    assertReceiptSchema(JSON.parse(finalLine));
   } catch {
     throw auditError();
   }
 }
 
+function assertReceiptSchema(receipt) {
+  if (
+    !isRecord(receipt)
+    || receipt.version !== 1
+    || !exactFields(receipt, [
+      "version", "receipt_id", "resolved_at", "decision", "reason", "task",
+      "project_id", "project", "source_id", "grant", "references"
+    ])
+    || !safeText(receipt.receipt_id, 256)
+    || !canonicalUtc(receipt.resolved_at)
+    || !["allowed", "refused"].includes(receipt.decision)
+    || !safeText(receipt.task, 500)
+    || !optionalSafeText(receipt.project_id, 200)
+    || !optionalSafeText(receipt.project, 200)
+    || !optionalSourceId(receipt.source_id)
+    || !Array.isArray(receipt.references)
+  ) throw auditError();
+  if (receipt.decision === "refused") {
+    if (!safeText(receipt.reason, 256) || receipt.references.length !== 0) throw auditError();
+    if (Object.hasOwn(receipt, "grant")) assertReceiptGrant(receipt.grant);
+  } else {
+    if (
+      Object.hasOwn(receipt, "reason")
+      || !safeText(receipt.project_id, 200)
+      || !safeText(receipt.project, 200)
+      || !sourceId(receipt.source_id)
+      || !Object.hasOwn(receipt, "grant")
+    ) throw auditError();
+    assertReceiptGrant(receipt.grant, true, receipt.resolved_at);
+  }
+  for (const reference of receipt.references) assertReceiptReference(reference, receipt);
+}
+
+function assertReceiptGrant(grant, completeRequired = false, resolvedAt = null) {
+  const partial = sameFields(grant, ["grant_id", "revision"]);
+  const complete = sameFields(grant, [
+    "grant_id", "revision", "scope", "purpose", "approved_at", "expires_at",
+    "source_revision", "binding_generation", "root_identity", "revoked_at"
+  ]);
+  if (
+    !isRecord(grant)
+    || (completeRequired ? !complete : (!partial && !complete))
+    || !identifier(grant.grant_id)
+    || !positiveInteger(grant.revision)
+  ) {
+    throw auditError();
+  }
+  if (!complete) return;
+  if (
+    (completeRequired ? grant.scope !== "read" : !safeText(grant.scope, 64))
+    || !safeText(grant.purpose, 500)
+    || !canonicalUtc(grant.approved_at)
+    || !canonicalUtc(grant.expires_at)
+    || !positiveInteger(grant.source_revision)
+    || !positiveInteger(grant.binding_generation)
+    || !rootIdentity(grant.root_identity)
+    || (grant.revoked_at !== null && !canonicalUtc(grant.revoked_at))
+    || (completeRequired && grant.revoked_at !== null)
+    || (completeRequired && Date.parse(grant.expires_at) <= Date.parse(grant.approved_at))
+    || (completeRequired && Date.parse(grant.approved_at) > Date.parse(resolvedAt))
+    || (completeRequired && Date.parse(grant.expires_at) <= Date.parse(resolvedAt))
+  ) throw auditError();
+}
+
+function assertReceiptReference(reference, receipt) {
+  if (
+    !exactFields(reference, [
+      "project_id", "source_id", "path", "type", "size_bytes", "mtime_ns", "resolved_at", "receipt_id"
+    ])
+    || !safeText(reference.project_id, 200)
+    || !sourceId(reference.source_id)
+    || !sourceRelativePath(reference.path)
+    || reference.type !== "regular-file"
+    || !digitString(reference.size_bytes)
+    || !digitString(reference.mtime_ns)
+    || reference.resolved_at !== receipt.resolved_at
+    || reference.receipt_id !== receipt.receipt_id
+    || reference.project_id !== receipt.project_id
+    || reference.source_id !== receipt.source_id
+  ) throw auditError();
+}
+
+function exactFields(value, allowed) {
+  return isRecord(value) && Object.keys(value).every((field) => allowed.includes(field));
+}
+
+function sameFields(value, expected) {
+  return exactFields(value, expected) && Object.keys(value).length === expected.length;
+}
+
+function isRecord(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function safeText(value, maximum) {
+  return typeof value === "string"
+    && Array.from(value).length >= 1
+    && Array.from(value).length <= maximum
+    && !/\p{Cc}/u.test(value)
+    && !/[\uD800-\uDFFF]/u.test(value);
+}
+
+function optionalSafeText(value, maximum) {
+  return value === undefined || safeText(value, maximum);
+}
+
+function optionalSourceId(value) {
+  return value === undefined || sourceId(value);
+}
+
+function sourceId(value) {
+  return typeof value === "string" && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 64;
+}
+
+function sourceRelativePath(value) {
+  if (
+    !safeText(value, 1024)
+    || Buffer.byteLength(value, "utf8") > 1024
+    || value.startsWith("/")
+    || /^[A-Za-z]:/.test(value)
+    || value.includes("\\")
+  ) return false;
+  const segments = value.split("/");
+  return segments.every((segment) => segment !== "" && segment !== "." && segment !== "..");
+}
+
+function identifier(value) {
+  return typeof value === "string" && /^[a-f0-9-]{1,64}$/.test(value);
+}
+
+function positiveInteger(value) {
+  return Number.isSafeInteger(value) && value > 0;
+}
+
+function canonicalUtc(value) {
+  return typeof value === "string"
+    && Number.isFinite(Date.parse(value))
+    && new Date(value).toISOString() === value;
+}
+
+function digitString(value) {
+  return typeof value === "string" && /^\d+$/.test(value);
+}
+
+function rootIdentity(value) {
+  return sameFields(value, ["type", "dev", "ino"])
+    && value.type === "directory"
+    && digitString(value.dev)
+    && digitString(value.ino);
+}
+
 async function preservePoisonGuard({ stateRoot, guardPath, guard, filesystem }) {
   try {
-    if (await lstatIfPresent(filesystem, guardPath)) return true;
+    if (await ownedFileStatsIfPresent(filesystem, guardPath)) return true;
     await publishGuard({ stateRoot, guardPath, guard, filesystem });
     return true;
   } catch {
@@ -174,37 +392,21 @@ async function preservePoisonGuard({ stateRoot, guardPath, guard, filesystem }) 
 }
 
 async function publishGuard({ stateRoot, guardPath, guard, filesystem }) {
-  const temporary = path.join(stateRoot, `.access-receipts.inflight.${randomUUID()}.tmp`);
-  let handle;
-  try {
-    handle = await filesystem.open(temporary, "wx", 0o600);
-    await handle.writeFile(guard, "utf8");
-    await handle.sync();
-    await handle.close();
-    handle = null;
-    await filesystem.link(temporary, guardPath);
-    await syncDirectory(filesystem, stateRoot);
-  } finally {
-    if (handle) await handle.close().catch(() => {});
-    await filesystem.rm(temporary, { force: true }).catch(() => {});
-  }
+  await publishOwnedFileExclusive(guardPath, guard, { filesystem });
 }
 
 async function syncDirectory(filesystem, directoryPath) {
-  const handle = await filesystem.open(directoryPath, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+  await syncOwnedDirectory(directoryPath, { filesystem });
 }
 
-async function lstatIfPresent(filesystem, filePath) {
+async function ownedFileStatsIfPresent(filesystem, filePath) {
   try {
-    return await filesystem.lstat(filePath);
+    const stats = await filesystem.lstat(filePath);
+    assertOwnedFileStats(stats);
+    return stats;
   } catch (error) {
     if (error?.code === "ENOENT") return null;
-    throw error;
+    throw auditError();
   }
 }
 
