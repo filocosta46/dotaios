@@ -44,9 +44,10 @@ An approved, testable Foundation reliability specification for the defined knowl
 
 ## Current execution frontier
 
-1. Contain and bound `search_aios` and `resolve_skill` without changing valid
-   ranking, scope, or ordering.
-2. Make the session Markdown/index pair one authoritative transactional store.
+1. Make the reviewed Issue 015 working tree durable, validate that exact commit
+   independently on the iMac, and close the remaining-reader containment gate.
+2. Make the session Markdown/index pair one authoritative transactional store
+   after Issue 015 closes.
 3. Align replication with that authority, then unify install/health and bind
    host receipts to the immutable packed candidate.
 4. Certify clean, drifted, update, rollback, removal, and packed-doc lifecycle

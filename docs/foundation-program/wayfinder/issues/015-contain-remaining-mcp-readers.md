@@ -37,3 +37,38 @@ resolution reads every complete `SKILL.md` before returning unbounded metadata.
   assertions.
 - Full local suite, exact packed-content check, and independent exact-commit
   iMac validation.
+
+## Implementation checkpoint
+
+The working tree on top of `f36fa92` contains the reviewed implementation and
+has passed the complete local gate plus the final independent adversarial
+replay. It is ready for one durability commit; read the live status and diff
+before resuming.
+
+- `search_aios` and `resolve_skill` share one request evidence reader. The
+  search authority config is itself contained, strict UTF-8, per-file bounded,
+  and charged before its configured external vault root is authorized on the
+  same aggregate ledger.
+- Enumeration snapshots bind later file and frontmatter reads to the directory
+  identities that produced their paths. Real-directory replacement, final-file
+  replacement, links, special files, invalid encoding, and excessive corpora
+  fail closed with path-free codes.
+- Session index paths are validated against `memory/sessions`, including
+  metadata-only matches, before any result is returned.
+- Exact MCP response budgets cover every result field and remain valid for
+  astral Unicode without splitting a surrogate pair. The public MCP contract
+  now documents the `resolve_skill` budget.
+- Corrupt JSONL remains byte- and metadata-unchanged through CLI and MCP
+  search. The observer's redundant publication check and Git-less test-suite
+  portability defects are also fixed in this candidate.
+- CLI search and skill lookup surfaces are classified read-only for the legacy
+  sync hook. CLI search contains `aios.json` before authorizing a configured
+  vault. Plain Markdown skills retain the public fallback without bypassing
+  strict UTF-8. Ineligible symlink entries are skipped without touching their
+  targets; eligible linked evidence still fails closed.
+
+Local evidence: 78 focused checks pass with zero failures; syntax, CLI check,
+smoke, packed-content dry run, public packed-content policy, and diff checks
+pass. The complete current suite reports 1,388 pass, zero failures, and one
+intentional skip. Independent exact-commit iMac validation remains the closure
+gate after this tree is committed.

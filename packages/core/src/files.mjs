@@ -224,10 +224,6 @@ export async function replaceFileIfUnchanged(
         return { replaced: false, preservedPath: null };
       }
 
-      if (!await fileStillMatches(destination, comparisonBytes, expectedStats)) {
-        return { replaced: false, preservedPath: null };
-      }
-
       // Publish an exact byte-for-byte backup while the live destination stays
       // in place. The later rename is atomic, so readers observe either the old
       // file or the complete replacement—even if the process stops mid-update.

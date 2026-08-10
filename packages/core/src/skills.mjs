@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { parseDocument } from "yaml";
+import { createEvidenceReader } from "./evidence-reader.mjs";
 import { writeFileSafe } from "./files.mjs";
+
+const MAX_ROUTING_METADATA_BYTES = 64 * 1024;
+const MAX_SKILL_SOURCE_BYTES = 8 * 1024 * 1024;
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 
@@ -9,87 +14,81 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const TRIGGER_SEPARATOR_RE = /[·,]/;
 const TRIGGER_JOINER = " · ";
 
-// Read one field out of a SKILL.md YAML frontmatter block. Deliberately tiny —
-// skills only need `name` and `description`, both single-line scalars.
-function readFrontmatterField(content, field) {
-  const match = content.match(FRONTMATTER_RE);
-  if (!match) return "";
-  const line = match[1]
-    .split(/\r?\n/)
-    .find((entry) => entry.startsWith(`${field}:`));
-  if (!line) return "";
-  return line.slice(field.length + 1).trim().replace(/^["']|["']$/g, "");
-}
-
-function unquoteScalar(value) {
-  return value.trim().replace(/^(['"])(.*)\1$/, "$2");
-}
-
-// Read either a separator-joined scalar or an indented YAML block list. Skill
-// frontmatter only needs these two trigger shapes, so no YAML dependency is
-// necessary. `triggers` is authored comma-separated; `when_to_use` is free text
-// the host appends to the description, so it also accepts the "·" DotAIOS uses
-// when it writes that field itself.
-function readFrontmatterList(content, field, separator = ",") {
-  const frontmatter = content.match(FRONTMATTER_RE)?.[1];
-  if (!frontmatter) return [];
-
-  const lines = frontmatter.split(/\r?\n/);
-  const fieldPattern = new RegExp(`^${field}:\\s*(.*)$`);
-  const fieldIndex = lines.findIndex((line) => fieldPattern.test(line));
-  if (fieldIndex === -1) return [];
-
-  const inlineValue = lines[fieldIndex].match(fieldPattern)?.[1].trim();
-  if (inlineValue) {
-    return unquoteScalar(inlineValue).split(separator).map(unquoteScalar).filter(Boolean);
-  }
-
-  const values = [];
-  for (const line of lines.slice(fieldIndex + 1)) {
-    if (!line.trim() || /^\s*#/.test(line)) continue;
-    if (!/^\s/.test(line)) break;
-
-    const item = line.match(/^\s+-\s+(.+?)\s*$/);
-    if (!item) break;
-    values.push(unquoteScalar(item[1]));
-  }
-  return values.filter(Boolean);
-}
-
 // Scan <aiosPath>/skills/ for every <name>/SKILL.md and return its metadata.
-export async function collectSkills(aiosPath) {
+export async function collectSkills(aiosPath, { reader = null, root = aiosPath } = {}) {
+  const activeReader = reader || createEvidenceReader({
+    roots: [path.resolve(root)],
+    limits: { maxFiles: 512, maxDirectoryEntries: 512 }
+  });
   const skillsDir = path.join(aiosPath, "skills");
-  let entries;
-  try {
-    entries = await fs.readdir(skillsDir, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  const directories = await activeReader.listDirectories(root, skillsDir, {
+    maxEntries: 512,
+    skipEntry: (name) => name.startsWith(".") || name.startsWith("_")
+  });
 
   const skills = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    if (entry.name.startsWith(".") || entry.name.startsWith("_")) continue;
-
-    const skillFile = path.join(skillsDir, entry.name, "SKILL.md");
-    let content;
-    try {
-      content = await fs.readFile(skillFile, "utf8");
-    } catch {
-      continue;
-    }
+  for (const directoryPath of directories) {
+    const dir = path.basename(directoryPath);
+    const skillFile = path.join(directoryPath, "SKILL.md");
+    const content = await activeReader.readFrontmatter(root, skillFile, {
+      allowMissing: true,
+      maxBytes: MAX_ROUTING_METADATA_BYTES,
+      maxFileBytes: MAX_SKILL_SOURCE_BYTES
+    });
+    if (content === null) throw skillMetadataError();
+    const metadata = parseSkillMetadata(content);
 
     skills.push({
-      dir: entry.name,
-      name: readFrontmatterField(content, "name") || entry.name,
-      description: readFrontmatterField(content, "description"),
-      triggers: readFrontmatterList(content, "triggers"),
-      whenToUse: readFrontmatterList(content, "when_to_use", TRIGGER_SEPARATOR_RE)
+      dir,
+      name: metadata.name || dir,
+      description: metadata.description,
+      triggers: metadata.triggers,
+      whenToUse: metadata.whenToUse
     });
   }
 
   skills.sort((a, b) => a.name.localeCompare(b.name));
   return skills;
+}
+
+function parseSkillMetadata(content) {
+  if (content === "") {
+    return { name: "", description: "", triggers: [], whenToUse: [] };
+  }
+  const frontmatter = content.match(FRONTMATTER_RE)?.[1];
+  if (frontmatter === undefined) throw skillMetadataError();
+  const document = parseDocument(frontmatter, { strict: true, uniqueKeys: true });
+  if (document.errors.length > 0) throw skillMetadataError();
+  const metadata = document.toJS();
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) throw skillMetadataError();
+  return {
+    name: optionalMetadataString(metadata.name),
+    description: optionalMetadataString(metadata.description),
+    triggers: metadataList(metadata.triggers, TRIGGER_SEPARATOR_RE),
+    whenToUse: metadataList(metadata.when_to_use, TRIGGER_SEPARATOR_RE)
+  };
+}
+
+function optionalMetadataString(value) {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw skillMetadataError();
+  return value.trim();
+}
+
+function metadataList(value, separator) {
+  if (value === undefined || value === null || value === "") return [];
+  if (Array.isArray(value)) {
+    if (!value.every((entry) => typeof entry === "string")) throw skillMetadataError();
+    return value.map((entry) => entry.trim()).filter(Boolean);
+  }
+  if (typeof value !== "string") throw skillMetadataError();
+  return value.split(separator).map((entry) => entry.trim()).filter(Boolean);
+}
+
+function skillMetadataError() {
+  const error = new Error("DotAIOS could not read skill routing metadata safely.");
+  error.code = "DOTAIOS_SKILL_METADATA_INVALID";
+  return error;
 }
 
 // Hosts route on a listing built from `description` (+ `when_to_use` where the
@@ -115,8 +114,8 @@ export async function planTriggerVisibility(aiosPath) {
 // indicator character, and cannot carry leading or trailing space — any of those
 // makes the whole frontmatter unparseable, which drops the skill from the very
 // host listing this field exists to reach. Fall back to a double-quoted scalar;
-// JSON's escape set is a subset of YAML's, and `unquoteScalar` strips the pair
-// back off on read.
+// JSON's escape set is a subset of YAML's, and the YAML parser restores the
+// scalar on read.
 const YAML_PLAIN_UNSAFE_RE = /^[-?:,[\]{}#&*!|>'"%@`]|:\s|\s#|[\n\r\t]/;
 
 function yamlScalar(value) {

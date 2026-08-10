@@ -298,16 +298,18 @@ test("readJsonl quarantines a corrupt line verbatim and never returns it as data
   assert.deepEqual(readLines(badPath), [badLine], "quarantine must be idempotent across reads");
 });
 
-test("search over a memory dir with a corrupt line still works and quarantines it", async () => {
+test("search over a memory dir with a corrupt line is non-mutating", async () => {
   const dir = tmpDir();
   const memoryDir = path.join(dir, "memory");
   fs.mkdirSync(memoryDir, { recursive: true });
   const eventsPath = path.join(memoryDir, "events.jsonl");
   fs.writeFileSync(eventsPath, `{"ts":"2026-01-01T00:00:00Z","type":"note","summary":"zebra sighting"}\nnot-json-at-all{\n`);
 
+  const before = fs.readFileSync(eventsPath);
   const results = await searchMemoryDir(memoryDir, "zebra", { limit: 5 });
   assert.equal(results.length, 1, "good line must still be searchable");
-  assert.ok(fs.existsSync(`${eventsPath}.bad.jsonl`), "search path must use the unified quarantining reader");
+  assert.equal(fs.existsSync(`${eventsPath}.bad.jsonl`), false, "read-only search must not create quarantine");
+  assert.deepEqual(fs.readFileSync(eventsPath), before);
 });
 
 test("memory audit reports preserved corrupt lines", async () => {

@@ -1,6 +1,6 @@
-import fs from "node:fs/promises";
 import path from "node:path";
-import { readJsonl } from "./jsonl.mjs";
+import { createEvidenceReader } from "./evidence-reader.mjs";
+import { isPathWithinLexically } from "./paths.mjs";
 
 export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "decisions", "skills", "references", "plugins", "sessions", "all"];
 
@@ -86,8 +86,15 @@ export async function searchAios({
   query,
   scope = "all",
   limit = DEFAULT_LIMIT,
-  sessionFilters = {}
+  sessionFilters = {},
+  evidenceReader = null
 }) {
+  const resolvedAiosPath = path.resolve(aiosPath);
+  const resolvedVaultPath = path.resolve(vaultPath || path.join(aiosPath, "vault"));
+  const vaultRoot = isPathWithinLexically(resolvedAiosPath, resolvedVaultPath)
+    ? resolvedAiosPath
+    : resolvedVaultPath;
+  const reader = evidenceReader || createEvidenceReader({ roots: [resolvedAiosPath, vaultRoot] });
   const scopes = scope === "all"
     ? ["sessions", "context", "memory", "vault", "projects", "decisions", "skills", "references", "plugins"]
     : [scope];
@@ -97,54 +104,86 @@ export async function searchAios({
   return Promise.all(
     scopes.map(async (name) => ({
       scope: name,
-      results: await searchScope(name, { aiosPath, vaultPath, query, limit, sessionFilters })
+      results: await searchScope(name, {
+        aiosPath: resolvedAiosPath,
+        vaultPath: resolvedVaultPath,
+        vaultRoot,
+        query,
+        limit,
+        sessionFilters,
+        reader
+      })
     }))
   );
 }
 
-async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_LIMIT, sessionFilters = {} }) {
+async function searchScope(scope, {
+  aiosPath,
+  vaultPath,
+  vaultRoot,
+  query,
+  limit = DEFAULT_LIMIT,
+  sessionFilters = {},
+  reader
+}) {
   if (scope === "sessions") {
-    return searchSessionsScope(aiosPath, query, { limit, ...sessionFilters });
+    return searchSessionsScope(aiosPath, query, { limit, reader, ...sessionFilters });
   }
   if (scope === "memory") {
-    return searchMemoryDir(path.join(aiosPath, "memory"), query, { limit });
+    return searchMemoryDir(path.join(aiosPath, "memory"), query, {
+      limit,
+      reader,
+      root: aiosPath
+    });
   }
   if (scope === "context") {
     return searchMarkdownDir(path.join(aiosPath, "context"), query, {
       limit,
-      sourcePrefix: "context"
+      sourcePrefix: "context",
+      reader,
+      root: aiosPath
     });
   }
   if (scope === "vault") {
-    return searchMarkdownDir(vaultPath || path.join(aiosPath, "vault"), query, {
+    return searchMarkdownDir(vaultPath, query, {
       limit,
-      sourcePrefix: "vault"
+      sourcePrefix: "vault",
+      reader,
+      root: vaultRoot
     });
   }
   if (scope === "projects") {
     return searchMarkdownDir(path.join(aiosPath, "projects"), query, {
       limit,
-      sourcePrefix: "projects"
+      sourcePrefix: "projects",
+      reader,
+      root: aiosPath
     });
   }
   if (scope === "decisions") {
     return searchMarkdownDir(path.join(aiosPath, "decisions"), query, {
       limit,
-      sourcePrefix: "decisions"
+      sourcePrefix: "decisions",
+      reader,
+      root: aiosPath
     });
   }
   if (scope === "skills") {
     return searchMarkdownDir(path.join(aiosPath, "skills"), query, {
       limit,
       sourcePrefix: "skills",
-      extensions: [".md"]
+      extensions: [".md"],
+      reader,
+      root: aiosPath
     });
   }
   if (scope === "references") {
     return searchMarkdownDir(path.join(aiosPath, "references"), query, {
       limit,
       sourcePrefix: "references",
-      extensions: [".md"]
+      extensions: [".md"],
+      reader,
+      root: aiosPath
     });
   }
   if (scope === "plugins") {
@@ -152,7 +191,9 @@ async function searchScope(scope, { aiosPath, vaultPath, query, limit = DEFAULT_
       limit,
       sourcePrefix: "plugins",
       extensions: [".md", ".json"],
-      includeFile: (filePath) => filePath.endsWith(".md") || path.basename(filePath) === "manifest.json"
+      includeFile: (filePath) => filePath.endsWith(".md") || path.basename(filePath) === "manifest.json",
+      reader,
+      root: aiosPath
     });
   }
   return [];
@@ -185,12 +226,17 @@ export function matchQuery(text, query) {
   return { matched: false, kind: null, score: 0 };
 }
 
-export async function searchMemoryDir(memoryDir, query, { limit = DEFAULT_LIMIT } = {}) {
+export async function searchMemoryDir(memoryDir, query, {
+  limit = DEFAULT_LIMIT,
+  reader = null,
+  root = memoryDir
+} = {}) {
+  const activeReader = reader || createEvidenceReader({ roots: [path.resolve(root)] });
   const sources = [
     { filePath: path.join(memoryDir, "events.jsonl"), source: "memory/events.jsonl" },
     { filePath: path.join(memoryDir, "events-archive.jsonl"), source: "memory/events-archive.jsonl" },
     { filePath: path.join(memoryDir, "signals-archive.jsonl"), source: "memory/signals-archive.jsonl" },
-    ...await listSignalSources(path.join(memoryDir, "signals"))
+    ...await listSignalSources(path.join(memoryDir, "signals"), { reader: activeReader, root })
   ];
 
   // Every scanned entry (matched or not) feeds the corpus so IDF reflects how
@@ -198,7 +244,7 @@ export async function searchMemoryDir(memoryDir, query, { limit = DEFAULT_LIMIT 
   const docs = [];
   const candidates = [];
   for (const { filePath, source } of sources) {
-    const entries = await readJsonl(filePath);
+    const entries = await activeReader.readJsonl(root, filePath);
     for (const entry of entries) {
       const text = JSON.stringify(entry);
       docs.push(text);
@@ -232,8 +278,9 @@ export async function searchMemoryDir(memoryDir, query, { limit = DEFAULT_LIMIT 
     .map(({ result }) => result);
 }
 
-export async function searchJsonlEntries(filePath, query, { source }) {
-  const entries = await readJsonl(filePath);
+export async function searchJsonlEntries(filePath, query, { source, reader = null, root = path.dirname(filePath) }) {
+  const activeReader = reader || createEvidenceReader({ roots: [path.resolve(root)] });
+  const entries = await activeReader.readJsonl(root, filePath);
   const results = [];
   for (const entry of entries) {
     const match = matchJsonEntry(entry, query);
@@ -253,9 +300,12 @@ export async function searchMarkdownDir(dir, query, {
   limit = DEFAULT_LIMIT,
   sourcePrefix = path.basename(dir),
   extensions = [".md"],
-  includeFile = null
+  includeFile = null,
+  reader = null,
+  root = dir
 } = {}) {
-  const files = await listSearchFiles(dir, { extensions, includeFile });
+  const activeReader = reader || createEvidenceReader({ roots: [path.resolve(root)] });
+  const files = await activeReader.listFiles(root, dir, { extensions, includeFile, skipEntry: shouldSkipEntry });
   const docs = [];
   const candidates = [];
 
@@ -265,7 +315,9 @@ export async function searchMarkdownDir(dir, query, {
   const CONCURRENCY = 32;
   for (let i = 0; i < files.length; i += CONCURRENCY) {
     const batch = await Promise.all(
-      files.slice(i, i + CONCURRENCY).map((filePath) => collectSearchFile(filePath, dir, query, sourcePrefix))
+      files.slice(i, i + CONCURRENCY).map((filePath) =>
+        collectSearchFile(filePath, dir, query, sourcePrefix, { reader: activeReader, root })
+      )
     );
     for (const item of batch) {
       if (!item) continue;
@@ -279,13 +331,8 @@ export async function searchMarkdownDir(dir, query, {
   const terms = queryTerms(query);
   const ranked = [];
   for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-    const batch = await Promise.all(candidates.slice(i, i + CONCURRENCY).map(async (candidate) => {
-      let ageMs = null;
-      try {
-        ageMs = now - (await fs.stat(candidate.filePath)).mtimeMs;
-      } catch {
-        // Unreadable mtime: rank without a recency penalty.
-      }
+    const batch = candidates.slice(i, i + CONCURRENCY).map((candidate) => {
+      let ageMs = candidate.mtimeMs === null ? null : now - candidate.mtimeMs;
       const haystack = candidate.content.toLowerCase();
       const matchedTerms = terms.filter((term) => haystack.includes(term));
       const rank = rankSearchHit({
@@ -296,7 +343,7 @@ export async function searchMarkdownDir(dir, query, {
         structuralBoost: candidate.structuralBoost
       });
       return { result: candidate.result, rank };
-    }));
+    });
     ranked.push(...batch);
   }
 
@@ -306,14 +353,15 @@ export async function searchMarkdownDir(dir, query, {
     .map(({ result }) => result);
 }
 
-async function collectSearchFile(filePath, dir, query, sourcePrefix) {
-  let content;
-  try {
-    content = await fs.readFile(filePath, "utf8");
-  } catch (err) {
-    console.warn(`[dotaios] Warning: Could not read file ${filePath} (${err.message})`);
-    return null;
+async function collectSearchFile(filePath, dir, query, sourcePrefix, { reader, root = dir } = {}) {
+  const observed = await reader.readText(root, filePath, { returnSnapshot: true });
+  if (observed === null) {
+    const error = new Error("Search evidence changed while it was being read.");
+    error.code = "DOTAIOS_EVIDENCE_CHANGED";
+    throw error;
   }
+  const { content } = observed;
+  const mtimeMs = observed.stats.mtimeMs;
 
   const snippets = buildMarkdownSnippets(content, query);
   if (snippets.length === 0) return { content, candidate: null };
@@ -328,6 +376,7 @@ async function collectSearchFile(filePath, dir, query, sourcePrefix) {
     candidate: {
       filePath,
       content,
+      mtimeMs,
       // The file's tier comes from a whole-file match: a doc containing every
       // query term across separate lines is a terms-tier hit even though each
       // individual snippet line is only a partial one.
@@ -437,13 +486,12 @@ export function markMatches(value, query) {
   return output;
 }
 
-async function listSignalSources(signalsDir) {
-  let files;
-  try {
-    files = (await fs.readdir(signalsDir)).filter((file) => file.endsWith(".jsonl")).sort().reverse();
-  } catch {
-    return [];
-  }
+async function listSignalSources(signalsDir, { reader, root = signalsDir } = {}) {
+  const files = (await reader.listFiles(root, signalsDir, {
+    extensions: [".jsonl"],
+    recursive: false,
+    skipEntry: shouldSkipEntry
+  })).map((filePath) => path.basename(filePath)).sort().reverse();
   return files.map((file) => ({
     filePath: path.join(signalsDir, file),
     source: `memory/signals/${file}`
@@ -510,30 +558,6 @@ function markdownStructuralBoost({ snippets, pathMatch, titleMatch }) {
   const titleBoost = titleMatch.matched ? 2.5 : 0;
   const pathBoost = pathMatch.matched ? 1 : 0;
   return areaBoost + titleBoost + pathBoost;
-}
-
-async function listSearchFiles(dir, { extensions, includeFile }) {
-  const results = [];
-  let entries;
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
-    return results;
-  }
-
-  for (const entry of entries) {
-    if (shouldSkipEntry(entry.name)) continue;
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...await listSearchFiles(fullPath, { extensions, includeFile }));
-    } else if (entry.isFile()) {
-      const ext = path.extname(entry.name).toLowerCase();
-      if (!extensions.includes(ext)) continue;
-      if (includeFile && !includeFile(fullPath)) continue;
-      results.push(fullPath);
-    }
-  }
-  return results.sort();
 }
 
 function shouldSkipEntry(name) {
@@ -609,9 +633,23 @@ function termLineIndexes(lines, query) {
   return indexes.sort((a, b) => a - b);
 }
 
-async function searchSessionsScope(aiosPath, query, { limit = DEFAULT_LIMIT, agent, project, since } = {}) {
+async function searchSessionsScope(aiosPath, query, {
+  limit = DEFAULT_LIMIT,
+  agent,
+  project,
+  since,
+  reader
+} = {}) {
   const { searchSessions } = await import("./sessions.mjs");
-  const hits = await searchSessions(aiosPath, query, { agent, project, since, limit });
+  const hits = await searchSessions(aiosPath, query, {
+    agent,
+    project,
+    since,
+    limit,
+    readOnly: true,
+    reader,
+    root: aiosPath
+  });
   return hits.map(({ entry, bodyMatch, snippet }) => ({
     source: `sessions/${entry.path}`,
     file: entry.path,

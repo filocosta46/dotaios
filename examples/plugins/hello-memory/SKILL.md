@@ -1,3 +1,8 @@
+---
+name: hello-memory
+description: Example workflow for validating declared plugin permissions.
+---
+
 # hello-memory
 
 Example skill for plugin validation.

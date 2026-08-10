@@ -32,7 +32,9 @@ The adapter exposes exactly these three read-only tool names:
 
 - `read_working_context`: return the same bounded, project-filtered projection as `dotaios brief --compact`; accepts optional `project`, session `limit`, and character `budget`
 - `search_aios`: search bounded local results by `query`, with optional `scope`, result `limit`, and character `budget`
-- `resolve_skill`: match an `intent` to installed workflows, with an optional result `limit`
+- `resolve_skill`: match an `intent` to installed workflows, with an optional
+  result `limit` and character `budget` from 256 to 32,000 (default 6,000);
+  the complete serialized response, including budget metadata, stays within it
 
 There are no compatibility aliases or additional MCP tools.
 

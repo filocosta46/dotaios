@@ -121,7 +121,14 @@ export async function readContainedFile(root, filePath, options = {}) {
   if (!sameFile(before, confirmedBefore)) {
     throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
   }
-  if (Number.isFinite(options.maxBytes) && before.size > options.maxBytes) {
+  if (
+    Number.isFinite(options.maxBytes)
+    && !Number.isFinite(options.prefixBytes)
+    && before.size > options.maxBytes
+  ) {
+    throw new ContainedReadError(options.tooLargeCode || "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE");
+  }
+  if (Number.isFinite(options.maxSourceBytes) && before.size > options.maxSourceBytes) {
     throw new ContainedReadError(options.tooLargeCode || "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE");
   }
 
@@ -139,6 +146,7 @@ export async function readContainedFile(root, filePath, options = {}) {
         throw new ContainedReadError();
       }
       await assertContainedAncestorsUnchanged(root, filePath, filesystem, ancestorsBefore);
+      await assertContainedDirectoriesUnchanged(root, filesystem, options.expectedDirectories);
       const opened = await handle.stat();
       const current = await lstatAfterObservation(filesystem, filePath);
       if (
@@ -157,23 +165,41 @@ export async function readContainedFile(root, filePath, options = {}) {
         await assertContainedAncestorsUnchanged(root, filePath, filesystem, ancestorsBefore);
         return { stats: completed, ancestors: ancestorsBefore };
       }
-      if (Number.isFinite(options.maxBytes) && opened.size > options.maxBytes) {
+      if (
+        Number.isFinite(options.maxBytes)
+        && !Number.isFinite(options.prefixBytes)
+        && opened.size > options.maxBytes
+      ) {
         throw new ContainedReadError(options.tooLargeCode || "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE");
       }
-      options.budget?.reserveFile(opened.size);
-      const bytes = Number.isFinite(options.maxBytes)
-        ? await readBoundedHandle(
+      if (Number.isFinite(options.maxSourceBytes) && opened.size > options.maxSourceBytes) {
+        throw new ContainedReadError(options.tooLargeCode || "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE");
+      }
+      const prefixBytes = Number.isFinite(options.prefixBytes)
+        ? normalizeFiniteLimit(options.prefixBytes)
+        : null;
+      const reservedBytes = options.reserveSourceBytes === true
+        ? opened.size
+        : prefixBytes === null
+          ? opened.size
+          : Math.min(opened.size, prefixBytes);
+      options.budget?.reserveFile(reservedBytes);
+      const bytes = prefixBytes !== null
+        ? await readHandlePrefix(handle, prefixBytes, opened.size)
+        : Number.isFinite(options.maxBytes)
+          ? await readBoundedHandle(
             handle,
             options.maxBytes,
             options.tooLargeCode || "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE",
             opened.size
           )
-        : await handle.readFile();
+          : await handle.readFile();
       const completed = await handle.stat();
       if (!sameFile(opened, completed)) {
         throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
       }
       await assertContainedAncestorsUnchanged(root, filePath, filesystem, ancestorsBefore);
+      await assertContainedDirectoriesUnchanged(root, filesystem, options.expectedDirectories);
       const content = decodeContainedBytes(bytes, options.encoding);
       return options.returnSnapshot ? { content, stats: completed } : content;
     } catch (error) {
@@ -244,12 +270,13 @@ export async function readContainedDirectory(root, directoryPath, options = {}) 
   if (!sameDirectorySnapshot(before, after)) {
     throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
   }
-  return entries;
+  return options.returnSnapshot ? { entries, snapshot: after } : entries;
 }
 
 /** Validate one directory without listing its potentially large contents. */
 export async function inspectContainedDirectory(root, directoryPath, options = {}) {
   const snapshot = await inspectContainedDirectorySnapshot(root, directoryPath, options);
+  if (options.returnSnapshot) return snapshot;
   return snapshot?.stats || null;
 }
 
@@ -281,7 +308,10 @@ async function inspectContainedDirectorySnapshot(root, directoryPath, options = 
 
 async function inspectContainedAncestors(root, candidate, filesystem) {
   const resolvedRoot = path.resolve(root);
-  const resolvedParent = path.resolve(path.dirname(candidate));
+  const resolvedCandidate = path.resolve(candidate);
+  const resolvedParent = resolvedCandidate === resolvedRoot
+    ? resolvedRoot
+    : path.resolve(path.dirname(candidate));
   if (!isPathWithinLexically(resolvedRoot, resolvedParent)) throw new ContainedReadError();
 
   const relative = path.relative(resolvedRoot, resolvedParent);
@@ -357,6 +387,15 @@ async function assertContainedAncestorsUnchanged(root, candidate, filesystem, ex
   }
 }
 
+async function assertContainedDirectoriesUnchanged(root, filesystem, expectedDirectories = []) {
+  for (const expected of expectedDirectories) {
+    const actual = await inspectContainedDirectorySnapshot(root, expected.path, { filesystem });
+    if (!sameDirectorySnapshot(expected.snapshot, actual)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+  }
+}
+
 function sameAncestorSnapshots(left, right) {
   return left.length === right.length && left.every((entry, index) => (
     entry.path === right[index].path
@@ -425,6 +464,27 @@ async function readBoundedHandle(handle, maximumBytes, tooLargeCode, expectedByt
   const sentinel = Buffer.allocUnsafe(1);
   const { bytesRead: extraBytes } = await handle.read(sentinel, 0, 1, null);
   if (extraBytes > 0) throw new ContainedReadError(tooLargeCode);
+  return Buffer.concat(chunks, total);
+}
+
+async function readHandlePrefix(handle, maximumBytes, expectedBytes = null) {
+  if (typeof handle.read !== "function") {
+    throw new ContainedReadError("DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE");
+  }
+  const limit = Math.max(0, Math.floor(maximumBytes));
+  const expected = Number.isSafeInteger(expectedBytes) && expectedBytes >= 0
+    ? Math.min(expectedBytes, limit)
+    : limit;
+  const chunks = [];
+  let total = 0;
+  while (total < expected) {
+    const length = Math.min(64 * 1024, expected - total);
+    const buffer = Buffer.allocUnsafe(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, null);
+    if (bytesRead === 0) break;
+    chunks.push(buffer.subarray(0, bytesRead));
+    total += bytesRead;
+  }
   return Buffer.concat(chunks, total);
 }
 

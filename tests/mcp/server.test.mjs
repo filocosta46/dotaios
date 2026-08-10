@@ -98,26 +98,89 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.equal(fs.readFileSync(eventsPath, "utf8"), eventsBefore);
 });
 
-test("mcp search budget bounds the exact serialized response", () => {
+test("mcp search budgets bound the exact serialized response at minimum, default, and maximum", () => {
   const { aiosPath } = setupAios();
   fs.writeFileSync(
     path.join(aiosPath, "context", "work.md"),
     `# Work\n\n${"bounded memory ".repeat(200)}\n`,
   );
   const query = `bounded ${"context ".repeat(55)}`.slice(0, 500);
-  const [response] = runMcp(aiosPath, [{
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/call",
-    params: { name: "search_aios", arguments: { query, budget: 256 } },
-  }]);
+  for (const requestedBudget of [256, undefined, 32000]) {
+    const argumentsValue = { query };
+    if (requestedBudget !== undefined) argumentsValue.budget = requestedBudget;
+    const [response] = runMcp(aiosPath, [{
+      jsonrpc: "2.0",
+      id: requestedBudget ?? "default",
+      method: "tools/call",
+      params: { name: "search_aios", arguments: argumentsValue },
+    }]);
 
-  const text = toolText(response);
-  const payload = JSON.parse(text);
-  assert.ok(text.length <= 256);
-  assert.equal(payload.budget.used, text.length);
-  assert.equal(payload.budget.limit, 256);
-  assert.equal(payload.budget.truncated, true);
+    const text = toolText(response);
+    const payload = JSON.parse(text);
+    const expectedBudget = requestedBudget ?? 6000;
+    assert.ok(text.length <= expectedBudget);
+    assert.equal(payload.budget.used, text.length);
+    assert.equal(payload.budget.limit, expectedBudget);
+    if (requestedBudget === 256) assert.equal(payload.budget.truncated, true);
+  }
+});
+
+test("mcp skill budgets bound every returned field at minimum, default, and maximum", () => {
+  const { aiosPath } = setupAios();
+  const skillDir = path.join(aiosPath, "skills", "verbose");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    `---\nname: verbose\ndescription: ${"bounded routing metadata ".repeat(200)}\ntriggers: bounded routing intent\n---\n# Verbose\n`
+  );
+
+  for (const requestedBudget of [256, undefined, 32000]) {
+    const argumentsValue = { intent: "bounded routing intent", limit: 1 };
+    if (requestedBudget !== undefined) argumentsValue.budget = requestedBudget;
+    const [response] = runMcp(aiosPath, [{
+      jsonrpc: "2.0",
+      id: requestedBudget ?? "default",
+      method: "tools/call",
+      params: { name: "resolve_skill", arguments: argumentsValue },
+    }]);
+    const text = toolText(response);
+    const payload = JSON.parse(text);
+    const expectedBudget = requestedBudget ?? 6000;
+
+    assert.ok(text.length <= expectedBudget);
+    assert.equal(payload.budget.limit, expectedBudget);
+    assert.equal(payload.budget.used, text.length);
+    if (requestedBudget === 256) assert.equal(payload.budget.truncated, true);
+  }
+});
+
+test("mcp response budgets remain exact for astral Unicode inputs", () => {
+  const { aiosPath } = setupAios();
+  const astral = "😀".repeat(434);
+  const responses = runMcp(aiosPath, [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: astral, scope: "context", budget: 256 } },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "resolve_skill", arguments: { intent: astral, budget: 256 } },
+    },
+  ]);
+
+  for (const response of responses) {
+    assert.equal(response.error, undefined);
+    const text = toolText(response);
+    const payload = JSON.parse(text);
+    assert.ok(text.length <= 256);
+    assert.equal(payload.budget.limit, 256);
+    assert.equal(payload.budget.used, text.length);
+    assert.equal(payload.budget.truncated, true);
+  }
 });
 
 test("mcp enforces runtime bounds and rejects removed write tools", () => {
@@ -250,6 +313,408 @@ test("read_working_context is byte-read-only on corrupt signals and emits no mac
   assert.deepEqual(snapshotTree(aiosPath), before);
   assert.equal(fs.existsSync(`${signalPath}.bad.jsonl`), false);
   assert.doesNotMatch(result.stderr, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("search_aios is byte-read-only on corrupt JSONL and emits no machine path", () => {
+  const { aiosPath } = setupAios();
+  const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
+  fs.writeFileSync(
+    eventsPath,
+    `{not-json}\n${JSON.stringify({
+      ts: "2026-08-10T10:00:00.000Z",
+      type: "note",
+      summary: "CORRUPT_SEARCH_FIXTURE_SELECTED"
+    })}\n`
+  );
+  const before = snapshotTree(aiosPath);
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "CORRUPT_SEARCH_FIXTURE_SELECTED", scope: "memory" }
+    },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(result.status, 0);
+  assert.match(toolText(response), /CORRUPT_SEARCH_FIXTURE_SELECTED/);
+  assert.deepEqual(snapshotTree(aiosPath), before);
+  assert.equal(fs.existsSync(`${eventsPath}.bad.jsonl`), false);
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("search_aios does not quarantine a corrupt session index", () => {
+  const { aiosPath } = setupAios();
+  const indexPath = path.join(aiosPath, "memory", "sessions", "index.jsonl");
+  fs.writeFileSync(
+    indexPath,
+    `{not-json}\n${JSON.stringify({
+      session_id: "safe-session",
+      captured_at: "2026-08-10T10:00:00.000Z",
+      title: "CORRUPT_SESSION_INDEX_SELECTED",
+      agent: "codex",
+      turns: 1,
+      path: "memory/sessions/2026-08-10/safe-session.md"
+    })}\n`
+  );
+  const before = snapshotTree(aiosPath);
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "CORRUPT_SESSION_INDEX_SELECTED", scope: "sessions" }
+    },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(result.status, 0);
+  assert.match(toolText(response), /CORRUPT_SESSION_INDEX_SELECTED/);
+  assert.deepEqual(snapshotTree(aiosPath), before);
+  assert.equal(fs.existsSync(`${indexPath}.bad.jsonl`), false);
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("search_aios fails closed on linked evidence without exposing a path", () => {
+  for (const targetKind of ["inside", "outside"]) {
+    const { aiosPath, tempRoot } = setupAios();
+    const targetPath = targetKind === "inside"
+      ? path.join(aiosPath, "context", "work.md")
+      : path.join(tempRoot, "outside.md");
+    if (targetKind === "outside") {
+      fs.writeFileSync(targetPath, "# Outside\n\nLINKED_SEARCH_CANARY\n");
+    } else {
+      fs.appendFileSync(targetPath, "\nLINKED_SEARCH_CANARY\n");
+    }
+    fs.symlinkSync(targetPath, path.join(aiosPath, "context", "linked.md"));
+
+    const result = runMcpResult(aiosPath, [{
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "search_aios",
+        arguments: { query: "LINKED_SEARCH_CANARY", scope: "context" }
+      },
+    }]);
+    const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+    assert.equal(response.error.code, -32603, `${targetKind} link must fail closed`);
+    assert.equal(response.error.message, "DotAIOS request failed safely.");
+    assert.doesNotMatch(
+      `${result.stdout}\n${result.stderr}`,
+      new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    );
+  }
+});
+
+test("search_aios enforces its per-file source-work bound on JSONL", () => {
+  const { aiosPath } = setupAios();
+  const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
+  fs.writeFileSync(eventsPath, Buffer.alloc(1024 * 1024 + 1, 0x61));
+  const before = snapshotTree(aiosPath);
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "missing", scope: "memory" }
+    },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(response.error.code, -32603);
+  assert.equal(response.error.message, "DotAIOS request failed safely.");
+  assert.deepEqual(snapshotTree(aiosPath), before);
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("search_aios rejects a session index path that escapes the AIOS root", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const outsidePath = path.join(tempRoot, "outside-session.md");
+  fs.writeFileSync(outsidePath, "# Outside\n\nSESSION_TRAVERSAL_CANARY\n");
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    `${JSON.stringify({
+      session_id: "unsafe-session",
+      captured_at: "2026-08-10T10:00:00.000Z",
+      title: "Unrelated title",
+      agent: "codex",
+      turns: 1,
+      path: "../outside-session.md"
+    })}\n`
+  );
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "SESSION_TRAVERSAL_CANARY", scope: "sessions" }
+    },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(response.error.code, -32603);
+  assert.equal(response.error.message, "DotAIOS request failed safely.");
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("search_aios rejects an absolute session path even when index metadata matches", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const outsidePath = path.join(tempRoot, "absolute-session.md");
+  fs.writeFileSync(outsidePath, "# Outside\n");
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    `${JSON.stringify({
+      session_id: "absolute-session",
+      captured_at: "2026-08-10T10:00:00.000Z",
+      title: "ABSOLUTE_SESSION_PATH_CANARY",
+      agent: "codex",
+      turns: 1,
+      path: outsidePath
+    })}\n`
+  );
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "ABSOLUTE_SESSION_PATH_CANARY", scope: "sessions" }
+    },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(response.error.code, -32603);
+  assert.equal(response.error.message, "DotAIOS request failed safely.");
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("search_aios rejects a session path that leaves the sessions corpus", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nCROSS_SCOPE_SESSION_CANARY\n");
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    `${JSON.stringify({
+      session_id: "cross-scope-session",
+      captured_at: "2026-08-10T10:00:00.000Z",
+      title: "Unrelated title",
+      agent: "codex",
+      turns: 1,
+      path: "context/identity.md"
+    })}\n`
+  );
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "CROSS_SCOPE_SESSION_CANARY", scope: "sessions" }
+    },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(response.error.code, -32603);
+  assert.equal(response.error.message, "DotAIOS request failed safely.");
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("search_aios contains and bounds its authority config", () => {
+  for (const variant of ["linked", "invalid-utf8", "oversized"]) {
+    const { aiosPath, tempRoot } = setupAios();
+    const configPath = path.join(aiosPath, "aios.json");
+    if (variant === "linked") {
+      const outsideConfig = path.join(tempRoot, "outside-aios.json");
+      fs.writeFileSync(outsideConfig, '{"schema_version":"1.2.0"}\n');
+      fs.unlinkSync(configPath);
+      fs.symlinkSync(outsideConfig, configPath);
+    } else if (variant === "invalid-utf8") {
+      fs.writeFileSync(configPath, Buffer.from([0x7b, 0x22, 0x78, 0x22, 0x3a, 0xff, 0x7d]));
+    } else {
+      fs.writeFileSync(configPath, `${JSON.stringify({ schema_version: "1.2.0", padding: "x".repeat(1024 * 1024) })}\n`);
+    }
+    const before = fs.readFileSync(configPath);
+
+    const result = runMcpResult(aiosPath, [{
+      jsonrpc: "2.0",
+      id: variant,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: "missing", scope: "memory" } },
+    }]);
+    const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+    assert.equal(response.error.code, -32603, variant);
+    assert.equal(response.error.message, "DotAIOS request failed safely.", variant);
+    assert.deepEqual(fs.readFileSync(configPath), before, variant);
+    assert.doesNotMatch(
+      `${result.stdout}\n${result.stderr}`,
+      new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      variant
+    );
+  }
+});
+
+test("search_aios authorizes a contained configured external vault", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const vaultPath = path.join(tempRoot, "external-vault");
+  fs.mkdirSync(vaultPath);
+  fs.writeFileSync(path.join(vaultPath, "note.md"), "# External\n\nMCP_EXTERNAL_VAULT_CANARY\n");
+  const configPath = path.join(aiosPath, "aios.json");
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  fs.writeFileSync(configPath, `${JSON.stringify({ ...config, vault_path: vaultPath }, null, 2)}\n`);
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "MCP_EXTERNAL_VAULT_CANARY", scope: "vault" }
+    },
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.equal(payload.results[0].scope, "vault");
+  assert.equal(payload.results[0].file, "note.md");
+  assert.doesNotMatch(JSON.stringify(payload), new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("resolve_skill fails closed on linked skill metadata", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const outsideSkill = path.join(tempRoot, "linked-skill");
+  fs.mkdirSync(outsideSkill);
+  fs.writeFileSync(
+    path.join(outsideSkill, "SKILL.md"),
+    "---\nname: linked-skill\ndescription: LINKED_SKILL_CANARY\ntriggers: LINKED_SKILL_CANARY\n---\n"
+  );
+  fs.symlinkSync(outsideSkill, path.join(aiosPath, "skills", "linked-skill"), "dir");
+
+  const result = runMcpResult(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: { intent: "LINKED_SKILL_CANARY" }
+    },
+  }]);
+  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+
+  assert.equal(response.error.code, -32603);
+  assert.equal(response.error.message, "DotAIOS request failed safely.");
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("resolve_skill bounds the complete serialized response", () => {
+  const { aiosPath } = setupAios();
+  const intent = `plan my day ${"context ".repeat(60)}`.slice(0, 500);
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: { intent, limit: 10, budget: 256 }
+    },
+  }]);
+
+  const text = toolText(response);
+  const payload = JSON.parse(text);
+  assert.ok(text.length <= 256);
+  assert.equal(payload.budget.limit, 256);
+  assert.equal(payload.budget.used, text.length);
+  assert.equal(payload.budget.truncated, true);
+});
+
+test("resolve_skill preserves complete trigger metadata when the response budget allows it", () => {
+  const { aiosPath } = setupAios();
+  const skillDir = path.join(aiosPath, "skills", "many-triggers");
+  const triggers = Array.from({ length: 7 }, (_, index) => `routing phrase ${index + 1}`);
+  fs.mkdirSync(skillDir);
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    [
+      "---",
+      "name: many-triggers",
+      "description: Route MANY_TRIGGER_CANARY.",
+      "triggers:",
+      ...triggers.map((trigger) => `  - ${trigger}`),
+      "---",
+      "# Many triggers",
+      ""
+    ].join("\n")
+  );
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: { intent: "MANY_TRIGGER_CANARY", budget: 32000 }
+    },
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.deepEqual(payload.matches[0].triggers, triggers);
+  assert.equal(payload.budget.truncated, false);
+});
+
+test("resolve_skill reads bounded frontmatter without loading a large skill body", () => {
+  const { aiosPath } = setupAios();
+  const skillDir = path.join(aiosPath, "skills", "metadata-only");
+  fs.mkdirSync(skillDir);
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    `---\nname: metadata-only\ndescription: Route METADATA_ONLY_CANARY.\ntriggers: METADATA_ONLY_CANARY\n---\n\n${"body ".repeat(400_000)}`
+  );
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: { intent: "METADATA_ONLY_CANARY" }
+    },
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.equal(payload.matches[0].name, "metadata-only");
+  assert.equal(payload.matches[0].resource, "skills/metadata-only/SKILL.md");
 });
 
 test("read_working_context rejects oversized project filters before they inflate output", () => {

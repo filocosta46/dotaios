@@ -22,7 +22,7 @@ async function makeTmpDirs() {
   await fs.mkdir(path.join(aiosPath, "skills", "test-skill"), { recursive: true });
   await fs.writeFile(
     path.join(aiosPath, "skills", "test-skill", "SKILL.md"),
-    "# Test Skill\nA test skill.\n"
+    "---\nname: test-skill\ndescription: A test skill.\n---\n\n# Test Skill\n"
   );
   return { base, aiosPath, homePath };
 }

@@ -20,7 +20,7 @@ function run(args, opts = {}) {
   return result;
 }
 
-test("setup/search/capture emit local reliability metrics jsonl", () => {
+test("setup and capture emit metrics while read-only search records nothing", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-reliability-metrics-"));
   const aiosPath = path.join(tempRoot, "aios");
   const processHomePath = path.join(tempRoot, "process-home");
@@ -42,11 +42,8 @@ test("setup/search/capture emit local reliability metrics jsonl", () => {
 
   assert.ok(types.has("install_start"));
   assert.ok(types.has("install_end"));
-  assert.ok(types.has("search_run"));
   assert.ok(types.has("capture_saved"));
-  const searchMetric = lines.find((line) => line.type === "search_run");
-  assert.ok(searchMetric.query_hash, "search metric should store query hash");
-  assert.equal(searchMetric.p_at_5, null);
+  assert.equal(types.has("search_run"), false);
 });
 
 test("setup emits phase start/end events with stable run_id", () => {

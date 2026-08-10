@@ -10,17 +10,17 @@ Updated: 2026-08-10
 
 - Programme worktree: `/Users/filo/Code/dotaios/.worktrees/codex/foundation-reliability`
 - Programme branch: `codex/foundation-reliability`
-- Current implementation checkpoint: `75c28d9` (`docs: refresh foundation continuation checkpoint`)
+- Current committed checkpoint: `f36fa92` (`docs: record exact projection validation`)
 - Canonical projection implementation: `f804957` (`fix: contain canonical working-context reads`)
 - Original base: `origin/main` at `f0d72f7`
 - Protected prelaunch checkout: `/Users/filo/Code/dotaios`, branch `launch/2026-08-08-prelaunch-fixes` at `fa08b69`, clean and untouched
 - Archived iMac head: local ref `refs/archive/imac/2026-08-09-40e4170`
 - Wayfinder map: `docs/foundation-program/wayfinder/map.md`
-- Current frontier: contain and bound the two remaining MCP readers, then make
-  session memory authoritative before aligning replication, onboarding/doctor,
-  host receipts, and exact-artifact release certification. The proposed
-  continuity slice remains separately blocked on the named product-contract
-  approval.
+- Current frontier: make the reviewed Issue 015 working tree durable and obtain
+  its exact-commit iMac receipt, then make session memory authoritative before
+  aligning replication, onboarding/doctor, host receipts, and exact-artifact
+  release certification. The proposed continuity slice remains separately
+  blocked on the named product-contract approval.
 
 ## Completed checkpoint
 
@@ -68,22 +68,45 @@ Updated: 2026-08-10
 - The iMac audit-shell PATH limitation is resolved via `~/.zshenv` as of
   2026-08-09. Node, npm, and Git are available over non-interactive SSH for
   future read-only independent validation.
+- Implemented Issue 015 in the current working tree on top of `f36fa92`.
+  `search_aios` and `resolve_skill` now share a bounded, strict-UTF-8,
+  non-mutating evidence reader; the contained search config authorizes an
+  external vault on the same aggregate ledger; directory enumeration identity
+  is revalidated before and after later file reads; session paths cannot leave
+  `memory/sessions`; and Unicode-safe exact response budgets cover every field.
+- Added traversal, in-bound/outside link, special-file, invalid-UTF-8,
+  final-file and directory replacement, aggregate-byte/file/entry, malformed
+  frontmatter, config authority, external-vault, session cross-scope, and
+  min/default/max plus astral-Unicode response fixtures. Corrupt CLI/MCP search
+  remains byte- and metadata-unchanged and path-free.
+- Applied the original code-review findings and the final adversarial replay.
+  Read-only CLI search and skill lookup no longer launch sync; CLI search
+  contains `aios.json` before authorizing a vault; plain Markdown skills keep
+  their public fallback with strict UTF-8; and ineligible links are ignored
+  without target operations while eligible evidence links fail closed.
+- Local focused validation passes 78/78. Syntax, CLI check, smoke,
+  packed-content dry run, public packed-content policy, and diff checks pass.
+  The complete current suite reports 1,388 pass, zero failures, and one
+  intentional skip.
+- Removed the redundant adjacent `fileStillMatches` check and made the public
+  contract suite tolerate source copies without `.git`, closing both minor
+  independent-observer items.
+- Durability checkpoint: the Issue 015 candidate's final independent diff
+  review is green. Commit this exact tree and obtain its iMac receipt before
+  starting Issue 016.
 
 ## Next unblocked actions
 
-1. Implement issue 015: contain and bound `search_aios` and `resolve_skill`
-   without changing valid ordering or ranking. Issues 013 and 014 are closed
-   against the exact local and independent `f804957` receipt.
-2. Resolve the memory-authority decision and implement issue 016 so session
+1. Stage the explicit Issue 015 paths and create one conventional commit; do
+   not change the green tree before making it durable.
+2. Bundle and validate that exact commit read-only on the iMac, record the full
+   receipt, and close Issue 015 only if the exact commit is green.
+3. Resolve the memory-authority decision and implement issue 016 so session
    Markdown is canonical evidence behind one transactional `SessionStore`.
-3. Implement issue 018's single human-run installation and truthful doctor
+4. Implement issue 018's single human-run installation and truthful doctor
    contract, then align experimental replication posture through issue 017.
-4. Bind host receipts to the immutable candidate artifact (issue 019) and
+5. Bind host receipts to the immutable candidate artifact (issue 019) and
    certify its complete disposable lifecycle without publishing (issue 020).
-5. Remove the redundant adjacent `fileStillMatches` check in
-   `packages/core/src/files.mjs` when next editing that module, and guard the
-   `git` probe in `tests/core/public-contract.test.mjs` so extracted source
-   archives can run the suite without `.git` metadata.
 6. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in
    `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`; then enrich it
    with `ce-plan`, create tracer-bullet tickets, implement the acceptance slice,

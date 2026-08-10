@@ -19,6 +19,11 @@ async function npmPackDryRun() {
 }
 
 test("commercial website source stays outside the public repository", async () => {
+  try {
+    await fs.access(path.join(repoRoot, ".git"));
+  } catch {
+    return;
+  }
   const { stdout } = await run("git", ["-C", repoRoot, "ls-files", "--", "website"]);
   assert.equal(stdout.trim(), "");
 });
