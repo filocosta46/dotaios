@@ -29,6 +29,7 @@ import {
   sourceStateLockPath
 } from "./project-source-state.mjs";
 import {
+  accessReceiptFitsPublicationBound,
   appendAccessReceipt,
   assertAccessReceiptStoreAvailable,
   createAccessReceipt
@@ -482,7 +483,8 @@ export async function retrieveProjectSource(options = {}) {
     const references = await enumerateAndRecheck({
       aiosPath, filesystem, project, source, reader, ...authorization
     });
-    return publishAllowedRetrieval({
+    // Keep result-bound refusals inside this catch while audit failures still rethrow.
+    return await publishAllowedRetrieval({
       homePath, filesystem, project, source, grant, references, task, options
     });
   } catch (error) {
@@ -504,7 +506,7 @@ async function resolveRetrievalProject({ aiosPath, filesystem, evidenceReader, p
 async function authorizeSelectedSource({ filesystem, source, state, stateCoordinates, now }) {
   const { binding, grant } = state;
   validateAuthorization({ source, binding, grant, now: now || (() => new Date()) });
-  const rootBefore = await inspectRootIdentity(binding.root_path, filesystem);
+  const rootBefore = await inspectRetrievalRootIdentity(binding.root_path, filesystem);
   if (!sameRootIdentity(rootBefore, binding.root_identity)) {
     throw sourceError("reconnect-required", "Project source binding changed; reconnect it.");
   }
@@ -521,7 +523,7 @@ async function enumerateAndRecheck({
     filesystem
   });
   const [rootAfter, sourceAfter, stateAfter] = await Promise.all([
-    inspectRootIdentity(binding.root_path, filesystem),
+    inspectRetrievalRootIdentity(binding.root_path, filesystem),
     readSourceDeclaration({ aiosPath, project, evidenceReader: reader }, source.source_id),
     readAuthorizationSnapshot(stateCoordinates)
   ]);
@@ -532,6 +534,14 @@ async function enumerateAndRecheck({
     throw sourceError("authorization-changed", "Project source authorization changed while it was being resolved.");
   }
   return references;
+}
+
+async function inspectRetrievalRootIdentity(rootPath, filesystem) {
+  try {
+    return await inspectRootIdentity(rootPath, filesystem);
+  } catch {
+    throw sourceError("reconnect-required", "Project source binding changed; reconnect it.");
+  }
 }
 
 function retrievalStateUnchanged({ rootBefore, rootAfter, source, sourceAfter, binding, stateAfter }) {
@@ -555,6 +565,9 @@ async function publishAllowedRetrieval({ homePath, filesystem, project, source, 
   });
   const result = allowedResult(receipt);
   if (JSON.stringify(result).length > MAX_RESULT_CHARACTERS) {
+    throw sourceError("result-too-large", "Complete project source results exceed the output bound.");
+  }
+  if (!accessReceiptFitsPublicationBound(receipt)) {
     throw sourceError("result-too-large", "Complete project source results exceed the output bound.");
   }
   await appendAccessReceipt({ homePath, receipt, filesystem });
@@ -793,15 +806,26 @@ async function walkSourceDirectory(context) {
   if (context.depth > MAX_DEPTH) {
     throw sourceError("source-bound-exceeded", "Project source exceeds the traversal bound.");
   }
-  const observed = await readContainedDirectory(context.rootPath, context.directoryPath, {
-    filesystem: context.filesystem,
-    budget: context.budget,
-    maxEntries: MAX_ENTRIES,
-    nameEncoding: "buffer",
-    readdirOptions: { withFileTypes: true },
-    returnSnapshot: true,
-    tooManyCode: "DOTAIOS_PROJECT_SOURCE_BOUND_EXCEEDED"
-  });
+  let observed;
+  try {
+    observed = await readContainedDirectory(context.rootPath, context.directoryPath, {
+      filesystem: context.filesystem,
+      budget: context.budget,
+      maxEntries: MAX_ENTRIES,
+      nameEncoding: "buffer",
+      readdirOptions: { withFileTypes: true },
+      returnSnapshot: true,
+      tooManyCode: "DOTAIOS_PROJECT_SOURCE_BOUND_EXCEEDED"
+    });
+  } catch (error) {
+    if (
+      context.directoryPath === context.rootPath
+      && (error?.code === "EACCES" || error?.code === "EPERM")
+    ) {
+      throw sourceError("reconnect-required", "Project source binding changed; reconnect it.");
+    }
+    throw error;
+  }
   if (observed === null) throw sourceError("source-changed", "Project source changed while it was being resolved.");
   let observation = Object.freeze({
     ...context.observation,
@@ -839,9 +863,17 @@ async function observeSourceEntry(context) {
   if (context.observation.references.length >= MAX_FILES) {
     throw sourceError("source-bound-exceeded", "Project source exceeds the file bound.");
   }
-  const snapshot = await inspectContainedFileMetadata(context.rootPath, absolutePath, {
-    filesystem: context.filesystem
-  });
+  let snapshot;
+  try {
+    snapshot = await inspectContainedFileMetadata(context.rootPath, absolutePath, {
+      filesystem: context.filesystem
+    });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_EVIDENCE_NOT_REGULAR_FILE") {
+      throw sourceError("source-unsafe-entry", "Project source contains an unsafe entry.");
+    }
+    throw error;
+  }
   return Object.freeze({
     ...context.observation,
     files: [...context.observation.files, { path: absolutePath, snapshot }],
@@ -1110,6 +1142,11 @@ function sameRootIdentity(left, right) {
 function stableReason(error) {
   if (error instanceof ProjectSourceError) return error.details.reason || error.code.replace(/^DOTAIOS_/, "").toLowerCase();
   if (error?.code === "DOTAIOS_PROJECT_SOURCE_STATE_INVALID") return "authorization-state-invalid";
+  if (error?.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED") return "source-changed";
+  if (
+    error?.code === "DOTAIOS_PROJECT_SOURCE_BOUND_EXCEEDED"
+    || error?.code === "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED"
+  ) return "source-bound-exceeded";
   if (typeof error?.code === "string" && error.code.startsWith("DOTAIOS_PROJECT_SELECTOR_")) {
     return error.code.replace("DOTAIOS_PROJECT_SELECTOR_", "project-").toLowerCase();
   }

@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  accessReceiptFitsPublicationBound,
   appendAccessReceipt,
   assertAccessReceiptStoreAvailable,
   createAccessReceipt
@@ -198,6 +199,15 @@ test("receipt and ledger byte boundaries fail rather than truncate or rewrite", 
   await t.test("receipt 32001 bytes", () => assertReceiptByteBoundary(32_001, false));
   await t.test("ledger exactly 64 MiB", () => assertLedgerByteBoundary(0, true));
   await t.test("ledger above 64 MiB", () => assertLedgerByteBoundary(1, false));
+});
+
+test("receipt publication preflight shares the canonical schema and newline-inclusive byte bound", () => {
+  assert.equal(accessReceiptFitsPublicationBound(receiptWithExactBytes(32_000)), true);
+  assert.equal(accessReceiptFitsPublicationBound(receiptWithExactBytes(32_001)), false);
+  assert.throws(
+    () => accessReceiptFitsPublicationBound({}),
+    { code: "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED" }
+  );
 });
 
 test("receipt task follows the 500-code-point core contract", async (t) => {

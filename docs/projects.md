@@ -70,6 +70,16 @@ identity. It reads metadata rather than file contents, never copies or edits
 the source, and publishes one machine-local receipt before exposing success.
 The MCP adapter deliberately has no retrieval or consent tool.
 
+The listing is all-or-nothing. A missing, moved, inaccessible, linked, replaced,
+or otherwise unsafe root requires reconnection; an unsafe nested link, hardlink,
+special entry, unsupported raw name, or observed identity change refuses the
+whole result with no partial references. One retrieval may descend at most 16
+levels, observe 4,096 entries and 256 regular files, use source-relative paths
+of at most 1,024 UTF-8 bytes, and serialize at most 32,000 characters. It
+refuses instead of truncating when any independent bound is exceeded. The
+machine-local append-only receipt line must itself fit within 32,000 UTF-8
+bytes; if receipt publication cannot complete, DotAIOS withholds the result.
+
 ## Add a project
 
 Start with a preview:

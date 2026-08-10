@@ -66,9 +66,12 @@ Retrieval opens no source-content bytes and returns no absolute roots or local
 state paths. It emits only complete source-relative metadata after containment
 and identity rechecks, then syncs one guarded append-only receipt before
 returning. Receipt uncertainty poisons later access rather than repairing or
-truncating historical bytes. Node's portable checks detect changes at observed
-boundaries; they are not a claim of native directory-handle-relative race
-immunity.
+truncating historical bytes. Root, directory, and file identities use BigInt
+metadata observations; linked or special entries and every exceeded traversal,
+path, output, or receipt bound fail closed with empty references. Node's
+portable checks detect changes at observed boundaries; they are not a claim of
+native directory-handle-relative race immunity and cannot exclude a hostile
+swap-away-and-restore completed entirely between observations.
 
 ## Optional Connections
 

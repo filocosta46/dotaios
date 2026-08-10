@@ -59,6 +59,19 @@ export function createAccessReceipt({
   });
 }
 
+/** Validate a complete receipt and check its canonical JSONL publication bound without writing. */
+export function accessReceiptFitsPublicationBound(receipt) {
+  let line;
+  try {
+    line = `${JSON.stringify(receipt)}\n`;
+    assertReceiptSchema(JSON.parse(line));
+  } catch (error) {
+    if (error?.code === "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED") throw error;
+    throw auditError();
+  }
+  return Buffer.byteLength(line) <= MAX_RECEIPT_BYTES;
+}
+
 export async function appendAccessReceipt({ homePath, receipt, filesystem = fs } = {}) {
   let publication = null;
   let lock = null;

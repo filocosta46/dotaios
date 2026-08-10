@@ -43,10 +43,12 @@ then participate.
 
 Local-folder retrieval enumerates contained metadata with raw UTF-8 name
 validation, finite depth/entry/file/path/output bounds, identity rechecks, and
-no source-content reads. It records the complete decision in the local guarded
-append-only ledger before returning references. Portable Node containment is
-observation-boundary detection; it does not claim kernel-relative `openat2`
-immunity to an unobservable swap-away-and-restore.
+no source-content reads. Root, directory, and regular-file device/inode
+identities are compared as BigInts at supported observation boundaries. It
+records the complete decision in the local guarded append-only ledger before
+returning references. Portable Node containment is observation-boundary
+detection; it does not claim kernel-relative `openat2` immunity to an
+unobservable swap-away-and-restore.
 
 ## Memory
 

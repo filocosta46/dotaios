@@ -326,7 +326,7 @@ async function inspectContainedDirectorySnapshot(root, directoryPath, options = 
   if (!isPathWithinLexically(root, directoryPath)) throw new ContainedReadError();
   let before;
   try {
-    before = await filesystem.lstat(directoryPath);
+    before = await filesystem.lstat(directoryPath, { bigint: true });
   } catch (error) {
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
       await assertMissingTailContained(root, directoryPath, filesystem);
@@ -339,8 +339,8 @@ async function inspectContainedDirectorySnapshot(root, directoryPath, options = 
   }
   if (!before.isDirectory() || before.isSymbolicLink()) throw new ContainedReadError();
   const ancestors = await inspectContainedAncestors(root, directoryPath, filesystem);
-  const confirmed = await lstatAfterObservation(filesystem, directoryPath);
-  if (!sameFile(before, confirmed)) {
+  const confirmed = await lstatAfterObservation(filesystem, directoryPath, { bigint: true });
+  if (!sameBigIntFile(before, confirmed)) {
     throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
   }
   await assertContainedAncestorsUnchanged(root, directoryPath, filesystem, ancestors);
@@ -441,8 +441,8 @@ function sameAncestorSnapshots(left, right) {
   return left.length === right.length && left.every((entry, index) => (
     entry.path === right[index].path
     && entry.resolvedPath === right[index].resolvedPath
-    && sameFile(entry.stats, right[index].stats)
-    && sameFile(entry.resolvedStats, right[index].resolvedStats)
+    && sameBigIntFile(entry.stats, right[index].stats)
+    && sameBigIntFile(entry.resolvedStats, right[index].resolvedStats)
   ));
 }
 
@@ -450,7 +450,7 @@ function sameDirectorySnapshot(left, right) {
   return Boolean(
     left
     && right
-    && sameFile(left.stats, right.stats)
+    && sameBigIntFile(left.stats, right.stats)
     && sameAncestorSnapshots(left.ancestors, right.ancestors)
   );
 }
@@ -483,9 +483,9 @@ function normalizeFiniteLimit(value) {
   return normalized;
 }
 
-async function lstatAfterObservation(filesystem, targetPath) {
+async function lstatAfterObservation(filesystem, targetPath, options) {
   try {
-    return await filesystem.lstat(targetPath);
+    return await filesystem.lstat(targetPath, options);
   } catch (error) {
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
       throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
