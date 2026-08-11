@@ -168,6 +168,34 @@ test("project search resolves slug and stable id before constructing only that p
   );
 });
 
+test("project search preserves the exact raw project selector", async () => {
+  const root = tmpDir();
+  const projectPath = path.join(root, "projects", "acme-campaign");
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectPath, "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Acme\n\nRAW_SELECTOR_CORE_CANARY\n",
+  );
+
+  const exact = await searchAios({
+    aiosPath: root,
+    query: "RAW_SELECTOR_CORE_CANARY",
+    scope: "projects",
+    projectSelector: "acme-campaign",
+  });
+  assert.match(JSON.stringify(exact), /RAW_SELECTOR_CORE_CANARY/);
+
+  await assert.rejects(
+    () => searchAios({
+      aiosPath: root,
+      query: "RAW_SELECTOR_CORE_CANARY",
+      scope: "projects",
+      projectSelector: " acme-campaign ",
+    }),
+    (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_INVALID",
+  );
+});
+
 test("project search refuses catalog identities outside the selector contract", async (t) => {
   for (const id of ["project acme 001", "project/acme", " project-acme-001 ", "x".repeat(201)]) {
     await t.test(`stable id ${JSON.stringify(id.slice(0, 24))}`, async () => {

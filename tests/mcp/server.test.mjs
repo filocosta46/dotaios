@@ -139,6 +139,64 @@ test("search_aios matches CLI project selection by slug and stable id without wi
   assert.doesNotMatch(JSON.stringify(bySlug), /OTHER_MCP_SEARCH_CANARY|other-client/);
 });
 
+test("search_aios preserves the exact raw project selector like CLI and core search", () => {
+  const { aiosPath } = setupAios();
+  const projectPath = path.join(aiosPath, "projects", "acme-campaign");
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectPath, "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Acme\n\nRAW_SELECTOR_MCP_CANARY\n",
+  );
+
+  const responses = runMcp(aiosPath, [
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "search_aios",
+        arguments: {
+          query: "RAW_SELECTOR_MCP_CANARY",
+          scope: "projects",
+          project: " acme-campaign ",
+          budget: 2000,
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "search_aios",
+        arguments: {
+          query: "RAW_SELECTOR_MCP_CANARY",
+          scope: "projects",
+          project: "acme-campaign",
+          budget: 2000,
+        },
+      },
+    },
+  ]);
+
+  assert.equal(responses[1].error?.code, -32602);
+  assert.match(responses[1].error.message, /safe project slug or stable id/);
+  assert.doesNotMatch(JSON.stringify(responses[1]), /RAW_SELECTOR_MCP_CANARY/);
+  assert.doesNotMatch(JSON.stringify(responses[1]), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  const exact = JSON.parse(toolText(responses[2]));
+  assert.equal(exact.scope_selection.project, "acme-campaign");
+  assert.match(JSON.stringify(exact), /RAW_SELECTOR_MCP_CANARY/);
+
+  const projectSchema = responses[0].result.tools
+    .find((tool) => tool.name === "search_aios")
+    .inputSchema.properties.project;
+  const selectorPattern = new RegExp(projectSchema.pattern, "u");
+  assert.equal(selectorPattern.test("acme-campaign"), true);
+  assert.equal(selectorPattern.test(" acme-campaign "), false);
+});
+
 test("search_aios refuses a selected catalog identity outside the selector contract", () => {
   const { aiosPath } = setupAios();
   const projectPath = path.join(aiosPath, "projects", "acme-campaign");

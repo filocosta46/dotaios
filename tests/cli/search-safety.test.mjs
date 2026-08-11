@@ -98,6 +98,38 @@ test("CLI project search keeps corpus selection separate from session attributio
   }
 });
 
+test("CLI project search preserves the exact raw project selector", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const exact = run([
+      "search", "Launch work",
+      "--scope", "projects",
+      "--project", "acme-campaign",
+      "--path", fixture.aiosPath,
+    ]);
+    assert.match(exact.stdout, /Acme Campaign|Launch work/);
+
+    const padded = spawnSync(process.execPath, [
+      cli,
+      "search",
+      "Launch work",
+      "--scope",
+      "projects",
+      "--project",
+      " acme-campaign ",
+      "--path",
+      fixture.aiosPath,
+    ], { cwd: repoRoot, encoding: "utf8" });
+
+    assert.equal(padded.status, 1);
+    assert.match(padded.stderr, /safe project slug or stable id/);
+    assert.doesNotMatch(`${padded.stdout}\n${padded.stderr}`, /OTHER_CLIENT_PRIVATE_CANARY|Launch work/);
+    assert.doesNotMatch(`${padded.stdout}\n${padded.stderr}`, escaped(fixture.aiosPath));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("CLI project search refuses a selector shared by a slug and another stable id", () => {
   const fixture = createProjectSourceRetrievalFixture();
   try {

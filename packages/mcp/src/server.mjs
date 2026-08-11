@@ -203,7 +203,9 @@ class DotaiosMcpServer {
 
   async searchAios(args) {
     const query = requireString(args.query, "query", 500);
-    const project = optionalString(args.project, "project", 200);
+    const project = args.project === undefined
+      ? undefined
+      : requireString(args.project, "project", 200);
     const limit = args.limit === undefined ? 10 : boundedInteger(args.limit, "limit", 1, 20);
     const budget = args.budget === undefined
       ? DEFAULT_RESULT_BUDGET
@@ -301,7 +303,7 @@ function tools() {
             type: "string",
             minLength: 1,
             maxLength: 200,
-            pattern: "^[^\\u0000-\\u001F\\u007F-\\u009F/\\\\]+$",
+            pattern: "^[^\\s\\u0000-\\u001F\\u007F-\\u009F/\\\\]+$",
             description: "Optional canonical project slug or stable id. Required for project-only scope."
           },
           limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
