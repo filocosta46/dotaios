@@ -6,6 +6,13 @@ import { resolvePortableProjectIdentity, validateProjectSelector } from "./proje
 export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "decisions", "skills", "references", "plugins", "sessions", "all"];
 
 const DEFAULT_LIMIT = 20;
+
+// memory/ holds two corpora, not one. events.jsonl and signals/ are append-only
+// streams; daily/ and inbox/ are Markdown notes a human wrote. Both are "my
+// memory" to the person asking, so a memory search has to read both. Missing
+// directories yield no files, so listing them here is safe on a fresh AIOS.
+const MEMORY_NOTE_DIRS = ["daily", "inbox"];
+
 const SKIP_DIR_NAMES = new Set([".git", "node_modules", ".obsidian", ".trash"]);
 const SECRET_FILE_PATTERNS = [
   /^\.env(?:\.|$)/,
@@ -165,11 +172,17 @@ async function searchScope(scope, {
     return searchSessionsScope(aiosPath, query, { limit, reader, ...sessionFilters });
   }
   if (scope === "memory") {
-    return searchMemoryDir(path.join(aiosPath, "memory"), query, {
-      limit,
-      reader,
-      root: aiosPath
-    });
+    const memoryDir = path.join(aiosPath, "memory");
+    const [entries, ...notes] = await Promise.all([
+      searchMemoryDir(memoryDir, query, { limit, reader, root: aiosPath }),
+      ...MEMORY_NOTE_DIRS.map((relative) => searchMarkdownDir(path.join(memoryDir, relative), query, {
+        limit,
+        sourcePrefix: `memory/${relative}`,
+        reader,
+        root: aiosPath
+      }))
+    ]);
+    return [...entries, ...notes.flat()].slice(0, limit);
   }
   if (scope === "context") {
     return searchMarkdownDir(path.join(aiosPath, "context"), query, {
