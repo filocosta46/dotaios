@@ -478,10 +478,24 @@ export async function resolvePortableProjectIdentity({
   }
   const resolvedAiosPath = path.resolve(aiosPath);
   const projectsPath = path.join(resolvedAiosPath, "projects");
+  const directIdentity = isProjectSlug(selector)
+    ? await readPortableProjectIdentity(
+      resolvedAiosPath,
+      path.join(projectsPath, selector),
+      evidenceReader,
+      { strict: true }
+    )
+    : null;
+  if (directIdentity) return directIdentity;
   const projectDirectories = await evidenceReader.listDirectories(resolvedAiosPath, projectsPath);
   let matches = [];
   for (const projectDirectory of projectDirectories) {
-    const identity = await readPortableProjectIdentity(resolvedAiosPath, projectDirectory, evidenceReader);
+    const identity = await readPortableProjectIdentity(
+      resolvedAiosPath,
+      projectDirectory,
+      evidenceReader,
+      { strict: false }
+    );
     if (identity && (selector === identity.slug || selector === identity.id)) {
       matches = [...matches, identity];
     }
@@ -496,30 +510,57 @@ export async function resolvePortableProjectIdentity({
   return matches[0];
 }
 
-async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceReader) {
+function isProjectSlug(value) {
+  try {
+    validateSlug(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceReader, { strict } = {}) {
   const slug = path.basename(projectDirectory);
   try {
     validateSlug(slug);
   } catch {
+    if (!strict) return null;
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project catalog contains an invalid slug");
   }
-  const frontmatter = await evidenceReader.readFrontmatter(
-    aiosPath,
-    path.join(projectDirectory, "README.md"),
-    { maxBytes: 16 * 1024, maxFileBytes: 1024 * 1024 }
-  );
+  let frontmatter;
+  try {
+    frontmatter = await evidenceReader.readFrontmatter(
+      aiosPath,
+      path.join(projectDirectory, "README.md"),
+      {
+        maxBytes: 16 * 1024,
+        maxFileBytes: 1024 * 1024,
+        allowMissing: !strict,
+        stopOnMissingFrontmatter: true
+      }
+    );
+  } catch (error) {
+    if (!strict && error?.code === "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID") return null;
+    if (strict && error?.code === "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID") {
+      throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
+    }
+    throw error;
+  }
   if (frontmatter === null) return null;
   const match = FRONTMATTER_RE.exec(frontmatter);
   if (!match) {
+    if (!strict) return null;
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
   }
   const document = parseDocument(match[1], { strict: true, uniqueKeys: true });
   if (document.errors.length > 0) {
+    if (!strict) return null;
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
   }
   const metadata = document.toJS();
   const id = readOptionalString(metadata?.id) || readOptionalString(metadata?.project_id);
   if (!id) {
+    if (!strict) return null;
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity requires a stable id");
   }
   return Object.freeze({ id, slug });

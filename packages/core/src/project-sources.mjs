@@ -42,6 +42,8 @@ const MAX_ENTRIES = 4096;
 const MAX_FILES = 256;
 const MAX_PATH_BYTES = 1024;
 const MAX_RESULT_CHARACTERS = 32_000;
+const MAX_SOURCE_DECLARATIONS = 32;
+const MAX_SOURCE_DECLARATION_BYTES = 64 * 1024;
 const SOURCE_VERSION = 1;
 const SOURCE_LOCK_FORMAT = "dotaios-project-source-lock/v1";
 const MATCH_TIERS = { partial: 1, terms: 2, phrase: 3 };
@@ -80,6 +82,165 @@ export async function addProjectSource(options = {}) {
       filesystem: options.filesystem || fs
     });
     return publicMutationResult(current, { applied: true, binding_generation: binding.generation });
+  });
+}
+
+export async function connectProjectSource(options = {}) {
+  const expiresAt = validateFutureUtc(options.expiresAt, options.now || (() => new Date()));
+  let plan = await planProjectSourceConnect({ ...options, expiresAt });
+  if (options.yes !== true) return publicConnectionResult(plan);
+
+  if (plan.add_plan) {
+    await addProjectSource({
+      ...options,
+      operationId: plan.add_plan.operation_id,
+      planFingerprint: plan.add_plan.plan_fingerprint,
+      apply: true
+    });
+    plan = await planProjectSourceConnect({ ...options, expiresAt });
+  }
+
+  if (plan.grant) {
+    return publicConnectionResult(plan, { applied: true, idempotent: true, grant: plan.grant });
+  }
+
+  const grantOptions = {
+    ...options,
+    sourceId: plan.source_id,
+    purpose: plan.purpose,
+    expiresAt: plan.expires_at
+  };
+  const grantPlan = await grantProjectSource(grantOptions);
+  const grant = await grantProjectSource({
+    ...grantOptions,
+    operationId: grantPlan.operation_id,
+    planFingerprint: grantPlan.plan_fingerprint,
+    apply: true
+  });
+  const completed = await planProjectSourceConnect({ ...options, expiresAt });
+  return publicConnectionResult(completed, {
+    applied: true,
+    idempotent: false,
+    grant: {
+      grant_id: grant.grant_id,
+      approved_at: grant.approved_at
+    }
+  });
+}
+
+async function planProjectSourceConnect(options) {
+  let addPlan = null;
+  try {
+    addPlan = await planProjectSourceAdd(options);
+  } catch (error) {
+    if (
+      !(error instanceof ProjectSourceError)
+      || !["source-already-exists", "source-binding-exists"].includes(error.details?.reason)
+    ) {
+      throw error;
+    }
+  }
+  if (addPlan) {
+    return Object.freeze({
+      project_id: addPlan.project_id,
+      project: addPlan.project,
+      source_id: addPlan.source_id,
+      label: addPlan.label,
+      purpose: addPlan.purpose,
+      expires_at: options.expiresAt,
+      machine_local: addPlan.machine_local,
+      portable_path: addPlan.portable_path,
+      add_plan: addPlan,
+      grant: null
+    });
+  }
+
+  const sourceId = validateSourceId(options.sourceId);
+  const context = await sourceContext(options);
+  const label = validateBoundedText(options.label, "label", 200);
+  const purpose = validateBoundedText(options.purpose, "purpose", 500);
+  const root = await inspectSourceRoot(options.folder, context, options.filesystem || fs);
+  const source = await readSourceDeclaration(context, sourceId);
+  const state = await readProjectSourceState({
+    homePath: context.homePath,
+    projectId: context.project.id,
+    sourceId,
+    filesystem: options.filesystem || fs
+  });
+  if (
+    source.label !== label
+    || source.purpose !== purpose
+    || !matchingConnectBinding(state.binding, root)
+  ) {
+    throw sourceError("connection-mismatch", "Existing project source state does not match this connection.");
+  }
+  if (state.grant && !matchingConnectGrant({
+    grant: state.grant,
+    source,
+    binding: state.binding,
+    expiresAt: options.expiresAt,
+    now: options.now || (() => new Date())
+  })) {
+    throw sourceError("connection-mismatch", "Existing project source grant does not match this connection.");
+  }
+  return Object.freeze({
+    project_id: context.project.id,
+    project: context.project.slug,
+    source_id: sourceId,
+    label,
+    purpose,
+    expires_at: options.expiresAt,
+    machine_local: Object.freeze({ root: root.path }),
+    portable_path: path.posix.join("projects", context.project.slug, "sources", `${sourceId}.md`),
+    add_plan: null,
+    grant: state.grant
+  });
+}
+
+function matchingConnectBinding(binding, root) {
+  return Boolean(
+    binding
+    && binding.portable_published === true
+    && binding.root_path === root.path
+    && sameRootIdentity(binding.root_identity, root.identity)
+  );
+}
+
+function matchingConnectGrant({ grant, source, binding, expiresAt, now }) {
+  const approvedAt = Date.parse(grant.approved_at);
+  const expiry = Date.parse(grant.expires_at);
+  const evaluatedAt = now().getTime();
+  return grant.scope === "read"
+    && grant.purpose === source.purpose
+    && grant.expires_at === expiresAt
+    && grant.revoked_at === null
+    && grant.source_revision === source.revision
+    && grant.binding_generation === binding.generation
+    && stableJson(grant.root_identity) === stableJson(binding.root_identity)
+    && Number.isFinite(approvedAt)
+    && Number.isFinite(expiry)
+    && approvedAt <= evaluatedAt
+    && expiry > evaluatedAt;
+}
+
+function publicConnectionResult(plan, { applied = false, idempotent = false, grant = null } = {}) {
+  return Object.freeze({
+    version: 1,
+    operation: "connect",
+    applied,
+    idempotent,
+    project_id: plan.project_id,
+    project: plan.project,
+    source_id: plan.source_id,
+    label: plan.label,
+    scope: "read",
+    purpose: plan.purpose,
+    approval_timing: "when --yes confirms this exact connection",
+    approved_at: grant?.approved_at || null,
+    expires_at: plan.expires_at,
+    grant_id: grant?.grant_id || null,
+    portable_path: plan.portable_path,
+    machine_local: plan.machine_local
   });
 }
 
@@ -431,6 +592,7 @@ function createGrantPlan({
     project_id: context.project.id,
     project: context.project.slug,
     source_id: sourceId,
+    label: source.label,
     purpose,
     scope: "read",
     approved_at: null,
@@ -448,6 +610,7 @@ export async function retrieveProjectSource(options = {}) {
   const homePath = path.resolve(options.homePath);
   const aiosPath = path.resolve(options.aiosPath);
   const filesystem = options.filesystem || fs;
+  await assertIndependentProjectSourceState(aiosPath, homePath, filesystem);
   let known = { projectId: null, project: null, sourceId: null, grant: null };
   if (options.projectSelector !== undefined && options.projectSelector !== null) {
     validateProjectSelector(options.projectSelector);
@@ -616,6 +779,7 @@ async function sourceContext(options) {
   const aiosPath = path.resolve(options.aiosPath);
   const homePath = path.resolve(options.homePath);
   const filesystem = options.filesystem || fs;
+  await assertIndependentProjectSourceState(aiosPath, homePath, filesystem);
   const evidenceReader = options.evidenceReader || createEvidenceReader({ roots: [aiosPath], filesystem });
   const project = await resolvePortableProjectIdentity({
     aiosPath,
@@ -623,6 +787,37 @@ async function sourceContext(options) {
     evidenceReader
   });
   return { aiosPath, homePath, filesystem, evidenceReader, project };
+}
+
+async function assertIndependentProjectSourceState(aiosPath, homePath, filesystem) {
+  const stateRoot = projectSourceStatePaths(homePath).root;
+  const [canonicalAios, canonicalStateRoot] = await Promise.all([
+    canonicalPathFromExistingAncestor(aiosPath, filesystem),
+    canonicalPathFromExistingAncestor(stateRoot, filesystem)
+  ]);
+  if (pathsOverlap(canonicalAios, canonicalStateRoot)) {
+    throw sourceError(
+      "state-root-overlap",
+      "Machine-local project source state must remain outside the portable AIOS."
+    );
+  }
+}
+
+async function canonicalPathFromExistingAncestor(candidate, filesystem) {
+  let ancestor = path.resolve(candidate);
+  const missingSegments = [];
+  while (true) {
+    try {
+      const canonicalAncestor = await filesystem.realpath(ancestor);
+      return path.join(canonicalAncestor, ...missingSegments);
+    } catch (error) {
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) return path.resolve(candidate);
+      missingSegments.unshift(path.basename(ancestor));
+      ancestor = parent;
+    }
+  }
 }
 
 function readCoordinateState(context, sourceId, filesystem) {
@@ -647,8 +842,11 @@ async function inspectSourceRoot(folder, context, filesystem) {
   } catch {
     throw sourceError("root-invalid", "The local source folder is unavailable.");
   }
-  const stateRoot = projectSourceStatePaths(context.homePath).root;
-  if (pathsOverlap(canonicalRoot, canonicalAios) || pathsOverlap(canonicalRoot, stateRoot)) {
+  const canonicalStateRoot = await canonicalPathFromExistingAncestor(
+    projectSourceStatePaths(context.homePath).root,
+    filesystem,
+  );
+  if (pathsOverlap(canonicalRoot, canonicalAios) || pathsOverlap(canonicalRoot, canonicalStateRoot)) {
     throw sourceError("root-overlap", "The local source folder overlaps protected DotAIOS state.");
   }
   return { path: canonicalRoot, identity: await inspectRootIdentity(canonicalRoot, filesystem) };
@@ -667,11 +865,32 @@ async function inspectRootIdentity(rootPath, filesystem) {
 
 async function selectSource({ aiosPath, project, task, evidenceReader }) {
   const sourcesPath = path.join(aiosPath, "projects", project.slug, "sources");
-  const entries = await evidenceReader.listDirectory(aiosPath, sourcesPath, { maxEntries: 256 });
+  let entries;
+  try {
+    entries = await evidenceReader.listDirectory(aiosPath, sourcesPath, {
+      maxEntries: MAX_SOURCE_DECLARATIONS,
+    });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE") {
+      throw sourceError(
+        "source-declaration-bound-exceeded",
+        "Project source declarations exceed the bounded catalog size.",
+      );
+    }
+    throw error;
+  }
+  const declarationEntries = entries.filter((entry) => path.extname(entry.name) === ".md");
+  if (declarationEntries.length > MAX_SOURCE_DECLARATIONS) {
+    throw sourceError(
+      "source-declaration-bound-exceeded",
+      "Project source declarations exceed the bounded catalog size."
+    );
+  }
   let candidates = [];
-  for (const entry of entries) {
-    if (entry.isSymbolicLink()) throw sourceError("source-declaration-invalid", "Project source declaration is invalid.");
-    if (!entry.isFile() || path.extname(entry.name) !== ".md") continue;
+  for (const entry of declarationEntries) {
+    if (entry.isSymbolicLink() || !entry.isFile()) {
+      throw sourceError("source-declaration-invalid", "Project source declaration is invalid.");
+    }
     const sourceId = validateSourceId(path.basename(entry.name, ".md"));
     const source = await readSourceDeclaration({ aiosPath, project, evidenceReader }, sourceId);
     const match = matchQuery(`${source.label}\n${source.purpose}`, task);
@@ -695,17 +914,28 @@ async function selectSource({ aiosPath, project, task, evidenceReader }) {
 
 async function readSourceDeclaration(context, sourceId) {
   const filePath = sourceDeclarationPath(context.aiosPath, context.project.slug, sourceId);
-  const frontmatter = await context.evidenceReader.readFrontmatter(context.aiosPath, filePath, {
-    maxBytes: 16 * 1024,
-    maxFileBytes: 64 * 1024
-  });
-  if (frontmatter === null) throw sourceError("source-missing", "Project source declaration is missing.");
-  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(frontmatter);
+  let declaration;
+  try {
+    declaration = await context.evidenceReader.readText(context.aiosPath, filePath, {
+      maxBytes: MAX_SOURCE_DECLARATION_BYTES
+    });
+  } catch (error) {
+    if (String(error?.code || "").startsWith("DOTAIOS_EVIDENCE_")) {
+      throw sourceError("source-declaration-invalid", "Project source declaration is invalid.");
+    }
+    throw error;
+  }
+  if (declaration === null) throw sourceError("source-missing", "Project source declaration is missing.");
+  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n)?$/.exec(declaration);
   if (!match) throw sourceError("source-declaration-invalid", "Project source declaration is invalid.");
   const document = parseDocument(match[1], { strict: true, uniqueKeys: true });
   if (document.errors.length > 0) throw sourceError("source-declaration-invalid", "Project source declaration is invalid.");
   const value = document.toJS();
   if (
+    !exactFields(value, [
+      "version", "project_id", "project", "source_id", "label", "type", "purpose", "revision"
+    ])
+    ||
     value?.version !== SOURCE_VERSION
     || value?.project_id !== context.project.id
     || value?.project !== context.project.slug
@@ -726,6 +956,16 @@ async function readSourceDeclaration(context, sourceId) {
     purpose: validateBoundedText(value.purpose, "purpose", 500),
     revision: value.revision
   });
+}
+
+function exactFields(value, expected) {
+  return Boolean(
+    value
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length === expected.length
+    && Object.keys(value).every((field) => expected.includes(field))
+  );
 }
 
 function validateAuthorization({ source, binding, grant, now }) {
@@ -925,7 +1165,7 @@ function renderSourceDeclaration({ projectId, project, sourceId, label, purpose,
 async function publishPortableSource(plan, filesystem) {
   const destination = sourceDeclarationPath(plan.aios_path, plan.project, plan.source_id);
   const directory = path.dirname(destination);
-  await filesystem.mkdir(directory, { recursive: true });
+  await assertPortableSourceDirectory(plan, directory, filesystem);
   const existing = await lstatIfPresent(filesystem, destination);
   if (existing) throw sourceError("stale-plan", "Project source apply plan is stale.");
   const temporary = path.join(directory, `.${plan.source_id}.${plan.operation_id}.tmp`);
@@ -946,6 +1186,28 @@ async function publishPortableSource(plan, filesystem) {
     }
   } finally {
     await filesystem.rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+async function assertPortableSourceDirectory(plan, directory, filesystem) {
+  await filesystem.mkdir(directory, { recursive: true });
+  try {
+    const [stats, canonicalAios, canonicalDirectory] = await Promise.all([
+      filesystem.lstat(directory),
+      filesystem.realpath(plan.aios_path),
+      filesystem.realpath(directory),
+    ]);
+    const expectedDirectory = path.join(canonicalAios, "projects", plan.project, "sources");
+    if (
+      !stats.isDirectory()
+      || stats.isSymbolicLink()
+      || path.resolve(canonicalDirectory) !== path.resolve(expectedDirectory)
+    ) {
+      throw sourceError("stale-plan", "Project source apply plan is stale.");
+    }
+  } catch (error) {
+    if (error instanceof ProjectSourceError) throw error;
+    throw sourceError("stale-plan", "Project source apply plan is stale.");
   }
 }
 

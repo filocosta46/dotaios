@@ -20,7 +20,26 @@ project at `projects/<slug>/sources/<source-id>.md`; the absolute binding,
 finite grant, and access receipts remain beneath
 `~/.dotaios/project-sources/` on this machine.
 
-Registering a source is preview-first:
+The guided form is `dotaios project source connect <project> <folder>`. It
+previews the folder binding and complete finite read consent together:
+
+```bash
+dotaios project source connect acme-campaign /path/to/assets \
+  --source-id campaign-assets \
+  --label "Campaign assets" \
+  --purpose "Launch campaign assets" \
+  --expires-at 2099-01-01T00:00:00.000Z \
+  --json
+```
+
+The preview writes nothing and names the project, source, read scope, exact
+purpose, approval timing, and UTC expiry. Re-run the same values with `--yes`
+to connect and grant access without copying operation IDs or fingerprints. An
+exact rerun is idempotent; a matching source whose grant was not completed can
+resume, while mismatched or unowned existing state refuses.
+
+The lower-level `add`, `bind`, `grant`, and `revoke` commands remain available
+for scripts and recovery. They keep their exact preview/apply proof contract:
 
 ```bash
 dotaios project source add acme-campaign /path/to/assets \
@@ -28,14 +47,7 @@ dotaios project source add acme-campaign /path/to/assets \
   --label "Campaign assets" \
   --purpose "Launch campaign assets" \
   --json
-```
 
-The preview writes nothing and returns `operation_id` and
-`plan_fingerprint`. Apply only that exact plan by repeating the command with
-both values and `--apply`. Grant read access the same way with an explicit
-future UTC expiry:
-
-```bash
 dotaios project source grant acme-campaign campaign-assets \
   --purpose "Launch campaign assets" \
   --expires-at 2099-01-01T00:00:00.000Z \
@@ -79,6 +91,11 @@ of at most 1,024 UTF-8 bytes, and serialize at most 32,000 characters. It
 refuses instead of truncating when any independent bound is exceeded. The
 machine-local append-only receipt line must itself fit within 32,000 UTF-8
 bytes; if receipt publication cannot complete, DotAIOS withholds the result.
+
+For search, `--project` selects the portable project corpus by slug or stable
+ID. `--session-project` filters session tags only. Older commands that used
+`--project` as a session attribution filter should migrate to
+`--session-project`.
 
 ## Add a project
 

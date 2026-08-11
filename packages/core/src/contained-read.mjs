@@ -217,7 +217,11 @@ export async function readContainedFile(root, filePath, options = {}) {
           : Math.min(opened.size, prefixBytes);
       options.budget?.reserveFile(reservedBytes);
       const bytes = options.frontmatterOnly === true
-        ? await readHandleFrontmatter(handle, prefixBytes ?? opened.size)
+        ? await readHandleFrontmatter(
+          handle,
+          prefixBytes ?? opened.size,
+          options.stopOnMissingFrontmatter === true
+        )
         : prefixBytes !== null
           ? await readHandlePrefix(handle, prefixBytes, opened.size)
         : Number.isFinite(options.maxBytes)
@@ -539,7 +543,7 @@ async function readHandlePrefix(handle, maximumBytes, expectedBytes = null) {
   return Buffer.concat(chunks, total);
 }
 
-async function readHandleFrontmatter(handle, maximumBytes) {
+async function readHandleFrontmatter(handle, maximumBytes, stopOnMissingFrontmatter = false) {
   if (typeof handle.read !== "function") {
     throw new ContainedReadError("DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE");
   }
@@ -550,6 +554,7 @@ async function readHandleFrontmatter(handle, maximumBytes) {
     const { bytesRead } = await handle.read(singleByte, 0, 1, null);
     if (bytesRead === 0) break;
     bytes += String.fromCharCode(singleByte[0]);
+    if (stopOnMissingFrontmatter && !frontmatterOpeningPossible(bytes)) break;
     if (bytes.length >= 5) {
       const opening = bytes.charCodeAt(3) === 0x0a
         || (bytes.charCodeAt(3) === 0x0d && bytes.charCodeAt(4) === 0x0a);
@@ -562,6 +567,12 @@ async function readHandleFrontmatter(handle, maximumBytes) {
     }
   }
   return Buffer.from(bytes, "latin1");
+}
+
+function frontmatterOpeningPossible(value) {
+  if (value.startsWith("---\n") || value.startsWith("---\r\n")) return true;
+  if (value.length > 5) return true;
+  return "---\n".startsWith(value) || "---\r\n".startsWith(value);
 }
 
 function endsWithBytes(value, suffix) {

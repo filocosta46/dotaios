@@ -21,7 +21,12 @@ const HELP_TEXT = `Usage:
   dotaios project resolve <slug-or-id> [options]
   dotaios project doctor [options]
   dotaios project context <slug-or-id> [options]
-  dotaios project source <add|bind|grant|retrieve> [options]
+  dotaios project source add <project> <folder> [options]
+  dotaios project source bind <project> <source-id> <folder> [options]
+  dotaios project source grant <project> <source-id> [options]
+  dotaios project source revoke <project> <source-id> [options]
+  dotaios project source retrieve [project] --task <text>
+  dotaios project source connect <project> <folder> [options]
 
 Keep portable project metadata under projects/<slug>/README.md. Existing
 external repositories stay where they are; restored repositories use the
@@ -59,13 +64,12 @@ Common options:
 
 export async function projectCommand(args = [], dependencies = {}) {
   const output = dependencies.output || console;
+  if (args[0] === "source") {
+    return projectSourceCommand(args.slice(1), dependencies);
+  }
   if (hasHelpFlag(args)) {
     output.log(HELP_TEXT);
     return;
-  }
-
-  if (args[0] === "source") {
-    return projectSourceCommand(args.slice(1), dependencies);
   }
 
   const { subcommand, positionals, options, addOptions } = parseOptions(args);

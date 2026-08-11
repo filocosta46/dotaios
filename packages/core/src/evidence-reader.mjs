@@ -121,6 +121,7 @@ function createEvidenceReaderView(roots, state) {
         budget,
         prefixBytes: options.maxBytes ?? 64 * 1024,
         frontmatterOnly: true,
+        stopOnMissingFrontmatter: options.stopOnMissingFrontmatter === true,
         maxSourceBytes: options.maxFileBytes ?? effectiveLimits.maxFileBytes,
         reserveSourceBytes: true,
         tooLargeCode: "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",

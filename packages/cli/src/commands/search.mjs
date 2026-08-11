@@ -157,6 +157,8 @@ Options:
   --since <n>d     Filter sessions by age (e.g. 7d, 30d, 2w)
   --limit <n>      Max results per scope (default: 20)
   --path <dir>     Use an AIOS folder other than ~/aios
+
+Use --project to select a portable project corpus; use --session-project only to filter session tags.
 `);
 }
 

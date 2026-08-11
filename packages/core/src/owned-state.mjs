@@ -2,24 +2,26 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-export async function ensureOwnedDirectory(directoryPath, {
+export async function ensureOwnedDirectory(directory, {
   filesystem = fs,
   mode = 0o700
 } = {}) {
+  const { directoryPath, sharedParent } = ownedDirectoryPolicy(directory);
   try {
-    await filesystem.mkdir(directoryPath, { mode });
+    await filesystem.mkdir(directoryPath, { mode, recursive: true });
   } catch (error) {
     if (error?.code !== "EEXIST") throw ownedStateError();
   }
   const stats = await filesystem.lstat(directoryPath).catch(() => null);
-  assertOwnedDirectoryStats(stats, mode);
+  assertOwnedDirectoryStats(stats, mode, sharedParent);
   return directoryPath;
 }
 
-export async function validateOwnedDirectoryIfPresent(directoryPath, {
+export async function validateOwnedDirectoryIfPresent(directory, {
   filesystem = fs,
   mode = 0o700
 } = {}) {
+  const { directoryPath, sharedParent } = ownedDirectoryPolicy(directory);
   let stats;
   try {
     stats = await filesystem.lstat(directoryPath);
@@ -27,7 +29,7 @@ export async function validateOwnedDirectoryIfPresent(directoryPath, {
     if (error?.code === "ENOENT") return false;
     throw ownedStateError();
   }
-  assertOwnedDirectoryStats(stats, mode);
+  assertOwnedDirectoryStats(stats, mode, sharedParent);
   return true;
 }
 
@@ -104,10 +106,27 @@ export function ownedStateError() {
   return error;
 }
 
-function assertOwnedDirectoryStats(stats, mode) {
+function assertOwnedDirectoryStats(stats, mode, sharedParent = false) {
   if (!stats || !stats.isDirectory() || stats.isSymbolicLink()) throw ownedStateError();
   if (process.platform === "win32") return;
-  if (stats.uid !== currentUid() || (stats.mode & 0o777) !== mode) throw ownedStateError();
+  const permissions = stats.mode & 0o777;
+  if (stats.uid !== currentUid()) throw ownedStateError();
+  if (sharedParent) {
+    if ((permissions & 0o700) !== 0o700 || (permissions & 0o022) !== 0) throw ownedStateError();
+    return;
+  }
+  if (permissions !== mode) throw ownedStateError();
+}
+
+function ownedDirectoryPolicy(directory) {
+  if (typeof directory === "string") return { directoryPath: directory, sharedParent: false };
+  if (
+    !directory
+    || typeof directory.path !== "string"
+    || directory.sharedParent !== true
+    || Object.keys(directory).some((key) => !["path", "sharedParent"].includes(key))
+  ) throw ownedStateError();
+  return { directoryPath: directory.path, sharedParent: true };
 }
 
 function currentUid() {

@@ -138,6 +138,6 @@ function resolveCommand(module, commandName) {
 }
 
 main(process.argv).catch((error) => {
-  console.error(error.message);
+  if (error?.dotaiosCliReported !== true) console.error(error.message);
   process.exitCode = 1;
 });

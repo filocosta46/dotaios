@@ -33,7 +33,11 @@ export function projectSourceStatePaths(homePath, projectId = null, sourceId = n
 export function projectSourceOwnedDirectories(homePath, leaf = null) {
   const dotaios = path.join(path.resolve(homePath), ".dotaios");
   const root = path.join(dotaios, "project-sources");
-  return Object.freeze([dotaios, root, ...(leaf ? [path.join(root, leaf)] : [])]);
+  return Object.freeze([
+    Object.freeze({ path: dotaios, sharedParent: true }),
+    root,
+    ...(leaf ? [path.join(root, leaf)] : []),
+  ]);
 }
 
 export function projectSourceCoordinate(projectId, sourceId) {
@@ -579,7 +583,11 @@ async function validateOwnedRecordDirectory(filePath, filesystem) {
 function ownedDirectoriesForRecord(filePath) {
   const recordDirectory = path.dirname(filePath);
   const root = path.dirname(recordDirectory);
-  return [path.dirname(root), root, recordDirectory];
+  return [
+    Object.freeze({ path: path.dirname(root), sharedParent: true }),
+    root,
+    recordDirectory,
+  ];
 }
 
 async function ownedFileExists(filePath, filesystem) {

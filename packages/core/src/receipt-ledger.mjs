@@ -24,6 +24,9 @@ import {
 const MAX_RECEIPT_BYTES = 32_000;
 const MAX_LEDGER_BYTES = 64 * 1024 * 1024;
 const LOCK_FORMAT = "dotaios-project-source-receipt-lock/v1";
+const RECEIPT_LOCK_ATTEMPTS = 200;
+const RECEIPT_LOCK_RETRY_MS = 5;
+const receiptQueues = new Map();
 
 export function createAccessReceipt({
   decision,
@@ -73,6 +76,21 @@ export function accessReceiptFitsPublicationBound(receipt) {
 }
 
 export async function appendAccessReceipt({ homePath, receipt, filesystem = fs } = {}) {
+  const queueKey = path.resolve(homePath);
+  const previous = receiptQueues.get(queueKey) || Promise.resolve();
+  let releaseQueue;
+  const current = new Promise((resolve) => { releaseQueue = resolve; });
+  receiptQueues.set(queueKey, current);
+  await previous;
+  try {
+    return await appendAccessReceiptOwned({ homePath, receipt, filesystem });
+  } finally {
+    releaseQueue();
+    if (receiptQueues.get(queueKey) === current) receiptQueues.delete(queueKey);
+  }
+}
+
+async function appendAccessReceiptOwned({ homePath, receipt, filesystem }) {
   let publication = null;
   let lock = null;
   let outcome = null;
@@ -80,14 +98,7 @@ export async function appendAccessReceipt({ homePath, receipt, filesystem = fs }
     publication = receiptPublication(homePath, receipt);
     assertReceiptLineValid(publication.line);
     await prepareStateRoot(publication.ownedDirectories, filesystem);
-    lock = await acquireOperationLock(publication.lockPath, {
-      filesystem,
-      format: LOCK_FORMAT,
-      ownsParent: false,
-      strictOwnedState: true,
-      ownedDirectories: publication.ownedDirectories
-    });
-    if (!lock) throw auditError();
+    lock = await acquireReceiptLock(publication, filesystem);
     outcome = await publishReceiptUnderLock(publication, filesystem);
     if (!outcome.ok) throw outcome.error;
     return receipt;
@@ -114,12 +125,36 @@ export async function assertAccessReceiptStoreAvailable({ homePath, filesystem =
       format: LOCK_FORMAT,
       strictOwnedState: true
     });
-    if (lock.exists && (lock.ownerAlive || lock.record.poisoned === true)) throw auditError();
+    if (lock.exists && lock.record.poisoned === true) throw auditError();
+    if (lock.exists && lock.ownerAlive) return;
     await assertLedgerHealthy({ ...publication, filesystem });
   } catch (error) {
     if (error?.code === "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED") throw error;
     throw auditError();
   }
+}
+
+async function acquireReceiptLock(publication, filesystem) {
+  for (let attempt = 0; attempt < RECEIPT_LOCK_ATTEMPTS; attempt += 1) {
+    const acquired = await acquireOperationLock(publication.lockPath, {
+      filesystem,
+      format: LOCK_FORMAT,
+      ownsParent: false,
+      strictOwnedState: true,
+      ownedDirectories: publication.ownedDirectories
+    });
+    if (acquired) return acquired;
+    const held = await inspectOperationLock(publication.lockPath, {
+      filesystem,
+      format: LOCK_FORMAT,
+      strictOwnedState: true
+    });
+    if (!held.exists) continue;
+    if (held.record.poisoned === true || !held.ownerAlive) throw auditError();
+    if (attempt === RECEIPT_LOCK_ATTEMPTS - 1) throw auditError();
+    await new Promise((resolve) => setTimeout(resolve, RECEIPT_LOCK_RETRY_MS));
+  }
+  throw auditError();
 }
 
 function receiptPublication(homePath, receipt) {

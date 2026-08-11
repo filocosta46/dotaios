@@ -4,8 +4,19 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Project sources now have a guided `project source connect` preview and one
+  `--yes` confirmation that combines the portable source declaration,
+  machine-local folder binding, and finite read grant without asking the user
+  to copy operation IDs or fingerprints. Exact live reruns are idempotent, and
+  matching source-only completion can resume safely.
+
 ### Changed
 
+- `search --project` now selects the portable project corpus by slug or stable
+  ID; `--session-project` remains the session-tag filter for the pre-existing
+  session attribution behavior.
 - Compact CLI, Gemini hook JSON, and MCP working-context reads now share one
   operational migration envelope beside the unchanged canonical working-context
   projection. The cheap session-start inspector reads only compatibility

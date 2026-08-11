@@ -12,6 +12,11 @@ import {
   assertAccessReceiptStoreAvailable,
   createAccessReceipt
 } from "../../packages/core/src/receipt-ledger.mjs";
+import {
+  acquireOperationLock,
+  inspectOperationLock,
+  releaseOperationLock,
+} from "../../packages/core/src/operation-lock.mjs";
 
 test("receipt publication appends one complete synced line and clears the in-flight guard", async (t) => {
   const homePath = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-receipt-ledger-"));
@@ -36,6 +41,89 @@ test("receipt publication appends one complete synced line and clears the in-fli
     assert.equal(fs.statSync(root).mode & 0o777, 0o700);
     assert.equal(fs.statSync(ledgerPath).mode & 0o777, 0o600);
   }
+});
+
+test("same-user concurrent receipt writers wait and durably append every decision", async (t) => {
+  const homePath = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-receipt-contention-"));
+  t.after(() => fs.rmSync(homePath, { recursive: true, force: true }));
+  const receipts = Array.from({ length: 16 }, (_, index) => createAccessReceipt({
+    decision: "refused",
+    reason: index % 2 === 0 ? "source-no-match" : "project-required",
+    task: `valid concurrent task ${index}`,
+    createId: () => `receipt-contention-${index}`,
+    now: () => new Date(`2026-08-10T12:00:${String(index).padStart(2, "0")}.000Z`),
+  }));
+
+  await Promise.all(receipts.map((receipt) => appendAccessReceipt({ homePath, receipt })));
+
+  const ledgerPath = path.join(homePath, ".dotaios", "project-sources", "access-receipts.jsonl");
+  const durable = fs.readFileSync(ledgerPath, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(durable.length, receipts.length);
+  assert.deepEqual(
+    durable.map((receipt) => receipt.receipt_id).toSorted(),
+    receipts.map((receipt) => receipt.receipt_id).toSorted(),
+  );
+});
+
+test("strict lock release keeps the canonical owner occupied until the release point", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-strict-release-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  if (process.platform !== "win32") fs.chmodSync(root, 0o700);
+  const lockPath = path.join(root, "receipt.lock");
+  const format = "dotaios-project-source-receipt-lock/v1";
+  const first = await acquireOperationLock(lockPath, { format, strictOwnedState: true });
+  let releaseRename;
+  const renameObserved = new Promise((resolve) => { releaseRename = resolve; });
+  let continueRelease;
+  const releaseGate = new Promise((resolve) => { continueRelease = resolve; });
+  const filesystem = Object.create(fsp);
+  filesystem.rename = async (source, destination) => {
+    const result = await fsp.rename(source, destination);
+    if (path.resolve(String(source)) === path.resolve(lockPath) && String(destination).includes(".release.")) {
+      releaseRename();
+      await releaseGate;
+    }
+    return result;
+  };
+  const releasing = releaseOperationLock(first, { filesystem, strictOwnedState: true })
+    .then(() => "released", () => "failed");
+  await renameObserved;
+  const contender = await acquireOperationLock(lockPath, { format, strictOwnedState: true });
+  continueRelease();
+  const releaseOutcome = await releasing;
+  if (contender) await releaseOperationLock(contender, { strictOwnedState: true }).catch(() => {});
+  assert.ok(contender);
+  assert.equal(releaseOutcome, "released");
+});
+
+test("strict lock release advertises retryable live ownership without false poison", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-strict-releasing-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  if (process.platform !== "win32") fs.chmodSync(root, 0o700);
+  const lockPath = path.join(root, "receipt.lock");
+  const format = "dotaios-project-source-receipt-lock/v1";
+  const first = await acquireOperationLock(lockPath, { format, strictOwnedState: true });
+  let releaseStarted;
+  const releaseObserved = new Promise((resolve) => { releaseStarted = resolve; });
+  let continueRelease;
+  const releaseGate = new Promise((resolve) => { continueRelease = resolve; });
+  const filesystem = Object.create(fsp);
+  filesystem.rename = async (source, destination) => {
+    if (path.resolve(String(source)) === path.resolve(lockPath) && String(destination).includes(".release.")) {
+      releaseStarted();
+      await releaseGate;
+    }
+    return fsp.rename(source, destination);
+  };
+  const releasing = releaseOperationLock(first, { filesystem, strictOwnedState: true });
+  await releaseObserved;
+  const held = await inspectOperationLock(lockPath, { format, strictOwnedState: true });
+  const contender = await acquireOperationLock(lockPath, { format, strictOwnedState: true });
+  continueRelease();
+  await releasing;
+  assert.equal(held.record.releasing, true);
+  assert.equal(held.record.poisoned, undefined);
+  assert.equal(contender, null);
 });
 
 test("ledger sync failure withholds success and preserves poison evidence", async (t) => {

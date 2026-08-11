@@ -36,7 +36,11 @@ function ownerRecordIsValid(record, format, strictOwnedState = false) {
   ) return false;
   if (strictOwnedState) {
     if (record.poisoned !== undefined && record.poisoned !== true) return false;
-    const allowedFields = new Set(["format", "pid", "owner", "at", "process_started_at", "poisoned"]);
+    if (record.releasing !== undefined && record.releasing !== true) return false;
+    if (record.poisoned === true && record.releasing === true) return false;
+    const allowedFields = new Set([
+      "format", "pid", "owner", "at", "process_started_at", "poisoned", "releasing",
+    ]);
     if (Object.keys(record).some((field) => !allowedFields.has(field))) return false;
   }
   return true;
@@ -240,6 +244,19 @@ export async function poisonOperationLock(lock, {
   strictOwnedState = false
 } = {}) {
   if (!strictOwnedState) throw new Error("Poisoned locks require strict owned state.");
+  return rewriteExactOperationLock(lock, filesystem, (held) => (
+    held.poisoned === true ? held : { ...held, poisoned: true }
+  ));
+}
+
+async function markOperationLockReleasing(lock, filesystem) {
+  return rewriteExactOperationLock(lock, filesystem, (held) => {
+    if (held.poisoned === true) throw ownedStateError();
+    return held.releasing === true ? held : { ...held, releasing: true };
+  });
+}
+
+async function rewriteExactOperationLock(lock, filesystem, update) {
   const before = await filesystem.lstat(lock.lockPath);
   assertOwnedFileStats(before);
   const handle = await filesystem.open(lock.lockPath, "r+");
@@ -255,8 +272,9 @@ export async function poisonOperationLock(lock, {
       throw ownedStateError();
     }
     if (!ownerRecordIsValid(held, lock.format, true) || held.owner !== lock.owner) throw ownedStateError();
-    if (held.poisoned !== true) {
-      const bytes = Buffer.from(`${JSON.stringify({ ...held, poisoned: true })}\n`);
+    const updated = update(held);
+    if (updated !== held) {
+      const bytes = Buffer.from(`${JSON.stringify(updated)}\n`);
       let offset = 0;
       while (offset < bytes.length) {
         const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset);
@@ -327,6 +345,7 @@ async function readLockRecord(lockPath, filesystem, strictOwnedState) {
 
 async function releaseStrictOperationLock(lock, filesystem) {
   const releasePath = `${lock.lockPath}.release.${randomUUID()}`;
+  await markOperationLockReleasing(lock, filesystem);
   try {
     await filesystem.rename(lock.lockPath, releasePath);
   } catch (error) {
@@ -336,37 +355,20 @@ async function releaseStrictOperationLock(lock, filesystem) {
   try {
     const [raw] = await readLockRecord(releasePath, filesystem, true);
     const held = JSON.parse(raw);
-    if (!ownerRecordIsValid(held, lock.format, true) || held.owner !== lock.owner) throw ownedStateError();
+    if (
+      !ownerRecordIsValid(held, lock.format, true)
+      || held.owner !== lock.owner
+      || held.releasing !== true
+      || held.poisoned === true
+    ) throw ownedStateError();
     await syncOwnedDirectory(path.dirname(lock.lockPath), { filesystem });
-    const poison = await publishReleasePoison(lock, held, filesystem);
     await filesystem.unlink(releasePath);
     await syncOwnedDirectory(path.dirname(lock.lockPath), { filesystem });
-    await removePublishedPoison(lock, poison, filesystem);
   } catch (error) {
     await restoreForeignLock(releasePath, lock.lockPath, filesystem);
+    await poisonOperationLock(lock, { filesystem, strictOwnedState: true }).catch(() => {});
     throw error;
   }
-}
-
-async function publishReleasePoison(lock, held, filesystem) {
-  const poison = Object.freeze({ ...held, poisoned: true });
-  await publishOwnedFileExclusive(lock.lockPath, `${JSON.stringify(poison)}\n`, { filesystem });
-  return poison;
-}
-
-async function removePublishedPoison(lock, poison, filesystem) {
-  const tombstone = `${lock.lockPath}.poison-release.${randomUUID()}`;
-  try {
-    await filesystem.rename(lock.lockPath, tombstone);
-    const [raw] = await readLockRecord(tombstone, filesystem, true);
-    if (raw !== `${JSON.stringify(poison)}\n`) throw ownedStateError();
-    await syncOwnedDirectory(path.dirname(lock.lockPath), { filesystem });
-  } catch (error) {
-    await restoreForeignLock(tombstone, lock.lockPath, filesystem);
-    throw error;
-  }
-  await filesystem.rm(tombstone, { force: true }).catch(() => {});
-  await syncOwnedDirectory(path.dirname(lock.lockPath), { filesystem }).catch(() => {});
 }
 
 async function restoreForeignLock(releasePath, lockPath, filesystem) {

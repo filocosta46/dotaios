@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -10,6 +11,7 @@ import {
   createProjectSourceRetrievalFixture,
   snapshotTree,
 } from "../fixtures/project-source-retrieval.mjs";
+import { projectSourceCommand } from "../../packages/cli/src/commands/project-source.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cliPath = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -43,6 +45,137 @@ function assertCliRevocation() {
     fixture.cleanup();
   }
 }
+
+test("human grant preview presents the complete finite read consent", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const addPreview = runJson(sourceAddArgs(fixture));
+    assert.equal(runJson(sourceAddArgs(fixture, addPreview)).applied, true);
+    const preview = runCli([
+      "project", "source", "grant", "acme-campaign", "campaign-assets",
+      "--purpose", "Launch campaign assets",
+      "--expires-at", "2099-01-01T00:00:00.000Z",
+      "--path", fixture.aiosPath,
+      "--home", fixture.homePath,
+    ]);
+    assert.equal(preview.status, 0, preview.stderr || preview.stdout);
+    assert.match(preview.stdout, /Project:\s+acme-campaign \(project-acme-001\)/);
+    assert.match(preview.stdout, /Source:\s+Campaign assets \(campaign-assets\)/);
+    assert.match(preview.stdout, /Scope:\s+read/);
+    assert.match(preview.stdout, /Purpose:\s+Launch campaign assets/);
+    assert.match(preview.stdout, /Approval timing:\s+when this exact preview is applied/);
+    assert.match(preview.stdout, /Expires:\s+2099-01-01T00:00:00.000Z/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("project-source help is reachable at every nested boundary and explains search selectors", () => {
+  for (const args of [
+    ["project", "--help"],
+    ["project", "source", "--help"],
+    ["project", "source", "grant", "--help"],
+  ]) {
+    const result = runCli(args);
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    for (const subcommand of ["add", "bind", "grant", "revoke", "retrieve", "connect"]) {
+      assert.match(result.stdout, new RegExp(`project source ${subcommand}\\b`), args.join(" "));
+    }
+  }
+  const search = runCli(["search", "--help"]);
+  assert.equal(search.status, 0, search.stderr || search.stdout);
+  assert.match(
+    search.stdout,
+    /Use --project to select a portable project corpus; use --session-project only to filter session tags\./,
+  );
+});
+
+test("spawned guided connect previews once, applies with --yes, and retrieves the exact tracer", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const portableBefore = snapshotTree(fixture.aiosPath);
+    const localBefore = snapshotTree(path.join(fixture.homePath, ".dotaios"));
+    const preview = runJson(sourceConnectArgs(fixture));
+    assert.equal(preview.operation, "connect");
+    assert.equal(preview.applied, false);
+    assert.equal(preview.project, "acme-campaign");
+    assert.equal(preview.project_id, "project-acme-001");
+    assert.equal(preview.source_id, "campaign-assets");
+    assert.equal(preview.label, "Campaign assets");
+    assert.equal(preview.scope, "read");
+    assert.equal(preview.purpose, "Launch campaign assets");
+    assert.equal(preview.approval_timing, "when --yes confirms this exact connection");
+    assert.equal(preview.approved_at, null);
+    assert.equal(preview.expires_at, "2099-01-01T00:00:00.000Z");
+    assert.deepEqual(snapshotTree(fixture.aiosPath), portableBefore);
+    assert.deepEqual(snapshotTree(path.join(fixture.homePath, ".dotaios")), localBefore);
+
+    const human = runCli(sourceConnectArgs(fixture, { json: false }));
+    assert.equal(human.status, 0, human.stderr || human.stdout);
+    assert.match(human.stdout, /Project:\s+acme-campaign \(project-acme-001\)/);
+    assert.match(human.stdout, /Source:\s+Campaign assets \(campaign-assets\)/);
+    assert.match(human.stdout, /Scope:\s+read/);
+    assert.match(human.stdout, /Purpose:\s+Launch campaign assets/);
+    assert.match(human.stdout, /Approval timing:\s+when --yes confirms this exact connection/);
+    assert.match(human.stdout, /Expires:\s+2099-01-01T00:00:00.000Z/);
+
+    const connected = runJson(sourceConnectArgs(fixture, { yes: true }));
+    assert.equal(connected.applied, true);
+    assert.equal(connected.idempotent, false);
+    assert.match(connected.grant_id, /^[a-f0-9-]+$/);
+    assert.match(connected.approved_at, /^\d{4}-\d{2}-\d{2}T/);
+    const rerun = runJson(sourceConnectArgs(fixture, { yes: true }));
+    assert.equal(rerun.applied, true);
+    assert.equal(rerun.idempotent, true);
+    assert.equal(rerun.grant_id, connected.grant_id);
+
+    assertAllowedCliRetrieval(fixture, connected);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("guided connect and the project-search selector migration are documented", () => {
+  const projectDocs = fs.readFileSync(path.join(repoRoot, "docs", "projects.md"), "utf8");
+  const gettingStarted = fs.readFileSync(path.join(repoRoot, "docs", "getting-started.md"), "utf8");
+  const changelog = fs.readFileSync(path.join(repoRoot, "CHANGELOG.md"), "utf8");
+  for (const document of [projectDocs, gettingStarted]) {
+    assert.match(document, /project source connect <project> <folder>/);
+    assert.match(document, /`--project` selects the portable project corpus/);
+    assert.match(document, /`--session-project` filters session tags only/);
+  }
+  assert.match(changelog, /guided `project source connect`/);
+  assert.match(changelog, /`search --project` now selects the portable project corpus/);
+  assert.match(changelog, /`--session-project` remains the session-tag filter/);
+});
+
+test("guided connect resumes only matching source-only state and refuses mismatches", () => {
+  const resumable = createProjectSourceRetrievalFixture();
+  try {
+    const addPreview = runJson(sourceAddArgs(resumable));
+    assert.equal(runJson(sourceAddArgs(resumable, addPreview)).applied, true);
+    const connected = runJson(sourceConnectArgs(resumable, { yes: true }));
+    assert.equal(connected.applied, true);
+    assert.equal(connected.idempotent, false);
+  } finally {
+    resumable.cleanup();
+  }
+
+  const mismatched = createProjectSourceRetrievalFixture();
+  try {
+    const addPreview = runJson(sourceAddArgs(mismatched));
+    assert.equal(runJson(sourceAddArgs(mismatched, addPreview)).applied, true);
+    const otherRoot = path.join(mismatched.root, "other-assets");
+    fs.mkdirSync(otherRoot);
+    const localBefore = snapshotTree(path.join(mismatched.homePath, ".dotaios"));
+    const refused = runCli(sourceConnectArgs(mismatched, { yes: true, folder: otherRoot }));
+    assert.equal(refused.status, 1);
+    assert.match(refused.stderr, /does not match this connection/);
+    assert.deepEqual(snapshotTree(path.join(mismatched.homePath, ".dotaios")), localBefore);
+  } finally {
+    mismatched.cleanup();
+  }
+});
 
 function authorizeCliSource(fixture, verifyPreview = false) {
   const portableBefore = snapshotTree(fixture.aiosPath);
@@ -166,6 +299,18 @@ function sourceRevokeArgs(fixture, grantId, proof = null) {
   ];
 }
 
+function sourceConnectArgs(fixture, { yes = false, json = true, folder = fixture.sourceRoot } = {}) {
+  return [
+    "project", "source", "connect", "acme-campaign", folder,
+    "--source-id", "campaign-assets", "--label", "Campaign assets",
+    "--purpose", "Launch campaign assets", "--expires-at", "2099-01-01T00:00:00.000Z",
+    ...(yes ? ["--yes"] : []),
+    "--path", fixture.aiosPath,
+    "--home", fixture.homePath,
+    ...(json ? ["--json"] : []),
+  ];
+}
+
 function retrieveArgs(fixture) {
   return [
     "project", "source", "retrieve", "acme-campaign", "--task", CAMPAIGN_TASK,
@@ -218,13 +363,48 @@ test("spawned CLI refuses incomplete grant and revoke previews without writing l
       ]),
     ];
     assert.ok(failures.every((result) => result.status === 1));
-    assert.match(failures[0].stderr, /--purpose is required/);
-    assert.match(failures[1].stderr, /--expires-at is required/);
-    assert.match(failures[2].stderr, /--grant-id is required/);
+    const errors = failures.map((result) => JSON.parse(result.stderr));
+    assert.deepEqual(errors.map((error) => error.error.reason), [
+      "invalid-request", "invalid-request", "invalid-request",
+    ]);
+    assert.match(errors[0].error.message, /--purpose is required/);
+    assert.match(errors[1].error.message, /--expires-at is required/);
+    assert.match(errors[2].error.message, /--grant-id is required/);
     assert.deepEqual(snapshotTree(path.join(fixture.homePath, ".dotaios")), before);
   } finally {
     fixture.cleanup();
   }
+});
+
+test("JSON source errors never expose raw filesystem exceptions or paths", async () => {
+  const output = {
+    lines: [],
+    errors: [],
+    log(value) { this.lines.push(value); },
+    error(value) { this.errors.push(value); },
+  };
+  const filesystem = Object.create(fsp);
+  filesystem.realpath = async () => {
+    const error = new Error("EACCES: /private/client-secret");
+    error.code = "EACCES";
+    throw error;
+  };
+  await assert.rejects(
+    () => projectSourceCommand([
+      "add", "acme-campaign", "/private/client-secret",
+      "--source-id", "campaign-assets",
+      "--label", "Campaign assets",
+      "--purpose", "Launch campaign assets",
+      "--path", "/private/portable-aios",
+      "--home", "/private/home",
+      "--json",
+    ], { output, fs: filesystem }),
+  );
+  const payload = JSON.parse(output.errors[0]);
+  assert.equal(payload.error.code, "DOTAIOS_PROJECT_SOURCE_INVALID_REQUEST");
+  assert.equal(payload.error.reason, "invalid-request");
+  assert.equal(payload.error.message, "Project source request is invalid.");
+  assert.doesNotMatch(JSON.stringify(payload), /private|EACCES|client-secret/);
 });
 
 function runJson(args) {

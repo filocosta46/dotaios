@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -167,6 +168,79 @@ test("project search resolves slug and stable id before constructing only that p
   );
 });
 
+test("project identity resolution keeps legacy neighbors non-blocking and header-only", async (t) => {
+  await t.test("direct slug never opens neighboring project identities", async () => {
+    const fixture = createLegacyProjectShelf();
+    const neighborReadmes = new Set(fixture.legacyReadmes.map((filePath) => path.resolve(filePath)));
+    const filesystem = Object.create(fsp);
+    filesystem.open = async (filePath, ...args) => {
+      if (neighborReadmes.has(path.resolve(String(filePath)))) {
+        throw new Error("direct slug opened a neighboring project identity");
+      }
+      return fsp.open(filePath, ...args);
+    };
+    const result = await searchAios({
+      aiosPath: fixture.root,
+      query: "SELECTED_LEGACY_SHELF_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+      evidenceReader: createEvidenceReader({ roots: [fixture.root], filesystem })
+    });
+    assert.match(JSON.stringify(result), /SELECTED_LEGACY_SHELF_CANARY/);
+  });
+
+  await t.test("stable id scans only bounded identity headers and skips unselectable records", async () => {
+    const fixture = createLegacyProjectShelf();
+    const bodyOnly = path.resolve(fixture.bodyOnlyReadme);
+    let bodyReadCalls = 0;
+    let bodyBytesRead = 0;
+    const filesystem = Object.create(fsp);
+    filesystem.open = async (filePath, ...args) => {
+      const handle = await fsp.open(filePath, ...args);
+      if (path.resolve(String(filePath)) !== bodyOnly) return handle;
+      return Object.create(handle, {
+        read: { value: async (...readArgs) => {
+          const result = await handle.read(...readArgs);
+          bodyReadCalls += 1;
+          bodyBytesRead += result.bytesRead;
+          return result;
+        } }
+      });
+    };
+    const result = await searchAios({
+      aiosPath: fixture.root,
+      query: "SELECTED_LEGACY_SHELF_CANARY",
+      scope: "projects",
+      projectSelector: "project-acme-001",
+      evidenceReader: createEvidenceReader({ roots: [fixture.root], filesystem })
+    });
+    assert.match(JSON.stringify(result), /SELECTED_LEGACY_SHELF_CANARY/);
+    assert.ok(bodyReadCalls <= 2, `body-only README required ${bodyReadCalls} reads`);
+    assert.ok(bodyBytesRead <= 5, `body-only README read ${bodyBytesRead} bytes`);
+  });
+
+  await t.test("stable ids with non-slug punctuation skip direct slug lookup", async () => {
+    const root = tmpDir();
+    const projectPath = path.join(root, "projects", "acme-campaign");
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      "---\nid: \"project:acme_001.test\"\nproject: acme-campaign\n---\n# Selected\n\nPUNCTUATED_STABLE_ID_CANARY\n"
+    );
+
+    const result = await searchAios({
+      aiosPath: root,
+      query: "PUNCTUATED_STABLE_ID_CANARY",
+      scope: "projects",
+      projectSelector: "project:acme_001.test",
+      evidenceReader: createEvidenceReader({ roots: [root] })
+    });
+
+    assert.equal(result.scope.project, "acme-campaign");
+    assert.match(JSON.stringify(result), /PUNCTUATED_STABLE_ID_CANARY/);
+  });
+});
+
 test("all-scope search without a project selector omits the project corpus and reports it", async () => {
   const root = tmpDir();
   fs.mkdirSync(path.join(root, "context"), { recursive: true });
@@ -184,3 +258,33 @@ test("all-scope search without a project selector omits the project corpus and r
   assert.equal(groups.some((group) => group.scope === "projects"), false);
   assert.doesNotMatch(JSON.stringify(groups), /PRIVATE_PROJECT_CANARY/);
 });
+
+function createLegacyProjectShelf() {
+  const root = tmpDir();
+  const projects = path.join(root, "projects");
+  const selected = path.join(projects, "acme-campaign");
+  const bodyOnly = path.join(projects, "legacy-body-only");
+  const missingId = path.join(projects, "legacy-missing-id");
+  const malformed = path.join(projects, "legacy-malformed");
+  for (const directory of [selected, bodyOnly, missingId, malformed]) {
+    fs.mkdirSync(directory, { recursive: true });
+  }
+  fs.writeFileSync(
+    path.join(selected, "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Selected\n\nSELECTED_LEGACY_SHELF_CANARY\n"
+  );
+  fs.writeFileSync(path.join(bodyOnly, "README.md"), `# Legacy\n\n${"body ".repeat(8_000)}`);
+  fs.writeFileSync(
+    path.join(missingId, "README.md"),
+    "---\nproject: legacy-missing-id\n---\n# Missing stable identity\n\nLEGACY_BODY_CANARY\n"
+  );
+  fs.writeFileSync(
+    path.join(malformed, "README.md"),
+    "---\nid: [unterminated\n---\n# Malformed\n\nMALFORMED_BODY_CANARY\n"
+  );
+  return {
+    root,
+    bodyOnlyReadme: path.join(bodyOnly, "README.md"),
+    legacyReadmes: [bodyOnly, missingId, malformed].map((directory) => path.join(directory, "README.md"))
+  };
+}

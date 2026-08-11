@@ -4,6 +4,7 @@ import path from "node:path";
 import {
   addProjectSource,
   bindProjectSource,
+  connectProjectSource,
   grantProjectSource,
   revokeProjectSource,
   retrieveProjectSource
@@ -16,6 +17,7 @@ const HELP_TEXT = `Usage:
   dotaios project source grant <project> <source-id> --purpose <purpose> --expires-at <UTC>
   dotaios project source revoke <project> <source-id> --grant-id <id>
   dotaios project source retrieve [project] --task <text>
+  dotaios project source connect <project> <folder> --source-id <id> --label <label> --purpose <purpose> --expires-at <UTC> [--yes]
 
 Source add, bind, grant, and revoke preview by default. Apply an exact preview with:
   --operation-id <id> --plan-fingerprint <sha256> --apply
@@ -32,23 +34,33 @@ export async function projectSourceCommand(args = [], dependencies = {}) {
     output.log(HELP_TEXT);
     return;
   }
-  const parsed = parseOptions(args);
-  const homePath = resolveUserPath(parsed.home || dependencies.homePath || os.homedir(), os.homedir());
-  const common = {
-    aiosPath: resolveUserPath(parsed.path || path.join(homePath, "aios"), homePath),
-    homePath,
-    operationId: parsed.operationId,
-    planFingerprint: parsed.planFingerprint,
-    apply: parsed.apply,
-    filesystem: dependencies.fs,
-    createId: dependencies.createId,
-    now: dependencies.now
-  };
-  const result = await dispatchSourceCommand(parsed, common);
+  const jsonRequested = args.includes("--json");
+  try {
+    const parsed = parseOptions(args);
+    const homePath = resolveUserPath(parsed.home || dependencies.homePath || os.homedir(), os.homedir());
+    const common = {
+      aiosPath: resolveUserPath(parsed.path || path.join(homePath, "aios"), homePath),
+      homePath,
+      operationId: parsed.operationId,
+      planFingerprint: parsed.planFingerprint,
+      apply: parsed.apply,
+      filesystem: dependencies.fs,
+      createId: dependencies.createId,
+      now: dependencies.now
+    };
+    const result = await dispatchSourceCommand(parsed, common);
 
-  if (parsed.json) output.log(JSON.stringify(publicResult(result), null, 2));
-  else printResult(output, publicResult(result));
-  return result;
+    if (parsed.json) output.log(JSON.stringify(publicResult(result), null, 2));
+    else printResult(output, publicResult(result));
+    return result;
+  } catch (error) {
+    if (!jsonRequested) throw error;
+    const envelope = publicError(error);
+    const logError = typeof output.error === "function" ? output.error.bind(output) : output.log.bind(output);
+    logError(JSON.stringify(envelope));
+    Object.defineProperty(error, "dotaiosCliReported", { value: true });
+    throw error;
+  }
 }
 
 async function dispatchSourceCommand(parsed, common) {
@@ -57,10 +69,12 @@ async function dispatchSourceCommand(parsed, common) {
   if (parsed.subcommand === "grant") return runGrant(parsed, common);
   if (parsed.subcommand === "revoke") return runRevoke(parsed, common);
   if (parsed.subcommand === "retrieve") return runRetrieve(parsed, common);
+  if (parsed.subcommand === "connect") return runConnect(parsed, common);
   throw new Error(`Unknown project source subcommand: ${parsed.subcommand || "(missing)"}.`);
 }
 
 function runAdd(parsed, common) {
+  rejectYes(parsed);
   assertPositionals(parsed.positionals, 2, "dotaios project source add <project> <folder>");
   requireOption(parsed.sourceId, "--source-id");
   requireOption(parsed.label, "--label");
@@ -77,6 +91,7 @@ function runAdd(parsed, common) {
 }
 
 function runBind(parsed, common) {
+  rejectYes(parsed);
   assertPositionals(parsed.positionals, 3, "dotaios project source bind <project> <source-id> <folder>");
   rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt", "grantId", "task"]);
   return bindProjectSource({
@@ -88,6 +103,7 @@ function runBind(parsed, common) {
 }
 
 function runGrant(parsed, common) {
+  rejectYes(parsed);
   assertPositionals(parsed.positionals, 2, "dotaios project source grant <project> <source-id>");
   requireOption(parsed.purpose, "--purpose");
   requireOption(parsed.expiresAt, "--expires-at");
@@ -102,6 +118,7 @@ function runGrant(parsed, common) {
 }
 
 function runRevoke(parsed, common) {
+  rejectYes(parsed);
   assertPositionals(parsed.positionals, 2, "dotaios project source revoke <project> <source-id>");
   requireOption(parsed.grantId, "--grant-id");
   rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt", "task"]);
@@ -114,6 +131,7 @@ function runRevoke(parsed, common) {
 }
 
 function runRetrieve(parsed, common) {
+  rejectYes(parsed);
   if (parsed.positionals.length > 1) {
     throw new Error("Usage: dotaios project source retrieve [project] --task <text>");
   }
@@ -127,6 +145,28 @@ function runRetrieve(parsed, common) {
     apply: false,
     projectSelector: parsed.positionals[0],
     task: parsed.task
+  });
+}
+
+function runConnect(parsed, common) {
+  assertPositionals(parsed.positionals, 2, "dotaios project source connect <project> <folder>");
+  requireOption(parsed.sourceId, "--source-id");
+  requireOption(parsed.label, "--label");
+  requireOption(parsed.purpose, "--purpose");
+  requireOption(parsed.expiresAt, "--expires-at");
+  rejectOptions(parsed, ["grantId", "task"]);
+  if (parsed.apply || parsed.operationId || parsed.planFingerprint) {
+    throw new Error("Connect uses one explicit --yes confirmation and does not accept proof tokens.");
+  }
+  return connectProjectSource({
+    ...common,
+    projectSelector: parsed.positionals[0],
+    folder: resolveUserPath(parsed.positionals[1], common.homePath),
+    sourceId: parsed.sourceId,
+    label: parsed.label,
+    purpose: parsed.purpose,
+    expiresAt: parsed.expiresAt,
+    yes: parsed.yes
   });
 }
 
@@ -145,6 +185,7 @@ function parseOptions(args, index = 0, parsed = null) {
     operationId: null,
     planFingerprint: null,
     apply: false,
+    yes: false,
     json: false
   };
   if (index >= args.length) return current;
@@ -157,6 +198,7 @@ function parseOptions(args, index = 0, parsed = null) {
     });
   }
   if (argument === "--apply") return parseOptions(args, index + 1, { ...current, apply: true });
+  if (argument === "--yes") return parseOptions(args, index + 1, { ...current, yes: true });
   if (argument === "--json") return parseOptions(args, index + 1, { ...current, json: true });
   if (argument.startsWith("--")) throw new Error(`Unknown option: ${argument}`);
   if (!current.subcommand) return parseOptions(args, index + 1, { ...current, subcommand: argument });
@@ -185,6 +227,7 @@ function publicResult(result) {
     version: result.version,
     operation: result.operation,
     applied: result.applied,
+    ...(Object.hasOwn(result, "idempotent") ? { idempotent: result.idempotent } : {}),
     operation_id: result.operation_id,
     plan_fingerprint: result.plan_fingerprint,
     ...(result.grant_id ? { grant_id: result.grant_id } : {}),
@@ -197,6 +240,7 @@ function publicResult(result) {
     ...(Object.hasOwn(result, "approved_at") ? { approved_at: result.approved_at } : {}),
     ...(Object.hasOwn(result, "revoked_at") ? { revoked_at: result.revoked_at } : {}),
     ...(result.expires_at ? { expires_at: result.expires_at } : {}),
+    ...(result.approval_timing ? { approval_timing: result.approval_timing } : {}),
     ...(result.recovery ? { recovery: true } : {}),
     ...(result.portable_path ? { portable: { path: result.portable_path } } : {}),
     ...(result.portable ? { portable: result.portable } : {}),
@@ -204,6 +248,34 @@ function publicResult(result) {
     ...(result.binding_generation ? { binding_generation: result.binding_generation } : {}),
     ...(result.grant_revision ? { grant_revision: result.grant_revision } : {})
   };
+}
+
+function publicError(error) {
+  const domainReason = typeof error?.details?.reason === "string"
+    ? error.details.reason
+    : null;
+  return Object.freeze({
+    version: 1,
+    error: Object.freeze({
+      code: domainReason && /^DOTAIOS_[A-Z0-9_]+$/.test(error?.code)
+        ? error.code
+        : "DOTAIOS_PROJECT_SOURCE_INVALID_REQUEST",
+      reason: domainReason || "invalid-request",
+      message: domainReason ? error.message : safeCliErrorMessage(error),
+    }),
+  });
+}
+
+function safeCliErrorMessage(error) {
+  const message = typeof error?.message === "string" ? error.message : "";
+  if (
+    /^--[a-z-]+ is required\.$/.test(message)
+    || /^Usage: dotaios project source [a-z]+ /.test(message)
+    || /^--yes is only valid for project source connect\.$/.test(message)
+    || /^Connect uses one explicit --yes confirmation/.test(message)
+    || /^Option is not valid for (?:add|bind|grant|revoke|retrieve|connect): --[a-z-]+$/.test(message)
+  ) return message;
+  return "Project source request is invalid.";
 }
 
 function printResult(output, result) {
@@ -218,11 +290,37 @@ function printResult(output, result) {
     output.log(`Receipt: ${result.receipt_id}`);
     return;
   }
+  if (result.operation === "connect") {
+    output.log(result.applied
+      ? (result.idempotent ? "Project source is already connected." : "Project source connected.")
+      : "Project source connection preview (no files changed)." );
+    output.log(`Project: ${result.project} (${result.project_id})`);
+    output.log(`Source: ${result.label} (${result.source_id})`);
+    output.log(`Scope: ${result.scope}`);
+    output.log(`Purpose: ${result.purpose}`);
+    output.log(`Approval timing: ${result.approved_at || result.approval_timing}`);
+    output.log(`Expires: ${result.expires_at}`);
+    if (!result.applied) output.log("Re-run this exact command with --yes to connect the folder and finite read grant.");
+    if (result.grant_id) output.log(`Grant: ${result.grant_id}`);
+    return;
+  }
   output.log(result.applied ? "Project source change applied." : "Project source preview (no files changed)." );
+  if (result.operation === "grant") {
+    output.log(`Project: ${result.project} (${result.project_id})`);
+    output.log(`Source: ${result.label} (${result.source_id})`);
+    output.log(`Scope: ${result.scope}`);
+    output.log(`Purpose: ${result.purpose}`);
+    output.log(`Approval timing: ${result.approved_at || "when this exact preview is applied"}`);
+    output.log(`Expires: ${result.expires_at}`);
+  }
   output.log(`Operation: ${result.operation_id}`);
   output.log(`Plan fingerprint: ${result.plan_fingerprint}`);
   if (result.portable?.path) output.log(`Portable effect: ${result.portable.path}`);
   if (result.machine_local?.root) output.log(`Local folder: ${result.machine_local.root}`);
+}
+
+function rejectYes(parsed) {
+  if (parsed.yes) throw new Error(`--yes is only valid for project source connect.`);
 }
 
 function rejectOptions(parsed, names) {

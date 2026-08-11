@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -24,6 +25,7 @@ import {
   createProjectSourceRetrievalFixture,
   snapshotTree
 } from "../fixtures/project-source-retrieval.mjs";
+import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
 
 test("project source syntax bounds fail before project discovery or receipt state", async () => {
   assert.equal(validateTask("x"), "x");
@@ -49,6 +51,226 @@ test("project source syntax bounds fail before project discovery or receipt stat
 });
 
 test("core composes finite consent, metadata-only retrieval, provenance, and one receipt", assertCoreConsentSlice);
+
+test("portable source declarations require the exact bounded metadata-only schema", async (t) => {
+  const scenarios = [
+    ["absolute root field", (declaration) => declaration.replace("type: local-folder", "type: local-folder\nroot: /private/client")],
+    ["credentials field", (declaration) => declaration.replace("type: local-folder", "type: local-folder\ncredentials: secret")],
+    ["grant field", (declaration) => declaration.replace("type: local-folder", "type: local-folder\ngrant: permanent")],
+    ["document body", (declaration) => `${declaration}# Hidden authority\n`],
+    ["malformed YAML", (declaration) => declaration.replace("label: \"Campaign assets\"", "label: [unterminated")],
+    ["oversized declaration", (declaration) => declaration.replace("label: \"Campaign assets\"", `label: \"${"x".repeat(65 * 1024)}\"`)],
+  ];
+  for (const [name, mutate] of scenarios) {
+    await t.test(name, async () => {
+      const fixture = createProjectSourceRetrievalFixture();
+      try {
+        await applyCampaignGrant(fixture);
+        const declarationPath = path.join(
+          fixture.aiosPath, "projects", "acme-campaign", "sources", "campaign-assets.md",
+        );
+        fs.writeFileSync(declarationPath, mutate(fs.readFileSync(declarationPath, "utf8")));
+        const result = await retrieveCampaignSource(fixture);
+        assert.equal(result.decision, "refused");
+        assert.equal(result.reason, "source-declaration-invalid");
+        assert.deepEqual(result.references, []);
+      } finally {
+        fixture.cleanup();
+      }
+    });
+  }
+
+  for (const kind of ["linked", "special"]) {
+    await t.test(`${kind} Markdown declaration candidate`, async () => {
+      const fixture = createProjectSourceRetrievalFixture();
+      try {
+        await applyCampaignGrant(fixture);
+        const sourcesPath = path.join(fixture.aiosPath, "projects", "acme-campaign", "sources");
+        const candidate = path.join(sourcesPath, "unsafe.md");
+        if (kind === "linked") {
+          const outside = path.join(fixture.root, "outside-source.md");
+          fs.writeFileSync(outside, projectSourceDeclaration("unsafe"));
+          fs.symlinkSync(outside, candidate);
+        } else {
+          fs.mkdirSync(candidate);
+        }
+        const result = await retrieveCampaignSource(fixture);
+        assert.equal(result.decision, "refused");
+        assert.equal(result.reason, "source-declaration-invalid");
+        assert.deepEqual(result.references, []);
+      } finally {
+        fixture.cleanup();
+      }
+    });
+  }
+
+  await t.test("declaration 33", async () => {
+    const fixture = createProjectSourceRetrievalFixture();
+    try {
+      await applyCampaignGrant(fixture);
+      const sourcesPath = path.join(fixture.aiosPath, "projects", "acme-campaign", "sources");
+      for (let index = 0; index < 32; index += 1) {
+        const sourceId = `archive-${index}`;
+        fs.writeFileSync(
+          path.join(sourcesPath, `${sourceId}.md`),
+          projectSourceDeclaration(sourceId)
+            .replace("label: Campaign assets", `label: Archive ${index}`)
+            .replace("purpose: Launch campaign assets", `purpose: Historical material ${index}`),
+        );
+      }
+      const result = await retrieveCampaignSource(fixture);
+      assert.equal(result.decision, "refused");
+      assert.equal(result.reason, "source-declaration-bound-exceeded");
+      assert.deepEqual(result.references, []);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await t.test("declaration discovery observes the approved bound", async () => {
+    const fixture = createProjectSourceRetrievalFixture();
+    try {
+      await applyCampaignGrant(fixture);
+      const reader = createEvidenceReader({ roots: [fixture.aiosPath] });
+      let observedBound = null;
+      const instrumentedReader = {
+        ...reader,
+        listDirectory: async (root, directoryPath, options) => {
+          if (directoryPath.endsWith(path.join("acme-campaign", "sources"))) {
+            observedBound = options?.maxEntries;
+          }
+          return reader.listDirectory(root, directoryPath, options);
+        },
+      };
+      const result = await retrieveProjectSource({
+        aiosPath: fixture.aiosPath,
+        homePath: fixture.homePath,
+        projectSelector: "acme-campaign",
+        task: CAMPAIGN_TASK,
+        evidenceReader: instrumentedReader,
+      });
+      assert.equal(result.decision, "allowed");
+      assert.equal(observedBound, 32);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+test("machine-local project-source state cannot overlap the portable AIOS", async (t) => {
+  for (const relation of ["equal", "inside", "containing"]) {
+    await t.test(relation, async () => {
+      const fixture = createStateOverlapFixture(relation);
+      try {
+        const before = snapshotTree(fixture.root);
+        await assert.rejects(
+          () => addProjectSource(campaignAddOptions(fixture)),
+          (error) => error?.details?.reason === "state-root-overlap",
+        );
+        assert.deepEqual(snapshotTree(fixture.root), before);
+      } finally {
+        fixture.cleanup();
+      }
+    });
+  }
+
+  await t.test("normal sibling layout", async () => {
+    const fixture = createProjectSourceRetrievalFixture();
+    try {
+      const preview = await addProjectSource(campaignAddOptions(fixture));
+      assert.equal(preview.applied, false);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await t.test("symlink alias", async () => {
+    const fixture = createSymlinkStateOverlapFixture();
+    try {
+      const before = snapshotTree(fixture.root);
+      await assert.rejects(
+        () => addProjectSource(campaignAddOptions(fixture)),
+        (error) => error?.details?.reason === "state-root-overlap",
+      );
+      assert.deepEqual(snapshotTree(fixture.root), before);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await t.test("source root through a symlinked home alias", async () => {
+    const fixture = createProjectSourceRetrievalFixture();
+    try {
+      const aliasHome = path.join(fixture.root, "home-alias");
+      fs.symlinkSync(fixture.homePath, aliasHome, "dir");
+      const stateRoot = path.join(fixture.homePath, ".dotaios", "project-sources");
+      fs.mkdirSync(stateRoot, { recursive: true, mode: 0o700 });
+      await assert.rejects(
+        () => addProjectSource({
+          ...campaignAddOptions(fixture),
+          homePath: aliasHome,
+          folder: stateRoot,
+        }),
+        (error) => error?.details?.reason === "root-overlap",
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
+test("project-source state accepts an existing same-user DotAIOS parent", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const sharedParent = path.join(fixture.homePath, ".dotaios");
+    fs.mkdirSync(sharedParent, { recursive: true, mode: 0o755 });
+    if (process.platform !== "win32") fs.chmodSync(sharedParent, 0o755);
+    const preview = await previewCampaignSourceAdd(fixture);
+    const applied = await applyCampaignSourceAdd(fixture, preview);
+    assert.equal(applied.applied, true);
+    assert.equal(fs.statSync(sharedParent).mode & 0o777, process.platform === "win32" ? fs.statSync(sharedParent).mode & 0o777 : 0o755);
+    assert.equal(fs.statSync(projectSourceStatePaths(fixture.homePath).root).mode & 0o777, process.platform === "win32" ? fs.statSync(projectSourceStatePaths(fixture.homePath).root).mode & 0o777 : 0o700);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("project-source state refuses a linked DotAIOS parent", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const sharedParent = path.join(fixture.homePath, ".dotaios");
+    const outside = path.join(fixture.root, "outside-local-state");
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, sharedParent, "dir");
+    await assert.rejects(
+      () => previewCampaignSourceAdd(fixture),
+      { code: "DOTAIOS_PROJECT_SOURCE_STATE_INVALID" },
+    );
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("source add refuses a linked portable sources directory", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const projectPath = path.join(fixture.aiosPath, "projects", "acme-campaign");
+    const sourcesPath = path.join(projectPath, "sources");
+    const outside = path.join(fixture.root, "outside-portable-sources");
+    fs.mkdirSync(outside);
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.symlinkSync(outside, sourcesPath, "dir");
+    const preview = await previewCampaignSourceAdd(fixture);
+    await assert.rejects(
+      () => applyCampaignSourceAdd(fixture, preview),
+      (error) => error?.details?.reason === "stale-plan",
+    );
+    assert.deepEqual(fs.readdirSync(outside), []);
+  } finally {
+    fixture.cleanup();
+  }
+});
 
 async function assertCoreConsentSlice() {
   const fixture = createProjectSourceRetrievalFixture();
@@ -367,7 +589,12 @@ async function assertProjectSourceResolutionRefusals() {
     seedAmbiguousProjectSources(fixture);
     attempts = [...attempts, await retrieveCampaignSource(fixture)];
     seedDuplicateProject(fixture);
-    attempts = [...attempts, await retrieveCampaignSource(fixture)];
+    attempts = [...attempts, await retrieveProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "project-acme-001",
+      task: CAMPAIGN_TASK,
+    })];
     assertResolutionRefusalReceipts(fixture, attempts);
   } finally {
     fixture.cleanup();
@@ -395,7 +622,7 @@ function seedDuplicateProject(fixture) {
   fs.mkdirSync(duplicatePath, { recursive: true });
   fs.writeFileSync(
     path.join(duplicatePath, "README.md"),
-    "---\nid: acme-campaign\nproject: duplicate-client\nstatus: active\n---\n",
+    "---\nid: project-acme-001\nproject: duplicate-client\nstatus: active\n---\n",
   );
 }
 
@@ -771,6 +998,29 @@ test("independent source coordinates do not lose or observe sibling authority", 
     assert.equal(selected.binding.operation_id, "a11");
     assert.equal(sibling.binding.operation_id, "b22");
     assert.notEqual(selected.paths.binding, sibling.paths.binding);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("sixteen concurrent retrieval decisions each publish one durable receipt", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const results = await Promise.all(
+      Array.from({ length: 16 }, () => retrieveCampaignSource(fixture)),
+    );
+    assert.ok(results.every((result) => ["allowed", "refused"].includes(result.decision)));
+    const ledgerPath = path.join(
+      fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+    );
+    const receipts = fs.readFileSync(ledgerPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, results.length);
+    assert.equal(new Set(receipts.map((receipt) => receipt.receipt_id)).size, results.length);
+    assert.deepEqual(
+      receipts.map((receipt) => receipt.receipt_id).toSorted(),
+      results.map((result) => result.receipt_id).toSorted(),
+    );
   } finally {
     fixture.cleanup();
   }
@@ -1200,7 +1450,7 @@ async function assertSourceLockReleaseSyncPoison() {
       const handle = await fsp.open(filePath, flags, mode);
       if (path.resolve(String(filePath)) !== path.resolve(paths.locks) || flags !== "r") return handle;
       return Object.create(handle, { sync: { value: async () => {
-        const poisonStaged = fs.readdirSync(paths.locks).some((name) => name.includes(".poison-release."));
+        const poisonStaged = fs.readdirSync(paths.locks).some((name) => name.includes(".release."));
         if (!failed && poisonStaged && !fs.existsSync(lockPath)) {
           failed = true;
           throw new Error("forced source lock release sync failure");
@@ -1231,14 +1481,18 @@ async function assertPostPoisonSourceLockReplacement() {
     })}\n`;
     let replaced = false;
     const filesystem = Object.create(fsp);
-    filesystem.rename = async (source, destination) => {
-      if (!replaced && path.resolve(String(source)) === path.resolve(lockPath) && String(destination).includes(".poison-release.")) {
+    filesystem.lstat = async (target, ...args) => {
+      const isCanonicalLock = path.resolve(String(target)) === path.resolve(lockPath);
+      const isPoisoned = isCanonicalLock
+        && fs.existsSync(lockPath)
+        && JSON.parse(fs.readFileSync(lockPath, "utf8")).releasing === true;
+      if (!replaced && isPoisoned) {
         const staged = `${lockPath}.foreign`;
         fs.writeFileSync(staged, replacement, { mode: 0o600 });
         fs.renameSync(staged, lockPath);
         replaced = true;
       }
-      return fsp.rename(source, destination);
+      return fsp.lstat(target, ...args);
     };
     await assert.rejects(() => apply(filesystem), { code: "DOTAIOS_OWNED_STATE_INVALID" });
     assert.equal(replaced, true);
@@ -1495,6 +1749,55 @@ function failDirectorySyncAfterRecordOperation(directoryPath, recordPath, operat
 
 function writeJsonRecord(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value)}\n`);
+}
+
+function createStateOverlapFixture(relation) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-state-overlap-"));
+  const homePath = relation === "inside" ? path.join(root, "aios") : root;
+  const stateRoot = path.join(homePath, ".dotaios", "project-sources");
+  const aiosPath = relation === "equal"
+    ? stateRoot
+    : relation === "containing"
+      ? path.join(stateRoot, "portable-aios")
+      : homePath;
+  const sourceRoot = path.join(root, "external-assets");
+  fs.mkdirSync(path.join(aiosPath, "projects", "acme-campaign"), { recursive: true });
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "acme-campaign", "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Acme Campaign\n",
+  );
+  return {
+    root,
+    aiosPath,
+    homePath,
+    sourceRoot,
+    cleanup() { fs.rmSync(root, { recursive: true, force: true }); },
+  };
+}
+
+function createSymlinkStateOverlapFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-state-overlap-link-"));
+  const homePath = path.join(root, "home");
+  const stateRoot = path.join(homePath, ".dotaios", "project-sources");
+  const aiosPath = path.join(root, "portable-aios-link");
+  const sourceRoot = path.join(root, "external-assets");
+  fs.mkdirSync(path.join(stateRoot, "projects", "acme-campaign"), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.join(homePath, ".dotaios"), 0o700);
+  fs.chmodSync(stateRoot, 0o700);
+  fs.mkdirSync(sourceRoot, { recursive: true });
+  fs.writeFileSync(
+    path.join(stateRoot, "projects", "acme-campaign", "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Acme Campaign\n",
+  );
+  fs.symlinkSync(stateRoot, aiosPath, "dir");
+  return {
+    root,
+    aiosPath,
+    homePath,
+    sourceRoot,
+    cleanup() { fs.rmSync(root, { recursive: true, force: true }); },
+  };
 }
 
 function projectSourceDeclaration(sourceId) {

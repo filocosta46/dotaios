@@ -24,6 +24,8 @@ test("project commands only request outer sync after an applied catalog change",
   assert.equal(skipsPortableMirrorSync("project", ["source", "bind", "client", "assets", "/tmp/assets", "--apply"]), true);
   assert.equal(skipsPortableMirrorSync("project", ["source", "grant", "client", "assets", "--apply"]), true);
   assert.equal(skipsPortableMirrorSync("project", ["source", "retrieve", "client", "--task", "assets"]), true);
+  assert.equal(skipsPortableMirrorSync("project", ["source", "connect", "client", "/tmp/assets"]), true);
+  assert.equal(skipsPortableMirrorSync("project", ["source", "connect", "client", "/tmp/assets", "--yes"]), false);
 });
 
 test("compact, hook JSON, and lean briefs are classified read-only and never spawn sync", async () => {
