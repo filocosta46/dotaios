@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 
 import {
   addProjectSource,
+  bindProjectSource,
+  connectProjectSource,
   grantProjectSource,
   revokeProjectSource,
   retrieveProjectSource,
@@ -48,6 +50,25 @@ test("project source syntax bounds fail before project discovery or receipt stat
     }),
     (error) => error?.details?.reason === "source-id-invalid"
   );
+});
+
+test("retrieval refuses a selector shared by a project slug and another stable id", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const neighborReadme = path.join(fixture.aiosPath, "projects", "other-client", "README.md");
+    fs.writeFileSync(
+      neighborReadme,
+      fs.readFileSync(neighborReadme, "utf8").replace("id: project-other-002", "id: acme-campaign"),
+    );
+
+    const result = await retrieveCampaignSource(fixture);
+
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "project-ambiguous");
+    assert.deepEqual(result.references, []);
+  } finally {
+    fixture.cleanup();
+  }
 });
 
 test("core composes finite consent, metadata-only retrieval, provenance, and one receipt", assertCoreConsentSlice);
@@ -1053,6 +1074,95 @@ test(
   "exact source-add retry succeeds after publication-marker sync uncertainty",
   assertPublicationMarkerRecovery,
 );
+
+test("guided connect exact retry resumes an interrupted publication marker", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const options = {
+      ...campaignAddOptions(fixture),
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      yes: true,
+    };
+    const bindingPath = projectSourceStatePaths(
+      fixture.homePath, "project-acme-001", "campaign-assets",
+    ).binding;
+    let bindingRenames = 0;
+    const filesystem = Object.create(fsp);
+    filesystem.rename = async (source, destination) => {
+      if (path.resolve(String(destination)) === path.resolve(bindingPath)) {
+        bindingRenames += 1;
+        if (bindingRenames === 2) throw new Error("forced marker rename failure");
+      }
+      return fsp.rename(source, destination);
+    };
+
+    await assert.rejects(() => connectProjectSource({ ...options, filesystem }));
+    assert.equal(fs.existsSync(path.join(
+      fixture.aiosPath, "projects", "acme-campaign", "sources", "campaign-assets.md",
+    )), true);
+    assert.equal(JSON.parse(fs.readFileSync(bindingPath, "utf8")).portable_published, false);
+    const completed = await connectProjectSource(options);
+
+    assert.equal(completed.applied, true);
+    assert.equal(completed.idempotent, false);
+    assert.match(completed.grant_id, /^[a-f0-9-]+$/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("guided connect never grants a concurrent rebind to another folder", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const otherRoot = path.join(fixture.root, "rebound-assets");
+    fs.mkdirSync(otherRoot);
+    fs.writeFileSync(path.join(otherRoot, "wrong-root.txt"), "WRONG_ROOT_CANARY");
+    const declarationPath = path.join(
+      fixture.aiosPath, "projects", "acme-campaign", "sources", "campaign-assets.md",
+    );
+    let declarationOpens = 0;
+    let rebound = false;
+    const filesystem = Object.create(fsp);
+    filesystem.open = async (filePath, ...args) => {
+      if (path.resolve(String(filePath)) === path.resolve(declarationPath)) {
+        declarationOpens += 1;
+        if (declarationOpens === 3) {
+          const bindOptions = {
+            ...campaignSourceOptions(fixture),
+            folder: otherRoot,
+          };
+          const preview = await bindProjectSource(bindOptions);
+          await bindProjectSource({
+            ...bindOptions,
+            operationId: preview.operation_id,
+            planFingerprint: preview.plan_fingerprint,
+            apply: true,
+          });
+          rebound = true;
+        }
+      }
+      return fsp.open(filePath, ...args);
+    };
+
+    await assert.rejects(
+      () => connectProjectSource({
+        ...campaignAddOptions(fixture),
+        expiresAt: "2099-01-01T00:00:00.000Z",
+        yes: true,
+        filesystem,
+      }),
+      (error) => error?.details?.reason === "connection-mismatch",
+    );
+    assert.equal(rebound, true);
+
+    const retrieval = await retrieveCampaignSource(fixture);
+    assert.equal(retrieval.decision, "refused");
+    assert.deepEqual(retrieval.references, []);
+    assert.doesNotMatch(JSON.stringify(retrieval), /WRONG_ROOT_CANARY/);
+  } finally {
+    fixture.cleanup();
+  }
+});
 
 async function assertPublicationMarkerRecovery() {
   const fixture = createProjectSourceRetrievalFixture();

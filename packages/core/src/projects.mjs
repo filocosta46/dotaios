@@ -486,12 +486,12 @@ export async function resolvePortableProjectIdentity({
       { strict: true }
     )
     : null;
-  if (directIdentity) return directIdentity;
   const projectDirectories = await evidenceReader.listDirectories(resolvedAiosPath, projectsPath, {
     skipLinkedEntries: true
   });
-  let matches = [];
+  let matches = directIdentity ? [directIdentity] : [];
   for (const projectDirectory of projectDirectories) {
+    if (directIdentity?.slug === path.basename(projectDirectory)) continue;
     const identity = await readPortableProjectIdentity(
       resolvedAiosPath,
       projectDirectory,

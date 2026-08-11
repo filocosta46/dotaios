@@ -118,6 +118,11 @@ test("spawned guided connect previews once, applies with --yes, and retrieves th
     assert.match(human.stdout, /Purpose:\s+Launch campaign assets/);
     assert.match(human.stdout, /Approval timing:\s+when --yes confirms this exact connection/);
     assert.match(human.stdout, /Expires:\s+2099-01-01T00:00:00.000Z/);
+    assert.match(
+      human.stdout,
+      /Portable effect:\s+projects\/acme-campaign\/sources\/campaign-assets\.md/,
+    );
+    assert.ok(human.stdout.includes(`Local folder: ${fs.realpathSync(fixture.sourceRoot)}`));
 
     const connected = runJson(sourceConnectArgs(fixture, { yes: true }));
     assert.equal(connected.applied, true);

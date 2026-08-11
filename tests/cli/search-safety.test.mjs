@@ -98,6 +98,36 @@ test("CLI project search keeps corpus selection separate from session attributio
   }
 });
 
+test("CLI project search refuses a selector shared by a slug and another stable id", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const neighborReadme = path.join(fixture.aiosPath, "projects", "other-client", "README.md");
+    fs.writeFileSync(
+      neighborReadme,
+      fs.readFileSync(neighborReadme, "utf8").replace("id: project-other-002", "id: acme-campaign"),
+    );
+
+    const result = spawnSync(process.execPath, [
+      cli,
+      "search",
+      "Launch work",
+      "--scope",
+      "projects",
+      "--project",
+      "acme-campaign",
+      "--path",
+      fixture.aiosPath,
+    ], { cwd: repoRoot, encoding: "utf8" });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /project selector is ambiguous/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /OTHER_CLIENT_PRIVATE_CANARY/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(fixture.aiosPath));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 function run(args) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: repoRoot,

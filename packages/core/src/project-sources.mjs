@@ -108,7 +108,8 @@ export async function connectProjectSource(options = {}) {
     ...options,
     sourceId: plan.source_id,
     purpose: plan.purpose,
-    expiresAt: plan.expires_at
+    expiresAt: plan.expires_at,
+    expectedBinding: plan.binding
   };
   const grantPlan = await grantProjectSource(grantOptions);
   const grant = await grantProjectSource({
@@ -193,6 +194,7 @@ async function planProjectSourceConnect(options) {
     machine_local: Object.freeze({ root: root.path }),
     portable_path: path.posix.join("projects", context.project.slug, "sources", `${sourceId}.md`),
     add_plan: null,
+    binding: state.binding,
     grant: state.grant
   });
 }
@@ -332,7 +334,8 @@ function createAddPlan({
 function resolveAddRecovery({
   existingSource, existingDeclaration, declaration, binding, requestedOperationId, explicitOperation, root
 }) {
-  const operationId = !existingSource && binding && !explicitOperation
+  const incompleteBinding = binding?.portable_published === false;
+  const operationId = incompleteBinding && !explicitOperation
     ? validateOperationId(binding.operation_id)
     : requestedOperationId;
   const operationMatches = binding?.operation_id === operationId
@@ -341,8 +344,12 @@ function resolveAddRecovery({
   const recovering = Boolean(
     operationMatches
     && (
-      (!existingSource && binding.portable_published === false)
-      || (existingSource && explicitOperation && existingDeclaration === declaration)
+      (!existingSource && incompleteBinding)
+      || (
+        existingSource
+        && existingDeclaration === declaration
+        && (explicitOperation || incompleteBinding)
+      )
     )
   );
   if (existingSource && !recovering) {
@@ -552,6 +559,9 @@ async function planProjectSourceGrant(options = {}) {
   });
   const binding = state.binding;
   if (!binding) throw sourceError("binding-missing", "Project source binding is missing.");
+  if (options.expectedBinding && !sameConnectBindingRevision(binding, options.expectedBinding)) {
+    throw sourceError("connection-mismatch", "Project source binding no longer matches this connection.");
+  }
   const currentGrant = state.grant;
   return createGrantPlan({
     context,
@@ -564,6 +574,12 @@ async function planProjectSourceGrant(options = {}) {
     currentGrant,
     now: options.now || (() => new Date())
   });
+}
+
+function sameConnectBindingRevision(current, expected) {
+  return current.generation === expected.generation
+    && current.root_path === expected.root_path
+    && sameRootIdentity(current.root_identity, expected.root_identity);
 }
 
 function createGrantPlan({

@@ -168,16 +168,46 @@ test("project search resolves slug and stable id before constructing only that p
   );
 });
 
+test("project selection refuses a slug that collides with another project's stable id", async () => {
+  const root = tmpDir();
+  for (const [slug, id] of [["acme", "project-acme-001"], ["agency", "acme"]]) {
+    const projectPath = path.join(root, "projects", slug);
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      `---\nid: ${id}\nproject: ${slug}\n---\n# ${slug}\n\nCOLLISION_PRIVATE_CANARY\n`,
+    );
+  }
+
+  await assert.rejects(
+    () => searchAios({
+      aiosPath: root,
+      query: "COLLISION_PRIVATE_CANARY",
+      scope: "projects",
+      projectSelector: "acme",
+    }),
+    (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_AMBIGUOUS",
+  );
+});
+
 test("project identity resolution keeps legacy neighbors non-blocking and header-only", async (t) => {
-  await t.test("direct slug never opens neighboring project identities", async () => {
+  await t.test("direct slug scans only bounded neighboring identity headers", async () => {
     const fixture = createLegacyProjectShelf();
-    const neighborReadmes = new Set(fixture.legacyReadmes.map((filePath) => path.resolve(filePath)));
+    const bodyOnly = path.resolve(fixture.bodyOnlyReadme);
+    let bodyReadCalls = 0;
+    let bodyBytesRead = 0;
     const filesystem = Object.create(fsp);
     filesystem.open = async (filePath, ...args) => {
-      if (neighborReadmes.has(path.resolve(String(filePath)))) {
-        throw new Error("direct slug opened a neighboring project identity");
-      }
-      return fsp.open(filePath, ...args);
+      const handle = await fsp.open(filePath, ...args);
+      if (path.resolve(String(filePath)) !== bodyOnly) return handle;
+      return Object.create(handle, {
+        read: { value: async (...readArgs) => {
+          const result = await handle.read(...readArgs);
+          bodyReadCalls += 1;
+          bodyBytesRead += result.bytesRead;
+          return result;
+        } },
+      });
     };
     const result = await searchAios({
       aiosPath: fixture.root,
@@ -187,6 +217,8 @@ test("project identity resolution keeps legacy neighbors non-blocking and header
       evidenceReader: createEvidenceReader({ roots: [fixture.root], filesystem })
     });
     assert.match(JSON.stringify(result), /SELECTED_LEGACY_SHELF_CANARY/);
+    assert.ok(bodyReadCalls <= 2, `body-only README required ${bodyReadCalls} reads`);
+    assert.ok(bodyBytesRead <= 5, `body-only README read ${bodyBytesRead} bytes`);
   });
 
   await t.test("stable id scans only bounded identity headers and skips unselectable records", async () => {

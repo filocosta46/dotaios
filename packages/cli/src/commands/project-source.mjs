@@ -300,6 +300,8 @@ function printResult(output, result) {
     output.log(`Purpose: ${result.purpose}`);
     output.log(`Approval timing: ${result.approved_at || result.approval_timing}`);
     output.log(`Expires: ${result.expires_at}`);
+    if (result.portable?.path) output.log(`Portable effect: ${result.portable.path}`);
+    if (result.machine_local?.root) output.log(`Local folder: ${result.machine_local.root}`);
     if (!result.applied) output.log("Re-run this exact command with --yes to connect the folder and finite read grant.");
     if (result.grant_id) output.log(`Grant: ${result.grant_id}`);
     return;
