@@ -2,6 +2,7 @@ import path from "node:path";
 import { createEvidenceReader } from "./evidence-reader.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 import { resolvePortableProjectIdentity, validateProjectSelector } from "./projects.mjs";
+import { haystackHasInflectionOf } from "./search-inflections.mjs";
 
 export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "decisions", "skills", "references", "plugins", "sessions", "all"];
 
@@ -46,7 +47,10 @@ const SECRET_FILE_PATTERNS = [
 
 export const RECENCY_HALF_LIFE_DAYS = 30;
 const RANK_TIER_WEIGHT = 1_000_000;
-const RANK_TIERS = { phrase: 3, terms: 2, partial: 1 };
+// Tiers are absolute: any phrase hit outranks every terms hit, and so on down.
+// "inflected" sits at the bottom because it is the only kind that did not match
+// the words the person actually typed.
+const RANK_TIERS = { phrase: 4, terms: 3, partial: 2, inflected: 1 };
 const TOKEN_SPLIT_RE = /[^a-z0-9_-]+/;
 
 export function tokenizeForCorpus(text) {
@@ -289,6 +293,14 @@ export function matchQuery(text, query) {
     if (present.length > 0) {
       return { matched: true, kind: "partial", score: present.length };
     }
+  }
+
+  // Last resort: the same words in a different tense or number. Ranked below
+  // every literal kind, and only reached once all of them have failed, so it
+  // adds recall without moving anything that already matched.
+  const inflected = terms.filter((term) => haystackHasInflectionOf(haystack, term));
+  if (inflected.length === terms.length) {
+    return { matched: true, kind: "inflected", score: inflected.length };
   }
 
   return { matched: false, kind: null, score: 0 };
