@@ -28,6 +28,13 @@ const PROJECT_STATE_VERSION = 1;
 const PROJECT_STATE_LOCK_FORMAT = "dotaios-project-state-lock/v1";
 const PROJECT_STATE_LOCK_STALE_MS = 5 * 60 * 1000;
 const PROJECT_DOMAINS = new Set(["build", "make", "sell"]);
+const UNSELECTABLE_PROJECT_IDENTITY_ERRORS = new Set([
+  "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
+  "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID",
+  "DOTAIOS_EVIDENCE_INVALID_UTF8",
+  "DOTAIOS_EVIDENCE_NOT_REGULAR_FILE",
+  "DOTAIOS_EVIDENCE_PATH_UNSAFE",
+]);
 
 /**
  * Preview registration of an external project repository without moving or
@@ -542,7 +549,7 @@ async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceR
       }
     );
   } catch (error) {
-    if (!strict && error?.code === "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID") return null;
+    if (!strict && UNSELECTABLE_PROJECT_IDENTITY_ERRORS.has(error?.code)) return null;
     if (strict && error?.code === "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID") {
       throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
     }

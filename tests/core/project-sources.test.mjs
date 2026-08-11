@@ -71,6 +71,40 @@ test("retrieval refuses a selector shared by a project slug and another stable i
   }
 });
 
+test("retrieval receipts survive structurally unselectable neighbor identities", async (t) => {
+  for (const kind of ["linked", "oversized"]) {
+    await t.test(kind, async () => {
+      const fixture = createProjectSourceRetrievalFixture();
+      try {
+        await applyCampaignGrant(fixture);
+        const neighborReadme = path.join(fixture.aiosPath, "projects", "other-client", "README.md");
+        if (kind === "linked") {
+          const outside = path.join(fixture.root, "outside-neighbor.md");
+          fs.writeFileSync(outside, "---\nid: acme-campaign\nproject: other-client\n---\n");
+          fs.rmSync(neighborReadme);
+          fs.symlinkSync(outside, neighborReadme);
+        } else {
+          fs.writeFileSync(neighborReadme, "x".repeat((1024 * 1024) + 1));
+        }
+
+        const result = await retrieveCampaignSource(fixture);
+
+        assert.equal(result.decision, "allowed");
+        assert.ok(result.references.length > 0);
+        const receiptPath = path.join(
+          fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+        );
+        const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+        assert.equal(receipts.length, 1);
+        assert.equal(receipts[0].decision, "allowed");
+        assert.equal(receipts[0].receipt_id, result.receipt_id);
+      } finally {
+        fixture.cleanup();
+      }
+    });
+  }
+});
+
 test("core composes finite consent, metadata-only retrieval, provenance, and one receipt", assertCoreConsentSlice);
 
 test("portable source declarations require the exact bounded metadata-only schema", async (t) => {

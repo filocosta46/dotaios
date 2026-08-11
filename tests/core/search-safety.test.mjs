@@ -190,6 +190,95 @@ test("project selection refuses a slug that collides with another project's stab
   );
 });
 
+test("direct slug selection skips structurally unselectable neighbor identities", async (t) => {
+  for (const kind of ["linked", "oversized"]) {
+    await t.test(kind, async () => {
+      const root = tmpDir();
+      const selectedPath = path.join(root, "projects", "acme-campaign");
+      const neighborPath = path.join(root, "projects", "legacy-neighbor");
+      fs.mkdirSync(selectedPath, { recursive: true });
+      fs.mkdirSync(neighborPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(selectedPath, "README.md"),
+        "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Selected\n\nSELECTED_NEIGHBOR_ISOLATION_CANARY\n",
+      );
+      const neighborReadme = path.join(neighborPath, "README.md");
+      if (kind === "linked") {
+        const outside = path.join(root, "outside-neighbor.md");
+        fs.writeFileSync(outside, "---\nid: acme-campaign\nproject: legacy-neighbor\n---\n");
+        fs.symlinkSync(outside, neighborReadme);
+      } else {
+        fs.writeFileSync(neighborReadme, "x".repeat((1024 * 1024) + 1));
+      }
+
+      const result = await searchAios({
+        aiosPath: root,
+        query: "SELECTED_NEIGHBOR_ISOLATION_CANARY",
+        scope: "projects",
+        projectSelector: "acme-campaign",
+      });
+
+      assert.equal(result.scope.project, "acme-campaign");
+      assert.match(JSON.stringify(result), /SELECTED_NEIGHBOR_ISOLATION_CANARY/);
+    });
+  }
+});
+
+test("project identity isolation preserves strict and state-change failures", async (t) => {
+  await t.test("selected linked README remains unsafe", async () => {
+    const root = tmpDir();
+    const selectedPath = path.join(root, "projects", "acme-campaign");
+    fs.mkdirSync(selectedPath, { recursive: true });
+    const outside = path.join(root, "outside-selected.md");
+    fs.writeFileSync(outside, "---\nid: project-acme-001\nproject: acme-campaign\n---\n");
+    fs.symlinkSync(outside, path.join(selectedPath, "README.md"));
+
+    await assert.rejects(
+      () => searchAios({
+        aiosPath: root,
+        query: "campaign",
+        scope: "projects",
+        projectSelector: "acme-campaign",
+      }),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_PATH_UNSAFE",
+    );
+  });
+
+  await t.test("neighbor state change remains fail closed", async () => {
+    const root = tmpDir();
+    for (const slug of ["acme-campaign", "legacy-neighbor"]) {
+      const projectPath = path.join(root, "projects", slug);
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\nid: project-${slug}\nproject: ${slug}\n---\n# ${slug}\n`,
+      );
+    }
+    const baseReader = createEvidenceReader({ roots: [root] });
+    const neighborReadme = path.join(root, "projects", "legacy-neighbor", "README.md");
+    const evidenceReader = {
+      ...baseReader,
+      async readFrontmatter(readerRoot, filePath, options) {
+        if (path.resolve(filePath) === path.resolve(neighborReadme)) {
+          throw Object.assign(new Error("changed"), { code: "DOTAIOS_EVIDENCE_CHANGED" });
+        }
+        return baseReader.readFrontmatter(readerRoot, filePath, options);
+      },
+    };
+
+    await assert.rejects(
+      () => searchAios({
+        aiosPath: root,
+        query: "campaign",
+        scope: "projects",
+        projectSelector: "acme-campaign",
+        evidenceReader,
+      }),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED",
+    );
+  });
+});
+
 test("project identity resolution keeps legacy neighbors non-blocking and header-only", async (t) => {
   await t.test("direct slug scans only bounded neighboring identity headers", async () => {
     const fixture = createLegacyProjectShelf();
