@@ -71,8 +71,126 @@ test("retrieval refuses a selector shared by a project slug and another stable i
   }
 });
 
+test("retrieval refuses and receipts a selected catalog identity outside the selector contract", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const selectedReadme = path.join(fixture.aiosPath, "projects", "acme-campaign", "README.md");
+    fs.writeFileSync(
+      selectedReadme,
+      fs.readFileSync(selectedReadme, "utf8").replace(
+        "id: project-acme-001",
+        "id: \" project-acme-001 \"",
+      ),
+    );
+
+    const result = await retrieveCampaignSource(fixture);
+
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "project-catalog-invalid");
+    assert.deepEqual(result.references, []);
+    const receiptPath = path.join(
+      fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+    );
+    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].decision, "refused");
+    assert.equal(receipts[0].reason, "project-catalog-invalid");
+    assert.equal(receipts[0].receipt_id, result.receipt_id);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("retrieval refuses and receipts conflicting canonical and legacy project ids", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const selectedReadme = path.join(fixture.aiosPath, "projects", "acme-campaign", "README.md");
+    fs.writeFileSync(
+      selectedReadme,
+      fs.readFileSync(selectedReadme, "utf8").replace(
+        "id: project-acme-001",
+        "id: project-acme-001\nproject_id: conflicting-id",
+      ),
+    );
+
+    const result = await retrieveCampaignSource(fixture);
+
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "project-catalog-invalid");
+    assert.deepEqual(result.references, []);
+    const receiptPath = path.join(
+      fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+    );
+    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].decision, "refused");
+    assert.equal(receipts[0].reason, "project-catalog-invalid");
+    assert.equal(receipts[0].receipt_id, result.receipt_id);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("retrieval refuses and receipts a present malformed canonical project id", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const selectedReadme = path.join(fixture.aiosPath, "projects", "acme-campaign", "README.md");
+    fs.writeFileSync(
+      selectedReadme,
+      fs.readFileSync(selectedReadme, "utf8").replace(
+        "id: project-acme-001",
+        "id: 123\nproject_id: project-acme-001",
+      ),
+    );
+
+    const result = await retrieveCampaignSource(fixture);
+
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "project-catalog-invalid");
+    assert.deepEqual(result.references, []);
+    const receiptPath = path.join(
+      fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+    );
+    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].decision, "refused");
+    assert.equal(receipts[0].reason, "project-catalog-invalid");
+    assert.equal(receipts[0].receipt_id, result.receipt_id);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("retrieval refuses and receipts non-mapping selected project metadata", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const selectedReadme = path.join(fixture.aiosPath, "projects", "acme-campaign", "README.md");
+    fs.writeFileSync(selectedReadme, "---\nnull\n---\n# Invalid metadata\n");
+
+    const result = await retrieveCampaignSource(fixture);
+
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "project-catalog-invalid");
+    assert.deepEqual(result.references, []);
+    const receiptPath = path.join(
+      fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+    );
+    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].decision, "refused");
+    assert.equal(receipts[0].reason, "project-catalog-invalid");
+    assert.equal(receipts[0].receipt_id, result.receipt_id);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("retrieval receipts survive structurally unselectable neighbor identities", async (t) => {
-  for (const kind of ["missing", "linked", "special", "oversized"]) {
+  for (const kind of ["missing", "linked", "special", "oversized", "padded-id"]) {
     await t.test(kind, async () => {
       const fixture = createProjectSourceRetrievalFixture();
       try {
@@ -88,6 +206,14 @@ test("retrieval receipts survive structurally unselectable neighbor identities",
         } else if (kind === "special") {
           fs.rmSync(neighborReadme);
           fs.mkdirSync(neighborReadme);
+        } else if (kind === "padded-id") {
+          fs.writeFileSync(
+            neighborReadme,
+            fs.readFileSync(neighborReadme, "utf8").replace(
+              "id: project-other-002",
+              "id: \" acme-campaign \"",
+            ),
+          );
         } else {
           fs.writeFileSync(neighborReadme, "x".repeat((1024 * 1024) + 1));
         }

@@ -139,6 +139,36 @@ test("search_aios matches CLI project selection by slug and stable id without wi
   assert.doesNotMatch(JSON.stringify(bySlug), /OTHER_MCP_SEARCH_CANARY|other-client/);
 });
 
+test("search_aios refuses a selected catalog identity outside the selector contract", () => {
+  const { aiosPath } = setupAios();
+  const projectPath = path.join(aiosPath, "projects", "acme-campaign");
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectPath, "README.md"),
+    "---\nid: \" project-acme-001 \"\nproject: acme-campaign\n---\n# Selected\n\nINVALID_ID_PRIVATE_CANARY\n",
+  );
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: {
+        query: "INVALID_ID_PRIVATE_CANARY",
+        scope: "projects",
+        project: "acme-campaign",
+        budget: 2000,
+      },
+    },
+  }]);
+
+  assert.equal(response.error.code, -32603);
+  assert.match(response.error.message, /failed safely/i);
+  assert.doesNotMatch(JSON.stringify(response), /INVALID_ID_PRIVATE_CANARY/);
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
 test("mcp search budgets bound the exact serialized response at minimum, default, and maximum", () => {
   const { aiosPath } = setupAios();
   fs.writeFileSync(

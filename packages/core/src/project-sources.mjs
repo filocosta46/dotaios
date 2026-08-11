@@ -1424,6 +1424,7 @@ function stableReason(error) {
     error?.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED"
     || error?.code === "DOTAIOS_EVIDENCE_CHANGED"
   ) return "source-changed";
+  if (error?.code === "DOTAIOS_PROJECT_CATALOG_INVALID") return "project-catalog-invalid";
   if (
     error?.code === "DOTAIOS_PROJECT_SOURCE_BOUND_EXCEEDED"
     || error?.code === "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED"

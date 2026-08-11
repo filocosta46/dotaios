@@ -128,6 +128,37 @@ test("CLI project search refuses a selector shared by a slug and another stable 
   }
 });
 
+test("CLI project search refuses a selected catalog identity outside the selector contract", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const selectedReadme = path.join(fixture.aiosPath, "projects", "acme-campaign", "README.md");
+    fs.writeFileSync(
+      selectedReadme,
+      `${fs.readFileSync(selectedReadme, "utf8")
+        .replace("id: project-acme-001", "id: \" project-acme-001 \"")}\nINVALID_ID_PRIVATE_CANARY\n`,
+    );
+
+    const result = spawnSync(process.execPath, [
+      cli,
+      "search",
+      "Launch work",
+      "--scope",
+      "projects",
+      "--project",
+      "acme-campaign",
+      "--path",
+      fixture.aiosPath,
+    ], { cwd: repoRoot, encoding: "utf8" });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /valid stable id/i);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /INVALID_ID_PRIVATE_CANARY/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(fixture.aiosPath));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 function run(args) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: repoRoot,

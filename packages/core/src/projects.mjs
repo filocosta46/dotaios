@@ -530,6 +530,7 @@ async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceR
   const slug = path.basename(projectDirectory);
   try {
     validateSlug(slug);
+    validateProjectSelector(slug);
   } catch {
     if (!strict) return null;
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project catalog contains an invalid slug");
@@ -572,10 +573,47 @@ async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceR
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
   }
   const metadata = document.toJS();
-  const id = readOptionalString(metadata?.id) || readOptionalString(metadata?.project_id);
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity frontmatter must be a metadata mapping",
+    );
+  }
+  const hasPrimaryId = Object.hasOwn(metadata, "id");
+  const hasLegacyId = Object.hasOwn(metadata, "project_id");
+  const primaryId = hasPrimaryId ? metadata.id : null;
+  const legacyId = hasLegacyId ? metadata.project_id : null;
+  if (
+    (hasPrimaryId && (typeof primaryId !== "string" || primaryId.length === 0))
+    || (hasLegacyId && (typeof legacyId !== "string" || legacyId.length === 0))
+  ) {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity requires valid stable id fields",
+    );
+  }
+  if (primaryId && legacyId && primaryId !== legacyId) {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity contains conflicting stable ids",
+    );
+  }
+  const id = primaryId || legacyId;
   if (!id) {
     if (!strict) return null;
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity requires a stable id");
+  }
+  try {
+    validateProjectSelector(id);
+  } catch {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity requires a valid stable id",
+    );
   }
   return Object.freeze({ id, slug });
 }

@@ -168,6 +168,290 @@ test("project search resolves slug and stable id before constructing only that p
   );
 });
 
+test("project search refuses catalog identities outside the selector contract", async (t) => {
+  for (const id of ["project acme 001", "project/acme", " project-acme-001 ", "x".repeat(201)]) {
+    await t.test(`stable id ${JSON.stringify(id.slice(0, 24))}`, async () => {
+      const root = tmpDir();
+      const projectPath = path.join(root, "projects", "acme-campaign");
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\nid: ${JSON.stringify(id)}\nproject: acme-campaign\n---\n# Selected\n\nINVALID_ID_PRIVATE_CANARY\n`,
+      );
+
+      await assert.rejects(
+        () => searchAios({
+          aiosPath: root,
+          query: "INVALID_ID_PRIVATE_CANARY",
+          scope: "projects",
+          projectSelector: "acme-campaign",
+        }),
+        (error) => error?.code === "DOTAIOS_PROJECT_CATALOG_INVALID",
+      );
+      await assert.rejects(
+        () => searchAios({
+          aiosPath: root,
+          query: "INVALID_ID_PRIVATE_CANARY",
+          scope: "projects",
+          projectSelector: id,
+        }),
+        (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_INVALID",
+      );
+    });
+  }
+
+  await t.test("201-code-point slug", async () => {
+    const root = tmpDir();
+    const slug = "s".repeat(201);
+    const projectPath = path.join(root, "projects", slug);
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      `---\nid: project-long-slug\nproject: ${slug}\n---\n# Selected\n`,
+    );
+
+    await assert.rejects(
+      () => searchAios({
+        aiosPath: root,
+        query: "Selected",
+        scope: "projects",
+        projectSelector: "project-long-slug",
+      }),
+      (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN",
+    );
+    await assert.rejects(
+      () => searchAios({
+        aiosPath: root,
+        query: "Selected",
+        scope: "projects",
+        projectSelector: slug,
+      }),
+      (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_INVALID",
+    );
+  });
+
+  await t.test("padded neighboring stable id", async () => {
+    const root = tmpDir();
+    for (const [slug, id, canary] of [
+      ["acme-campaign", "project-acme-001", "SELECTED_VALID_ID_CANARY"],
+      ["legacy-neighbor", " acme-campaign ", "PADDED_NEIGHBOR_PRIVATE_CANARY"],
+    ]) {
+      const projectPath = path.join(root, "projects", slug);
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\nid: ${JSON.stringify(id)}\nproject: ${slug}\n---\n# ${slug}\n\n${canary}\n`,
+      );
+    }
+
+    const result = await searchAios({
+      aiosPath: root,
+      query: "SELECTED_VALID_ID_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+    });
+
+    assert.equal(result.scope.project, "acme-campaign");
+    assert.match(JSON.stringify(result), /SELECTED_VALID_ID_CANARY/);
+    assert.doesNotMatch(JSON.stringify(result), /PADDED_NEIGHBOR_PRIVATE_CANARY|legacy-neighbor/);
+  });
+
+  await t.test("conflicting canonical and legacy ids", async () => {
+    const root = tmpDir();
+    const projectPath = path.join(root, "projects", "acme-campaign");
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      "---\nid: project-acme-001\nproject_id: conflicting-id\nproject: acme-campaign\n---\n# Selected\n",
+    );
+
+    await assert.rejects(
+      () => searchAios({
+        aiosPath: root,
+        query: "Selected",
+        scope: "projects",
+        projectSelector: "acme-campaign",
+      }),
+      (error) => error?.code === "DOTAIOS_PROJECT_CATALOG_INVALID",
+    );
+  });
+
+  await t.test("conflicting neighboring ids remain unselectable", async () => {
+    const root = tmpDir();
+    for (const [slug, frontmatter, canary] of [
+      ["acme-campaign", "id: project-acme-001", "SELECTED_CONFLICT_ISOLATION_CANARY"],
+      ["legacy-neighbor", "id: acme-campaign\nproject_id: conflicting-id", "CONFLICTING_NEIGHBOR_PRIVATE_CANARY"],
+    ]) {
+      const projectPath = path.join(root, "projects", slug);
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\n${frontmatter}\nproject: ${slug}\n---\n# ${slug}\n\n${canary}\n`,
+      );
+    }
+
+    const result = await searchAios({
+      aiosPath: root,
+      query: "SELECTED_CONFLICT_ISOLATION_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+    });
+
+    assert.equal(result.scope.project, "acme-campaign");
+    assert.match(JSON.stringify(result), /SELECTED_CONFLICT_ISOLATION_CANARY/);
+    assert.doesNotMatch(JSON.stringify(result), /CONFLICTING_NEIGHBOR_PRIVATE_CANARY|legacy-neighbor/);
+  });
+
+  await t.test("matching canonical and legacy ids remain selectable", async () => {
+    const root = tmpDir();
+    const projectPath = path.join(root, "projects", "acme-campaign");
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      "---\nid: project-acme-001\nproject_id: project-acme-001\nproject: acme-campaign\n---\n# Selected\n\nMATCHING_DUAL_ID_CANARY\n",
+    );
+
+    const bySlug = await searchAios({
+      aiosPath: root,
+      query: "MATCHING_DUAL_ID_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+    });
+    const byId = await searchAios({
+      aiosPath: root,
+      query: "MATCHING_DUAL_ID_CANARY",
+      scope: "projects",
+      projectSelector: "project-acme-001",
+    });
+
+    assert.deepEqual(bySlug, byId);
+  });
+
+  for (const fields of [
+    "id: 123\nproject_id: project-acme-001",
+    "id: \"\"\nproject_id: project-acme-001",
+    "id: project-acme-001\nproject_id: 123",
+    "id: project-acme-001\nproject_id: \"\"",
+  ]) {
+    await t.test(`present malformed alias ${JSON.stringify(fields)}`, async () => {
+      const root = tmpDir();
+      const projectPath = path.join(root, "projects", "acme-campaign");
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\n${fields}\nproject: acme-campaign\n---\n# Selected\n`,
+      );
+
+      await assert.rejects(
+        () => searchAios({
+          aiosPath: root,
+          query: "Selected",
+          scope: "projects",
+          projectSelector: "acme-campaign",
+        }),
+        (error) => error?.code === "DOTAIOS_PROJECT_CATALOG_INVALID",
+      );
+    });
+  }
+
+  await t.test("malformed canonical neighbor remains unselectable", async () => {
+    const root = tmpDir();
+    for (const [slug, fields, canary] of [
+      ["acme-campaign", "id: project-acme-001", "SELECTED_MALFORMED_ALIAS_CANARY"],
+      ["legacy-neighbor", "id: 123\nproject_id: acme-campaign", "MALFORMED_ALIAS_PRIVATE_CANARY"],
+    ]) {
+      const projectPath = path.join(root, "projects", slug);
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\n${fields}\nproject: ${slug}\n---\n# ${slug}\n\n${canary}\n`,
+      );
+    }
+
+    const result = await searchAios({
+      aiosPath: root,
+      query: "SELECTED_MALFORMED_ALIAS_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+    });
+
+    assert.equal(result.scope.project, "acme-campaign");
+    assert.doesNotMatch(JSON.stringify(result), /MALFORMED_ALIAS_PRIVATE_CANARY|legacy-neighbor/);
+  });
+
+  await t.test("legacy-only stable id remains selectable", async () => {
+    const root = tmpDir();
+    const projectPath = path.join(root, "projects", "acme-campaign");
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      "---\nproject_id: project-acme-001\nproject: acme-campaign\n---\n# Selected\n\nLEGACY_ONLY_ID_CANARY\n",
+    );
+
+    const bySlug = await searchAios({
+      aiosPath: root,
+      query: "LEGACY_ONLY_ID_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+    });
+    const byId = await searchAios({
+      aiosPath: root,
+      query: "LEGACY_ONLY_ID_CANARY",
+      scope: "projects",
+      projectSelector: "project-acme-001",
+    });
+
+    assert.deepEqual(bySlug, byId);
+  });
+
+  for (const metadata of ["", "null", "[]", "123", "scalar"]) {
+    await t.test(`non-mapping metadata ${JSON.stringify(metadata)}`, async () => {
+      const root = tmpDir();
+      const projectPath = path.join(root, "projects", "acme-campaign");
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\n${metadata}\n---\n# Selected\n`,
+      );
+
+      await assert.rejects(
+        () => searchAios({
+          aiosPath: root,
+          query: "Selected",
+          scope: "projects",
+          projectSelector: "acme-campaign",
+        }),
+        (error) => error?.code === "DOTAIOS_PROJECT_CATALOG_INVALID",
+      );
+    });
+  }
+
+  await t.test("non-mapping neighboring metadata remains unselectable", async () => {
+    const root = tmpDir();
+    for (const [slug, frontmatter, canary] of [
+      ["acme-campaign", "id: project-acme-001\nproject: acme-campaign", "SELECTED_MAPPING_CANARY"],
+      ["legacy-neighbor", "null", "NON_MAPPING_PRIVATE_CANARY"],
+    ]) {
+      const projectPath = path.join(root, "projects", slug);
+      fs.mkdirSync(projectPath, { recursive: true });
+      fs.writeFileSync(
+        path.join(projectPath, "README.md"),
+        `---\n${frontmatter}\n---\n# ${slug}\n\n${canary}\n`,
+      );
+    }
+
+    const result = await searchAios({
+      aiosPath: root,
+      query: "SELECTED_MAPPING_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+    });
+
+    assert.equal(result.scope.project, "acme-campaign");
+    assert.doesNotMatch(JSON.stringify(result), /NON_MAPPING_PRIVATE_CANARY|legacy-neighbor/);
+  });
+});
+
 test("project selection refuses a slug that collides with another project's stable id", async () => {
   const root = tmpDir();
   for (const [slug, id] of [["acme", "project-acme-001"], ["agency", "acme"]]) {
