@@ -23,6 +23,7 @@ export async function collectSkills(aiosPath, { reader = null, root = aiosPath }
   const skillsDir = path.join(aiosPath, "skills");
   const directories = await activeReader.listDirectories(root, skillsDir, {
     maxEntries: 512,
+    skipLinkedEntries: true,
     skipEntry: (name) => name.startsWith(".") || name.startsWith("_")
   });
 
@@ -30,10 +31,13 @@ export async function collectSkills(aiosPath, { reader = null, root = aiosPath }
   for (const directoryPath of directories) {
     const dir = path.basename(directoryPath);
     const skillFile = path.join(directoryPath, "SKILL.md");
+    const expectedEntry = await activeReader.inspectEntry(root, skillFile);
+    if (expectedEntry === null) continue;
     const content = await activeReader.readFrontmatter(root, skillFile, {
       allowMissing: true,
       maxBytes: MAX_ROUTING_METADATA_BYTES,
-      maxFileBytes: MAX_SKILL_SOURCE_BYTES
+      maxFileBytes: MAX_SKILL_SOURCE_BYTES,
+      expectedEntry
     });
     if (content === null) throw skillMetadataError();
     const metadata = parseSkillMetadata(content);

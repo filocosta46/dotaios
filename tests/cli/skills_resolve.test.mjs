@@ -33,6 +33,22 @@ test("skills resolve matches a trigger phrase and returns the right skill", () =
   assert.match(result.stdout, /skills\/plan-today\/SKILL\.md/);
 });
 
+test("skills resolve skips a linked top-level skill and routes real siblings", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const outside = path.join(tempRoot, "outside-skill");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(
+    path.join(outside, "SKILL.md"),
+    "---\nname: OUTSIDE_SKILL_CANARY\ndescription: Must never be read.\ntriggers: plan my day\n---\n",
+  );
+  fs.symlinkSync(outside, path.join(aiosPath, "skills", "linked-entry"), "dir");
+
+  const result = run(["skills", "resolve", "plan my day", "--path", aiosPath]);
+
+  assert.match(result.stdout, /plan-today/);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /OUTSIDE_SKILL_CANARY|linked-entry/);
+});
+
 test("skills resolve routes a block-list trigger fixture to audit", () => {
   const { aiosPath } = setupAios();
   fs.cpSync(

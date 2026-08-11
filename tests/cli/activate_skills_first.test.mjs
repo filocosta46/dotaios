@@ -113,6 +113,8 @@ describe("activateCommand --skills-first", () => {
     const bridgePath = path.join(dryRunDirs.homePath, ".claude", "CLAUDE.md");
     const staleLink = path.join(dryRunDirs.homePath, ".claude", "skills", "stale-skill");
     const hermesConfig = path.join(dryRunDirs.homePath, ".hermes", "config.yaml");
+    const outsideSkill = path.join(dryRunDirs.base, "outside-skill");
+    const linkedSkill = path.join(dryRunDirs.aiosPath, "skills", "linked-entry");
 
     await fs.writeFile(indexPath, "stale index\n");
     await fs.writeFile(resolverPath, "stale resolver\n");
@@ -125,6 +127,12 @@ describe("activateCommand --skills-first", () => {
     await fs.symlink(path.join(dryRunDirs.aiosPath, "skills", "missing-skill"), staleLink);
     await fs.mkdir(path.dirname(hermesConfig), { recursive: true });
     await fs.writeFile(hermesConfig, "skills:\n  external_dirs: []\n");
+    await fs.mkdir(outsideSkill);
+    await fs.writeFile(
+      path.join(outsideSkill, "SKILL.md"),
+      "---\nname: OUTSIDE_SKILL_CANARY\ndescription: Must never be read.\n---\n",
+    );
+    await fs.symlink(outsideSkill, linkedSkill, "dir");
 
     const before = await snapshotTree(dryRunDirs.base);
     const output = [];
@@ -151,6 +159,7 @@ describe("activateCommand --skills-first", () => {
     assert.match(output.join("\n"), /\[would refresh\].*INDEX\.md.*RESOLVER\.md/);
     assert.match(output.join("\n"), /\[skills-first\] bridge files would inline the current skill catalog/);
     assert.match(output.join("\n"), /\[would link\].*test-skill/);
+    assert.doesNotMatch(output.join("\n"), /OUTSIDE_SKILL_CANARY|linked-entry/);
     // The target basename differs from the link name, so ownership is not
     // provable and the dry-run must preserve the foreign alias.
     assert.doesNotMatch(output.join("\n"), /\[would remove\].*stale-skill/);

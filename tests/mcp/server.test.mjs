@@ -738,33 +738,44 @@ test("search_aios authorizes a contained configured external vault", () => {
   assert.doesNotMatch(JSON.stringify(payload), new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
-test("resolve_skill fails closed on linked skill metadata", () => {
+test("resolve_skill skips linked top-level skills and keeps real siblings routable", () => {
   const { aiosPath, tempRoot } = setupAios();
   const outsideSkill = path.join(tempRoot, "linked-skill");
   fs.mkdirSync(outsideSkill);
   fs.writeFileSync(
     path.join(outsideSkill, "SKILL.md"),
-    "---\nname: linked-skill\ndescription: LINKED_SKILL_CANARY\ntriggers: LINKED_SKILL_CANARY\n---\n"
+    "---\nname: linked-skill\ndescription: ZZZXQ_9471\ntriggers: ZZZXQ_9471\n---\n"
   );
   fs.symlinkSync(outsideSkill, path.join(aiosPath, "skills", "linked-skill"), "dir");
 
-  const result = runMcpResult(aiosPath, [{
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/call",
-    params: {
-      name: "resolve_skill",
-      arguments: { intent: "LINKED_SKILL_CANARY" }
+  const responses = runMcp(aiosPath, [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "resolve_skill",
+        arguments: { intent: "ZZZXQ_9471" }
+      },
     },
-  }]);
-  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "resolve_skill",
+        arguments: { intent: "plan my day" }
+      },
+    },
+  ]);
+  const linked = JSON.parse(toolText(responses[0]));
+  const real = JSON.parse(toolText(responses[1]));
 
-  assert.equal(response.error.code, -32603);
-  assert.equal(response.error.message, "DotAIOS request failed safely.");
-  assert.doesNotMatch(
-    `${result.stdout}\n${result.stderr}`,
-    new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-  );
+  assert.deepEqual(linked.matches, []);
+  assert.equal(real.matches[0].name, "plan-today");
+  assert.doesNotMatch(JSON.stringify(linked.matches), /ZZZXQ_9471|linked-skill/);
+  assert.doesNotMatch(JSON.stringify(responses), /linked-skill/);
+  assert.doesNotMatch(JSON.stringify(responses), new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("resolve_skill bounds the complete serialized response", () => {

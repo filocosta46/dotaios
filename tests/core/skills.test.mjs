@@ -58,6 +58,28 @@ test("writeSkillsIndex writes skills/INDEX.md from the skills on disk", async ()
   assert.match(written, /## audit/);
 });
 
+test("writeSkillsIndex omits linked top-level skill entries and keeps real siblings", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-outside-"));
+  const skillsDir = path.join(root, "skills");
+  makeSkill(skillsDir, "real-sibling", "real-sibling", "Canonical skill.");
+  makeSkill(outside, "outside-canary", "OUTSIDE_SKILL_CANARY", "Must never be read.");
+  fs.symlinkSync(
+    path.join(outside, "outside-canary"),
+    path.join(skillsDir, "linked-entry"),
+    "dir",
+  );
+
+  const result = await writeSkillsIndex(root);
+  const catalogs = [result.path, result.resolverPath].map((filePath) => fs.readFileSync(filePath, "utf8"));
+
+  assert.equal(result.count, 1);
+  for (const catalog of catalogs) {
+    assert.match(catalog, /real-sibling/);
+    assert.doesNotMatch(catalog, /OUTSIDE_SKILL_CANARY|linked-entry/);
+  }
+});
+
 test("collectSkills parses comma-separated triggers, empty when absent", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-"));
   const skillsDir = path.join(root, "skills");
