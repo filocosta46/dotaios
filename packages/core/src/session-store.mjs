@@ -395,7 +395,13 @@ export function createSessionStore(options = {}) {
         // has cleared, so it is no longer the caller's news.
         unresolved = null;
       } catch (error) {
-        if (error?.code === "DOTAIOS_SESSION_STORE_DEADLINE") break;
+        if (error?.code === "DOTAIOS_SESSION_STORE_DEADLINE") {
+          // Only mutation.check() raises this, and it runs inside the locked
+          // section -- so reaching it proves the lock was acquired and any
+          // earlier contention had cleared. Ran out of time, nothing to report.
+          unresolved = null;
+          break;
+        }
         if (!CONTENDED_ACQUISITION_CODES.has(error?.code)) throw publicError(error);
         unresolved = error;
       }
