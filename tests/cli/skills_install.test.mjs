@@ -125,6 +125,27 @@ test("skills doctor returns a read-only JSON coverage report", () => {
   assert.equal(report.targets.find((target) => target.dir === ".agents/skills").foreign.length, 0);
 });
 
+test("skills doctor keeps real skills available beside a linked top-level entry", () => {
+  const { aiosPath, homePath, tempRoot } = setupAios();
+  const outside = path.join(tempRoot, "outside-skill");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.writeFileSync(
+    path.join(outside, "SKILL.md"),
+    "---\nname: OUTSIDE_SKILL_CANARY\ndescription: Must never be read.\n---\n",
+  );
+  fs.symlinkSync(outside, path.join(aiosPath, "skills", "linked-entry"), "dir");
+  run(["skills", "install", "--path", aiosPath, "--home", homePath, "--all"]);
+
+  const result = run(
+    ["skills", "doctor", "--json", "--path", aiosPath, "--home", homePath],
+    { allowNonZero: true },
+  );
+  const report = JSON.parse(result.stdout);
+
+  assert.ok(report.source.count > 0);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /OUTSIDE_SKILL_CANARY|linked-entry/);
+});
+
 test("skills doctor human output labels configuration evidence separately from invocation", () => {
   const { aiosPath, homePath } = setupAios();
   run(["skills", "install", "--path", aiosPath, "--home", homePath, "--all"]);

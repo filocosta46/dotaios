@@ -53,7 +53,7 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
-      params: { name: "search_aios", arguments: { query: "gateway", scope: "projects", budget: 1000 } },
+      params: { name: "search_aios", arguments: { query: "gateway", scope: "projects", project: "demo-id", budget: 1000 } },
     },
     {
       jsonrpc: "2.0",
@@ -96,6 +96,135 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
 
   assert.equal(fs.readFileSync(sessionsPath, "utf8"), sessionsBefore);
   assert.equal(fs.readFileSync(eventsPath, "utf8"), eventsBefore);
+});
+
+test("search_aios matches CLI project selection by slug and stable id without widening the tool allowlist", () => {
+  const { aiosPath } = setupAios();
+  for (const [slug, id, canary] of [
+    ["acme-campaign", "project-acme-001", "ACME_MCP_SEARCH_CANARY"],
+    ["other-client", "project-other-002", "OTHER_MCP_SEARCH_CANARY"]
+  ]) {
+    const projectPath = path.join(aiosPath, "projects", slug);
+    fs.mkdirSync(projectPath, { recursive: true });
+    fs.writeFileSync(
+      path.join(projectPath, "README.md"),
+      `---\nid: ${id}\nproject: ${slug}\n---\n# ${slug}\n\n${canary} campaign assets\n`
+    );
+  }
+  const responses = runMcp(aiosPath, [
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "acme-campaign", budget: 2000 } }
+    },
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "project-acme-001", budget: 2000 } }
+    }
+  ]);
+
+  assert.deepEqual(
+    responses[0].result.tools.map((tool) => tool.name),
+    ["read_working_context", "search_aios", "resolve_skill"]
+  );
+  const bySlug = JSON.parse(toolText(responses[1]));
+  const byId = JSON.parse(toolText(responses[2]));
+  assert.deepEqual(bySlug.results, byId.results);
+  assert.equal(bySlug.scope_selection.project, "acme-campaign");
+  assert.match(JSON.stringify(bySlug), /ACME_MCP_SEARCH_CANARY/);
+  assert.doesNotMatch(JSON.stringify(bySlug), /OTHER_MCP_SEARCH_CANARY|other-client/);
+});
+
+test("search_aios preserves the exact raw project selector like CLI and core search", () => {
+  const { aiosPath } = setupAios();
+  const projectPath = path.join(aiosPath, "projects", "acme-campaign");
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectPath, "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Acme\n\nRAW_SELECTOR_MCP_CANARY\n",
+  );
+
+  const responses = runMcp(aiosPath, [
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "search_aios",
+        arguments: {
+          query: "RAW_SELECTOR_MCP_CANARY",
+          scope: "projects",
+          project: " acme-campaign ",
+          budget: 2000,
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "search_aios",
+        arguments: {
+          query: "RAW_SELECTOR_MCP_CANARY",
+          scope: "projects",
+          project: "acme-campaign",
+          budget: 2000,
+        },
+      },
+    },
+  ]);
+
+  assert.equal(responses[1].error?.code, -32602);
+  assert.match(responses[1].error.message, /safe project slug or stable id/);
+  assert.doesNotMatch(JSON.stringify(responses[1]), /RAW_SELECTOR_MCP_CANARY/);
+  assert.doesNotMatch(JSON.stringify(responses[1]), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+
+  const exact = JSON.parse(toolText(responses[2]));
+  assert.equal(exact.scope_selection.project, "acme-campaign");
+  assert.match(JSON.stringify(exact), /RAW_SELECTOR_MCP_CANARY/);
+
+  const projectSchema = responses[0].result.tools
+    .find((tool) => tool.name === "search_aios")
+    .inputSchema.properties.project;
+  const selectorPattern = new RegExp(projectSchema.pattern, "u");
+  assert.equal(selectorPattern.test("acme-campaign"), true);
+  assert.equal(selectorPattern.test(" acme-campaign "), false);
+});
+
+test("search_aios refuses a selected catalog identity outside the selector contract", () => {
+  const { aiosPath } = setupAios();
+  const projectPath = path.join(aiosPath, "projects", "acme-campaign");
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectPath, "README.md"),
+    "---\nid: \" project-acme-001 \"\nproject: acme-campaign\n---\n# Selected\n\nINVALID_ID_PRIVATE_CANARY\n",
+  );
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: {
+        query: "INVALID_ID_PRIVATE_CANARY",
+        scope: "projects",
+        project: "acme-campaign",
+        budget: 2000,
+      },
+    },
+  }]);
+
+  assert.equal(response.error.code, -32603);
+  assert.match(response.error.message, /failed safely/i);
+  assert.doesNotMatch(JSON.stringify(response), /INVALID_ID_PRIVATE_CANARY/);
+  assert.doesNotMatch(JSON.stringify(response), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("mcp search budgets bound the exact serialized response at minimum, default, and maximum", () => {
@@ -609,33 +738,44 @@ test("search_aios authorizes a contained configured external vault", () => {
   assert.doesNotMatch(JSON.stringify(payload), new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
-test("resolve_skill fails closed on linked skill metadata", () => {
+test("resolve_skill skips linked top-level skills and keeps real siblings routable", () => {
   const { aiosPath, tempRoot } = setupAios();
   const outsideSkill = path.join(tempRoot, "linked-skill");
   fs.mkdirSync(outsideSkill);
   fs.writeFileSync(
     path.join(outsideSkill, "SKILL.md"),
-    "---\nname: linked-skill\ndescription: LINKED_SKILL_CANARY\ntriggers: LINKED_SKILL_CANARY\n---\n"
+    "---\nname: linked-skill\ndescription: ZZZXQ_9471\ntriggers: ZZZXQ_9471\n---\n"
   );
   fs.symlinkSync(outsideSkill, path.join(aiosPath, "skills", "linked-skill"), "dir");
 
-  const result = runMcpResult(aiosPath, [{
-    jsonrpc: "2.0",
-    id: 1,
-    method: "tools/call",
-    params: {
-      name: "resolve_skill",
-      arguments: { intent: "LINKED_SKILL_CANARY" }
+  const responses = runMcp(aiosPath, [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "resolve_skill",
+        arguments: { intent: "ZZZXQ_9471" }
+      },
     },
-  }]);
-  const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "resolve_skill",
+        arguments: { intent: "plan my day" }
+      },
+    },
+  ]);
+  const linked = JSON.parse(toolText(responses[0]));
+  const real = JSON.parse(toolText(responses[1]));
 
-  assert.equal(response.error.code, -32603);
-  assert.equal(response.error.message, "DotAIOS request failed safely.");
-  assert.doesNotMatch(
-    `${result.stdout}\n${result.stderr}`,
-    new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-  );
+  assert.deepEqual(linked.matches, []);
+  assert.equal(real.matches[0].name, "plan-today");
+  assert.doesNotMatch(JSON.stringify(linked.matches), /ZZZXQ_9471|linked-skill/);
+  assert.doesNotMatch(JSON.stringify(responses), /linked-skill/);
+  assert.doesNotMatch(JSON.stringify(responses), new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
 test("resolve_skill bounds the complete serialized response", () => {

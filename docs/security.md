@@ -36,6 +36,43 @@ and that every workspace is registered, complete, and bound to the expected
 safe remote. This prevents project contents, Gitlinks, and clone residue from
 entering the personal-context mirror.
 
+## Project source consent and receipts
+
+Project-source paths, grants, revocation state, and access receipts are
+machine-local. A portable declaration carries only source identity, label,
+type, and purpose beneath its owning project. Add, bind, grant, and revoke
+commands preview by default; apply requires the displayed operation ID and plan
+fingerprint from that exact state. An explicit future expiry and exact purpose
+are mandatory. Neither task text nor the read-only MCP adapter can grant
+consent.
+
+Each grant is limited to one project, source, read operation, purpose, portable
+source revision, binding generation, and root identity. Missing, mismatched,
+expired, stale, or revoked authorization refuses before the external root is
+opened. Those decisions append one bounded, path-free machine-local receipt;
+receipt publication failure withholds the refusal result as well as successful
+references. Unknown future authorization-state versions are refused in place
+and are never rewritten as an older format.
+
+Local authorization and receipt state accepts only same-user regular files and
+directories with restrictive permissions and stable identities. Links, special
+nodes, extra-linked files, unsafe owners or modes, unknown lock fields, and
+replaced lock owners fail closed without permission repair. Grant/revoke and
+receipt publication keep a durable in-flight guard; directory-sync uncertainty
+reinstates that guard or retains a non-reclaimable poisoned owner lock before
+authorization can resume.
+
+Retrieval opens no source-content bytes and returns no absolute roots or local
+state paths. It emits only complete source-relative metadata after containment
+and identity rechecks, then syncs one guarded append-only receipt before
+returning. Receipt uncertainty poisons later access rather than repairing or
+truncating historical bytes. Root, directory, and file identities use BigInt
+metadata observations; linked or special entries and every exceeded traversal,
+path, output, or receipt bound fail closed with empty references. Node's
+portable checks detect changes at observed boundaries; they are not a claim of
+native directory-handle-relative race immunity and cannot exclude a hostile
+swap-away-and-restore completed entirely between observations.
+
 ## Optional Connections
 
 Google Workspace auth remains inside `gws`. DotAIOS requests the fixed read-only Gmail, Calendar, and Drive service set, and does not expose full, custom-scope, or custom-service login options. `gws auth status` does not verify the scopes of an existing grant, so broader grants must be revoked or re-authorized in `gws`. Google and `gws` process requested Workspace data. DotAIOS connection records contain neither OAuth material nor absolute binary paths. Google commands are not exposed through the read-only DotAIOS MCP adapter.

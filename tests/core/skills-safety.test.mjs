@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
 import { collectSkills } from "../../packages/core/src/skills.mjs";
 
 function tmpDir() {
@@ -75,6 +76,73 @@ test("skill discovery rejects a linked skills root", async () => {
     () => collectSkills(root),
     (error) => error?.code === "DOTAIOS_EVIDENCE_PATH_UNSAFE"
   );
+});
+
+test("skill discovery skips linked top-level entries without reading outside the skills shelf", async () => {
+  const root = tmpDir();
+  const outside = tmpDir();
+  writeSkill(root, "real-sibling");
+  writeSkill(outside, "outside-canary", [
+    "---",
+    "name: OUTSIDE_SKILL_CANARY",
+    "description: Must never be read.",
+    "---",
+    ""
+  ].join("\n"));
+  fs.symlinkSync(
+    path.join(outside, "skills", "outside-canary"),
+    path.join(root, "skills", "linked-entry"),
+    "dir",
+  );
+
+  const skills = await collectSkills(root);
+
+  assert.deepEqual(skills.map(({ dir }) => dir), ["real-sibling"]);
+  assert.equal(JSON.stringify(skills).includes("OUTSIDE_SKILL_CANARY"), false);
+});
+
+test("skill discovery skips a statically unmanaged directory without a SKILL.md", async () => {
+  const root = tmpDir();
+  writeSkill(root, "real-sibling");
+  fs.mkdirSync(path.join(root, "skills", "proposed"), { recursive: true });
+  fs.writeFileSync(path.join(root, "skills", "proposed", ".gitkeep"), "");
+
+  const skills = await collectSkills(root);
+
+  assert.deepEqual(skills.map(({ dir }) => dir), ["real-sibling"]);
+});
+
+test("skill discovery refuses an observed SKILL.md replaced before its bounded read", async (t) => {
+  for (const replacement of ["missing", "linked"]) {
+    await t.test(replacement, async () => {
+      const root = tmpDir();
+      const outside = tmpDir();
+      writeSkill(root, "raced-skill");
+      writeSkill(outside, "outside-canary");
+      const skillFile = path.join(root, "skills", "raced-skill", "SKILL.md");
+      const reader = createEvidenceReader({ roots: [root] });
+      let replaced = false;
+      const racingReader = {
+        ...reader,
+        async inspectEntry(readerRoot, filePath, options) {
+          const entry = await reader.inspectEntry(readerRoot, filePath, options);
+          if (!replaced && filePath === skillFile) {
+            replaced = true;
+            fs.unlinkSync(skillFile);
+            if (replacement === "linked") {
+              fs.symlinkSync(path.join(outside, "skills", "outside-canary", "SKILL.md"), skillFile);
+            }
+          }
+          return entry;
+        }
+      };
+
+      await assert.rejects(
+        () => collectSkills(root, { reader: racingReader, root }),
+        (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED",
+      );
+    });
+  }
 });
 
 test("skill discovery rejects a linked SKILL.md final component", async () => {

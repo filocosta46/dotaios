@@ -28,6 +28,11 @@ const PROJECT_STATE_VERSION = 1;
 const PROJECT_STATE_LOCK_FORMAT = "dotaios-project-state-lock/v1";
 const PROJECT_STATE_LOCK_STALE_MS = 5 * 60 * 1000;
 const PROJECT_DOMAINS = new Set(["build", "make", "sell"]);
+const UNSELECTABLE_PROJECT_IDENTITY_CONTENT_ERRORS = new Set([
+  "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
+  "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID",
+  "DOTAIOS_EVIDENCE_INVALID_UTF8",
+]);
 
 /**
  * Preview registration of an external project repository without moving or
@@ -434,6 +439,183 @@ export async function readProjectCatalog(options = {}) {
   const context = createContext(options);
   const records = await readProjectRecords(context);
   return records.map(toProjectCatalogRecord);
+}
+
+/** Validate the canonical selector shared by project-scoped CLI and MCP reads. */
+export function validateProjectSelector(value) {
+  if (typeof value !== "string" || value.length === 0) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_INVALID", "project selector must be a non-empty string");
+  }
+  const codePoints = Array.from(value);
+  if (codePoints.length > 200) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_INVALID", "project selector must contain at most 200 code points");
+  }
+  if (
+    value.trim() !== value
+    || /[\p{Cc}\/\\]/u.test(value)
+    || /[\uD800-\uDFFF]/u.test(value)
+    || value === "."
+    || value === ".."
+    || path.isAbsolute(value)
+    || !/^[\p{L}\p{N}](?:[\p{L}\p{N}:._-]*[\p{L}\p{N}])?$/u.test(value)
+  ) {
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_SELECTOR_INVALID",
+      "project selector must be a safe project slug or stable id"
+    );
+  }
+  return value;
+}
+
+/**
+ * Resolve one portable project identity from bounded README frontmatter only.
+ * The caller supplies the request-scoped evidence capability so catalog work
+ * and the later corpus share one observation budget.
+ */
+export async function resolvePortableProjectIdentity({
+  aiosPath,
+  projectSelector,
+  evidenceReader
+} = {}) {
+  const selector = validateProjectSelector(projectSelector);
+  if (!evidenceReader) {
+    throw new TypeError("resolvePortableProjectIdentity requires an evidence reader");
+  }
+  const resolvedAiosPath = path.resolve(aiosPath);
+  const projectsPath = path.join(resolvedAiosPath, "projects");
+  const directIdentity = isProjectSlug(selector)
+    ? await readPortableProjectIdentity(
+      resolvedAiosPath,
+      path.join(projectsPath, selector),
+      evidenceReader,
+      { strict: true }
+    )
+    : null;
+  const projectDirectories = await evidenceReader.listDirectories(resolvedAiosPath, projectsPath, {
+    skipLinkedEntries: true
+  });
+  let matches = directIdentity ? [directIdentity] : [];
+  for (const projectDirectory of projectDirectories) {
+    if (directIdentity?.slug === path.basename(projectDirectory)) continue;
+    const identity = await readPortableProjectIdentity(
+      resolvedAiosPath,
+      projectDirectory,
+      evidenceReader,
+      { strict: false }
+    );
+    if (identity && (selector === identity.slug || selector === identity.id)) {
+      matches = [...matches, identity];
+    }
+  }
+
+  if (matches.length === 0) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_UNKNOWN", "project selector is unknown");
+  }
+  if (matches.length > 1) {
+    throw projectSelectorError("DOTAIOS_PROJECT_SELECTOR_AMBIGUOUS", "project selector is ambiguous; use its stable id");
+  }
+  return matches[0];
+}
+
+function isProjectSlug(value) {
+  try {
+    validateSlug(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceReader, { strict } = {}) {
+  const slug = path.basename(projectDirectory);
+  try {
+    validateSlug(slug);
+    validateProjectSelector(slug);
+  } catch {
+    if (!strict) return null;
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project catalog contains an invalid slug");
+  }
+  const readmePath = path.join(projectDirectory, "README.md");
+  const expectedEntry = strict ? null : await evidenceReader.inspectEntry(aiosPath, readmePath);
+  if (!strict && expectedEntry?.type !== "regular-file") {
+    await evidenceReader.inspectEntry(aiosPath, readmePath, { expectedEntry });
+    return null;
+  }
+  let frontmatter;
+  try {
+    frontmatter = await evidenceReader.readFrontmatter(
+      aiosPath,
+      readmePath,
+      {
+        maxBytes: 16 * 1024,
+        maxFileBytes: 1024 * 1024,
+        allowMissing: !strict,
+        stopOnMissingFrontmatter: true,
+        expectedEntry
+      }
+    );
+  } catch (error) {
+    if (!strict && UNSELECTABLE_PROJECT_IDENTITY_CONTENT_ERRORS.has(error?.code)) return null;
+    if (strict && error?.code === "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID") {
+      throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
+    }
+    throw error;
+  }
+  if (frontmatter === null) return null;
+  const match = FRONTMATTER_RE.exec(frontmatter);
+  if (!match) {
+    if (!strict) return null;
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
+  }
+  const document = parseDocument(match[1], { strict: true, uniqueKeys: true });
+  if (document.errors.length > 0) {
+    if (!strict) return null;
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
+  }
+  const metadata = document.toJS();
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity frontmatter must be a metadata mapping",
+    );
+  }
+  const hasPrimaryId = Object.hasOwn(metadata, "id");
+  const hasLegacyId = Object.hasOwn(metadata, "project_id");
+  const primaryId = hasPrimaryId ? metadata.id : null;
+  const legacyId = hasLegacyId ? metadata.project_id : null;
+  if (
+    (hasPrimaryId && (typeof primaryId !== "string" || primaryId.length === 0))
+    || (hasLegacyId && (typeof legacyId !== "string" || legacyId.length === 0))
+  ) {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity requires valid stable id fields",
+    );
+  }
+  if (primaryId && legacyId && primaryId !== legacyId) {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity contains conflicting stable ids",
+    );
+  }
+  const id = primaryId || legacyId;
+  if (!id) {
+    if (!strict) return null;
+    throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity requires a stable id");
+  }
+  try {
+    validateProjectSelector(id);
+  } catch {
+    if (!strict) return null;
+    throw projectSelectorError(
+      "DOTAIOS_PROJECT_CATALOG_INVALID",
+      "project identity requires a valid stable id",
+    );
+  }
+  return Object.freeze({ id, slug });
 }
 
 /** Resolve a project id or slug to an existing path on this machine. */
@@ -1280,6 +1462,12 @@ function validateSlug(value) {
     throw new Error("slug must use lowercase letters, numbers, and single hyphens");
   }
   return slug;
+}
+
+function projectSelectorError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 function slugify(value) {

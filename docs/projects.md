@@ -12,6 +12,91 @@ For each project, three things are stored separately:
 
 The project source code remains in its own repository with its own Git history.
 
+## Retrieve references from a local project source
+
+A project may declare the meaning of a local folder without putting its path or
+contents into the portable AIOS. Source declarations live beneath the owning
+project at `projects/<slug>/sources/<source-id>.md`; the absolute binding,
+finite grant, and access receipts remain beneath
+`~/.dotaios/project-sources/` on this machine.
+
+The guided form is `dotaios project source connect <project> <folder>`. It
+previews the folder binding and complete finite read consent together:
+
+```bash
+dotaios project source connect acme-campaign /path/to/assets \
+  --source-id campaign-assets \
+  --label "Campaign assets" \
+  --purpose "Launch campaign assets" \
+  --expires-at 2099-01-01T00:00:00.000Z \
+  --json
+```
+
+The preview writes nothing and names the project, source, read scope, exact
+purpose, approval timing, and UTC expiry. Re-run the same values with `--yes`
+to connect and grant access without copying operation IDs or fingerprints. An
+exact rerun is idempotent; a matching source whose grant was not completed can
+resume, while mismatched or unowned existing state refuses.
+
+The lower-level `add`, `bind`, `grant`, and `revoke` commands remain available
+for scripts and recovery. They keep their exact preview/apply proof contract:
+
+```bash
+dotaios project source add acme-campaign /path/to/assets \
+  --source-id campaign-assets \
+  --label "Campaign assets" \
+  --purpose "Launch campaign assets" \
+  --json
+
+dotaios project source grant acme-campaign campaign-assets \
+  --purpose "Launch campaign assets" \
+  --expires-at 2099-01-01T00:00:00.000Z \
+  --json
+```
+
+Ordinary task text never grants consent. Once the exact grant preview is
+applied by the same shell user, it is bound to the selected project, source,
+read operation, exact portable purpose, source revision, binding generation,
+and explicit expiry. Revoke that grant with its returned `grant_id`; revoke is
+also preview-first and changes only machine-local authorization state:
+
+```bash
+dotaios project source revoke acme-campaign campaign-assets \
+  --grant-id <grant-id> \
+  --json
+```
+
+Apply only the displayed revoke operation ID and plan fingerprint. Revocation
+does not alter earlier access receipts, and every later retrieval refuses.
+Retrieval remains an explicit CLI operation:
+
+```bash
+dotaios project source retrieve acme-campaign \
+  --task "retrieve the campaign assets for that client." \
+  --json
+```
+
+Retrieval returns sorted source-relative regular-file references with size,
+nanosecond freshness, project/source identity, resolution time, and receipt
+identity. It reads metadata rather than file contents, never copies or edits
+the source, and publishes one machine-local receipt before exposing success.
+The MCP adapter deliberately has no retrieval or consent tool.
+
+The listing is all-or-nothing. A missing, moved, inaccessible, linked, replaced,
+or otherwise unsafe root requires reconnection; an unsafe nested link, hardlink,
+special entry, unsupported raw name, or observed identity change refuses the
+whole result with no partial references. One retrieval may descend at most 16
+levels, observe 4,096 entries and 256 regular files, use source-relative paths
+of at most 1,024 UTF-8 bytes, and serialize at most 32,000 characters. It
+refuses instead of truncating when any independent bound is exceeded. The
+machine-local append-only receipt line must itself fit within 32,000 UTF-8
+bytes; if receipt publication cannot complete, DotAIOS withholds the result.
+
+For search, `--project` selects the portable project corpus by slug or stable
+ID. `--session-project` filters session tags only. Older commands that used
+`--project` as a session attribution filter should migrate to
+`--session-project`.
+
 ## Add a project
 
 Start with a preview:

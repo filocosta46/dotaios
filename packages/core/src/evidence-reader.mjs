@@ -5,6 +5,7 @@ import {
   ContainedReadError,
   createContainedReadBudget,
   inspectContainedDirectory,
+  inspectContainedPathEntry,
   readContainedDirectory,
   readContainedFile
 } from "./contained-read.mjs";
@@ -120,9 +121,12 @@ function createEvidenceReaderView(roots, state) {
         filesystem,
         budget,
         prefixBytes: options.maxBytes ?? 64 * 1024,
+        frontmatterOnly: true,
+        stopOnMissingFrontmatter: options.stopOnMissingFrontmatter === true,
         maxSourceBytes: options.maxFileBytes ?? effectiveLimits.maxFileBytes,
         reserveSourceBytes: true,
         tooLargeCode: "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
+        expectedSnapshot: options.expectedEntry,
         expectedDirectories: expectedDirectoriesFor(authorizedRoot, filePath)
       });
       if (bytes === null) return null;
@@ -136,6 +140,24 @@ function createEvidenceReaderView(roots, state) {
         throw new EvidenceReadError("DOTAIOS_EVIDENCE_FRONTMATTER_INVALID");
       }
       return decodeEvidenceUtf8(bytes.subarray(0, end));
+    } catch (error) {
+      throw normalizeEvidenceReadError(error);
+    }
+  }
+
+  async function inspectEntry(root, filePath, options = {}) {
+    const authorizedRoot = assertAuthorizedRoot(root);
+    if (!isPathWithinLexically(authorizedRoot, filePath)) {
+      throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
+    }
+    try {
+      return await inspectContainedPathEntry(authorizedRoot, filePath, {
+        filesystem,
+        expectedDirectories: expectedDirectoriesFor(authorizedRoot, filePath),
+        ...(Object.hasOwn(options, "expectedEntry")
+          ? { expectedSnapshot: options.expectedEntry }
+          : {})
+      });
     } catch (error) {
       throw normalizeEvidenceReadError(error);
     }
@@ -165,6 +187,7 @@ function createEvidenceReaderView(roots, state) {
       for (const entry of entries) {
         if (options.skipEntry?.(entry.name)) continue;
         if (entry.isSymbolicLink()) {
+          if (options.skipLinkedEntries === true) continue;
           throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
         }
         if (!entry.isDirectory()) continue;
@@ -258,6 +281,7 @@ function createEvidenceReaderView(roots, state) {
     readJson,
     readJsonl,
     readFrontmatter,
+    inspectEntry,
     listFiles,
     listDirectories,
     listDirectory,

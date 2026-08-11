@@ -5,6 +5,10 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import {
+  createProjectSourceRetrievalFixture
+} from "../fixtures/project-source-retrieval.mjs";
+
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
@@ -66,6 +70,125 @@ test("CLI search refuses a linked aios.json before authorizing an external vault
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /OUTSIDE_VAULT_CANARY/);
   assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(outside));
   assert.deepEqual(snapshotTree(tempRoot), before);
+});
+
+test("CLI project search keeps corpus selection separate from session attribution", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const bySlug = run([
+      "search", "Launch work",
+      "--scope", "all",
+      "--project", "acme-campaign",
+      "--session-project", "unrelated-session-tag",
+      "--path", fixture.aiosPath
+    ]);
+    const byId = run([
+      "search", "Launch work",
+      "--scope", "all",
+      "--project", "project-acme-001",
+      "--session-project", "unrelated-session-tag",
+      "--path", fixture.aiosPath
+    ]);
+
+    assert.match(bySlug.stdout, /Acme Campaign|Launch work/);
+    assert.match(byId.stdout, /Acme Campaign|Launch work/);
+    assert.doesNotMatch(`${bySlug.stdout}\n${byId.stdout}`, /OTHER_CLIENT_PRIVATE_CANARY|other-client/);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("CLI project search preserves the exact raw project selector", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const exact = run([
+      "search", "Launch work",
+      "--scope", "projects",
+      "--project", "acme-campaign",
+      "--path", fixture.aiosPath,
+    ]);
+    assert.match(exact.stdout, /Acme Campaign|Launch work/);
+
+    const padded = spawnSync(process.execPath, [
+      cli,
+      "search",
+      "Launch work",
+      "--scope",
+      "projects",
+      "--project",
+      " acme-campaign ",
+      "--path",
+      fixture.aiosPath,
+    ], { cwd: repoRoot, encoding: "utf8" });
+
+    assert.equal(padded.status, 1);
+    assert.match(padded.stderr, /safe project slug or stable id/);
+    assert.doesNotMatch(`${padded.stdout}\n${padded.stderr}`, /OTHER_CLIENT_PRIVATE_CANARY|Launch work/);
+    assert.doesNotMatch(`${padded.stdout}\n${padded.stderr}`, escaped(fixture.aiosPath));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("CLI project search refuses a selector shared by a slug and another stable id", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const neighborReadme = path.join(fixture.aiosPath, "projects", "other-client", "README.md");
+    fs.writeFileSync(
+      neighborReadme,
+      fs.readFileSync(neighborReadme, "utf8").replace("id: project-other-002", "id: acme-campaign"),
+    );
+
+    const result = spawnSync(process.execPath, [
+      cli,
+      "search",
+      "Launch work",
+      "--scope",
+      "projects",
+      "--project",
+      "acme-campaign",
+      "--path",
+      fixture.aiosPath,
+    ], { cwd: repoRoot, encoding: "utf8" });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /project selector is ambiguous/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /OTHER_CLIENT_PRIVATE_CANARY/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(fixture.aiosPath));
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("CLI project search refuses a selected catalog identity outside the selector contract", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const selectedReadme = path.join(fixture.aiosPath, "projects", "acme-campaign", "README.md");
+    fs.writeFileSync(
+      selectedReadme,
+      `${fs.readFileSync(selectedReadme, "utf8")
+        .replace("id: project-acme-001", "id: \" project-acme-001 \"")}\nINVALID_ID_PRIVATE_CANARY\n`,
+    );
+
+    const result = spawnSync(process.execPath, [
+      cli,
+      "search",
+      "Launch work",
+      "--scope",
+      "projects",
+      "--project",
+      "acme-campaign",
+      "--path",
+      fixture.aiosPath,
+    ], { cwd: repoRoot, encoding: "utf8" });
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /valid stable id/i);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /INVALID_ID_PRIVATE_CANARY/);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(fixture.aiosPath));
+  } finally {
+    fixture.cleanup();
+  }
 });
 
 function run(args) {

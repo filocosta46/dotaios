@@ -44,6 +44,26 @@ Run without a slug to restore every missing project, or add `--dry-run` to
 preview. The project repository stays independent and never enters the AIOS Git
 mirror; external checkout locations remain supported.
 
+To connect a consultant or client asset folder, preview the complete finite
+read consent with `dotaios project source connect <project> <folder>`:
+
+```bash
+npx dotaios@latest project source connect acme-campaign /path/to/assets \
+  --source-id campaign-assets \
+  --label "Campaign assets" \
+  --purpose "Launch campaign assets" \
+  --expires-at 2099-01-01T00:00:00.000Z
+```
+
+The preview names the project, source, read scope, purpose, approval timing,
+and expiry, and writes nothing. Repeat the same command with `--yes` for the
+single explicit confirmation; no operation ID or fingerprint transcription is
+required.
+
+For search, `--project` selects the portable project corpus by slug or stable
+ID. `--session-project` filters session tags only. If an older command used
+`--project` to filter session attribution, change it to `--session-project`.
+
 After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Cursor, or another repo-aware assistant.
 
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
