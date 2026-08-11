@@ -5,8 +5,10 @@ import path from "node:path";
 export const CAMPAIGN_TASK = "retrieve the campaign assets for that client.";
 export const OTHER_PROJECT_CANARY = "OTHER_CLIENT_PRIVATE_CANARY";
 
-export function createProjectSourceRetrievalFixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-project-source-"));
+export function createProjectSourceRetrievalFixture(options = {}) {
+  const temporaryDirectory = options.temporaryDirectory || os.tmpdir();
+  const prefix = options.prefix || "dotaios-project-source-";
+  const root = fs.mkdtempSync(path.join(temporaryDirectory, prefix));
   const aiosPath = path.join(root, "aios");
   const homePath = path.join(root, "home");
   const sourceRoot = path.join(root, "campaign-assets");

@@ -250,15 +250,28 @@ test("retrieval refuses supported special source entries", async (t) => {
 
   await t.test("Unix socket entry", {
     skip: process.platform === "win32" ? "Unix-domain socket entries are unavailable on Windows" : false
-  }, async () => {
-    const fixture = createProjectSourceRetrievalFixture();
+  }, async (subtest) => {
+    const fixture = createProjectSourceRetrievalFixture({
+      temporaryDirectory: "/tmp",
+      prefix: "d61-socket-"
+    });
     const server = net.createServer();
     try {
       const socketPath = path.join(fixture.sourceRoot, "campaign.sock");
-      await new Promise((resolve, reject) => {
-        server.once("error", reject);
-        server.listen(socketPath, resolve);
-      });
+      try {
+        await new Promise((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(socketPath, resolve);
+        });
+      } catch (error) {
+        if (["EAFNOSUPPORT", "EPROTONOSUPPORT", "ENOSYS", "ENOTSUP", "EOPNOTSUPP"].includes(error?.code)) {
+          subtest.skip(`Unix-domain socket fixture unsupported: ${error.code}`);
+          return;
+        }
+        throw error;
+      }
+      const socketStats = fs.lstatSync(socketPath);
+      assert.equal(socketStats.isSocket(), true, "fixture must create the exact requested socket path");
       await assertUnsafeSpecialEntry(fixture, "SOCKET_CONTENT_CANARY");
     } finally {
       if (server.listening) await new Promise((resolve) => server.close(() => resolve()));
