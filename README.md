@@ -4,7 +4,7 @@
 
 DotAIOS keeps your identity, priorities, projects, notes, and trusted workflows in one private place, then connects that context to local AI agents through documented bridges. No DotAIOS account. No hosted memory.
 
-Current boundary: activation configures documented bridge surfaces for detected Claude Code, Codex, and Gemini CLI installations. Cursor connects per project. A verified file or link does not prove that every client version will load or invoke it. Claude Code can auto-save sessions today; other tools use explicit saving or import.
+Activation configures the documented bridge for Claude Code, Codex, and Gemini CLI when it finds them, and Cursor connects per project. Claude Code can auto-save sessions today; the others use explicit saving or import. [Client support](docs/client-support.md) records what each client has actually been observed to do, so you can check rather than assume.
 
 ## Why people use it
 
@@ -55,7 +55,7 @@ npm view dotaios@1.28.4 scripts
 npm pack dotaios@1.28.4 --dry-run
 ```
 
-The published package defines no `preinstall`, `install`, or `postinstall` lifecycle script. `npx` still downloads and runs the named npm package when you invoke its CLI. The human-run commands intentionally omit `npx -y`, so npm can show its first-run confirmation for the pinned package. If you do not trust the source, publisher, integrity record, or package contents, do not approve it. Interactive setup may then offer private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every optional capability defaults to No. Read [INSTALL.md](INSTALL.md) for the complete human-run sequence and [the security model](docs/security.md) for package and permission boundaries.
+Those three commands show you the publisher, the integrity record, and every file in the package before anything runs. The package defines no `preinstall`, `install`, or `postinstall` script, so nothing executes until you invoke the CLI yourself. The commands above omit `npx -y` on purpose, so npm still asks you to confirm the pinned package — approve it once what you see matches what you expect. Interactive setup then offers private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every one of them defaults to No. [INSTALL.md](INSTALL.md) has the full sequence and [the security model](docs/security.md) has the package and permission boundaries.
 
 ## What you have afterward
 
@@ -145,12 +145,12 @@ npx -y dotaios@latest capture disable claude-code
 npx -y dotaios@latest sync logout
 ```
 
-Those commands stop managed capture and private sync. The current release does not provide a one-command full uninstall: review and remove only DotAIOS-managed bridge blocks or links in your client configuration, then archive or delete `~/aios` yourself. Unmanaged client configuration is deliberately left alone.
+Those commands stop managed capture and private sync. The last step is deliberately yours: review the DotAIOS-managed bridge blocks and links in your client configuration, remove those, then archive or delete `~/aios`. There is no one-command wipe, because the same command would have to guess which parts of your client configuration are ours — and anything unmanaged is left exactly as you wrote it.
 
 ## Good to know
 
 - A browser-only chat cannot open local files by itself.
-- Each assistant has its own way of discovering and using local context; setup does not guarantee that every assistant will actively use it.
+- Each assistant discovers and uses local context in its own way. [Client support](docs/client-support.md) records what has been observed for each one, rather than asking you to take it on faith.
 - Claude Code supports managed automatic session capture today. Other clients use explicit capture, import, or the bundled `save-session` workflow.
 - Optional sync sends the selected Git mirror to your own private GitHub repository. The free core does not upload context to a DotAIOS service.
 - [Client support](docs/client-support.md) separates configured, discoverable, invoked, and produced evidence for each client.
