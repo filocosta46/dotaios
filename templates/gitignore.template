@@ -16,5 +16,8 @@ node_modules/
 # Local project checkouts are repositories in their own right and never enter the AIOS mirror.
 /workspaces/
 
+# Recoverable SessionStore locks and transaction journals are local operational state.
+/.dotaios/session-store/
+
 # Regenerable OKF export bundles (dotaios export-okf) — never tracked or synced
 build/

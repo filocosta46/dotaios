@@ -2,6 +2,7 @@ import path from "node:path";
 import { createEvidenceReader } from "./evidence-reader.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 import { resolvePortableProjectIdentity, validateProjectSelector } from "./projects.mjs";
+import { searchSessions } from "./sessions.mjs";
 
 export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "decisions", "skills", "references", "plugins", "sessions", "all"];
 
@@ -676,26 +677,25 @@ async function searchSessionsScope(aiosPath, query, {
   since,
   reader
 } = {}) {
-  const { searchSessions } = await import("./sessions.mjs");
-  const hits = await searchSessions(aiosPath, query, {
+  const results = await searchSessions(aiosPath, query, {
     agent,
     project,
     since,
     limit,
-    readOnly: true,
     reader,
-    root: aiosPath
   });
-  return hits.map(({ entry, bodyMatch, snippet }) => ({
-    source: `sessions/${entry.path}`,
-    file: entry.path,
-    title: entry.title || "(untitled)",
-    agent: entry.agent,
-    date: entry.captured_at?.slice(0, 10),
-    session_id: entry.session_id,
-    project: entry.project,
-    matches: snippet ? [{ line: 0, content: snippet, match: "phrase", area: "body" }] : [],
-  }));
+  return results.map(({ entry, snippet = "" }) => {
+    return {
+      source: `sessions/${entry.path}`,
+      file: entry.path,
+      title: entry.title || "(untitled)",
+      agent: entry.agent,
+      date: entry.captured_at?.slice(0, 10),
+      session_id: entry.session_id,
+      project: entry.project,
+      matches: snippet ? [{ line: 0, content: snippet, match: "phrase", area: "body" }] : [],
+    };
+  });
 }
 
 function compareTimestampsDesc(a, b) {

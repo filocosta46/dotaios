@@ -36,3 +36,38 @@ traversal or linked entry can therefore escape the AIOS root.
 - Whole-tree byte snapshots and recovery receipts proving no lost or duplicated
   captured turns.
 - Full local and independent exact-commit validation.
+
+## Implementation checkpoint
+
+Implementation is in review. The current candidate routes capture,
+reconciliation, bounded search metadata, and exact deletion through one
+`SessionStore`; treats schema-1 Markdown as canonical and `index.jsonl` as a
+rebuildable projection; and journals capture, projection rebuild, and deletion
+for idempotent forward recovery.
+
+The candidate serializes source observation through publication. Strict
+same-source growth extends one record, an older prefix is a no-op, and
+non-prefix versions are preserved as conflicts. Reconciliation reports orphan
+Markdown; stale, malformed, or unsafe rows; invalid Markdown; duplicate IDs,
+paths, or sources; conflicts; missing projection state; and operational poison
+without silently deleting evidence. Stored paths and canonical artifacts are
+validated before read, update, or delete; unsafe, linked, special, hardlinked, replaced,
+duplicate, absolute, traversing, and outside cases refuse.
+
+CLI, working-context, promotion, and MCP session consumers use the read-only
+store boundary without adding tools or returning absolute machine paths. The
+save-session skill submits bounded prepared Markdown to
+`dotaios capture import prepared` on standard input. Private operational state
+under `.dotaios/session-store/` is excluded from managed mirrors and refused by
+mirror content validation.
+
+This checkpoint is not closure evidence. Replace these placeholders only after
+the reviewed candidate is fixed and the receipts exist:
+
+- Exact candidate commit: `PENDING_EXACT_COMMIT_AFTER_REVIEW`
+- Ready pull request: `PENDING_READY_PR`
+- Candidate CI result: `PENDING_CI`
+- Independent exact-commit iMac validation: `PENDING_IMAC_VALIDATION`
+
+Issue 016 remains open until the complete local gate, exact packed-content
+check, CI, and independent iMac replay pass against that same commit.

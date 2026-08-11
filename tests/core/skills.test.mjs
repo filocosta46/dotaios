@@ -159,17 +159,23 @@ test("writeSkillsIndex also writes skills/RESOLVER.md", async () => {
   assert.match(resolver, /skills\/audit\/SKILL\.md/);
 });
 
-test("bundled save-session skill is shipped and has digest instructions", () => {
+test("bundled save-session skill submits prepared Markdown only through SessionStore CLI", () => {
   const skillPath = path.join(repoRoot, "skills", "save-session", "SKILL.md");
   const content = fs.readFileSync(skillPath, "utf8");
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 
   assert.ok(packageJson.files.includes("skills"), "npm package must include bundled skills");
   assert.match(content, /^---\nname: save-session\n/m);
-  assert.match(content, /memory\/sessions\/YYYY-MM-DD/);
+  assert.match(content, /dotaios capture import prepared/);
+  assert.match(content, /standard input|stdin/i);
+  assert.match(content, /1 MiB|1,048,576/);
   assert.match(content, /<!-- digest:start -->/);
   assert.match(content, /<!-- digest:end -->/);
-  assert.match(content, /index\.jsonl/);
+  assert.match(content, /non-zero|exit code/i);
+  assert.match(content, /do not report.*saved|never report.*saved/is);
+  assert.doesNotMatch(content, /choose.*(?:8-character|hex).*session ID|session_id:/i);
+  assert.doesNotMatch(content, /create this folder|append one compact JSON line|still save the Markdown/i);
+  assert.doesNotMatch(content, /writeFile|fs\.write|>>\s*.*index\.jsonl/i);
 });
 
 test("bundled skillify skill ships with trigger phrases and an approval gate", () => {

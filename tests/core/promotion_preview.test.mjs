@@ -4,6 +4,8 @@ import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { planPromotion, applyPromotion } from "../../packages/core/src/promotion.mjs";
+import { deriveProjectionRow, parseSessionMarkdown, renderSessionMarkdown } from "../../packages/core/src/session-codec.mjs";
+import { createSessionStore } from "../../packages/core/src/session-store.mjs";
 
 // The product's core safety promise is preview-then-apply. A preview that does
 // not show the real change is worse than none: it manufactures consent.
@@ -16,22 +18,70 @@ function setupAios(t) {
   const aiosPath = path.join(root, "aios");
   const rel = path.join("memory", "sessions", "2026-07-15", `2026-07-15T09-00-00_manual_${SESSION_ID.slice(0, 6)}.md`);
   const sessionPath = path.join(aiosPath, rel);
+  const session = {
+    schema: 1,
+    agent: "manual",
+    session_id: SESSION_ID,
+    captured_at: "2026-07-15T09:00:00.000Z",
+    source_type: "manual",
+    turns: [{ role: "user", content: "hello" }],
+    title: "hello",
+  };
   fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
   fs.mkdirSync(path.join(aiosPath, "context"), { recursive: true });
   fs.writeFileSync(path.join(aiosPath, "aios.json"), "{}\n");
-  fs.writeFileSync(sessionPath, [
-    "---", "agent: manual", `session_id: ${SESSION_ID}`,
-    "captured_at: 2026-07-15T09:00:00.000Z", "turns: 2", "---", "", "**user**", "", "hello", ""
-  ].join("\n"));
+  fs.writeFileSync(sessionPath, renderSessionMarkdown(session));
   fs.mkdirSync(path.join(aiosPath, "memory", "sessions"), { recursive: true });
   fs.writeFileSync(
     path.join(aiosPath, "memory", "sessions", "index.jsonl"),
-    JSON.stringify({ session_id: SESSION_ID, path: rel, captured_at: "2026-07-15T09:00:00.000Z", agent: "manual" }) + "\n"
+    `${JSON.stringify(deriveProjectionRow(session, rel))}\n`,
   );
   return aiosPath;
 }
 
 const TAIL = Array.from({ length: 20 }, (_, i) => `unchanged tail line ${i}`).join("\n");
+
+test("promotion refuses forged projection metadata instead of resolving it as evidence", async (t) => {
+  const aiosPath = setupAios(t);
+  const indexPath = path.join(aiosPath, "memory", "sessions", "index.jsonl");
+  const row = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  fs.writeFileSync(indexPath, `${JSON.stringify({ ...row, title: "FORGED_PROMOTION_TITLE" })}\n`);
+
+  await assert.rejects(
+    () => planPromotion(aiosPath, {
+      source: SESSION_ID,
+      destinationType: "session-only",
+      summary: "Keep the canonical evidence boundary.",
+    }),
+    (error) => error?.code === "DOTAIOS_SESSION_PROJECTION_DRIFT",
+  );
+});
+
+test("promotion apply refuses canonical session growth after preview", async (t) => {
+  const aiosPath = setupAios(t);
+  const target = path.join(aiosPath, "context", "work.md");
+  fs.writeFileSync(target, "Original context.\n");
+  const plan = await planPromotion(aiosPath, {
+    source: SESSION_ID,
+    destinationType: "context",
+    destinationPath: "context/work.md",
+    summary: "A fact from the previewed session.",
+  });
+
+  const sessionPath = path.join(aiosPath, ...plan.source.relativePath.split("/"));
+  const session = parseSessionMarkdown(fs.readFileSync(sessionPath));
+  fs.writeFileSync(sessionPath, renderSessionMarkdown({
+    ...session,
+    turns: [...session.turns, { role: "assistant", content: "A later turn." }],
+  }));
+  await createSessionStore({ aiosPath }).reconcile({ apply: true });
+
+  await assert.rejects(
+    () => applyPromotion(plan),
+    /captured session changed after the preview/i,
+  );
+  assert.equal(fs.readFileSync(target, "utf8"), "Original context.\n");
+});
 
 test("an edit near the top of a long file is visible in the preview", async (t) => {
   const aiosPath = setupAios(t);

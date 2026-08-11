@@ -23,6 +23,56 @@ Generated AIOS folders include a `.gitignore` that ignores:
 
 Agents should never ask users to paste API keys, passwords, tokens, private keys, or OAuth client secrets into chat. They should name the required variable and ask the user to edit `.env` locally.
 
+## Session memory boundary
+
+Session Markdown under `memory/sessions/<date>/` is canonical user evidence.
+`memory/sessions/index.jsonl` is a rebuildable search projection and cannot
+authorize a read, update, or delete by itself. Capture, reconciliation, bounded
+search metadata, and exact deletion enter through one SessionStore interface.
+
+The schema-1 codec decodes input as strict UTF-8 and accepts only closed,
+flat frontmatter. It refuses duplicate keys, aliases, tags, nested values,
+control characters, prototype-like keys, malformed turns, and inputs beyond
+fixed document, field, body, turn-count, and turn-size limits. Every projection
+path is parsed as a relative canonical-session path before use. Absolute,
+traversing, duplicate, linked, special, hardlinked, replaced, and outside
+artifacts are refused rather than normalized or followed.
+
+Capture observes and parses a source inside the same store lock that publishes
+the result. Same-source prefixes are idempotent, strict growth extends the
+record, and non-prefix versions remain visible as conflicts requiring explicit
+reconciliation. Reconciliation reports orphan Markdown, stale, malformed, or
+unsafe rows, invalid Markdown, duplicate IDs or paths, duplicate or conflicting
+source groups, and operational poison without deleting evidence.
+Delete requires the exact full session ID and proved ownership of the canonical
+regular file before either canonical or derived bytes change.
+
+Mutations use a bounded private journal under `.dotaios/session-store/`.
+Staging is synced before pending publication, and recovery completes a pending
+capture, projection rebuild, or delete idempotently under the store lock.
+The mutation deadline includes prerequisite recovery, so expired work cannot
+begin a new capture after an unbounded recovery pass. Cleanup detaches and
+re-proves each owned child before deletion; a replacement is restored and the
+transaction is poison-preserved.
+Read-only search, listing, reconciliation reports, working-context, promotion
+preview, and MCP paths do not create recovery, repair, or quarantine artifacts.
+Public search results retain bounded relative provenance but expose no absolute
+machine paths, and internal failures remain path-free.
+
+Fresh managed mirror rules exclude `/.dotaios/session-store/`; mirror content
+validation also refuses that exact tree, including case aliases, if it is
+forced or staged. An established mirror remains protected before its ignore
+template is refreshed because the pre-add policy excludes the operational
+tree. Adding the exact ignore entry makes that boundary visible to Git as well.
+Canonical session Markdown remains eligible for the private personal mirror;
+the derived index and operational state are not new memory authorities.
+
+These protections use portable Node identity and containment observations.
+They detect changes at supported boundaries but do not claim native
+directory-handle-relative immunity to a hostile same-user swap-away-and-restore
+completed entirely between checks. Access-time metadata managed by the
+filesystem is also outside byte-level zero-write claims.
+
 ## Project restore
 
 `dotaios project restore` accepts only credential-free HTTPS and SSH project

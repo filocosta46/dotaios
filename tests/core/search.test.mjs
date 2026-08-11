@@ -10,9 +10,34 @@ import {
   searchJsonlEntries,
   searchMarkdownDir
 } from "../../packages/core/src/search.mjs";
+import { deriveProjectionRow, renderSessionMarkdown } from "../../packages/core/src/session-codec.mjs";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-search-test-"));
+}
+
+function writeCanonicalSession(aiosPath, overrides = {}) {
+  const session = {
+    agent: "codex",
+    session_id: "search001",
+    captured_at: "2026-08-10T09:00:00.000Z",
+    source_type: "manual",
+    project: "foundation",
+    title: "Canonical search evidence",
+    turns: [
+      { role: "user", content: "A prefix before the bounded session snippet needle and a suffix after it." },
+    ],
+    ...overrides,
+  };
+  const relativePath = `memory/sessions/${session.captured_at.slice(0, 10)}/canonical.md`;
+  const absolutePath = path.join(aiosPath, ...relativePath.split("/"));
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, renderSessionMarkdown(session));
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    `${JSON.stringify(deriveProjectionRow(session, relativePath))}\n`,
+  );
+  return { relativePath, session };
 }
 
 test("matchQuery prefers exact phrase, then all terms, then partial terms", () => {
@@ -101,6 +126,64 @@ test("searchAios supports skills, references, and plugins scopes", async () => {
   assert.equal(skills[0].results[0].source, "skills/audit/SKILL.md");
   assert.equal(references[0].results[0].source, "references/framework.md");
   assert.equal(plugins[0].results[0].source, "plugins/demo/manifest.json");
+});
+
+test("session search returns bounded path-free public results from canonical Markdown", async () => {
+  const aiosPath = tmpDir();
+  const { relativePath, session } = writeCanonicalSession(aiosPath);
+
+  const [group] = await searchAios({
+    aiosPath,
+    query: "session snippet needle",
+    scope: "sessions",
+  });
+
+  assert.equal(group.scope, "sessions");
+  assert.deepEqual(group.results, [{
+    source: `sessions/${relativePath}`,
+    file: relativePath,
+    title: session.title,
+    agent: session.agent,
+    date: "2026-08-10",
+    session_id: session.session_id,
+    project: session.project,
+    matches: [{
+      line: 0,
+      content: "**user**\n\nA prefix before the bounded session snippet needle and a suffix after it.",
+      match: "phrase",
+      area: "body",
+    }],
+  }]);
+  assert.equal(Object.hasOwn(group.results[0], "body"), false);
+  assert.equal(Object.hasOwn(group.results[0], "canonical_hash"), false);
+  assert.equal(Object.hasOwn(group.results[0], "canonicalHash"), false);
+});
+
+test("session search refuses projection metadata that disagrees with canonical Markdown", async () => {
+  const aiosPath = tmpDir();
+  writeCanonicalSession(aiosPath);
+  const indexPath = path.join(aiosPath, "memory", "sessions", "index.jsonl");
+  const row = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  fs.writeFileSync(indexPath, `${JSON.stringify({ ...row, title: "FORGED_SEARCH_EVIDENCE" })}\n`);
+
+  await assert.rejects(
+    () => searchAios({ aiosPath, query: "FORGED_SEARCH_EVIDENCE", scope: "sessions" }),
+    (error) => error?.code === "DOTAIOS_SESSION_PROJECTION_DRIFT",
+  );
+});
+
+test("session search preserves week-based since filters at the SessionStore boundary", async () => {
+  const aiosPath = tmpDir();
+  writeCanonicalSession(aiosPath);
+
+  const [group] = await searchAios({
+    aiosPath,
+    query: "not present",
+    scope: "sessions",
+    sessionFilters: { since: "2w" },
+  });
+
+  assert.deepEqual(group.results, []);
 });
 
 test("searchMarkdownDir skips hidden and secret-like files", async () => {

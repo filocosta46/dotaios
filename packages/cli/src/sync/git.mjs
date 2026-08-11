@@ -14,6 +14,7 @@ import { schemaVersion } from "../../../core/src/schema.mjs";
 import {
   assertMirrorContentSafe,
   findSensitiveMirrorPaths,
+  isSessionStoreOperationalPath,
   nestedRepoMessage
 } from "./mirror-content-policy.mjs";
 
@@ -1398,9 +1399,15 @@ export function createGit({
       await assertNoActiveGitOperation();
       await recoverIndexTransaction(indexPath);
       await assertNoActiveGitOperation();
-      const { stdout } = await run(["status", "--porcelain", "-z"]);
-      const paths = parsePorcelainZ(stdout);
-      if (paths.length === 0) return null;
+      const { stdout } = await run(["status", "--porcelain", "-z", "--untracked-files=all"]);
+      const changedPaths = parsePorcelainZ(stdout);
+      if (changedPaths.length === 0) return null;
+      // SessionStore journals are local recovery evidence. Established
+      // mirrors may predate the managed ignore rule, so exclude only the
+      // exact lowercase operational subtree from candidate staging. Any
+      // already-indexed, forced, case-aliased, or incoming form is still
+      // rejected by the mirror policy below.
+      const paths = changedPaths.filter((candidate) => !isSessionStoreOperationalPath(candidate));
       const indexed = await run(["ls-files", "-s", "-z"]);
       if (indexed.code !== 0) {
         throw new Error(
@@ -1413,6 +1420,7 @@ export function createGit({
         indexedEntries: indexed.stdout,
         filesystem
       });
+      if (paths.length === 0) return null;
       const transactionId = randomUUID();
       const temporaryIndex = path.join(
         path.dirname(indexPath),

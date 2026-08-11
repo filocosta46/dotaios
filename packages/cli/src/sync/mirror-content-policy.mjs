@@ -61,6 +61,10 @@ function isSensitiveMirrorPath(candidate) {
   if (basename === ".ds_store") return true;
   if (basename === ".dotaios-setup-transaction.json") return true;
   if (/^\.dotaios-setup-.*\.tmp$/.test(basename)) return true;
+  if (
+    portablePath === ".dotaios/session-store"
+    || portablePath.startsWith(".dotaios/session-store/")
+  ) return true;
   if (portablePath.startsWith(".dotaios/migrations/transactions/")) return true;
   if (
     portablePath.startsWith(".dotaios/migrations/receipts/")
@@ -69,6 +73,12 @@ function isSensitiveMirrorPath(candidate) {
   if (parts.some((part) => part === "cache" || part === "tmp" || part === "node_modules")) return true;
   if (/^connections\/[^/]+\/(?:credentials|token)\.json$/.test(portablePath)) return true;
   return /^license\/[^/]+\.json$/.test(portablePath);
+}
+
+export function isSessionStoreOperationalPath(candidate) {
+  const portablePath = String(candidate).replaceAll("\\", "/");
+  return portablePath === ".dotaios/session-store"
+    || portablePath.startsWith(".dotaios/session-store/");
 }
 
 export function findSensitiveMirrorPaths(paths) {

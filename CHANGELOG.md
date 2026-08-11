@@ -6,6 +6,18 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Added
 
+- Session capture now has one recoverable `SessionStore` for capture,
+  reconciliation, bounded search metadata, and exact deletion. Schema-1 session
+  Markdown is canonical user memory; `memory/sessions/index.jsonl` is a
+  rebuildable projection.
+- `dotaios capture reconcile` reports orphan Markdown, stale, malformed, or
+  unsafe projection rows, invalid Markdown, duplicate IDs or paths, duplicate
+  or conflicting sources, missing projection state, and pending or poisoned
+  operational state without deleting evidence. `--apply` rebuilds only the
+  derived projection.
+- The save-session workflow now submits bounded prepared schema-1 Markdown on
+  standard input through `dotaios capture import prepared`, including supported
+  `turns: 0` summaries.
 - Project sources now have a guided `project source connect` preview and one
   `--yes` confirmation that combines the portable source declaration,
   machine-local folder binding, and finite read grant without asking the user
@@ -14,6 +26,20 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Changed
 
+- Automatic and manual session capture, working context, search, promotion,
+  listing, and deletion now use the SessionStore boundary. Same-source growth
+  extends a record, an older prefix is idempotent, and divergent non-prefix
+  versions are preserved as conflicts for reconciliation.
+- New session IDs are assigned only by SessionStore. Direct and prepared
+  capture drafts no longer need to generate a throwaway caller-owned ID.
+- Claude capture activation now preflights canonical, projection, and private
+  operational state, then installs or upgrades the managed hook with one
+  guarded atomic settings replacement. Pre-rename failure preserves prior
+  bytes; post-rename observation or parent-sync uncertainty reports an
+  indeterminate-success warning instead of a false installation failure.
+- Managed mirror rules exclude the private `.dotaios/session-store/` recovery
+  tree, and mirror content validation refuses that tree if it is forced or
+  staged. Session Markdown remains canonical; the journal does not replicate.
 - `search --project` now selects the portable project corpus by slug or stable
   ID; `--session-project` remains the session-tag filter for the pre-existing
   session attribution behavior.
@@ -37,6 +63,13 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Fixed
 
+- Session reads, updates, and deletes now refuse invalid UTF-8, malformed
+  schema, absolute or traversing projection paths, links, special files,
+  hardlinks, source replacement, duplicate ownership, and outside artifacts.
+  Mutating publication is journaled for idempotent forward recovery, while
+  search, reconciliation reports, working-context, promotion preview, and MCP
+  reads create no repair or quarantine state and expose no absolute machine
+  paths.
 - Canonical working-context reads no longer create corrupt-JSONL quarantine
   files, follow projected sources outside the AIOS boundary, echo unbounded
   project filters, or return absolute machine paths in internal MCP errors.

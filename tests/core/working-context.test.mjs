@@ -5,12 +5,14 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { isoDate } from "../../packages/core/src/memory.mjs";
+import { deriveProjectionRows, renderSessionMarkdown } from "../../packages/core/src/session-codec.mjs";
 import {
   buildWorkingContext,
   createWorkingContextProjection,
   renderWorkingContext,
   selectWorkingContext,
 } from "../../packages/core/src/working-context.mjs";
+import { createSessionStore } from "../../packages/core/src/session-store.mjs";
 
 const FIXED_NOW = new Date("2026-07-15T10:00:00.000Z");
 
@@ -28,13 +30,185 @@ function writeJsonl(filePath, entries) {
   fs.writeFileSync(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 }
 
+function writeSessionFixtures(aiosPath, rows) {
+  const records = rows.map((row, index) => {
+    const turnCount = Number.isInteger(row.turns) ? row.turns : 0;
+    const session = {
+      schema: 1,
+      agent: row.agent || "manual",
+      session_id: row.session_id,
+      captured_at: row.captured_at,
+      source_type: row.source_type || "manual",
+      ...(row.source_path ? { source_path: row.source_path } : {}),
+      ...(row.project ? { project: row.project } : {}),
+      ...(row.project_id ? { project_id: row.project_id } : {}),
+      turns: Array.from({ length: turnCount }, (_, turnIndex) => ({
+        role: turnIndex % 2 === 0 ? "user" : "assistant",
+        content: `fixture ${index + 1} turn ${turnIndex + 1}`,
+      })),
+      title: row.title ?? null,
+    };
+    const date = session.captured_at.slice(0, 10);
+    const timestamp = session.captured_at.slice(0, 19).replaceAll(":", "-");
+    const relativePath = `memory/sessions/${date}/${timestamp}_${session.agent}_${session.session_id}.md`;
+    const absolutePath = path.join(aiosPath, ...relativePath.split("/"));
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, renderSessionMarkdown(session));
+    return { session, relativePath };
+  });
+  writeJsonl(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    deriveProjectionRows(records),
+  );
+}
+
 function fixedClock() {
   return new Date(FIXED_NOW.getTime());
 }
 
+test("working context refuses forged projection metadata instead of treating it as memory", async () => {
+  const aiosPath = tmpAios();
+  const store = createSessionStore({ aiosPath, clock: fixedClock });
+  await store.capture({
+    session: {
+      agent: "codex",
+      session_id: "canonical-session",
+      captured_at: "2026-07-15T09:00:00.000Z",
+      source_type: "manual",
+      project: "project-a",
+      title: "Canonical session title",
+      turns: [{ role: "user", content: "Canonical session body" }],
+    },
+  });
+
+  const indexPath = path.join(aiosPath, "memory", "sessions", "index.jsonl");
+  const [row] = fs.readFileSync(indexPath, "utf8").trim().split("\n").map(JSON.parse);
+  fs.writeFileSync(indexPath, `${JSON.stringify({ ...row, title: "FORGED_INDEX_TITLE" })}\n`);
+
+  await assert.rejects(
+    () => selectWorkingContext(aiosPath, { project: "project-a" }, { clock: fixedClock }),
+    (error) => error?.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+      && error?.cause?.code === "DOTAIOS_SESSION_PROJECTION_DRIFT",
+  );
+});
+
+test("working context omits conflicting canonical sessions and budgets the omission count", async () => {
+  const aiosPath = tmpAios();
+  writeSessionFixtures(aiosPath, [
+    {
+      session_id: "conflict-a",
+      source_path: "/private/source/session.jsonl",
+      captured_at: "2026-07-15T08:00:00.000Z",
+      title: "CONFLICT_VERSION_A",
+      turns: 1,
+    },
+    {
+      session_id: "conflict-b",
+      source_path: "/private/source/session.jsonl",
+      captured_at: "2026-07-15T09:00:00.000Z",
+      title: "CONFLICT_VERSION_B",
+      turns: 2,
+    },
+  ]);
+
+  const result = await buildWorkingContext(
+    aiosPath,
+    { visibleCharacterBudget: 256 },
+    { clock: fixedClock },
+  );
+
+  assert.deepEqual(result.context.sessions, []);
+  assert.equal(result.context.conflictsOmitted, 2);
+  assert.match(result.rendered, /2 conflicting session records omitted/i);
+  assert.doesNotMatch(result.rendered, /CONFLICT_VERSION_[AB]/);
+  assert.ok(result.rendered.length <= 256);
+  assert.equal(result.context.budget.used, result.rendered.length);
+});
+
+test("project-scoped working context does not reveal another project's conflict count", async () => {
+  const aiosPath = tmpAios();
+  writeSessionFixtures(aiosPath, [
+    {
+      session_id: "private-conflict-a",
+      source_path: "/private/source/other-project.jsonl",
+      project: "project-b",
+      captured_at: "2026-07-15T08:00:00.000Z",
+      title: "PRIVATE_CONFLICT_VERSION_A",
+      turns: 1,
+    },
+    {
+      session_id: "private-conflict-b",
+      source_path: "/private/source/other-project.jsonl",
+      project: "project-b",
+      captured_at: "2026-07-15T09:00:00.000Z",
+      title: "PRIVATE_CONFLICT_VERSION_B",
+      turns: 2,
+    },
+  ]);
+
+  const result = await buildWorkingContext(
+    aiosPath,
+    { project: "project-a", visibleCharacterBudget: 256 },
+    { clock: fixedClock },
+  );
+
+  assert.equal(result.context.conflictsOmitted, 0);
+  assert.doesNotMatch(result.rendered, /conflict|PRIVATE_CONFLICT/);
+  assert.ok(result.rendered.length <= 256);
+});
+
+test("project-scoped working context reports only the selected project's conflicts", async () => {
+  const aiosPath = tmpAios();
+  writeSessionFixtures(aiosPath, [
+    {
+      session_id: "selected-conflict-a",
+      source_path: "/private/source/selected-project.jsonl",
+      project: "project-a",
+      captured_at: "2026-07-15T08:00:00.000Z",
+      title: "SELECTED_CONFLICT_VERSION_A",
+      turns: 1,
+    },
+    {
+      session_id: "selected-conflict-b",
+      source_path: "/private/source/selected-project.jsonl",
+      project: "project-a",
+      captured_at: "2026-07-15T09:00:00.000Z",
+      title: "SELECTED_CONFLICT_VERSION_B",
+      turns: 2,
+    },
+    {
+      session_id: "other-conflict-a",
+      source_path: "/private/source/other-project.jsonl",
+      project: "project-b",
+      captured_at: "2026-07-15T08:30:00.000Z",
+      title: "OTHER_CONFLICT_VERSION_A",
+      turns: 1,
+    },
+    {
+      session_id: "other-conflict-b",
+      source_path: "/private/source/other-project.jsonl",
+      project: "project-b",
+      captured_at: "2026-07-15T09:30:00.000Z",
+      title: "OTHER_CONFLICT_VERSION_B",
+      turns: 2,
+    },
+  ]);
+
+  const result = await buildWorkingContext(
+    aiosPath,
+    { project: "project-a", visibleCharacterBudget: 256 },
+    { clock: fixedClock },
+  );
+
+  assert.equal(result.context.conflictsOmitted, 2);
+  assert.match(result.rendered, /2 conflicting session records omitted/i);
+  assert.doesNotMatch(result.rendered, /SELECTED_CONFLICT|OTHER_CONFLICT/);
+  assert.ok(result.rendered.length <= 256);
+});
+
 test("project filter scopes sessions, namespaced signals, and events with stable ordering", async () => {
   const aiosPath = tmpAios();
-  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
+  writeSessionFixtures(aiosPath, [
     {
       session_id: "project-b",
       project: "project-b",
@@ -102,7 +276,7 @@ test("project filter scopes sessions, namespaced signals, and events with stable
 
 test("scoped views retain unattributed evidence without leaking another project", async () => {
   const aiosPath = tmpAios();
-  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
+  writeSessionFixtures(aiosPath, [
     { session_id: "a", project: "project-a", captured_at: "2026-07-15T09:00:00.000Z", title: "A fact" },
     { session_id: "b", project: "project-b", captured_at: "2026-07-15T08:00:00.000Z", title: "B fact" },
     { session_id: "unscoped", captured_at: "2026-07-15T07:00:00.000Z", title: "Unscoped fact" },
@@ -154,7 +328,10 @@ test("scoped views authorize project and project_id attribution consistently", a
     { project_id: "", label: "MALFORMED_EMPTY_SECRET" },
   ];
 
-  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), scopedRows.map((row, index) => ({
+  // An empty project_id cannot be represented by strict canonical session
+  // Markdown. Keep that malformed-attribution case on the signal/event
+  // channels while the session fixture contains only valid canonical records.
+  writeSessionFixtures(aiosPath, scopedRows.filter((row) => row.project_id !== "").map((row, index) => ({
     ...row,
     session_id: `session-${index}`,
     captured_at: `2026-07-15T0${index}:00:00.000Z`,
@@ -302,7 +479,7 @@ test("stable project id resolves to the canonical slug before filtering", async 
     path.join(aiosPath, "projects", "project-a", "README.md"),
     "---\nid: stable-project-id\nproject: project-a\n---\n# Project A\n",
   );
-  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
+  writeSessionFixtures(aiosPath, [
     {
       session_id: "matching-session",
       project: "project-a",
@@ -335,7 +512,7 @@ test("existing stable project id characters remain valid selectors", async () =>
     path.join(aiosPath, "projects", "project-a", "README.md"),
     "---\nid: café:client/01\nproject: project-a\n---\n# Project A\n",
   );
-  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [{
+  writeSessionFixtures(aiosPath, [{
     session_id: "matching-session",
     project: "project-a",
     captured_at: "2026-07-15T09:00:00.000Z",

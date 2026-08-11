@@ -1,105 +1,39 @@
 ---
 name: save-session
 triggers: save this session, save to memory, remember this session, log this work session
-description: Save the current AI conversation as a clean local session summary with decisions, open threads, and action items.
+description: Use when the user asks to save, remember, or log the current conversation into local DotAIOS session memory.
 when_to_use: save this session · save to memory · remember this session · log this work session
 ---
 
 # save-session
 
-Save the useful parts of the current AI conversation into DotAIOS memory.
+Save the useful parts of the visible conversation as local session evidence. SessionStore is the only publication authority.
 
-## What this does
+## Authority boundary
 
-- Summarizes the current session into a readable Markdown file.
-- Saves decisions, open threads, and action items in `memory/sessions/`.
-- Adds a structured digest block that future agents can read quickly.
-- Works without a CLI command when the agent can write local files.
+- Submit one prepared schema-1 document to `dotaios capture import prepared` through standard input (stdin).
+- Never create or modify files under `memory/sessions/`, and never append or rewrite `index.jsonl` directly.
+- Do not fall back to a direct file write, partial save, editor instruction, or hand-built index entry.
+- If the local CLI cannot run or returns a non-zero exit code, report that the session was not saved and stop.
 
-## What this doesn't do
+## Prepare
 
-- It does not save a raw transcript.
-- It does not upload anything.
-- It does not write durable identity, project, CRM, company, person, or wiki knowledge.
-- It does not invent missing details. Mark unclear items as uncertain or leave them out.
-- It does not save secrets, credentials, private keys, tokens, or large tool-output dumps.
+1. Use the current DotAIOS folder. If none is known, use `~/aios`.
+2. Review only the visible conversation unless the user explicitly includes another source.
+3. Produce a concise summary of decisions, completed work, action items, risks, and open threads. Omit chatter, failed dead ends, raw transcripts, large tool output, credentials, tokens, keys, and other secrets.
+4. If nothing useful remains, tell the user there is nothing to save and do not invoke the CLI.
+5. Choose an ISO 8601 capture time and a lowercase agent slug. SessionStore assigns the session ID. Include a lowercase project slug only when it is known.
 
-## How to use it
-
-Try saying:
-
-- "save this session"
-- "use save-session"
-- "/save-session"
-- "write a session summary to my AIOS"
-
-## Agent steps
-
-### Read
-
-1. Use the current DotAIOS folder. If no folder is already known, use `~/aios`.
-2. Review only the visible current conversation unless the user asks you to include other files.
-3. Identify:
-   - current timestamp in ISO 8601 format
-   - current date as `YYYY-MM-DD`
-   - the tool name, such as `claude-code`, `codex`, `cursor`, `gemini-cli`, `claude-web`, `chatgpt-web`, or `manual`
-   - project name if obvious from the conversation or working directory
-
-### Process
-
-- Write a short summary of what happened, not a raw transcript.
-- Keep the memory useful to a future agent that was not present.
-- Prefer concrete facts:
-  - decisions made
-  - work completed
-  - files, PRs, releases, or commands that matter
-  - open threads
-  - next actions
-- Omit chatter, failed dead ends, giant logs, and private details that do not help future work.
-- If the session contains secrets or credentials, do not write them. Note only that sensitive material was omitted.
-- If there is nothing useful to save, tell the user that and stop.
-
-### File path
-
-Create this folder if it does not exist:
-
-```text
-~/aios/memory/sessions/YYYY-MM-DD/
-```
-
-Create one Markdown file with this filename shape:
-
-```text
-YYYY-MM-DDTHH-MM-SS_<agent-slug>_<session-id-prefix>.md
-```
-
-Rules:
-
-- Replace `:` in the ISO timestamp with `-`.
-- Use a lowercase agent slug with only `a-z`, `0-9`, and `-`.
-- Generate `session-id` as 8 lowercase hex characters when possible.
-- Use the first 6 characters of `session-id` in the filename.
-- If randomness is unavailable, use a timestamp-based 8 character id and keep going.
-
-Example:
-
-```text
-~/aios/memory/sessions/2026-05-17/2026-05-17T15-42-08_codex_a1b2c3.md
-```
-
-### File content
-
-Write the session file with this structure:
+The complete UTF-8 document has a hard ceiling of 1 MiB; target at most 64 KiB. Use `turns: 0` because this is a curated summary, not a transcript. Keep frontmatter scalar-only and omit `project` when unknown.
 
 ```markdown
 ---
 agent: <agent-slug>
-session_id: <8-char-id>
-captured_at: <ISO 8601 timestamp>
+captured_at: <ISO-8601-timestamp>
 source_type: save-session
 project: <project-slug-if-known>
 turns: 0
-title: "<short title>"
+title: "<short-title>"
 schema: 1
 ---
 
@@ -107,14 +41,14 @@ schema: 1
 
 <!-- digest:start -->
 decisions:
-- <decision>
+- <decision, or None recorded.>
 open_threads:
-- <open thread>
+- <open thread, or None.>
 <!-- digest:end -->
 
 ## Summary
 
-<3-8 bullets or short paragraphs that explain what happened and why it matters.>
+<What happened and why it matters.>
 
 ## Key Decisions
 
@@ -130,60 +64,19 @@ open_threads:
 
 ## Notes For Next Agent
 
-<Anything a future AI should know before continuing.>
+<Useful continuation context.>
 ```
 
-Omit the `project:` frontmatter line when the project is unknown.
+## Publish
 
-If there are no decisions, write:
+Pass the completed document directly to the CLI without creating a temporary session file. Substitute the resolved AIOS path and all template fields before execution.
 
-```markdown
-decisions:
-- None recorded.
+```sh
+dotaios capture import prepared --path <absolute-aios-path> <<'DOTAIOS_SESSION'
+<complete prepared Markdown document>
+DOTAIOS_SESSION
 ```
 
-If there are no open threads, write:
+Success requires exit code zero and the CLI's explicit `Saved:` or `Already saved` outcome. Only then tell the user the returned relative path, title, and whether sensitive material was omitted.
 
-```markdown
-open_threads:
-- None.
-```
-
-### Index entry
-
-After writing the Markdown file, update:
-
-```text
-~/aios/memory/sessions/index.jsonl
-```
-
-Append one compact JSON line for the saved session:
-
-```json
-{"session_id":"<8-char-id>","agent":"<agent-slug>","captured_at":"<ISO 8601 timestamp>","source_type":"save-session","project":"<project-slug-if-known>","turns":0,"title":"<short title>","path":"memory/sessions/YYYY-MM-DD/<filename>.md"}
-```
-
-Rules:
-
-- Use forward slashes in `path`.
-- Omit the `project` field when unknown.
-- Do not append a duplicate if `session_id` or `path` is already present.
-- If you cannot safely update the JSONL index, still save the Markdown file and tell the user the index was not updated.
-
-### Output
-
-After saving, tell the user:
-
-- the relative path saved
-- the title
-- any sensitive material omitted
-
-Keep the reply short.
-
-## If the agent cannot write files
-
-Some web chat agents cannot write to local files. In that case:
-
-1. Produce the complete Markdown session content.
-2. Give the intended path under `~/aios/memory/sessions/YYYY-MM-DD/`.
-3. Tell the user to save it with a local agent or text editor.
+On a non-zero exit code, conflict, reconciliation requirement, refusal, timeout, or missing CLI, surface the bounded CLI diagnostic and say the session was not saved. Never report it as saved and never attempt a direct-write recovery.

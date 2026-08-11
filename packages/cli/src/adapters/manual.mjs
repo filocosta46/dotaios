@@ -1,5 +1,5 @@
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
-import { generateSessionId, inferTitle } from "../../../core/src/sessions.mjs";
+import { inferTitle } from "../../../core/src/sessions.mjs";
 
 export const name = "manual";
 export const level = ADAPTER_LEVELS.MANUAL_ASSIST;
@@ -7,11 +7,8 @@ export const level = ADAPTER_LEVELS.MANUAL_ASSIST;
 export function parseRawText(text, { project, projectId = null, sourceType = "import" } = {}) {
   const turns = parseTurns(text);
   const now = new Date().toISOString();
-  const session_id = generateSessionId();
-
   return {
     agent: "manual",
-    session_id,
     captured_at: now,
     source_type: sourceType,
     ...(project && { project }),

@@ -1,9 +1,11 @@
 import fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
-import { writeSession, readSessionIndex } from "../../../core/src/sessions.mjs";
+import { inferTitle } from "../../../core/src/session-codec.mjs";
+import { createSessionStore } from "../../../core/src/session-store.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
 export const name = "claude-code";
@@ -27,6 +29,10 @@ const HOOK_VERSION = JSON.parse(
 ).version;
 const HOOK_COMMAND = `npx -y dotaios@${HOOK_VERSION} capture hook claude-code`;
 const HOOK_MARKER = "capture hook claude-code";
+const HOOK_TIMEOUT_SECONDS = 15;
+const HOOK_NOT_SAVED_DIAGNOSTIC = "dotaios capture hook: session not saved\n";
+const ACTIVATION_REFUSAL_MESSAGE = "Session capture activation refused: session memory requires reconciliation. "
+  + "Run `dotaios capture reconcile` for the selected AIOS folder.";
 
 // The command is written into another program's config and run through a
 // shell, so a home directory with a space in it would otherwise word-split and
@@ -49,11 +55,12 @@ export async function importClaudeCode(aiosPath, { all = false, project = null, 
   }
 
   const cutoff = all ? null : new Date(Date.now() - 30 * 86400000).toISOString();
-  const existing = await readSessionIndex(aiosPath);
-  const existingPaths = new Set(existing.map((e) => e.source_path).filter(Boolean));
+  const store = createSessionStore({ aiosPath, claudeRoot: PROJECTS_DIR });
 
   let imported = 0;
-  let skipped = 0;
+  let alreadySaved = 0;
+  let beforeCutoff = 0;
+  let emptySources = 0;
   let errors = 0;
 
   for (const dirEntry of projectDirs) {
@@ -63,48 +70,31 @@ export async function importClaudeCode(aiosPath, { all = false, project = null, 
     const jsonlFiles = await listJsonlFiles(dirEntry.fullPath);
 
     for (const filePath of jsonlFiles) {
-      if (existingPaths.has(filePath)) {
-        skipped++;
-        continue;
-      }
-
-      let lines;
       try {
-        lines = await readJsonlLines(filePath);
-      } catch {
-        errors++;
-        continue;
-      }
-
-      if (lines.length === 0) {
-        skipped++;
-        continue;
-      }
-
-      // Apply date cutoff based on first message timestamp
-      const firstTs = firstTimestamp(lines);
-      if (cutoff && firstTs && firstTs < cutoff) {
-        skipped++;
-        continue;
-      }
-
-      const session = parseTranscript(lines, {
-        project: inferredProject,
-        projectId,
-        sourcePath: filePath,
-      });
-
-      if (!session || session.turns.length === 0) {
-        skipped++;
-        continue;
-      }
-
-      try {
-        const result = await writeSession(aiosPath, session);
-        if (result.skipped) {
-          skipped++;
-        } else {
+        const result = await store.capture({
+          source: {
+            path: filePath,
+            policy: "claude-code-root",
+            parser: (text) => parseTranscript(parseJsonlText(text), {
+              project: inferredProject,
+              projectId,
+              sourcePath: filePath,
+            }),
+          },
+          project: inferredProject,
+          projectId,
+          ...(cutoff ? { capturedAfter: cutoff } : {}),
+        });
+        if (result.outcome === "idempotent") {
+          alreadySaved++;
+        } else if (result.outcome === "refused" && result.reason === "before_cutoff") {
+          beforeCutoff++;
+        } else if (result.outcome === "refused" && result.reason === "empty_source") {
+          emptySources++;
+        } else if (["created", "grown"].includes(result.outcome)) {
           imported++;
+        } else {
+          errors++;
         }
       } catch {
         errors++;
@@ -112,18 +102,23 @@ export async function importClaudeCode(aiosPath, { all = false, project = null, 
     }
   }
 
+  const skipped = alreadySaved + beforeCutoff + emptySources;
   if (imported === 0 && skipped === 0) {
     console.log("No Claude Code sessions found.");
   } else if (imported === 0) {
-    console.log(`0 new sessions (${skipped} already saved).`);
+    console.log("0 new sessions.");
   } else {
     console.log(`Imported ${imported} session${imported !== 1 ? "s" : ""} from Claude Code.`);
-    if (skipped > 0) console.log(`${skipped} already saved.`);
   }
+  if (alreadySaved > 0) console.log(`${alreadySaved} already saved.`);
+  if (beforeCutoff > 0) console.log(`${beforeCutoff} before the 30-day cutoff.`);
+  if (emptySources > 0) console.log(`${emptySources} empty source${emptySources !== 1 ? "s" : ""}.`);
 
   if (errors > 0) {
     console.log(`${errors} file${errors !== 1 ? "s" : ""} could not be read.`);
+    throw new Error("Claude Code backfill incomplete; one or more sessions were not saved.");
   }
+  return Object.freeze({ imported, alreadySaved, beforeCutoff, emptySources, errors });
 }
 
 // ---------- live hook ----------
@@ -151,39 +146,33 @@ export async function handleHookPayload(aiosPath, { cwd = process.cwd() } = {}) 
     return;
   }
 
-  let lines;
   try {
-    lines = await readJsonlLines(transcriptPath);
+    const project = await resolveProjectContext({
+      aiosPath,
+      cwd: payload.cwd || cwd
+    });
+    const result = await createSessionStore({ aiosPath, claudeRoot: PROJECTS_DIR }).capture({
+      source: {
+        path: transcriptPath,
+        policy: "claude-code-root",
+        parser: (text) => parseTranscript(parseJsonlText(text), {
+          project: project?.slug || null,
+          projectId: project?.id || null,
+          sourcePath: transcriptPath,
+        }),
+      },
+      project: project?.slug || null,
+      projectId: project?.id || null,
+    });
+    if (!["created", "grown", "idempotent"].includes(result.outcome)) {
+      process.stderr.write(HOOK_NOT_SAVED_DIAGNOSTIC);
+      process.exitCode = 0;
+      return;
+    }
   } catch {
+    process.stderr.write(HOOK_NOT_SAVED_DIAGNOSTIC);
     process.exitCode = 0;
     return;
-  }
-
-  if (lines.length === 0) {
-    process.exitCode = 0;
-    return;
-  }
-
-  const project = await resolveProjectContext({
-    aiosPath,
-    cwd: payload.cwd || cwd
-  });
-
-  const session = parseTranscript(lines, {
-    project: project?.slug || null,
-    projectId: project?.id || null,
-    sourcePath: transcriptPath,
-  });
-
-  if (!session || session.turns.length === 0) {
-    process.exitCode = 0;
-    return;
-  }
-
-  try {
-    await writeSession(aiosPath, session);
-  } catch (err) {
-    process.stderr.write(`dotaios capture hook: failed to save session: ${err.message}\n`);
   }
 
   process.exitCode = 0;
@@ -191,70 +180,283 @@ export async function handleHookPayload(aiosPath, { cwd = process.cwd() } = {}) 
 
 // ---------- enable / disable ----------
 
-export async function enable(aiosPath) {
+export async function enable(aiosPath, {
+  filesystem = fs,
+  settingsPath = SETTINGS_PATH,
+} = {}) {
+  await assertWriterActivationCompatible(aiosPath);
+
+  let snapshot;
   let settings;
   try {
-    const raw = await fs.readFile(SETTINGS_PATH, "utf8");
-    settings = JSON.parse(raw);
+    snapshot = await readSettingsSnapshot(settingsPath, filesystem);
+    settings = snapshot.exists ? JSON.parse(snapshot.bytes.toString("utf8")) : {};
   } catch (error) {
-    if (error.code !== "ENOENT") {
-      // The file exists but we cannot read or parse it. Starting from {} would
-      // write our hook over the user's entire Claude Code configuration.
-      // Refusing is the only safe move; they can fix or move the file.
-      throw new Error(
-        `Cannot read ${SETTINGS_PATH}: ${error.message}\n` +
-        "Fix or move that file, then run this again. Refusing to overwrite it."
-      );
-    }
-    settings = {};
+    // Starting from {} after a read or parse failure would replace the user's
+    // entire Claude Code configuration. Refuse before staging any replacement.
+    throw new Error(
+      `Cannot read ${settingsPath}: ${error.message}\n` +
+      "Fix or move that file, then run this again. Refusing to overwrite it."
+    );
   }
+  assertSupportedSettings(settings);
 
-  if (!settings.hooks) settings.hooks = {};
-  if (!settings.hooks.Stop) settings.hooks.Stop = [];
+  if (settings.hooks === undefined) settings.hooks = {};
+  if (settings.hooks.Stop === undefined) settings.hooks.Stop = [];
 
   const wanted = hookCommandFor(aiosPath);
-  const existing = settings.hooks.Stop.find(
-    (h) => h.hooks?.some?.((e) => e.command?.includes(HOOK_MARKER))
-  );
-
-  if (existing) {
-    const entry = existing.hooks.find((e) => e.command?.includes(HOOK_MARKER));
-    if (entry.command === wanted) {
-      console.log("Claude Code auto-save already configured.");
-      return;
-    }
-    // An earlier release wrote a hook that no longer works — 1.26's bare
-    // `dotaios` never resolves on the npx-only install path, so it failed
-    // silently on every session. Reporting "already configured" would leave
-    // the user permanently broken with no signal.
-    console.log("Updating the Claude Code auto-save hook:");
-    console.log(`  was: ${entry.command}`);
-    console.log(`  now: ${wanted}`);
-    entry.command = wanted;
-    entry.type = "command";
-    if (entry.timeout == null) entry.timeout = 10;
-    await fs.mkdir(CLAUDE_DIR, { recursive: true });
-    await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
-    console.log("Claude Code auto-save repaired.");
-    return;
+  const managed = settings.hooks.Stop.flatMap((group) => (
+    group.hooks.filter((entry) => isManagedHook(entry))
+  ));
+  if (
+    managed.length === 1
+    && managed[0].command === wanted
+    && managed[0].type === "command"
+    && Number.isFinite(managed[0].timeout)
+    && managed[0].timeout >= HOOK_TIMEOUT_SECONDS
+  ) {
+    console.log("Claude Code auto-save already configured.");
+    return Object.freeze({ outcome: "already_configured" });
   }
 
+  const hadManagedHook = managed.length > 0;
+  settings.hooks.Stop = settings.hooks.Stop.flatMap((group) => {
+    const hooks = group.hooks.filter((entry) => !isManagedHook(entry));
+    if (hooks.length === 0 && group.hooks.length > 0) return [];
+    return [{ ...group, hooks }];
+  });
   settings.hooks.Stop.push({
     hooks: [
       {
         type: "command",
         command: wanted,
-        timeout: 10,
+        timeout: HOOK_TIMEOUT_SECONDS,
         statusMessage: "Saving conversation to AIOS..."
       }
     ]
   });
 
   // A machine that has never run Claude Code has no ~/.claude yet.
-  await fs.mkdir(CLAUDE_DIR, { recursive: true });
-  await fs.writeFile(SETTINGS_PATH, JSON.stringify(settings, null, 2) + "\n", "utf8");
-  console.log("Claude Code auto-save enabled.");
-  console.log("Future conversations will be saved incrementally after each completed Claude Code response.");
+  const publication = await replaceSettingsAtomically(settingsPath, snapshot, settings, filesystem);
+  if (hadManagedHook) {
+    console.log("Claude Code auto-save repaired.");
+  } else {
+    console.log("Claude Code auto-save enabled.");
+    console.log("Future conversations will be saved incrementally after each completed Claude Code response.");
+  }
+  return publication;
+}
+
+function assertSupportedSettings(settings) {
+  if (!isSettingsObject(settings)) throw unsupportedSettingsError();
+  if (settings.hooks === undefined) return;
+  if (!isSettingsObject(settings.hooks)) throw unsupportedSettingsError();
+  if (settings.hooks.Stop === undefined) return;
+  if (!Array.isArray(settings.hooks.Stop)) throw unsupportedSettingsError();
+  for (const group of settings.hooks.Stop) {
+    if (!isSettingsObject(group) || !Array.isArray(group.hooks)) throw unsupportedSettingsError();
+    if (group.hooks.some((entry) => !isSettingsObject(entry))) throw unsupportedSettingsError();
+  }
+}
+
+function isSettingsObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isManagedHook(entry) {
+  return typeof entry.command === "string" && entry.command.includes(HOOK_MARKER);
+}
+
+function unsupportedSettingsError() {
+  const error = new Error("Claude Code settings structure is unsupported; refusing to overwrite it.");
+  error.code = "DOTAIOS_CLAUDE_SETTINGS_UNSUPPORTED";
+  return error;
+}
+
+async function readSettingsSnapshot(settingsPath, filesystem) {
+  try {
+    const observation = await observeSettingsFile(settingsPath, filesystem);
+    return Object.freeze({ exists: true, ...observation });
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return Object.freeze({ exists: false, bytes: null, stats: null });
+    }
+    throw error;
+  }
+}
+
+async function observeSettingsFile(settingsPath, filesystem) {
+  const before = await filesystem.lstat(settingsPath);
+  assertSafeSettingsFile(before);
+  let handle;
+  try {
+    handle = await filesystem.open(settingsPath, "r");
+    const opened = await handle.stat();
+    assertSafeSettingsFile(opened);
+    if (!sameSettingsFile(before, opened)) throw settingsChangedError();
+    const bytes = await handle.readFile();
+    const openedAfter = await handle.stat();
+    const after = await filesystem.lstat(settingsPath);
+    assertSafeSettingsFile(openedAfter);
+    assertSafeSettingsFile(after);
+    if (!sameSettingsFile(opened, openedAfter) || !sameSettingsFile(openedAfter, after)) {
+      throw settingsChangedError();
+    }
+    return Object.freeze({ bytes, stats: after });
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+async function replaceSettingsAtomically(settingsPath, snapshot, settings, filesystem) {
+  const directory = path.dirname(settingsPath);
+  await filesystem.mkdir(directory, { recursive: true });
+  const temporary = path.join(
+    directory,
+    `.${path.basename(settingsPath)}.${process.pid}.${randomUUID()}.tmp`,
+  );
+  const bytes = Buffer.from(`${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  const mode = snapshot.exists ? snapshot.stats.mode & 0o777 : 0o600;
+  let handle;
+  try {
+    handle = await filesystem.open(temporary, "wx", mode);
+    await handle.writeFile(bytes);
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await filesystem.chmod(temporary, mode);
+    const staged = await filesystem.lstat(temporary);
+    assertSafeSettingsFile(staged);
+    await assertSettingsSnapshotCurrent(settingsPath, snapshot, filesystem);
+    await filesystem.rename(temporary, settingsPath);
+    let published;
+    try {
+      published = await observeSettingsFile(settingsPath, filesystem);
+    } catch (error) {
+      if (isDefinitiveSettingsProofFailure(error)) throw error;
+      return publicationIndeterminate();
+    }
+    if (!sameSettingsIdentity(staged, published.stats) || !published.bytes.equals(bytes)) {
+      throw settingsChangedError();
+    }
+    try {
+      await syncDirectory(directory, filesystem);
+    } catch {
+      return publicationIndeterminate();
+    }
+    return Object.freeze({ outcome: "installed" });
+  } finally {
+    await handle?.close().catch(() => {});
+    await filesystem.rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+async function assertSettingsSnapshotCurrent(settingsPath, snapshot, filesystem) {
+  if (!snapshot.exists) {
+    try {
+      await filesystem.lstat(settingsPath);
+    } catch (error) {
+      if (error?.code === "ENOENT") return;
+      throw error;
+    }
+    throw settingsChangedError();
+  }
+  const current = await observeSettingsFile(settingsPath, filesystem);
+  if (!sameSettingsFile(snapshot.stats, current.stats) || !snapshot.bytes.equals(current.bytes)) {
+    throw settingsChangedError();
+  }
+}
+
+function assertSafeSettingsFile(stats) {
+  if (
+    !stats.isFile()
+    || stats.isSymbolicLink()
+    || (process.platform !== "win32" && stats.nlink !== 1)
+    || (
+      process.platform !== "win32"
+      && typeof process.getuid === "function"
+      && Number(stats.uid) !== process.getuid()
+    )
+  ) {
+    const error = new Error("Claude Code settings are not a safe owned regular file.");
+    error.code = "DOTAIOS_CLAUDE_SETTINGS_UNSAFE";
+    throw error;
+  }
+}
+
+function isDefinitiveSettingsProofFailure(error) {
+  return [
+    "DOTAIOS_CLAUDE_SETTINGS_CHANGED",
+    "DOTAIOS_CLAUDE_SETTINGS_UNSAFE",
+    "ENOENT",
+    "ELOOP",
+    "ENOTDIR",
+  ].includes(error?.code);
+}
+
+function publicationIndeterminate() {
+  console.warn("Claude Code auto-save settings were installed, but directory durability could not be confirmed.");
+  return Object.freeze({ outcome: "installed_durability_indeterminate" });
+}
+
+function sameSettingsIdentity(left, right) {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameSettingsFile(left, right) {
+  return sameSettingsIdentity(left, right)
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+function settingsChangedError() {
+  const error = new Error("Claude Code settings changed during managed-hook cutover.");
+  error.code = "DOTAIOS_CLAUDE_SETTINGS_CHANGED";
+  return error;
+}
+
+async function syncDirectory(directory, filesystem) {
+  let handle;
+  try {
+    handle = await filesystem.open(directory, "r");
+    await handle.sync();
+  } catch (error) {
+    if (!["EINVAL", "ENOTSUP", "EISDIR", "EPERM"].includes(error?.code)) throw error;
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+
+async function assertWriterActivationCompatible(aiosPath) {
+  try {
+    const store = createSessionStore({ aiosPath });
+    const report = await store.reconcile({ apply: false });
+    if (activationReportHasDrift(report)) throw new Error(ACTIVATION_REFUSAL_MESSAGE);
+
+    // Reconciliation reports syntax and projection drift. A bounded metadata
+    // read additionally proves that canonical ancestors and artifacts are safe.
+    await store.search({ purpose: "metadata", query: "", limit: 1 });
+  } catch {
+    throw new Error(ACTIVATION_REFUSAL_MESSAGE);
+  }
+}
+
+function activationReportHasDrift(report) {
+  return report.operational_state !== "clean"
+    || report.malformed_rows !== 0
+    || report.unsafe_rows !== 0
+    || [
+      "orphan_markdown",
+      "stale_rows",
+      "invalid_markdown",
+      "duplicate_ids",
+      "duplicate_paths",
+      "duplicate_sources",
+      "conflicting_sources",
+    ].some((key) => report[key].length !== 0);
 }
 
 export async function disable(aiosPath) {
@@ -322,7 +524,7 @@ export function parseTranscript(lines, { project = null, projectId = null, sourc
 
   if (turns.length === 0) return null;
 
-  const title = inferTitleFromTurns(turns);
+  const title = inferTitle(turns);
 
   return {
     agent: "claude-code",
@@ -330,7 +532,7 @@ export function parseTranscript(lines, { project = null, projectId = null, sourc
     captured_at: capturedAt,
     source_type: "import",
     source_path: sourcePath,
-    project,
+    ...(project && { project }),
     ...(projectId && { project_id: projectId }),
     title,
     turns,
@@ -364,25 +566,11 @@ async function listJsonlFiles(dir) {
     .sort();
 }
 
-async function readJsonlLines(filePath) {
-  const content = await fs.readFile(filePath, "utf8");
+function parseJsonlText(content) {
   return content
     .split("\n")
     .filter((line) => line.trim())
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line)];
-      } catch {
-        return [];
-      }
-    });
-}
-
-function firstTimestamp(lines) {
-  for (const line of lines) {
-    if (line.timestamp) return line.timestamp;
-  }
-  return null;
+    .map((line) => JSON.parse(line));
 }
 
 function extractSessionId(sourcePath) {
@@ -409,11 +597,4 @@ function extractTextContent(contentBlocks) {
 
   const text = parts.join("\n\n").trim();
   return text || null;
-}
-
-function inferTitleFromTurns(turns) {
-  const first = turns.find((t) => t.role === "user");
-  if (!first?.content) return null;
-  const text = String(first.content).replace(/\s+/g, " ").trim();
-  return text.length > 80 ? text.slice(0, 77) + "..." : text;
 }

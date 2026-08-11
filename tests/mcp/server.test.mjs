@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { deriveProjectionRows, renderSessionMarkdown } from "../../packages/core/src/session-codec.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -18,18 +19,18 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
     path.join(aiosPath, "projects", "demo", "README.md"),
     "---\nid: demo-id\nproject: demo\nstatus: active\ndomain: [build]\n---\n# Demo\n\nGateway acceptance.\n",
   );
-  fs.writeFileSync(
-    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
-    `${JSON.stringify({
+  writeCanonicalSessions(aiosPath, [{
       session_id: "session-1",
       project: "demo",
       captured_at: "2026-07-15T09:00:00.000Z",
       title: "Gateway session",
       agent: "codex",
-      turns: 3,
+      turns: Array.from({ length: 3 }, (_, index) => ({
+        role: index % 2 === 0 ? "user" : "assistant",
+        content: `Gateway turn ${index + 1}`,
+      })),
       source_path: "/private/machine/session.jsonl",
-    })}\n`,
-  );
+    }]);
 
   const sessionsPath = path.join(aiosPath, "memory", "sessions", "index.jsonl");
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
@@ -86,6 +87,7 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.equal(search.scope, "projects");
   assert.match(JSON.stringify(search.results), /Gateway acceptance/);
   assert.doesNotMatch(JSON.stringify(search), /private\/machine/);
+  assert.doesNotMatch(JSON.stringify(search), /canonical_hash|canonicalHash/);
   assert.equal(search.budget.used, toolText(responses[3]).length);
   assert.ok(toolText(responses[3]).length <= search.budget.limit);
 
@@ -481,17 +483,13 @@ test("search_aios is byte-read-only on corrupt JSONL and emits no machine path",
 test("search_aios does not quarantine a corrupt session index", () => {
   const { aiosPath } = setupAios();
   const indexPath = path.join(aiosPath, "memory", "sessions", "index.jsonl");
-  fs.writeFileSync(
-    indexPath,
-    `{not-json}\n${JSON.stringify({
+  writeCanonicalSessions(aiosPath, [{
       session_id: "safe-session",
       captured_at: "2026-08-10T10:00:00.000Z",
       title: "CORRUPT_SESSION_INDEX_SELECTED",
       agent: "codex",
-      turns: 1,
-      path: "memory/sessions/2026-08-10/safe-session.md"
-    })}\n`
-  );
+      turns: [{ role: "user", content: "Canonical corrupt-index test evidence." }],
+    }], { indexPrefix: "{not-json}\n" });
   const before = snapshotTree(aiosPath);
 
   const result = runMcpResult(aiosPath, [{
@@ -507,6 +505,7 @@ test("search_aios does not quarantine a corrupt session index", () => {
 
   assert.equal(result.status, 0);
   assert.match(toolText(response), /CORRUPT_SESSION_INDEX_SELECTED/);
+  assert.doesNotMatch(toolText(response), /canonical_hash|canonicalHash|private\/machine/);
   assert.deepEqual(snapshotTree(aiosPath), before);
   assert.equal(fs.existsSync(`${indexPath}.bad.jsonl`), false);
   assert.doesNotMatch(
@@ -1026,28 +1025,25 @@ test("working-context budgets survive JSON escaping at minimum, default, and max
     path.join(aiosPath, "context", "identity.md"),
     `# Identity\n\n${'"\\\n'.repeat(12000)}`
   );
-  fs.writeFileSync(
-    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
-    `${Array.from({ length: 3 }, (_, index) => JSON.stringify({
+  writeCanonicalSessions(aiosPath, Array.from({ length: 3 }, (_, index) => ({
       captured_at: `${date}T12:0${index}:00.000Z`,
       agent: "test",
       session_id: `session-${index}`,
-      title: noisy.repeat(3500),
-      turns: 1
-    })).join("\n")}\n`
-  );
+      title: noisy.repeat(250),
+      turns: [{ role: "user", content: noisy.repeat(3500) }],
+    })));
   fs.writeFileSync(
     path.join(aiosPath, "memory", "signals", `${date}.jsonl`),
     `${Array.from({ length: 8 }, (_, index) => JSON.stringify({
       ts: `${date}T13:0${index}:00.000Z`,
-      summary: noisy.repeat(350)
+      summary: noisy.repeat(1000)
     })).join("\n")}\n`
   );
   fs.writeFileSync(
     path.join(aiosPath, "memory", "events.jsonl"),
     `${Array.from({ length: 8 }, (_, index) => JSON.stringify({
       ts: `${date}T14:0${index}:00.000Z`,
-      summary: noisy.repeat(350)
+      summary: noisy.repeat(1000)
     })).join("\n")}\n`
   );
 
@@ -1146,6 +1142,24 @@ function setupAios() {
   });
   if (result.status !== 0) throw new Error(`init failed\n${result.stdout}\n${result.stderr}`);
   return { aiosPath, tempRoot };
+}
+
+function writeCanonicalSessions(aiosPath, sessions, { indexPrefix = "" } = {}) {
+  const records = sessions.map((input) => {
+    const session = {
+      source_type: "manual",
+      ...input,
+    };
+    const relativePath = `memory/sessions/${session.captured_at.slice(0, 10)}/${session.session_id}.md`;
+    const absolutePath = path.join(aiosPath, ...relativePath.split("/"));
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    fs.writeFileSync(absolutePath, renderSessionMarkdown(session));
+    return { session, relativePath };
+  });
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    `${indexPrefix}${deriveProjectionRows(records).map((row) => JSON.stringify(row)).join("\n")}\n`,
+  );
 }
 
 function runMcp(aiosPath, messages) {

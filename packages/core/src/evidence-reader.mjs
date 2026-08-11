@@ -32,9 +32,14 @@ export class EvidenceReadError extends Error {
  * roots learned from already-contained configuration; every view shares one
  * file, byte, entry, and directory-snapshot ledger.
  */
-export function createEvidenceReader({ roots, filesystem = localFilesystem, limits = {} }) {
+export function createEvidenceReader({
+  roots,
+  filesystem = localFilesystem,
+  limits = {},
+  budget: suppliedBudget,
+}) {
   const effectiveLimits = { ...DEFAULT_EVIDENCE_READ_LIMITS, ...limits };
-  const budget = createContainedReadBudget({
+  const budget = suppliedBudget || createContainedReadBudget({
     maxBytes: effectiveLimits.maxBytes,
     maxFiles: effectiveLimits.maxFiles,
     maxEntries: effectiveLimits.maxEntries

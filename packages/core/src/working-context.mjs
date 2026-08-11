@@ -1,6 +1,7 @@
 import localFilesystem from "node:fs/promises";
 import path from "node:path";
 
+import { createEvidenceReader } from "./evidence-reader.mjs";
 import { isoDate, readSignals as readMemorySignals } from "./memory.mjs";
 import {
   ContainedReadError,
@@ -12,6 +13,7 @@ import {
 } from "./contained-read.mjs";
 import { readProjectCatalog } from "./projects.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
+import { createSessionStore } from "./session-store.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
 
@@ -90,6 +92,19 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     fileTooLargeCode: "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE",
     tooManyCode: "DOTAIOS_PROJECT_DIRECTORY_LIMIT_EXCEEDED"
   });
+  const sessionReader = createEvidenceReader({
+    roots: [aiosPath],
+    filesystem,
+    budget: readBudget,
+    limits: {
+      maxBytes: MAX_PROJECTION_SOURCE_BYTES,
+      maxFiles: MAX_PROJECTION_SOURCE_FILES,
+      maxEntries: MAX_PROJECTION_DIRECTORY_ENTRIES,
+      maxFileBytes: MAX_TIMELINE_SOURCE_BYTES,
+      maxDirectoryEntries: MAX_PROJECTION_DIRECTORY_ENTRIES,
+    },
+  });
+  const sessionStore = createSessionStore({ aiosPath, filesystem });
   let sources;
   try {
     const authorityPath = path.join(aiosPath, "aios.json");
@@ -103,13 +118,11 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
       readText(filesystem, path.join(aiosPath, "decisions", "log.md"), aiosPath, readBudget, MAX_DECISIONS_SOURCE_BYTES),
       readText(filesystem, path.join(dailyDir, `${today}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
       readText(filesystem, path.join(dailyDir, `${yesterday}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
-      readJsonl(
-        filesystem,
-        path.join(aiosPath, "memory", "sessions", "index.jsonl"),
-        aiosPath,
-        readBudget,
-        MAX_TIMELINE_SOURCE_BYTES
-      ),
+      sessionStore.search({
+        purpose: "working-context",
+        query: "",
+        reader: sessionReader,
+      }),
       readMemorySignals(
         path.join(aiosPath, "memory", "signals"),
         yesterday,
@@ -146,10 +159,14 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     error.code = "DOTAIOS_WORKING_CONTEXT_READ_FAILED";
     throw error;
   }
-  const [identity, priorities, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] = sources;
+  const [identity, priorities, decisionsLog, todayNote, yesterdayNote, sessionResult, signalEntries, eventEntries, projects] = sources;
+  const sessionEntries = sessionResult.rows;
 
   const projectScope = resolveProjectScope(requestedProject, projects);
   const projectFilter = projectScope?.filter || null;
+  const conflictsOmitted = sessionResult.conflict_attributions
+    .filter((attribution) => matchesProject(attribution, projectScope))
+    .length;
   const sessions = stableSessionOrder(sessionEntries)
     .filter((session) => matchesProject(session, projectScope))
     .map((session) => markUnscoped(session, projectScope));
@@ -186,6 +203,7 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
       today,
       yesterday,
       projectFilter,
+      conflictsOmitted,
     },
     candidates,
     visibleCharacterBudget,
@@ -315,6 +333,9 @@ function renderUnbounded(context) {
   const today = context?.today || "";
   const todayContext = context?.todayContext || { focus: "", plan: [] };
   const carryOver = context?.carryOver || [];
+  const conflictsOmitted = Number.isSafeInteger(context?.conflictsOmitted)
+    ? Math.max(0, context.conflictsOmitted)
+    : 0;
   const sessions = context?.sessions || [];
   const signals = context?.signals || [];
   const events = context?.events || [];
@@ -337,6 +358,14 @@ function renderUnbounded(context) {
 
   if (context?.activeProject) {
     lines.push("### Active Project", ...renderProject(context.activeProject), "");
+  }
+
+  if (conflictsOmitted > 0) {
+    lines.push(
+      "### Session Reconciliation",
+      `- ${conflictsOmitted} conflicting session record${conflictsOmitted === 1 ? "" : "s"} omitted pending reconciliation.`,
+      "",
+    );
   }
 
   if (sessions.length > 0) {

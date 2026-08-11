@@ -131,9 +131,9 @@ test("renderSessionBody excludes frontmatter", () => {
   assert.match(body, /Hello/);
 });
 
-// ---------- writeSession ----------
+// ---------- SessionStore write compatibility ----------
 
-test("writeSession creates file and index entry", async () => {
+test("writeSession compatibility captures direct sessions as paste evidence", async () => {
   const aios = tmpAios();
   const session = makeSession();
 
@@ -143,70 +143,30 @@ test("writeSession creates file and index entry", async () => {
   assert.ok(fs.existsSync(result.filePath), "session file must exist");
 
   const content = fs.readFileSync(result.filePath, "utf8");
-  assert.match(content, /\nagent: manual\n/);
+  assert.match(content, /\nagent: paste\n/);
+  assert.match(content, /\nsource_type: paste\n/);
   assert.match(content, /Hello/);
 
   const index = await readSessionIndex(aios);
   assert.equal(index.length, 1);
-  assert.equal(index[0].session_id, session.session_id);
+  assert.match(index[0].session_id, /^[0-9a-f]{8}$/);
+  assert.notEqual(index[0].session_id, session.session_id);
   assert.equal(index[0].turns, 2);
   assert.equal(index[0].content_hash.length, 16);
 });
 
-test("writeSession skips exact duplicate (same source_path, same content)", async () => {
+test("writeSession refuses caller-forged source identity", async () => {
   const aios = tmpAios();
   const session = makeSession({ source_path: "/tmp/src.jsonl" });
 
-  await writeSession(aios, session);
-  const result2 = await writeSession(aios, session);
-
-  assert.equal(result2.skipped, true);
-  const index = await readSessionIndex(aios);
-  assert.equal(index.length, 1, "no duplicate index entry");
+  await assert.rejects(
+    () => writeSession(aios, session),
+    { code: "DOTAIOS_SESSION_SOURCE_IDENTITY_FORBIDDEN" },
+  );
+  assert.equal((await readSessionIndex(aios)).length, 0);
 });
 
-test("writeSession updates in place when source_path matches but content changed", async () => {
-  const aios = tmpAios();
-  const session1 = makeSession({
-    source_path: "/tmp/growing.jsonl",
-    turns: [
-      { role: "user", content: "First question" },
-      { role: "assistant", content: "First answer" },
-    ],
-  });
-
-  const r1 = await writeSession(aios, session1);
-  assert.equal(r1.skipped, false);
-
-  const session2 = {
-    ...session1,
-    session_id: generateSessionId(), // adapter re-parses; would generate new id
-    captured_at: "2026-05-16T16:00:00.000Z",
-    turns: [
-      { role: "user", content: "First question" },
-      { role: "assistant", content: "First answer" },
-      { role: "user", content: "Follow-up question" },
-      { role: "assistant", content: "Follow-up answer" },
-    ],
-  };
-
-  const r2 = await writeSession(aios, session2);
-  assert.equal(r2.skipped, false);
-  assert.equal(r2.updated, true);
-
-  const index = await readSessionIndex(aios);
-  assert.equal(index.length, 1, "no duplicate index entry — update in place");
-  assert.equal(index[0].session_id, session1.session_id, "original session_id preserved");
-  assert.equal(index[0].captured_at, session1.captured_at, "original captured_at preserved");
-  assert.equal(index[0].turns, 4, "turn count updated to 4");
-
-  // Old file must be gone; new file must exist
-  assert.ok(fs.existsSync(path.join(aios, index[0].path)));
-  const content = fs.readFileSync(path.join(aios, index[0].path), "utf8");
-  assert.match(content, /Follow-up question/);
-});
-
-test("writeSession appends without source_path (no dedup)", async () => {
+test("writeSession compatibility assigns distinct identities to source-less captures", async () => {
   const aios = tmpAios();
   const s1 = makeSession({ session_id: "aaaa1111" });
   const s2 = makeSession({ session_id: "bbbb2222" });
@@ -218,16 +178,17 @@ test("writeSession appends without source_path (no dedup)", async () => {
   assert.equal(index.length, 2);
 });
 
-// ---------- deleteSession ----------
+// ---------- SessionStore delete compatibility ----------
 
 test("deleteSession removes file and index entry", async () => {
   const aios = tmpAios();
   const session = makeSession();
   const r = await writeSession(aios, session);
+  const storedId = (await readSessionIndex(aios))[0].session_id;
 
-  const deleted = await deleteSession(aios, session.session_id);
+  const deleted = await deleteSession(aios, storedId);
 
-  assert.equal(deleted.session_id, session.session_id);
+  assert.equal(deleted.session_id, storedId);
   assert.ok(!fs.existsSync(r.filePath), "file must be removed");
 
   const index = await readSessionIndex(aios);
@@ -242,31 +203,35 @@ test("deleteSession throws for unknown session_id", async () => {
   );
 });
 
-test("deleteSession succeeds even if file already missing", async () => {
+test("deleteSession refuses stale projection evidence when the canonical file is missing", async () => {
   const aios = tmpAios();
   const session = makeSession();
   const r = await writeSession(aios, session);
+  const storedId = (await readSessionIndex(aios))[0].session_id;
 
   // Manually remove the file before calling deleteSession
   await fsp.unlink(r.filePath);
 
-  const deleted = await deleteSession(aios, session.session_id);
-  assert.equal(deleted.session_id, session.session_id);
+  await assert.rejects(
+    () => deleteSession(aios, storedId),
+    { code: "DOTAIOS_SESSION_RECONCILIATION_REQUIRED" },
+  );
 
-  const index = await readSessionIndex(aios);
-  assert.equal(index.length, 0);
+  await assert.rejects(() => readSessionIndex(aios), { code: "DOTAIOS_SESSION_PROJECTION_DRIFT" });
 });
 
 // ---------- filterSessions ----------
 
-test("filterSessions by agent", async () => {
+test("filterSessions uses SessionStore-authored agent metadata", async () => {
   const aios = tmpAios();
   await writeSession(aios, makeSession({ agent: "claude-code", session_id: generateSessionId() }));
   await writeSession(aios, makeSession({ agent: "manual", session_id: generateSessionId() }));
 
-  const results = await filterSessions(aios, { agent: "claude-code" });
-  assert.equal(results.length, 1);
-  assert.equal(results[0].agent, "claude-code");
+  const pasteResults = await filterSessions(aios, { agent: "paste" });
+  const forgedAgentResults = await filterSessions(aios, { agent: "claude-code" });
+  assert.equal(pasteResults.length, 2);
+  assert.ok(pasteResults.every((entry) => entry.agent === "paste"));
+  assert.equal(forgedAgentResults.length, 0);
 });
 
 test("filterSessions by project", async () => {
@@ -313,6 +278,7 @@ test("parseRawText handles own markdown format (**role · time**)", () => {
 
   const session = parseRawText(text);
   assert.equal(session.agent, "manual");
+  assert.equal(Object.hasOwn(session, "session_id"), false);
   assert.equal(session.turns.length, 2);
   assert.equal(session.turns[0].role, "user");
   assert.match(session.turns[0].content, /capital of France/);
@@ -472,23 +438,25 @@ test("parseTranscript extracts session_id from source file UUID", () => {
   assert.equal(session.session_id, "a1b2c3d4");
 });
 
-// ---------- index lock robustness ----------
+// ---------- SessionStore compatibility and concurrency ----------
 
-test("withIndexLock steals a lock held by a dead process and cleans it up", async () => {
+test("writeSession compatibility preserves an unrelated index.jsonl.lock artifact", async () => {
   const aios = tmpAios();
   const lockPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock");
-  // A lock left by a process that no longer exists, with a *fresh* mtime, so it
-  // can only be reclaimed via a PID liveness check — not the mtime backstop.
+  // An older release may have left this file behind. SessionStore does not use
+  // it and must leave the unrelated bytes untouched while publishing.
   fs.writeFileSync(lockPath, "2147483647");
 
   await writeSession(aios, makeSession({ session_id: "ghost-steal" }));
 
   const index = await readSessionIndex(aios);
-  assert.equal(index.some((e) => e.session_id === "ghost-steal"), true);
-  assert.equal(fs.existsSync(lockPath), false); // stolen and released, not left behind
+  assert.equal(index.length, 1);
+  assert.match(index[0].session_id, /^[0-9a-f]{8}$/);
+  assert.equal(fs.existsSync(lockPath), true);
+  assert.equal(fs.readFileSync(lockPath, "utf8"), "2147483647");
 });
 
-test("withIndexLock reclaims a stale lock with an old mtime", async () => {
+test("writeSession compatibility leaves a stale unowned index.jsonl.lock artifact untouched", async () => {
   const aios = tmpAios();
   const lockPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock");
   fs.writeFileSync(lockPath, "not-a-pid");
@@ -498,11 +466,13 @@ test("withIndexLock reclaims a stale lock with an old mtime", async () => {
   await writeSession(aios, makeSession({ session_id: "stale-mtime" }));
 
   const index = await readSessionIndex(aios);
-  assert.equal(index.some((e) => e.session_id === "stale-mtime"), true);
-  assert.equal(fs.existsSync(lockPath), false);
+  assert.equal(index.length, 1);
+  assert.match(index[0].session_id, /^[0-9a-f]{8}$/);
+  assert.equal(fs.existsSync(lockPath), true);
+  assert.equal(fs.readFileSync(lockPath, "utf8"), "not-a-pid");
 });
 
-test("withIndexLock serializes concurrent writers without losing entries", async () => {
+test("SessionStore serializes concurrent writeSession compatibility captures without losing entries", async () => {
   const aios = tmpAios();
   const N = 10;
   const sessionsUrl = new URL("../../packages/core/src/sessions.mjs", import.meta.url).href;
@@ -523,10 +493,10 @@ test("withIndexLock serializes concurrent writers without losing entries", async
   assert.equal(index.length, N); // every concurrent writer's entry survived
 });
 
-test("withIndexLock: concurrent writers all stealing one dead lock keep every entry", async () => {
+test("SessionStore concurrent compatibility captures ignore a dead-PID index lock artifact", async () => {
   const aios = tmpAios();
-  // A dead holder's lock that every writer must steal at the same time — the
-  // steal must be atomic so two writers can't both delete it and double-acquire.
+  // The dead-PID file belongs to an older locking design. SessionStore must not
+  // reclaim it or let it weaken serialization through its strict operation lock.
   fs.writeFileSync(path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock"), "2147483647");
 
   const N = 8;

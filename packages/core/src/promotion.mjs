@@ -2,8 +2,9 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathExists, readJson } from "./files.mjs";
-import { SIGNAL_RETENTION_DAYS, formatJsonlEntry, isoDate, readJsonl, withEventStoreLock } from "./memory.mjs";
+import { SIGNAL_RETENTION_DAYS, formatJsonlEntry, isoDate, withEventStoreLock } from "./memory.mjs";
 import { expandHome, isPathWithin, resolveVaultPath } from "./paths.mjs";
+import { createSessionStore } from "./session-store.mjs";
 
 export const PROMOTION_DESTINATIONS = [
   "signal",
@@ -46,7 +47,7 @@ export async function planPromotion(aiosPath, options = {}) {
     now
   });
   const project = normalizeProject(options.project || destination.project || source.project);
-  const sourceHash = contentHash(source.content);
+  const sourceHash = source.canonicalHash;
   const promotedContentHash = contentHash(summary);
   const receiptPath = path.join(root, "memory", "events.jsonl");
   await assertSafeShelfPath(root, path.join(root, "memory"), receiptPath, "promotion receipt");
@@ -123,7 +124,6 @@ export async function planPromotion(aiosPath, options = {}) {
     source: {
       sessionId: source.sessionId,
       relativePath: source.relativePath,
-      absolutePath: source.absolutePath,
       hash: sourceHash
     },
     before,
@@ -206,12 +206,6 @@ export async function consumePromotionPlan(plan) {
 export async function applyPromotion(plan, options = {}) {
   assertPromotionPlan(plan);
 
-  await assertSafeShelfPath(
-    plan.aiosPath,
-    path.join(plan.aiosPath, "memory", "sessions"),
-    plan.source.absolutePath,
-    "captured session"
-  );
   if (plan.destinationType !== "session-only") {
     await assertSafeDestinationFromPlan(plan);
   }
@@ -223,8 +217,16 @@ export async function applyPromotion(plan, options = {}) {
     "promotion receipt"
   );
   return withEventStoreLock(plan.receiptPath, async () => {
-    const currentSource = await fs.readFile(plan.source.absolutePath, "utf8");
-    if (contentHash(currentSource) !== plan.source.hash) {
+    const sourceResult = await createSessionStore({ aiosPath: plan.aiosPath }).search({
+      purpose: "exact",
+      sessionId: plan.source.sessionId,
+    });
+    const [currentSource] = sourceResult.rows;
+    if (
+      sourceResult.rows.length !== 1
+      || currentSource.path !== plan.source.relativePath
+      || currentSource.canonical_hash !== plan.source.hash
+    ) {
       throw new Error("The captured session changed after the preview. Preview the promotion again.");
     }
 
@@ -316,10 +318,8 @@ async function resolveSessionSource(aiosPath, sourceValue) {
   const source = String(sourceValue || "").trim();
   if (!source) throw new Error("Choose captured evidence with a session ID.");
 
-  const sessionsRoot = path.join(aiosPath, "memory", "sessions");
-  const indexPath = path.join(sessionsRoot, "index.jsonl");
-  await assertSafeShelfPath(aiosPath, sessionsRoot, indexPath, "session index");
-  const entries = await readJsonl(indexPath);
+  const result = await createSessionStore({ aiosPath }).search({ purpose: "body", query: "" });
+  const entries = result.rows;
   const normalizedSource = normalizeRelativePath(source);
   const exact = entries.find((entry) => (
     entry.session_id === source || normalizeRelativePath(entry.path) === normalizedSource
@@ -336,25 +336,10 @@ async function resolveSessionSource(aiosPath, sourceValue) {
   }
 
   const relativePath = normalizeRelativePath(entry.path);
-  const absolutePath = path.resolve(aiosPath, relativePath);
-  if (!await isPathWithin(sessionsRoot, absolutePath)) {
-    throw new Error(`Unsafe captured session path in index: ${entry.path}`);
-  }
-  await assertSafeShelfPath(aiosPath, sessionsRoot, absolutePath, "captured session");
-
-  let content;
-  try {
-    content = await fs.readFile(absolutePath, "utf8");
-  } catch (error) {
-    if (error.code === "ENOENT") throw new Error(`Captured session file is missing: ${relativePath}`);
-    throw error;
-  }
-
   return {
     sessionId: entry.session_id,
     relativePath,
-    absolutePath,
-    content,
+    canonicalHash: entry.canonical_hash,
     project: entry.project
   };
 }

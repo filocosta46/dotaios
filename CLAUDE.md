@@ -103,7 +103,9 @@ Windows (`lightpanda.exe` path).
 | `paths.mjs` | Default paths (`~/aios`, `~/.dotaios`), vault/sync path resolution |
 | `projects.mjs` | Portable project records plus machine-local checkout mapping and diagnostics |
 | `memory.mjs` | Read/write events + signals (JSONL). Exports `isoDate()` (**local** date), tolerant `readJsonl()` |
-| `sessions.mjs` | Session index read/write under `withIndexLock()` (cross-process file lock) |
+| `session-store.mjs` | Four-operation session authority: capture, reconcile, bounded search, and exact delete; canonical Markdown plus a rebuildable index projection |
+| `sessions.mjs` | Compatibility facade and pure helper re-exports; durable work delegates to `SessionStore` |
+| `operation-lock.mjs` | Shared cross-process lock primitive, including strict owned-state publication for `SessionStore` |
 | `promotion.mjs` | Preview/apply memory promotion with shelf containment, drift checks, and receipts |
 | `working-context.mjs` | Canonical bounded, deterministic, project-filtered context selection and rendering |
 | `search.mjs` | TF text-match search across memory/vault/context/skills/...; reads files in bounded-concurrency batches |
@@ -123,12 +125,16 @@ Date-based memory paths use `memory.isoDate(date)` and local time consistently.
 Do not reintroduce `new Date().toISOString().slice(0,10)` for signal, brief, or
 cleanup paths: UTC dates can disagree with the user's local day near midnight.
 
-### Sessions index lock
-`withIndexLock()` (`sessions.mjs`) records the holder PID in the lock file. A
-crashed holder is reclaimed via a liveness check; a live holder is waited on
-(bounded by `LOCK_WAIT_MS`, then it errors rather than running unlocked); release
-only removes the lock if it's still ours. Don't reintroduce an unlocked
-best-effort fallback — that corrupts the index under concurrency.
+### SessionStore authority and operation lock
+Session Markdown is canonical user memory; `memory/sessions/index.jsonl` is only
+a rebuildable projection. Route capture, reconcile, search metadata, and exact
+delete through `SessionStore`. Its mutating operations use the shared operation
+lock in strict owned-state mode, with atomically published owner transitions,
+bounded waiting, and fail-closed recovery. Never add an unlocked fallback or
+write the projection as an independent authority. Current session code does not
+use `withIndexLock()`; if a downstream compatibility branch still retains it,
+that path is legacy compatibility only, never session authority. `sessions.mjs`
+delegates its durable work to `SessionStore`.
 
 ### MCP capability boundary
 The MCP server is an optional read adapter, not a command or memory authority.

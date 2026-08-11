@@ -38,19 +38,27 @@ An approved, testable Foundation reliability specification for the defined knowl
   at exact commit `beb76f8`; `search_aios` and `resolve_skill` now use the same
   bounded evidence-reader seam.
 - [Authoritative session store](issues/016-make-session-store-authoritative.md):
-  serialize canonical Markdown and index publication, validate every stored
-  path, and make crash/recovery behavior explicit before replication relies on
-  session evidence.
+  implementation is in review. One SessionStore now owns serialized capture,
+  reconciliation, bounded search metadata, and exact deletion with canonical
+  Markdown, a rebuildable projection, path refusal, and journaled recovery.
+  Closure still requires one fixed candidate commit, CI, and independent iMac
+  validation.
+- [Replication authority](issues/017-align-replication-with-memory-authority.md):
+  remains blocked. Excluding the SessionStore journal is necessary but does not
+  prove serialized replica writers, divergence preservation, tracked-artifact
+  diagnosis, or clean restore.
 - [Memory authority](issues/002-define-memory-domains-authority.md): canonical
   user files and session Markdown own durable evidence; indexes, projections,
   operational artifacts, and replicas remain rebuildable views or transport.
 
 ## Current execution frontier
 
-1. Make the session Markdown/index pair one authoritative transactional store.
+1. Finish review and exact-commit local, CI, packed-content, and independent
+   iMac validation for Issue 016; do not close it from working-tree evidence.
 2. Align plugin/onboarding lifecycle writes with one ownership transaction.
-3. Align replication with that authority, then unify install/health and bind
-   host receipts to the immutable packed candidate.
+3. Keep Issue 017 blocked until its separate replication authority,
+   divergence, doctor, and restore proofs exist; then unify install/health and
+   bind host receipts to the immutable packed candidate.
 4. Certify clean, drifted, update, rollback, removal, and packed-doc lifecycle
    behavior before any publication decision.
 

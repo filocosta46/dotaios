@@ -12,6 +12,7 @@ import {
 } from "../../packages/core/src/promotion.mjs";
 import { auditMemory } from "../../packages/core/src/memory-audit.mjs";
 import { compactEvents } from "../../packages/core/src/memory.mjs";
+import { deriveProjectionRow, renderSessionMarkdown } from "../../packages/core/src/session-codec.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -43,36 +44,26 @@ function setupAios(t, { project = null } = {}) {
     `2026-07-15T09-00-00_manual_${SESSION_ID.slice(0, 6)}.md`
   );
   const sessionPath = path.join(aiosPath, sessionRelativePath);
-  fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
-  fs.writeFileSync(path.join(aiosPath, "aios.json"), "{}\n");
-  fs.writeFileSync(sessionPath, [
-    "---",
-    "agent: manual",
-    `session_id: ${SESSION_ID}`,
-    "captured_at: 2026-07-15T09:00:00.000Z",
-    "turns: 2",
-    "---",
-    "",
-    "**user**",
-    "",
-    "We agreed on a concrete fact.",
-    "",
-    "**assistant**",
-    "",
-    "Captured as evidence first.",
-    ""
-  ].join("\n"));
-  fs.writeFileSync(path.join(aiosPath, "memory", "sessions", "index.jsonl"), `${JSON.stringify({
+  const session = {
+    schema: 1,
     session_id: SESSION_ID,
     agent: "manual",
     captured_at: "2026-07-15T09:00:00.000Z",
     source_type: "manual",
     ...(project && { project }),
-    turns: 2,
+    turns: [
+      { role: "user", content: "We agreed on a concrete fact." },
+      { role: "assistant", content: "Captured as evidence first." },
+    ],
     title: "We agreed on a concrete fact.",
-    path: sessionRelativePath,
-    content_hash: "fixture"
-  })}\n`);
+  };
+  fs.mkdirSync(path.dirname(sessionPath), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "aios.json"), "{}\n");
+  fs.writeFileSync(sessionPath, renderSessionMarkdown(session));
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    `${JSON.stringify(deriveProjectionRow(session, sessionRelativePath))}\n`,
+  );
   fs.writeFileSync(path.join(aiosPath, "memory", "events.jsonl"), "");
 
   return { aiosPath, sessionPath, sessionRelativePath, tempRoot };

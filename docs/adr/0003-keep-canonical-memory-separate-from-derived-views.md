@@ -16,9 +16,9 @@ host-specific views without making their loss or corruption a loss of memory.
 | Durable user context | User-authored files under `context/`, project records, decisions, and daily memory | The person directly, or a command they explicitly invoke for that exact record | Working context, search results, generated summaries |
 | Source material | Provenance-bearing files under `vault/` and other explicit imports | Explicit ingest/capture commands; later edits remain the person's | Search snippets, source indexes |
 | Recent event and signal memory | Append-only records under `memory/` | Explicit capture/log workflows and configured local automations with a named write contract | Bounded startup selection, search results, archives produced by explicit maintenance |
-| Session evidence | Readable session Markdown under `memory/sessions/<date>/` | Explicit save/import or a separately enabled host-capture workflow | `memory/sessions/index.jsonl`, working-context selections, search results |
+| Session evidence | Readable schema-1 session Markdown under `memory/sessions/<date>/` | `SessionStore` through explicit save/import/delete or a separately enabled host-capture workflow | Rebuildable `memory/sessions/index.jsonl`, working-context selections, search results |
 | Managed scaffold | Files or marked regions DotAIOS can prove it owns | Previewed setup, activation, migration, repair, disconnect, or removal operations | Installation inventory and health reports |
-| Operational evidence | Receipts, recovery metadata, locks, metrics, and quarantine material | The exact operation that owns the artifact | Status and doctor summaries |
+| Operational evidence | Receipts, recovery metadata, locks, metrics, and quarantine material, including `.dotaios/session-store/` | The exact operation that owns the artifact | Status and doctor summaries; excluded from the personal mirror |
 | Personal replica | An allowlisted copy of canonical records | A serialized private replication workflow | Remote Git history and restore receipts |
 
 Agents and read adapters may inspect canonical records only through the
@@ -30,10 +30,22 @@ carry allowlisted canonical bytes, but it may not resolve competing edits or
 promote operational artifacts into memory silently.
 
 For sessions specifically, Markdown is canonical evidence and
-`memory/sessions/index.jsonl` is a rebuildable derivative. Capture must publish
-the Markdown durably before its index entry becomes visible, reconcile must
-recover orphans without deleting evidence, and delete must prove ownership of
-the exact canonical file before changing either representation.
+`memory/sessions/index.jsonl` is a rebuildable derivative. One deep
+`SessionStore` owns capture, reconciliation, bounded search metadata, and exact
+deletion. Capture serializes source observation through durable publication. A
+strictly longer same-source turn sequence is growth, an older prefix is an
+idempotent no-op, and non-prefix versions are retained as conflicts instead of
+being silently merged or discarded.
+
+Every publication boundary is represented by a private recoverable journal
+transaction. Staged canonical and projection bytes are synced before pending
+publication; forward recovery is idempotent. Reconciliation reports orphan
+Markdown, stale or malformed projection rows, and duplicate or conflicting
+sources without deleting evidence. Delete must prove ownership of the exact
+canonical file and matching identity before changing either representation.
+Read-only search and reports may not create repair, quarantine, or recovery
+state. The private journal is excluded from replication and never becomes
+user memory.
 
 Rejected alternatives:
 

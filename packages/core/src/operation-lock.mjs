@@ -13,6 +13,12 @@ import {
 
 const DEFAULT_LOCK_FORMAT = "dotaios-sync-operation-lock/v1";
 const DEFAULT_STALE_MS = 5 * 60 * 1000;
+const STRICT_TRANSITION_READ_RETRIES = 16;
+const STRICT_TRANSITION_FORMAT = "dotaios-operation-lock-transition/v1";
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
 
 function ownerRecordIsValid(record, format, strictOwnedState = false) {
   if (!record || typeof record !== "object" || Array.isArray(record)) return false;
@@ -99,7 +105,7 @@ async function stealAbandoned(lockPath, settings) {
     if (!ownerCanBeReclaimed(observed.held, observed.stats, settings)) return false;
     const held = observed.held;
     if (strictOwnedState && !ownerRecordIsValid(held, format, true)) throw ownedStateError();
-    return moveAbandonedLock(lockPath, filesystem);
+    return moveAbandonedLock(lockPath, settings);
   } finally {
     await releaseOperationLock(recovery, { filesystem, strictOwnedState });
   }
@@ -181,27 +187,53 @@ async function assertPublishedOwner(lockPath, record, filesystem) {
 }
 
 async function readHeldLock(lockPath, settings, fallbackStats = false) {
-  const { filesystem, strictOwnedState } = settings;
-  try {
-    const [raw, stats] = await readLockRecord(lockPath, filesystem, strictOwnedState);
-    let held = null;
-    try { held = JSON.parse(raw); } catch { /* Invalid non-strict records age out by mtime. */ }
-    return Object.freeze({ missing: false, held, stats });
-  } catch (error) {
-    if (error?.code === "ENOENT") return Object.freeze({ missing: true, held: null, stats: null });
-    if (strictOwnedState) throw error;
-    const stats = fallbackStats ? await filesystem.stat(lockPath).catch(() => null) : null;
-    return Object.freeze({ missing: false, held: null, stats });
+  const { filesystem, format, strictOwnedState } = settings;
+  for (let attempt = 0; attempt <= STRICT_TRANSITION_READ_RETRIES; attempt += 1) {
+    try {
+      const [raw, stats] = await readLockRecord(lockPath, filesystem, strictOwnedState);
+      let held = null;
+      try { held = JSON.parse(raw); } catch { /* Invalid non-strict records age out by mtime. */ }
+      if (
+        strictOwnedState
+        && !ownerRecordIsValid(held, format, true)
+        && await recoverOrObserveStrictTransition(lockPath, stats, settings)
+      ) {
+        throw operationLockTransitionError();
+      }
+      return Object.freeze({ missing: false, held, stats });
+    } catch (error) {
+      if (error?.code === "ENOENT") return Object.freeze({ missing: true, held: null, stats: null });
+      if (
+        strictOwnedState
+        && error?.code === "DOTAIOS_OPERATION_LOCK_TRANSITION"
+        && attempt < STRICT_TRANSITION_READ_RETRIES
+      ) {
+        await delay(1);
+        continue;
+      }
+      if (strictOwnedState && error?.code === "DOTAIOS_OPERATION_LOCK_TRANSITION") {
+        throw ownedStateError();
+      }
+      if (strictOwnedState) throw error;
+      const stats = fallbackStats ? await filesystem.stat(lockPath).catch(() => null) : null;
+      return Object.freeze({ missing: false, held: null, stats });
+    }
   }
+  throw ownedStateError();
 }
 
-async function moveAbandonedLock(lockPath, filesystem) {
+async function moveAbandonedLock(lockPath, settings) {
+  const { filesystem, strictOwnedState } = settings;
   const moved = `${lockPath}.stale.${randomUUID()}`;
   try {
     await filesystem.rename(lockPath, moved);
   } catch (error) {
     if (error?.code === "ENOENT") return false;
     throw error;
+  }
+  if (strictOwnedState) {
+    const movedStats = await filesystem.lstat(moved);
+    await clearAbandonedStrictTransition(lockPath, movedStats, settings);
   }
   await filesystem.rm(moved, { force: true });
   return true;
@@ -260,10 +292,12 @@ async function rewriteExactOperationLock(lock, filesystem, update) {
   const before = await filesystem.lstat(lock.lockPath);
   assertOwnedFileStats(before);
   const handle = await filesystem.open(lock.lockPath, "r+");
+  let transition = null;
+  let completed = false;
   try {
     const opened = await handle.stat();
     assertOwnedFileStats(opened);
-    if (!sameFileIdentity(before, opened)) throw ownedStateError();
+    if (!sameFileIdentity(before, opened)) throw operationLockTransitionError();
     const raw = await handle.readFile("utf8");
     let held;
     try {
@@ -274,6 +308,10 @@ async function rewriteExactOperationLock(lock, filesystem, update) {
     if (!ownerRecordIsValid(held, lock.format, true) || held.owner !== lock.owner) throw ownedStateError();
     const updated = update(held);
     if (updated !== held) {
+      transition = await publishStrictTransition(lock, held, updated, opened, filesystem);
+      const canonicalBeforeWrite = await filesystem.lstat(lock.lockPath);
+      assertOwnedFileStats(canonicalBeforeWrite);
+      if (!sameFileIdentity(opened, canonicalBeforeWrite)) throw ownedStateError();
       const bytes = Buffer.from(`${JSON.stringify(updated)}\n`);
       let offset = 0;
       while (offset < bytes.length) {
@@ -287,10 +325,129 @@ async function rewriteExactOperationLock(lock, filesystem, update) {
     const after = await filesystem.lstat(lock.lockPath);
     assertOwnedFileStats(after);
     if (!sameFileIdentity(opened, after)) throw ownedStateError();
+    completed = true;
   } finally {
     await handle.close();
   }
+  if (transition && completed) await clearStrictTransition(transition, filesystem);
   await syncOwnedDirectory(path.dirname(lock.lockPath), { filesystem });
+}
+
+async function publishStrictTransition(lock, held, updated, stats, filesystem) {
+  const transitionPath = `${lock.lockPath}.transition`;
+  const record = Object.freeze({
+    format: STRICT_TRANSITION_FORMAT,
+    lock_format: lock.format,
+    pid: held.pid,
+    owner: held.owner,
+    at: held.at,
+    ...(held.process_started_at && { process_started_at: held.process_started_at }),
+    lock_dev: String(stats.dev),
+    lock_ino: String(stats.ino),
+    next: updated,
+  });
+  await publishOwnedFileExclusive(transitionPath, `${JSON.stringify(record)}\n`, { filesystem });
+  return Object.freeze({ path: transitionPath, raw: `${JSON.stringify(record)}\n` });
+}
+
+async function clearStrictTransition(transition, filesystem) {
+  const [raw] = await readLockRecord(transition.path, filesystem, true);
+  if (raw !== transition.raw) throw ownedStateError();
+  await filesystem.unlink(transition.path);
+  await syncOwnedDirectory(path.dirname(transition.path), { filesystem });
+}
+
+async function recoverOrObserveStrictTransition(lockPath, lockStats, settings) {
+  const transitionPath = `${lockPath}.transition`;
+  let raw;
+  try {
+    [raw] = await readLockRecord(transitionPath, settings.filesystem, true);
+  } catch (error) {
+    if (error?.code === "ENOENT") return false;
+    throw error;
+  }
+  let transition;
+  try { transition = JSON.parse(raw); } catch { throw ownedStateError(); }
+  assertStrictTransitionRecord(transition, settings.format, lockStats);
+  if (settings.isOwnerAlive(transition)) return true;
+  await completeInterruptedStrictTransition(lockPath, lockStats, transition, settings.filesystem);
+  return true;
+}
+
+async function completeInterruptedStrictTransition(lockPath, expectedStats, transition, filesystem) {
+  const before = await filesystem.lstat(lockPath);
+  assertOwnedFileStats(before);
+  if (!sameFileIdentity(before, expectedStats)) throw ownedStateError();
+  const handle = await filesystem.open(lockPath, "r+");
+  try {
+    const opened = await handle.stat();
+    assertOwnedFileStats(opened);
+    if (!sameFileIdentity(before, opened)) throw ownedStateError();
+    const bytes = Buffer.from(`${JSON.stringify(transition.next)}\n`);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesWritten } = await handle.write(bytes, offset, bytes.length - offset, offset);
+      if (bytesWritten < 1) throw ownedStateError();
+      offset += bytesWritten;
+    }
+    await handle.truncate(bytes.length);
+    await handle.sync();
+    const openedAfter = await handle.stat();
+    const canonicalAfter = await filesystem.lstat(lockPath);
+    assertOwnedFileStats(openedAfter);
+    assertOwnedFileStats(canonicalAfter);
+    if (
+      !sameFileIdentity(opened, openedAfter)
+      || !sameFileIdentity(openedAfter, canonicalAfter)
+    ) throw ownedStateError();
+  } finally {
+    await handle.close();
+  }
+  await syncOwnedDirectory(path.dirname(lockPath), { filesystem });
+}
+
+function assertStrictTransitionRecord(transition, format, lockStats) {
+  const allowedFields = new Set([
+    "format", "lock_format", "pid", "owner", "at", "process_started_at", "lock_dev", "lock_ino", "next",
+  ]);
+  if (
+    !transition || typeof transition !== "object" || Array.isArray(transition)
+    || Object.keys(transition).some((field) => !allowedFields.has(field))
+    || transition.format !== STRICT_TRANSITION_FORMAT
+    || transition.lock_format !== format
+    || !Number.isSafeInteger(transition.pid) || transition.pid <= 0
+    || typeof transition.owner !== "string" || !transition.owner || transition.owner.length > 256
+    || !Number.isSafeInteger(transition.at) || transition.at < 0
+    || (transition.process_started_at !== undefined && (
+      typeof transition.process_started_at !== "string"
+      || !transition.process_started_at
+      || transition.process_started_at.length > 256
+    ))
+    || transition.lock_dev !== String(lockStats.dev)
+    || transition.lock_ino !== String(lockStats.ino)
+    || !ownerRecordIsValid(transition.next, format, true)
+    || transition.next.owner !== transition.owner
+    || transition.next.pid !== transition.pid
+    || transition.next.at !== transition.at
+    || transition.next.process_started_at !== transition.process_started_at
+    || (transition.next.poisoned !== true && transition.next.releasing !== true)
+  ) throw ownedStateError();
+}
+
+async function clearAbandonedStrictTransition(lockPath, lockStats, settings) {
+  const transitionPath = `${lockPath}.transition`;
+  let raw;
+  try {
+    [raw] = await readLockRecord(transitionPath, settings.filesystem, true);
+  } catch (error) {
+    if (error?.code === "ENOENT") return;
+    throw error;
+  }
+  let transition;
+  try { transition = JSON.parse(raw); } catch { throw ownedStateError(); }
+  assertStrictTransitionRecord(transition, settings.format, lockStats);
+  if (settings.isOwnerAlive(transition)) throw ownedStateError();
+  await clearStrictTransition({ path: transitionPath, raw }, settings.filesystem);
 }
 
 export async function inspectOperationLock(lockPath, {
@@ -322,25 +479,74 @@ async function readLockRecord(lockPath, filesystem, strictOwnedState) {
     return Promise.all([filesystem.readFile(lockPath, "utf8"), filesystem.stat(lockPath)]);
   }
   const before = await filesystem.lstat(lockPath);
-  assertOwnedFileStats(before);
+  assertStrictLockStatsOrTransition(before);
   const handle = await filesystem.open(lockPath, "r");
   try {
     const opened = await handle.stat();
-    assertOwnedFileStats(opened);
-    if (!sameFileIdentity(before, opened)) throw ownedStateError();
+    assertStrictLockStatsOrTransition(opened);
+    if (!sameFileIdentity(before, opened)) throw operationLockTransitionError();
     const raw = await handle.readFile("utf8");
     const openedAfter = await handle.stat();
     const canonicalAfter = await filesystem.lstat(lockPath);
-    assertOwnedFileStats(openedAfter);
-    assertOwnedFileStats(canonicalAfter);
+    assertStrictLockStatsOrTransition(openedAfter);
+    assertStrictLockStatsOrTransition(canonicalAfter);
     if (
       !sameFileIdentity(opened, openedAfter)
       || !sameFileIdentity(openedAfter, canonicalAfter)
-    ) throw ownedStateError();
+    ) throw operationLockTransitionError();
+    // Strict release/poison transitions deliberately rewrite the same owned
+    // inode in place. A contender can otherwise read a mixed JSON record while
+    // that bounded rewrite is active. Retry only when metadata proves this
+    // exact inode changed during our handle observation; stable malformed or
+    // replaced state still fails closed as owned-state invalid.
+    if (!sameLockContentSnapshot(opened, openedAfter)) {
+      throw operationLockTransitionError();
+    }
     return [raw, canonicalAfter];
   } finally {
     await handle.close();
   }
+}
+
+function assertStrictLockStatsOrTransition(stats) {
+  try {
+    assertOwnedFileStats(stats);
+  } catch (error) {
+    if (isExclusivePublicationWindow(stats)) {
+      throw operationLockTransitionError();
+    }
+    throw error;
+  }
+}
+
+function isExclusivePublicationWindow(stats) {
+  if (
+    process.platform === "win32"
+    || !stats?.isFile()
+    || stats.isSymbolicLink()
+    || stats.nlink !== 2
+    || stats.uid !== process.getuid()
+    || (stats.mode & 0o777) !== 0o600
+  ) return false;
+  // nlink=2 is the exact intermediate state produced by
+  // publishOwnedFileExclusive(). Retry it only for a bounded number of reads;
+  // a pre-planted or persistent hardlink therefore still fails closed.
+  return true;
+}
+
+function sameLockContentSnapshot(left, right) {
+  return Boolean(
+    sameFileIdentity(left, right)
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs
+  );
+}
+
+function operationLockTransitionError() {
+  const error = new Error("Operation lock owner state changed during observation.");
+  error.code = "DOTAIOS_OPERATION_LOCK_TRANSITION";
+  return error;
 }
 
 async function releaseStrictOperationLock(lock, filesystem) {

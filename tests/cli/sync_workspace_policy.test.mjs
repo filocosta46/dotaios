@@ -7,19 +7,22 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createGit } from "../../packages/cli/src/sync/git.mjs";
+import { findSensitiveMirrorPaths } from "../../packages/cli/src/sync/mirror-content-policy.mjs";
 import { initialMirrorPush } from "../../packages/cli/src/sync/repo.mjs";
 
 const run = promisify(execFile);
 
 test("the managed sync ignore template carries the portable privacy contract", async () => {
-  const template = await fs.readFile(
-    new URL("../../templates/sync-gitignore.template", import.meta.url),
-    "utf8"
-  );
-  assert.match(template, /^\/workspaces\/$/m);
-  assert.match(template, /^credentials\.\*$/m);
-  assert.match(template, /^token\.\*$/m);
-  assert.match(template, /^!\.env\.example$/m);
+  for (const name of ["sync-gitignore.template", "gitignore.template"]) {
+    const template = await fs.readFile(new URL(`../../templates/${name}`, import.meta.url), "utf8");
+    assert.match(template, /^\/workspaces\/$/m);
+    assert.match(template, /^\/\.dotaios\/session-store\/$/m);
+    if (name === "sync-gitignore.template") {
+      assert.match(template, /^credentials\.\*$/m);
+      assert.match(template, /^token\.\*$/m);
+      assert.match(template, /^!\.env\.example$/m);
+    }
+  }
 });
 
 async function git(cwd, ...args) {
@@ -155,6 +158,54 @@ test("mirror validation refuses transient migration state", async (t) => {
     (await git(aios, "ls-files", "--", ".dotaios/migrations/transactions")).stdout,
     ""
   );
+});
+
+test("mirror validation excludes SessionStore operational state and refuses forced or case aliases", async (t) => {
+  const aios = await makeAios(t, {
+    gitignore: "/workspaces/\n/.dotaios/session-store/\n",
+  });
+  const manifest = path.join(
+    aios,
+    ".dotaios",
+    "session-store",
+    "pending",
+    "tx-1",
+    "manifest.json",
+  );
+  await fs.mkdir(path.dirname(manifest), { recursive: true });
+  await fs.writeFile(manifest, '{"format":"dotaios-session-store-transaction/v1"}\n');
+
+  const sha = await createGit({ cwd: aios }).commitAll("mirror without operational state");
+  assert.match(sha, /^[0-9a-f]{40}$/);
+  assert.equal((await git(aios, "ls-files", "--", ".dotaios/session-store")).stdout, "");
+  assert.equal(await fs.readFile(manifest, "utf8"), '{"format":"dotaios-session-store-transaction/v1"}\n');
+
+  await git(aios, "add", "-f", "--", ".dotaios/session-store/pending/tx-1/manifest.json");
+  await assert.rejects(
+    () => createGit({ cwd: aios }).validateMirrorContent(),
+    (error) => /private or regenerable local files/i.test(error.message)
+      && error.message.includes(".dotaios/session-store"),
+  );
+  assert.deepEqual(
+    findSensitiveMirrorPaths([".DotAIOS/Session-Store/private/manifest.json"]),
+    [".DotAIOS/Session-Store/private/manifest.json"],
+  );
+  assert.equal(await fs.readFile(manifest, "utf8"), '{"format":"dotaios-session-store-transaction/v1"}\n');
+});
+
+test("an established mirror excludes untracked SessionStore state even before its ignore template is refreshed", async (t) => {
+  const aios = await makeAios(t, { gitignore: "/workspaces/\n" });
+  const manifest = path.join(aios, ".dotaios", "session-store", "pending", "manifest.json");
+  await fs.mkdir(path.dirname(manifest), { recursive: true });
+  await fs.writeFile(manifest, '{"format":"dotaios-session-store-transaction/v1"}\n');
+  await fs.writeFile(path.join(aios, "portable-note.md"), "portable\n");
+
+  const sha = await createGit({ cwd: aios }).commitAll("exclude operational state");
+
+  assert.match(sha, /^[0-9a-f]{40}$/);
+  assert.equal((await git(aios, "ls-files", "--", ".dotaios/session-store")).stdout, "");
+  assert.equal((await git(aios, "show", "HEAD:portable-note.md")).stdout, "portable\n");
+  assert.equal(await fs.readFile(manifest, "utf8"), '{"format":"dotaios-session-store-transaction/v1"}\n');
 });
 
 test("fresh scaffold .env.example is safe to mirror", async (t) => {

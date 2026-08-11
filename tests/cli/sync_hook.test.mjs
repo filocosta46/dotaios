@@ -81,6 +81,43 @@ test("search and skill lookup surfaces are classified read-only while skill writ
   assert.equal(skipsPortableMirrorSync("skill", ["remove", "reviewed"]), false);
 });
 
+test("capture host hooks request portable mirror sync after a possible session mutation", async () => {
+  const readOnly = skipsPortableMirrorSync("capture", ["hook", "claude-code"]);
+  assert.equal(readOnly, false);
+
+  let spawned = false;
+  await fireSyncHook({
+    allowAutoSync: true,
+    command: "capture",
+    isSyncEnabled: async () => true,
+    readOnly,
+    spawnImpl: () => { spawned = true; },
+    testContext: null,
+  });
+  assert.equal(spawned, true);
+});
+
+test("capture sync classification skips only non-portable or report-only subcommands", () => {
+  for (const args of [
+    ["list"],
+    ["status"],
+    ["enable", "claude-code"],
+    ["disable", "claude-code"],
+    ["reconcile"],
+  ]) {
+    assert.equal(skipsPortableMirrorSync("capture", args), true, args.join(" "));
+  }
+
+  for (const args of [
+    ["hook", "claude-code"],
+    ["import", "file", "/tmp/session.md"],
+    ["delete", "deadbeef"],
+    ["reconcile", "--apply"],
+  ]) {
+    assert.equal(skipsPortableMirrorSync("capture", args), false, args.join(" "));
+  }
+});
+
 test("fireSyncHook returns immediately when sync not enabled", async () => {
   let spawned = false;
   await fireSyncHook({

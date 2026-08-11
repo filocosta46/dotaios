@@ -15,5 +15,6 @@ cache/
 tmp/
 node_modules/
 /workspaces/
+/.dotaios/session-store/
 .dotaios-setup-transaction.json
 .dotaios-setup-*.tmp

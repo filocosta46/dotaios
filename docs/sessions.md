@@ -1,149 +1,226 @@
 # Saving AI Conversations
 
-DotAIOS can save AI conversations locally so supported agents that can read your folder can find what you chose to preserve.
+DotAIOS saves selected AI conversations as local, agent-neutral Markdown so a
+later agent can find the evidence you chose to preserve.
 
-## Where conversations are saved
+## Authority and storage
 
-All saved conversations live in:
+Canonical session files live under:
 
+```text
+~/aios/memory/sessions/<date>/<timestamp>_<agent>_<id>.md
 ```
-~/aios/memory/sessions/
-```
 
-Each conversation is a plain text file, you can open it in any text editor. The files are named by date and agent, so they're easy to browse.
+Each schema-1 file has closed YAML frontmatter and a bounded Markdown body.
+New turn-based records declare `body_encoding: escaped-lines-v1` so a
+standalone role marker inside message content round-trips without becoming a
+new turn. Legacy untagged records remain readable, and `turns: 0` prepared
+summaries keep their bounded Markdown body unchanged.
+Those Markdown files are canonical user memory. The adjacent
+`memory/sessions/index.jsonl` file is only a rebuildable projection for bounded
+listing and search. It is not a second session authority.
+
+Capture, reconciliation, search metadata, and deletion all go through one
+SessionStore boundary. Do not write a session file or edit the projection by
+hand as part of an agent workflow.
 
 ## How to save a conversation
 
-**From any capable AI agent** (clean summary, no CLI needed):
+From any capable local agent, ask:
 
-Ask:
-
-```
+```text
 save this session
 ```
 
-The `save-session` skill writes a readable summary into `~/aios/memory/sessions/` with decisions, open threads, and action items. This is best when you want the next agent to understand what happened without storing a full raw transcript.
+The `save-session` skill prepares a bounded schema-1 Markdown summary and sends
+it on standard input to:
 
-**From Claude Code** (saves automatically once enabled):
-
+```bash
+dotaios capture import prepared --path ~/aios
 ```
+
+The command must report a saved session before the skill reports success. The
+skill does not write Markdown or `index.jsonl` directly. Prepared summaries use
+`turns: 0` because they preserve decisions, open threads, and action items
+rather than claiming to be a raw turn transcript.
+
+For automatic Claude Code capture:
+
+```bash
 dotaios capture enable claude-code
 ```
 
-This sets up automatic saving. After each Claude Code response, the conversation is saved to your AIOS folder. If you start a session and never see a response, nothing is saved.
+After each completed Claude Code response, the adapter submits the observed
+source through SessionStore. A session with no response is not saved.
 
-**From any AI tool** (paste in manually):
+To paste a conversation from any tool:
 
-```
+```bash
 dotaios capture import paste
 ```
 
-Your text editor opens. Paste the conversation, save, and close. Works with Claude.ai, ChatGPT, Gemini, or anything else. Use this when the tool cannot write local files or you want a fuller transcript.
+To import an exact saved file:
 
-**From a saved file:**
-
-```
+```bash
 dotaios capture import file /path/to/conversation.txt
 ```
 
-## How to browse saved conversations
+Paste and file import support Claude.ai, ChatGPT, Gemini, and other text
+exports. All capture modes publish through the same durable boundary.
+
+## Continuations and conflicts
+
+Capture is serialized from source observation through publication. For records
+from the same source:
+
+- A strictly longer turn sequence grows the existing session.
+- An older prefix is an idempotent no-op.
+- Two non-prefix versions are both preserved as conflicts for explicit
+  reconciliation.
+
+The store never silently chooses one divergent source version or deletes the
+other as duplicate evidence.
+
+## Browse and search
 
 List recent conversations:
 
-```
+```bash
 dotaios capture list
 ```
 
-Search across all saved conversations:
+Search across saved conversations:
 
-```
+```bash
 dotaios search "your topic"
 ```
 
 Filter by tool or date:
 
-```
+```bash
 dotaios search "launch timing" --agent claude-code --since 7d
 ```
 
-## How saved conversations become working context
+These read paths validate every projection path against a proved canonical
+Markdown file. They are bounded and path-free, and do not create recovery,
+repair, or quarantine state. A damaged or unsafe record is refused or reported
+instead of being followed outside the session tree.
 
-At session start, use `dotaios brief --compact` rather than opening session
-files directly. The canonical projection selects up to three bounded records
-from `memory/sessions/index.jsonl` alongside the same events and signals used by
-other local clients, and applies one project filter to all three sources when a
-project is requested. It does not inject full saved transcripts. Use
-`dotaios search` when you need older or more detailed evidence.
+## Inspect or rebuild the projection
 
-With the optional MCP adapter, `read_working_context` returns that same startup
-projection plus bounded operational migration state beside it. Compact CLI and
-hook output render the same actionable fact before the projection. The
-operational notice does not change memory selection or the projection budget.
-Source reads also have a separate 16 MiB aggregate raw-input ceiling and fixed
-file/directory caps; oversize state fails closed instead of changing ordering or
-silently widening the session window. `search_aios` performs
-the on-demand lookup, and `resolve_skill` routes a request to an installed
-workflow. Those are the adapter's only tools. Compact text, hook JSON, and lean
-brief reads are classified read-only before CLI teardown, so even an explicitly
-enabled automatic sync hook cannot turn a context read into a detached writer.
+Report drift without changing files:
 
-## Promote something that should last
+```bash
+dotaios capture reconcile
+```
 
-A saved session is evidence, not automatic truth. To turn one fact into durable
-context, preview the exact destination first:
+The report includes orphan Markdown; stale, malformed, or unsafe rows; invalid
+Markdown; duplicate IDs or paths; duplicate or conflicting source groups; a
+missing projection; and pending, poisoned, or unsafe operational state. To rebuild only
+the derived projection from proved canonical Markdown:
+
+```bash
+dotaios capture reconcile --apply
+```
+
+Reconciliation preserves session evidence. It does not silently delete an
+orphan, duplicate, or conflict. The CLI recommends `reconcile --apply` only for
+derived-projection drift or recoverable pending work. A duplicate or conflict
+instead names the exact-session deletion flow below; poisoned operational
+evidence is preserved for support rather than sent through automatic repair.
+
+## Delete one exact session
+
+Find the full session ID with `dotaios capture list`, then run:
+
+```bash
+dotaios capture delete <session-id>
+```
+
+Deletion succeeds only when SessionStore can prove the exact requested ID owns
+one canonical regular file and its projection identity agrees. It refuses
+ambiguous, linked, replaced, duplicate, or outside artifacts. The deletion is
+journaled, so recovery can finish the same exact operation after interruption.
+Unrelated session and outside bytes are not part of the transaction.
+
+## Recovery and refusal boundaries
+
+Mutations use a private journal under `.dotaios/session-store/`. Canonical and
+projection bytes are staged and synced before a pending transaction is
+published. A later mutating store call completes an interrupted publication
+idempotently under the store lock.
+
+The store rejects invalid UTF-8, malformed or open-ended frontmatter,
+duplicate/alias/nested/prototype-like metadata, oversize fields or turns,
+absolute and traversing paths, symlinked components, special files, hardlinks,
+source replacement, and duplicate ownership. Its portable Node checks prove
+identity at supported observation boundaries; they do not claim kernel-level
+immunity to a hostile same-user swap-away-and-restore completed entirely
+between checks.
+
+Capture drafts do not mint identity. SessionStore assigns every new random
+session ID; the ID becomes required only in the stored canonical Markdown.
+
+The journal is local operational state, not memory. Fresh managed mirror rules
+exclude `/.dotaios/session-store/`, and mirror validation refuses the path if it
+is forced or staged. Existing mirrors remain protected before their ignore
+template is refreshed because the pre-add policy excludes this operational
+tree. Adding the exact ignore entry makes the boundary visible to Git as well.
+
+## Working context and promotion
+
+At session start, use `dotaios brief --compact` instead of opening session files
+directly. The canonical working-context projection asks SessionStore for up to
+three bounded, canonical-backed session records alongside the same events and
+signals used by other local clients. One project filter applies to all three
+sources. Session inventory and reads stay inside the projection's shared
+512-file, 16 MiB, and 10,000-entry accounting, and the final visible projection
+stays inside its 6,000-character budget.
+
+Use `dotaios search` for older or more detailed evidence. To turn one session
+fact into durable context, preview the exact destination first:
 
 ```bash
 dotaios memory promote <session-id> --to project --project my-project \
   --summary "The beta ships Friday"
 ```
 
-Nothing changes during the preview. Re-run with `--apply` only after the source,
+Nothing changes during preview. Re-run with `--apply` only after the source,
 destination, and appended text look right. Every applied disposition writes a
-receipt to `memory/events.jsonl`. Use `--to session-only` when the session should
-remain evidence without creating a knowledge file.
+receipt to `memory/events.jsonl`. Use `--to session-only` when the session
+should remain evidence without creating a knowledge file.
 
-## How to delete a saved conversation
+## MCP and read-only behavior
 
-First, find the conversation ID with `dotaios capture list`. It's the 8-character code on the left.
+The optional MCP adapter still exposes exactly `read_working_context`,
+`search_aios`, and `resolve_skill`. Working-context and search use the same
+SessionStore read boundary as the CLI. Search retains its bounded relative
+provenance label but returns no absolute machine path. Compact CLI output, hook
+JSON, lean brief reads, MCP reads, and search do not launch repair, quarantine,
+recovery, or detached sync work.
 
-Then delete it:
+## Stop automatic capture
 
-```
-dotaios capture delete <id>
-```
-
-This removes the file and its entry from the index.
-
-## How to turn off auto-saving
-
-```
+```bash
 dotaios capture disable claude-code
 ```
 
-Auto-saving stops immediately. Past saved conversations are not deleted.
+Automatic capture stops immediately. Existing sessions are not deleted.
 
-## What gets saved
+## What is and is not saved
 
-- The messages you typed and the AI's replies.
-- The date and which tool you were using.
-- The project folder you were working in (inferred automatically).
-- For `save-session`, a summary with decisions, open threads, and action items instead of a raw transcript.
+Raw capture saves the messages you typed, the AI replies, the capture time and
+tool, and inferred project attribution when available. A prepared save-session
+summary saves its decisions, open threads, and action items instead of a raw
+transcript.
 
-## What does NOT get saved
+Capture does not implicitly save files you opened or edited, terminal/search
+tool output, internal reasoning, or secret files such as `.env`.
 
-- Files you opened or edited during the session.
-- Tool outputs like search results or terminal commands.
-- Thinking blocks or internal reasoning steps.
-- Anything in `.env` or other secret files.
+DotAIOS stores session Markdown on your machine. Your AI provider still
+processes the conversation according to its terms. Optional GitHub sync copies
+canonical session Markdown to your private mirror but excludes the private
+SessionStore journal.
 
-DotAIOS stores these saved files on your machine. Your AI provider still processes the conversation you have with it, according to that provider's terms and settings. Optional GitHub sync copies the saved files to your own private repository.
-
-## Which tools support what
-
-Run this to see what's available on your machine:
-
-```
-dotaios capture status
-```
-
-See [adapters.md](adapters.md) for a full breakdown by tool.
+Run `dotaios capture status` to see the adapters available on the current
+machine. See [adapters.md](adapters.md) for the per-tool capability matrix.

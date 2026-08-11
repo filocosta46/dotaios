@@ -62,10 +62,11 @@ test("buildSessionDigest includes recent sessions and returns their ids", async 
     turns: [{ role: "user", content: "hello" }, { role: "assistant", content: "hi" }],
   };
   await writeSession(aiosPath, session);
+  const storedId = (await readSessionIndex(aiosPath))[0].session_id;
 
   const { digest, sessionIds } = await buildSessionDigest(aiosPath);
   assert.match(digest, /Implement digest feature/);
-  assert.ok(sessionIds.includes(session.session_id));
+  assert.ok(sessionIds.includes(storedId));
 });
 
 test("buildSessionDigest project filter scopes sessions", async () => {
@@ -90,12 +91,13 @@ test("buildSessionDigest project filter scopes sessions", async () => {
   };
   await writeSession(aiosPath, sessionA);
   await writeSession(aiosPath, sessionB);
+  const storedByProject = new Map((await readSessionIndex(aiosPath)).map((row) => [row.project, row.session_id]));
 
   const { digest, sessionIds } = await buildSessionDigest(aiosPath, { project: "project-a" });
   assert.match(digest, /Work on A/);
   assert.doesNotMatch(digest, /Work on B/);
-  assert.ok(sessionIds.includes(sessionA.session_id));
-  assert.ok(!sessionIds.includes(sessionB.session_id));
+  assert.ok(sessionIds.includes(storedByProject.get("project-a")));
+  assert.ok(!sessionIds.includes(storedByProject.get("project-b")));
 });
 
 test("buildSessionDigest project filter also scopes signals and events", async () => {

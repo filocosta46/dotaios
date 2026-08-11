@@ -34,3 +34,17 @@ operational metric artifacts that can contain sensitive memory-derived bytes.
   metrics, plus tracked-artifact doctor fixtures.
 - Two-clone conflict and clean restore receipts before any non-experimental
   wording can return.
+
+## Blocked checkpoint
+
+Issue 016 now has a SessionStore implementation in review, including exclusion
+and refusal of its private `.dotaios/session-store/` journal. That narrow
+consumer-foundation change does not close or unblock this replication issue.
+Issue 016 still needs exact-commit CI and independent iMac validation, and this
+issue still requires its own operational-artifact policy, tracked-artifact
+doctor fixtures, serialized writer authority, two-clone divergence proof, and
+clean restore receipts.
+
+Until those separate acceptance checks pass, personal replication remains an
+experimental private transport. It is not canonical memory, collaboration, or
+backup, and no replication-closure claim follows from the SessionStore work.

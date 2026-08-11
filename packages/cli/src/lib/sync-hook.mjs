@@ -4,6 +4,12 @@ import { isSyncEnabled } from "../../../core/src/sync-config.mjs";
 export function skipsPortableMirrorSync(command, args = []) {
   if (command === "brief" && (args.includes("--compact") || args.includes("--lean"))) return true;
   if (command === "search") return true;
+  if (command === "capture") {
+    const subcommand = args[0];
+    if (["list", "status", "enable", "disable"].includes(subcommand)) return true;
+    if (subcommand === "reconcile" && !args.includes("--apply")) return true;
+    return false;
+  }
   if (command === "skills") {
     if (args[0] === "install") return false;
     if (args[0] === "sync-triggers" && args.includes("--apply")) return false;

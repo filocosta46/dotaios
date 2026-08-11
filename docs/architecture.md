@@ -53,25 +53,65 @@ unobservable swap-away-and-restore.
 
 ## Memory
 
-`memory/` is operational state. Agents should not preload `events.jsonl`,
-`signals/`, or `sessions/` directly. Those stores enter startup context only
-through the canonical bounded projection. `errors.jsonl` remains opt-in when
-debugging.
+`memory/` contains both user-owned evidence and derived operational views.
+Agents should not preload `events.jsonl`, `signals/`, or `sessions/` directly.
+Those stores enter startup context only through the canonical bounded
+projection. `errors.jsonl` remains opt-in when debugging.
 
 **Daily notes** live in `memory/daily/YYYY-MM-DD.md`. `dotaios brief` writes the deterministic `## Brief` section. The `/today` skill writes today's plan (focus, plan, frog). The `/closeday` skill fills the close-out section (done, carry-over, reflection) and stages carry-overs into the next day's note. Daily notes are operational memory, not long-term knowledge, they belong in `memory/`, not `vault/`.
 
-**Session memory** lives in `memory/sessions/<date>/<timestamp>_<agent>_<id>.md`. Each file is agent-neutral Markdown with YAML frontmatter (`agent`, `session_id`, `captured_at`, `project`, `title`, `turns`). `memory/sessions/index.jsonl` is a lightweight catalog enabling fast search and deduplication. Sessions are captured via `dotaios capture enable <agent>` (auto-save) or `dotaios capture import` (manual/backfill). Agents should not load sessions in bulk, use `dotaios search` to surface relevant ones on demand.
+**Session memory** lives in
+`memory/sessions/<date>/<timestamp>_<agent>_<id>.md`. Each schema-1 file is
+agent-neutral Markdown with closed YAML frontmatter and bounded turns. These
+Markdown files are canonical user memory. `memory/sessions/index.jsonl` is a
+rebuildable search projection, never an independent source of session truth.
+
+One deep `SessionStore` interface owns capture, reconciliation, bounded search
+metadata, and exact deletion. Capture serializes the observation of one source
+through durable publication. A strictly longer turn sequence continues the
+existing session, an older prefix is an idempotent no-op, and divergent
+non-prefix versions are preserved as conflicts that require reconciliation.
+Prepared summaries use the same schema with `turns: 0` and enter through
+`dotaios capture import prepared` on standard input. Automatic Claude Code
+capture and the paste/file import modes enter through the same store.
+
+The four-operation facade stays in `session-store.mjs`; private modules isolate
+the strict codec, canonical inventory/projection proof, file-identity rules, and
+journal/recovery state machine. Those modules are implementation details and do
+not create peer storage authorities or widen the public interface.
+
+Mutating operations use a private recoverable journal under
+`.dotaios/session-store/`. Staged canonical and projection bytes are synced
+before a pending transaction is published, and recovery finishes an incomplete
+publication idempotently under the store lock. Reconciliation reports orphan
+Markdown, stale projection rows, and duplicate or conflicting source groups;
+it does not silently delete evidence. Explicit deletion requires an exact,
+proved-owned session and is journaled so recovery can complete it. Invalid,
+linked, special, hardlinked, replaced, duplicate, absolute, traversing, or
+outside artifacts are refused at their relevant boundary.
+
+Search and reconciliation reports are read-only. They validate projection
+paths against proved canonical files and do not create journals, quarantine,
+or repair state. CLI and MCP session search return bounded relative provenance
+without absolute machine paths; internal exact promotion selection retains the
+validated relative session coordinate it needs for change detection. The
+private journal is local operational state: managed mirror rules exclude
+`.dotaios/session-store/`, and mirror validation refuses it if it is forced into
+the outer index. Agents should use `dotaios search` to surface session evidence
+on demand rather than reading the tree in bulk.
 
 Captured text is evidence, not automatically durable knowledge. Promotion to `context/`, a project, `vault/`, or a skill is explicit, previewed, and recorded in `memory/events.jsonl`. Signals remain short-lived operational hints.
 
 `dotaios brief --compact` owns the default working-context selection policy. It
-selects up to three ranked session-index records plus at most eight signals and
-eight events from today and yesterday, combines them with bounded daily and
-project context, applies one project filter to all three memory sources, and
-fits the canonical working-context projection into a visible 6,000-character
-budget. When the budget is reached, lower-priority items are omitted and the
-rendered projection says so. Compact CLI output, session-start hook JSON, and
-MCP wrap that unchanged projection in a read-only operational envelope.
+asks `SessionStore` for up to three ranked, canonical-backed session records,
+then combines them with at most eight signals and eight events from today and
+yesterday, bounded daily and project context, and one project filter across all
+three memory sources. Session inventory and reads share the projection's
+existing 512-file, 16 MiB, and 10,000-entry accounting. The complete result
+fits the visible 6,000-character budget. When the budget is reached,
+lower-priority items are omitted and the rendered projection says so. Compact
+CLI output, session-start hook JSON, and MCP wrap that unchanged projection in
+a read-only operational envelope.
 
 Within a project-scoped projection, a timeline row is global only when both
 `project` and `project_id` are absent or null. Every present attribution field
