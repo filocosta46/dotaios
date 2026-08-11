@@ -20,20 +20,26 @@
 const MIN_TERM_LENGTH = 5;
 const MIN_STEM_LENGTH = 4;
 
-// Longest first: -azioni has to win over -i, -endo over -o.
+// Grouped by language for reading, then sorted by length so the longest ending
+// always wins: -azioni has to beat -i, -arono has to beat -ando. Sorting here
+// rather than by hand means a suffix added in the wrong place cannot quietly
+// change what every other one matches.
 const SUFFIXES = [
   // Italian
   "azioni", "azione", "amento", "amenti",
-  "endo", "ando", "arono", "erono", "irono",
-  "iamo", "iate", "ando", "ata", "ate", "ati", "ato",
-  "uta", "ute", "uti", "uto", "ita", "ite", "iti", "ito",
-  "are", "ere", "ire", "arsi", "ersi", "irsi",
-  "eremo", "eranno", "erebbe",
+  "erebbe", "eranno", "eremo",
+  "arono", "erono", "irono",
+  "endo", "ando", "iamo", "iate",
+  "arsi", "ersi", "irsi",
+  "ata", "ate", "ati", "ato",
+  "uta", "ute", "uti", "uto",
+  "ita", "ite", "iti", "ito",
+  "are", "ere", "ire",
   // English
   "ization", "isation", "ations", "ation", "ings", "ing", "edly", "ed", "es", "s",
-  // Shared plural / gender endings, last because they are the most destructive
+  // Shared plural and gender endings, the most destructive and so the last resort
   "i", "e", "o", "a"
-];
+].sort((left, right) => right.length - left.length);
 
 /**
  * Fold one token to a comparable stem, or return null when folding it would do
