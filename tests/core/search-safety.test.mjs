@@ -239,6 +239,23 @@ test("project identity resolution keeps legacy neighbors non-blocking and header
     assert.equal(result.scope.project, "acme-campaign");
     assert.match(JSON.stringify(result), /PUNCTUATED_STABLE_ID_CANARY/);
   });
+
+  await t.test("stable ids ignore unrelated linked project neighbors", async () => {
+    const fixture = createLegacyProjectShelf();
+    const outside = tmpDir();
+    fs.symlinkSync(outside, path.join(fixture.root, "projects", "legacy-linked"));
+
+    const result = await searchAios({
+      aiosPath: fixture.root,
+      query: "SELECTED_LEGACY_SHELF_CANARY",
+      scope: "projects",
+      projectSelector: "project-acme-001",
+      evidenceReader: createEvidenceReader({ roots: [fixture.root] })
+    });
+
+    assert.equal(result.scope.project, "acme-campaign");
+    assert.match(JSON.stringify(result), /SELECTED_LEGACY_SHELF_CANARY/);
+  });
 });
 
 test("all-scope search without a project selector omits the project corpus and reports it", async () => {

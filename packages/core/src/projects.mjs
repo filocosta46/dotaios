@@ -487,7 +487,9 @@ export async function resolvePortableProjectIdentity({
     )
     : null;
   if (directIdentity) return directIdentity;
-  const projectDirectories = await evidenceReader.listDirectories(resolvedAiosPath, projectsPath);
+  const projectDirectories = await evidenceReader.listDirectories(resolvedAiosPath, projectsPath, {
+    skipLinkedEntries: true
+  });
   let matches = [];
   for (const projectDirectory of projectDirectories) {
     const identity = await readPortableProjectIdentity(

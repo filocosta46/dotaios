@@ -167,6 +167,7 @@ function createEvidenceReaderView(roots, state) {
       for (const entry of entries) {
         if (options.skipEntry?.(entry.name)) continue;
         if (entry.isSymbolicLink()) {
+          if (options.skipLinkedEntries === true) continue;
           throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
         }
         if (!entry.isDirectory()) continue;
