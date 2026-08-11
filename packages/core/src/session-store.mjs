@@ -371,6 +371,7 @@ export function createSessionStore(options = {}) {
   async function mutate(callback, operation) {
     try { await prepareOperationalRoot(); } catch (error) { throw publicError(error); }
     const deadline = Date.now() + limits.lockTimeoutMs;
+    let unresolved = null;
     const mutation = Object.freeze({
       check() {
         if (Date.now() > deadline) refuse("DOTAIOS_SESSION_STORE_DEADLINE");
@@ -390,12 +391,22 @@ export function createSessionStore(options = {}) {
           retainOnError: (error) => error?.code === "DOTAIOS_SESSION_STORE_POISONED",
         });
         if (result.acquired) return result.value;
+        // A clean "busy" answer means the condition the previous attempt hit
+        // has cleared, so it is no longer the caller's news.
+        unresolved = null;
       } catch (error) {
         if (error?.code === "DOTAIOS_SESSION_STORE_DEADLINE") break;
         if (!CONTENDED_ACQUISITION_CODES.has(error?.code)) throw publicError(error);
+        unresolved = error;
       }
       await delay(25 + Math.floor(Math.random() * 20));
     }
+    // Retrying is only allowed to hide a condition that went away. One that
+    // outlived the whole budget is not contention -- a symlinked lock reports
+    // the same code every single attempt -- and reporting it as "busy, try
+    // again" would turn a tampered store into an install that quietly never
+    // saves. Whatever the last attempt saw is what the caller hears.
+    if (unresolved) throw publicError(unresolved);
     if (operation === "capture") return Object.freeze({ outcome: "refused", committed: false, reason: "contention" });
     refuse("DOTAIOS_SESSION_STORE_CONTENTION");
   }

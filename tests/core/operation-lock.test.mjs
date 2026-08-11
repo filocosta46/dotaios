@@ -27,7 +27,22 @@ test("32 strict contenders never parse a torn owner-state transition", { timeout
 
   const contenders = Array.from({ length: 32 }, async () => {
     for (let attempt = 0; attempt < 2_000; attempt += 1) {
-      const lock = await acquireOperationLock(lockPath, options);
+      let lock;
+      try {
+        lock = await acquireOperationLock(lockPath, options);
+      } catch (error) {
+        // Acquisition reports a busy lock by returning nothing, but it reports
+        // one that was released mid-read by throwing. Both are this test
+        // deliberately creating contention, and the loop has to treat them the
+        // same way or the contention it asks for fails it.
+        //
+        // Only this one code is retried. A torn parse -- the thing being
+        // asserted -- surfaces as DOTAIOS_OWNED_STATE_INVALID and still fails
+        // the test, so the assertion below keeps its teeth.
+        if (error?.code !== "DOTAIOS_OPERATION_LOCK_REMOVED") throw error;
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        continue;
+      }
       if (!lock) {
         await new Promise((resolve) => setTimeout(resolve, 1));
         continue;
