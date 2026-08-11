@@ -12,6 +12,22 @@ _Avoid_: workspace, database, app data
 The person's accumulated context, project records, recent memory, and long-term knowledge. A product upgrade preserves it by default and may change it only through a separate explicit user action.
 _Avoid_: generated state, cache
 
+**Source material**:
+Imported or captured material retained with its origin so it can support later work. Source material is evidence available to the person; it is not automatically an approved fact about them or their project.
+_Avoid_: memory, extracted truth
+
+**Session evidence**:
+A canonical, readable record of what a person and an agent exchanged in one captured session. It can support retrieval or promotion, but it is evidence rather than approved durable truth.
+_Avoid_: conversation index, automatic memory
+
+**Derived index**:
+A rebuildable catalog or search aid computed from canonical records. Losing or rebuilding it cannot remove, replace, or redefine the records it points to.
+_Avoid_: memory store, source of truth
+
+**Operational evidence**:
+A bounded receipt, health observation, recovery marker, or metric about how DotAIOS operated. It may justify a support or recovery decision, but it is neither user memory nor source material.
+_Avoid_: memory, user context
+
 **Managed scaffold**:
 Content DotAIOS can prove it owns, such as generated indexes, declared managed regions, and compatibility metadata. Ownership never extends to surrounding user-authored content.
 _Avoid_: system files, internal files

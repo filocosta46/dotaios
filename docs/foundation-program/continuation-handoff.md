@@ -8,12 +8,12 @@ Updated: 2026-08-10
 
 ## Exact state
 
-- Programme worktree: `/Users/filo/Code/dotaios/.worktrees/codex/foundation-reliability`
+- Programme worktree: `<repo>/.worktrees/codex/foundation-reliability`
 - Programme branch: `codex/foundation-reliability`
 - Current committed checkpoint: `beb76f8` (`fix: contain search and skill evidence reads`)
 - Canonical projection implementation: `f804957` (`fix: contain canonical working-context reads`)
 - Original base: `origin/main` at `f0d72f7`
-- Protected prelaunch checkout: `/Users/filo/Code/dotaios`, branch `launch/2026-08-08-prelaunch-fixes` at `fa08b69`, clean and untouched
+- Protected prelaunch checkout: `<repo>`, branch `launch/2026-08-08-prelaunch-fixes` at `fa08b69`, clean and untouched
 - Archived iMac head: local ref `refs/archive/imac/2026-08-09-40e4170`
 - Wayfinder map: `docs/foundation-program/wayfinder/map.md`
 - Current frontier: make session memory authoritative, then

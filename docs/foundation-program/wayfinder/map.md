@@ -41,6 +41,9 @@ An approved, testable Foundation reliability specification for the defined knowl
   serialize canonical Markdown and index publication, validate every stored
   path, and make crash/recovery behavior explicit before replication relies on
   session evidence.
+- [Memory authority](issues/002-define-memory-domains-authority.md): canonical
+  user files and session Markdown own durable evidence; indexes, projections,
+  operational artifacts, and replicas remain rebuildable views or transport.
 
 ## Current execution frontier
 

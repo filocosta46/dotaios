@@ -80,7 +80,7 @@ secrets here.
    validates portable project frontmatter.
 5. **No semantic/vector search.** Search is lexical TF/IDF + recency decay. Do not add embeddings or a disk IDF cache unless measured.
 6. **Local-first.** Core logic makes no external network calls. Network belongs in ingest/adapters/plugins, never in `packages/core`.
-7. **Conventional commits**, single concern each: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `release`.
+7. **Conventional commits**, single concern each: `feat`, `fix`, `test`, `refactor`, `docs`, `chore`, `release`; use `merge` only for an explicit reviewed branch reconciliation.
 8. **Keep tests green.** Run `npm test` + `npm run smoke` before every commit. Never leave the branch red.
 
 ## How to run things
