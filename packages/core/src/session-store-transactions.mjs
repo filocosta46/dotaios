@@ -29,6 +29,7 @@ const MAX_MANIFEST_BYTES = 16 * 1024;
 const MAX_TRANSACTION_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const MAX_OPERATIONAL_ENTRIES = 64;
 const MAX_TRANSACTION_CHILD_ENTRIES = 4;
+const OPERATION_LOCK_UUID_PATTERN = "[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}";
 
 function sha256(bytes) {
   return crypto.createHash("sha256").update(bytes).digest("hex");
@@ -49,6 +50,8 @@ export function createSessionTransactionManager(context) {
   } = context;
   let operationalRootSnapshot = null;
   async function prepareMutation(checkDeadline) {
+    checkDeadline();
+    await hasPendingTransaction();
     checkDeadline();
     await cleanupDiscardedBootstraps(checkDeadline);
     checkDeadline();
@@ -1079,8 +1082,16 @@ export function createSessionTransactionManager(context) {
   }
 
   function operationalEntryType(name) {
+    const lockBase = "store\\.lock(?:\\.recovery)*";
     if (
-      /^store\.lock(?:\.recovery)*(?:\.transition|\.(?:release|stale)\.[0-9a-f-]{36})?$/i.test(name)
+      new RegExp(
+        `^${lockBase}(?:\\.transition|\\.(?:release|stale)\\.${OPERATION_LOCK_UUID_PATTERN})?$`,
+        "i",
+      ).test(name)
+      || new RegExp(
+        `^\\.${lockBase}(?:\\.transition)?\\.${OPERATION_LOCK_UUID_PATTERN}\\.tmp$`,
+        "i",
+      ).test(name)
     ) return "file";
     if (
       name === "pending"

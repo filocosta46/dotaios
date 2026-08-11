@@ -67,6 +67,45 @@ test("operational ancestors and lock state cannot redirect writes outside the st
   }
 });
 
+test("pending symlink is rejected before bounded cleanup can consume the mutation deadline", async (t) => {
+  if (process.platform === "win32") return t.skip("POSIX link ownership fixture");
+  const aiosPath = tmpAios();
+  const outsideRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dss-pending-deadline-"));
+  const canary = path.join(outsideRoot, "canary");
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  t.after(() => fs.rmSync(outsideRoot, { recursive: true, force: true }));
+  await fsp.writeFile(canary, "OUTSIDE_PENDING_DEADLINE_CANARY\n", { mode: 0o600 });
+
+  const created = await createSessionStore({ aiosPath }).capture({ session: session() });
+  const canonicalPath = path.join(aiosPath, created.relativePath);
+  const indexPath = path.join(aiosPath, "memory", "sessions", "index.jsonl");
+  const pendingPath = path.join(aiosPath, ".dotaios", "session-store", "pending");
+  const [canonicalBefore, indexBefore] = await Promise.all([
+    fsp.readFile(canonicalPath),
+    fsp.readFile(indexPath),
+  ]);
+  await fsp.symlink(outsideRoot, pendingPath);
+
+  const filesystem = Object.create(fsp);
+  filesystem.opendir = async (...args) => {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    return fsp.opendir(...args);
+  };
+
+  await assert.rejects(
+    () => createSessionStore({ aiosPath, filesystem, lockTimeoutMs: 100 }).capture({
+      session: session({ session_id: "22222222" }),
+    }),
+    { code: "DOTAIOS_SESSION_STORE_POISONED" },
+  );
+
+  assert.equal(await fsp.readFile(canary, "utf8"), "OUTSIDE_PENDING_DEADLINE_CANARY\n");
+  assert.equal((await fsp.lstat(pendingPath)).isSymbolicLink(), true);
+  assert.equal(await fsp.readlink(pendingPath), outsideRoot);
+  assert.deepEqual(await fsp.readFile(canonicalPath), canonicalBefore);
+  assert.deepEqual(await fsp.readFile(indexPath), indexBefore);
+});
+
 test("report-only reconciliation distinguishes pending, poisoned, and unsafe operational nodes", async (t) => {
   if (process.platform === "win32") return t.skip("POSIX linked and special-node fixture");
 
@@ -82,6 +121,46 @@ test("report-only reconciliation distinguishes pending, poisoned, and unsafe ope
 
     assert.equal(report.operational_state, "pending");
     assert.equal((await fsp.lstat(path.join(storeRoot, "pending"))).isDirectory(), true);
+  });
+
+  for (const name of [
+    ".store.lock.01234567-89ab-4cde-8fab-0123456789ab.tmp",
+    ".store.lock.transition.01234567-89ab-4cde-8fab-0123456789ab.tmp",
+  ]) {
+    await t.test(`${name} is pending publication evidence`, async (subtest) => {
+      const aiosPath = tmpAios();
+      subtest.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+      const storeRoot = path.join(aiosPath, ".dotaios", "session-store");
+      await fsp.mkdir(storeRoot, { recursive: true, mode: 0o700 });
+      await fsp.chmod(path.join(aiosPath, ".dotaios"), 0o700);
+      await fsp.chmod(storeRoot, 0o700);
+      const evidence = path.join(storeRoot, name);
+      await fsp.writeFile(evidence, "PENDING_PUBLICATION_EVIDENCE\n", { mode: 0o600 });
+
+      const report = await createSessionStore({ aiosPath }).reconcile({ apply: false });
+
+      assert.equal(report.operational_state, "pending");
+      assert.equal(await fsp.readFile(evidence, "utf8"), "PENDING_PUBLICATION_EVIDENCE\n");
+    });
+  }
+
+  await t.test("a lock publication near-miss is poisoned and preserved", async (subtest) => {
+    const aiosPath = tmpAios();
+    subtest.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+    const storeRoot = path.join(aiosPath, ".dotaios", "session-store");
+    await fsp.mkdir(storeRoot, { recursive: true, mode: 0o700 });
+    await fsp.chmod(path.join(aiosPath, ".dotaios"), 0o700);
+    await fsp.chmod(storeRoot, 0o700);
+    const evidence = path.join(
+      storeRoot,
+      "Xstore.lock.transition.01234567-89ab-4cde-8fab-0123456789ab.tmp",
+    );
+    await fsp.writeFile(evidence, "NEAR_MISS_PUBLICATION_CANARY\n", { mode: 0o600 });
+
+    const report = await createSessionStore({ aiosPath }).reconcile({ apply: false });
+
+    assert.equal(report.operational_state, "poisoned");
+    assert.equal(await fsp.readFile(evidence, "utf8"), "NEAR_MISS_PUBLICATION_CANARY\n");
   });
 
   await t.test("an unknown regular artifact is poisoned", async (subtest) => {

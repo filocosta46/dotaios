@@ -28,6 +28,7 @@ import {
   snapshotTree
 } from "../fixtures/project-source-retrieval.mjs";
 import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
+import { inspectOperationLock } from "../../packages/core/src/operation-lock.mjs";
 
 test("project source syntax bounds fail before project discovery or receipt state", async () => {
   assert.equal(validateTask("x"), "x");
@@ -1583,7 +1584,12 @@ async function assertGrantClearFailure(failRepublish) {
     if (failRepublish) {
       assert.equal(fs.existsSync(paths.grantGuard), false);
       assert.equal(fs.existsSync(sourceLock), true);
-      assert.equal(JSON.parse(fs.readFileSync(sourceLock, "utf8")).poisoned, true);
+      const held = await inspectOperationLock(sourceLock, {
+        format: "dotaios-project-source-lock/v1",
+        strictOwnedState: true,
+        isOwnerAlive: () => false,
+      });
+      assert.equal(held.record.poisoned, true);
     } else {
       assert.equal(fs.existsSync(paths.grantGuard), true);
     }
@@ -1810,7 +1816,12 @@ async function assertSourceLockReleaseSyncPoison() {
     };
     await assert.rejects(() => apply(filesystem), { code: "DOTAIOS_PROJECT_SOURCE_APPLY_FAILED" });
     assert.equal(failed, true);
-    assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).poisoned, true);
+    const held = await inspectOperationLock(lockPath, {
+      format: "dotaios-project-source-lock/v1",
+      strictOwnedState: true,
+      isOwnerAlive: () => false,
+    });
+    assert.equal(held.record.poisoned, true);
     const result = await retrieveCampaignSource(fixture);
     assert.equal(result.reason, "authorization-state-invalid");
   } finally {
@@ -1831,18 +1842,18 @@ async function assertPostPoisonSourceLockReplacement() {
     })}\n`;
     let replaced = false;
     const filesystem = Object.create(fsp);
-    filesystem.lstat = async (target, ...args) => {
-      const isCanonicalLock = path.resolve(String(target)) === path.resolve(lockPath);
-      const isPoisoned = isCanonicalLock
-        && fs.existsSync(lockPath)
-        && JSON.parse(fs.readFileSync(lockPath, "utf8")).releasing === true;
-      if (!replaced && isPoisoned) {
+    filesystem.rename = async (source, destination) => {
+      if (
+        !replaced
+        && path.resolve(String(source)) === path.resolve(lockPath)
+        && String(destination).includes(".release.")
+      ) {
         const staged = `${lockPath}.foreign`;
         fs.writeFileSync(staged, replacement, { mode: 0o600 });
         fs.renameSync(staged, lockPath);
         replaced = true;
       }
-      return fsp.lstat(target, ...args);
+      return fsp.rename(source, destination);
     };
     await assert.rejects(() => apply(filesystem), { code: "DOTAIOS_OWNED_STATE_INVALID" });
     assert.equal(replaced, true);
@@ -1961,16 +1972,22 @@ function racingRetrievalFilesystem({ bindingPath, lockPath, rootPath, startMutat
     if (resolved === canonicalRoot) observeExternalRoot();
     return fsp.lstat(filePath, ...args);
   };
-  filesystem.link = async (source, destination) => {
-    if (path.resolve(String(destination)) === path.resolve(lockPath)) await startMutation();
-    return fsp.link(source, destination);
-  };
   filesystem.opendir = async (directoryPath, ...args) => {
     if (path.resolve(String(directoryPath)) === canonicalRoot) observeExternalRoot();
     return fsp.opendir(directoryPath, ...args);
   };
   filesystem.open = async (filePath, flags, mode) => {
-    if (path.resolve(String(filePath)) === canonicalRoot) observeExternalRoot();
+    const resolved = path.resolve(String(filePath));
+    const lockTemporary = new RegExp(
+      `^\\.${path.basename(lockPath).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.[0-9a-f-]{36}\\.tmp$`,
+      "i",
+    );
+    if (
+      flags === "wx"
+      && path.dirname(resolved) === path.dirname(path.resolve(lockPath))
+      && lockTemporary.test(path.basename(resolved))
+    ) await startMutation();
+    if (resolved === canonicalRoot) observeExternalRoot();
     return fsp.open(filePath, flags, mode);
   };
   return Object.freeze({

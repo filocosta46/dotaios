@@ -121,7 +121,8 @@ test("strict lock release advertises retryable live ownership without false pois
   const contender = await acquireOperationLock(lockPath, { format, strictOwnedState: true });
   continueRelease();
   await releasing;
-  assert.equal(held.record.releasing, true);
+  assert.equal(held.record.owner, first.owner);
+  assert.equal(held.record.releasing, undefined);
   assert.equal(held.record.poisoned, undefined);
   assert.equal(contender, null);
 });
@@ -347,7 +348,12 @@ async function assertDeadPublishedLockPoison(stage) {
     const child = spawnLockPublicationFailure(homePath, stage);
     assert.equal(child.status, 0, child.stderr || child.stdout);
     const lockPath = path.join(homePath, ".dotaios", "project-sources", "access-receipts.lock");
-    assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).poisoned, true);
+    const held = await inspectOperationLock(lockPath, {
+      format: "dotaios-project-source-receipt-lock/v1",
+      strictOwnedState: true,
+      isOwnerAlive: () => false,
+    });
+    assert.equal(held.record.poisoned, true);
     await assert.rejects(
       () => appendAccessReceipt({ homePath, receipt: refusedReceipt() }),
       { code: "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED" },
@@ -662,7 +668,12 @@ async function assertRetainedReceiptLockPoison() {
     const guardPath = path.join(root, "access-receipts.inflight.json");
     const lockPath = path.join(root, "access-receipts.lock");
     assert.equal(fs.existsSync(guardPath), false);
-    assert.equal(JSON.parse(fs.readFileSync(lockPath, "utf8")).poisoned, true);
+    const held = await inspectOperationLock(lockPath, {
+      format: "dotaios-project-source-receipt-lock/v1",
+      strictOwnedState: true,
+      isOwnerAlive: () => false,
+    });
+    assert.equal(held.record.poisoned, true);
     await assert.rejects(
       () => appendAccessReceipt({ homePath, receipt }),
       { code: "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED" },

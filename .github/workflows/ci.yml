@@ -38,7 +38,10 @@ jobs:
         run: pnpm run syntax-check
 
       - name: Run tests
-        run: pnpm test
+        # The suite contains deliberate 32-writer durability/contention tests.
+        # Running unrelated filesystem-heavy test files beside them can consume
+        # their bounded lock deadlines without exercising additional behavior.
+        run: pnpm exec node --test --test-concurrency=1 tests/**/*.test.mjs
 
       - name: Run smoke test
         run: pnpm run smoke
