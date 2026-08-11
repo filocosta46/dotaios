@@ -29,6 +29,20 @@ import { createSessionTransactionManager } from "./session-store-transactions.mj
 
 const STORE_RELATIVE = ".dotaios/session-store";
 const LOCK_FORMAT = "dotaios-session-store-lock/v1";
+
+// Losing a race for the lock arrives as a thrown error, not as a failed
+// acquisition. Both of these are raised while inspecting a lock another
+// process is publishing or releasing at that exact moment: the caller never
+// reached the stored sessions, so there is nothing to distrust and nothing to
+// roll back. The outer loop already owns the retry budget, so it retries.
+//
+// Tampering is not caught here. prepareOperationalRoot() checks ownership,
+// permissions and symlinks before the loop starts, and it rejects in 0 ms
+// without ever entering a retry -- see tests/core/session-store-contention.test.mjs.
+const CONTENDED_ACQUISITION_CODES = new Set([
+  "DOTAIOS_OWNED_STATE_INVALID",
+  "DOTAIOS_OPERATION_LOCK_REMOVED",
+]);
 const DEFAULT_LIMITS = Object.freeze({
   maxCanonicalFiles: 512,
   maxCanonicalBytes: 16 * 1024 * 1024,
@@ -378,7 +392,7 @@ export function createSessionStore(options = {}) {
         if (result.acquired) return result.value;
       } catch (error) {
         if (error?.code === "DOTAIOS_SESSION_STORE_DEADLINE") break;
-        throw publicError(error);
+        if (!CONTENDED_ACQUISITION_CODES.has(error?.code)) throw publicError(error);
       }
       await delay(25 + Math.floor(Math.random() * 20));
     }
