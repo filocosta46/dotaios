@@ -77,3 +77,25 @@ test("secrets dropped into memory/inbox stay out of results", async (t) => {
   const sources = memoryHits(await searchAios({ aiosPath, query: "swordfish" })).map((hit) => hit.source);
   assert.deepEqual(sources, ["memory/inbox/safe.md"]);
 });
+
+test("a busy event stream cannot bury the notes under the result limit", async (t) => {
+  // Concatenation would let 20 events fill a limit of 20 and hide the note
+  // entirely, which is the bug this scope was widened to fix.
+  const aiosPath = await fixture(t);
+  const rows = Array.from({ length: 40 }, (_, index) =>
+    JSON.stringify({ ts: `2026-08-10T09:${String(index).padStart(2, "0")}:00.000Z`, type: "note", summary: "pendant seen again" })
+  ).join("\n");
+  await fs.writeFile(path.join(aiosPath, "memory", "events.jsonl"), `${rows}\n`);
+  await fs.writeFile(
+    path.join(aiosPath, "memory", "daily", "2026-08-10.md"),
+    "# 2026-08-10\n\nThe pendant arrives Thursday.\n"
+  );
+
+  const hits = memoryHits(await searchAios({ aiosPath, query: "pendant" }));
+  const sources = hits.map((hit) => hit.source);
+  assert.ok(hits.length <= 20, `the limit must still hold, got ${hits.length}`);
+  assert.ok(
+    sources.includes("memory/daily/2026-08-10.md"),
+    `the note must survive 40 competing events, got: ${[...new Set(sources)].join(", ")}`
+  );
+});

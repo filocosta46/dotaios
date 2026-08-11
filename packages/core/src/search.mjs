@@ -173,7 +173,7 @@ async function searchScope(scope, {
   }
   if (scope === "memory") {
     const memoryDir = path.join(aiosPath, "memory");
-    const [entries, ...notes] = await Promise.all([
+    const corpora = await Promise.all([
       searchMemoryDir(memoryDir, query, { limit, reader, root: aiosPath }),
       ...MEMORY_NOTE_DIRS.map((relative) => searchMarkdownDir(path.join(memoryDir, relative), query, {
         limit,
@@ -182,7 +182,7 @@ async function searchScope(scope, {
         root: aiosPath
       }))
     ]);
-    return [...entries, ...notes.flat()].slice(0, limit);
+    return interleaveByRank(corpora, limit);
   }
   if (scope === "context") {
     return searchMarkdownDir(path.join(aiosPath, "context"), query, {
@@ -246,6 +246,25 @@ async function searchScope(scope, {
     });
   }
   return [];
+}
+
+// Each corpus arrives already ranked and already capped at the limit, but their
+// scores are not comparable: a JSONL entry and a Markdown line are scored by
+// different functions. Concatenating them would let a busy events.jsonl fill
+// the limit and hide every note, which is the bug this scope was widened to
+// fix. Round-robin keeps the best of each corpus at the top and guarantees a
+// note is reachable whenever one matched.
+function interleaveByRank(corpora, limit) {
+  const merged = [];
+  const deepest = Math.max(0, ...corpora.map((corpus) => corpus.length));
+  for (let position = 0; position < deepest && merged.length < limit; position += 1) {
+    for (const corpus of corpora) {
+      if (position >= corpus.length) continue;
+      merged.push(corpus[position]);
+      if (merged.length >= limit) break;
+    }
+  }
+  return merged;
 }
 
 export function matchQuery(text, query) {
