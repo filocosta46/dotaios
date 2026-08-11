@@ -5,7 +5,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
 
-import { buildSessionDigest } from "../../core/src/digest.mjs";
+import {
+  WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT,
+  buildWorkingContextEnvelope
+} from "../../core/src/working-context-envelope.mjs";
+import { createEvidenceReader } from "../../core/src/evidence-reader.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
 import { rankSkills } from "../../core/src/skill-resolver.mjs";
@@ -15,7 +19,8 @@ const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_VERSION = JSON.parse(
   readFileSync(new URL("../../../package.json", import.meta.url), "utf8"),
 ).version;
-const DEFAULT_SEARCH_BUDGET = 6000;
+const DEFAULT_RESULT_BUDGET = 6000;
+const MAX_SEARCH_CONFIG_BYTES = 1024 * 1024;
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) {
@@ -56,7 +61,13 @@ class DotaiosMcpServer {
       const result = await this.handleRequest(message);
       this.write({ jsonrpc: "2.0", id: message.id, result });
     } catch (error) {
-      this.writeError(message.id, error.code || -32603, error.message || "Internal error");
+      const protocolCode = Number.isInteger(error?.code) && error.code < 0 ? error.code : -32603;
+      const messageText = protocolCode !== -32603
+        ? error.message
+        : error?.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+          ? "DotAIOS could not read working context safely."
+          : "DotAIOS request failed safely.";
+      this.writeError(message.id, protocolCode, messageText);
     }
   }
 
@@ -86,7 +97,8 @@ class DotaiosMcpServer {
     if (message.method === "tools/list") return { tools: tools() };
     if (message.method === "tools/call") {
       const name = message.params?.name;
-      const args = message.params?.arguments || {};
+      const rawArguments = message.params?.arguments;
+      const args = rawArguments === undefined ? {} : requireArgumentsObject(rawArguments);
       return textResult(await this.callTool(name, args));
     }
     throw protocolError(-32601, `Method not found: ${message.method}`);
@@ -94,9 +106,18 @@ class DotaiosMcpServer {
 
   async callTool(name, args) {
     await this.assertAios();
-    if (name === "read_working_context") return this.readWorkingContext(args);
-    if (name === "search_aios") return this.searchAios(args);
-    if (name === "resolve_skill") return this.resolveSkill(args);
+    if (name === "read_working_context") {
+      assertAllowedArguments(args, ["project", "limit", "budget"]);
+      return this.readWorkingContext(args);
+    }
+    if (name === "search_aios") {
+      assertAllowedArguments(args, ["query", "scope", "limit", "budget"]);
+      return this.searchAios(args);
+    }
+    if (name === "resolve_skill") {
+      assertAllowedArguments(args, ["intent", "limit", "budget"]);
+      return this.resolveSkill(args);
+    }
     throw protocolError(-32602, `Unknown tool: ${name}`);
   }
 
@@ -104,42 +125,68 @@ class DotaiosMcpServer {
     try {
       await fs.access(path.join(this.aiosPath, "aios.json"));
     } catch {
-      throw protocolError(-32602, `No AIOS folder found at ${this.aiosPath}`);
+      throw protocolError(-32602, "No AIOS folder found at the configured path");
     }
   }
 
-  async readConfig() {
-    try {
-      return JSON.parse(await fs.readFile(path.join(this.aiosPath, "aios.json"), "utf8"));
-    } catch {
-      return {};
-    }
+  async readConfig(reader) {
+    return reader.readJson(
+      this.aiosPath,
+      path.join(this.aiosPath, "aios.json"),
+      {
+        invalidCode: "DOTAIOS_EVIDENCE_CONFIG_INVALID",
+        maxBytes: MAX_SEARCH_CONFIG_BYTES
+      }
+    );
   }
 
   async readWorkingContext(args) {
-    const project = optionalString(args.project);
+    const project = optionalString(args.project, "project", 200);
+    if (project && /\p{Cc}/u.test(project)) {
+      throw protocolError(-32602, "project must be a project slug or stable id");
+    }
     const limit = args.limit === undefined ? 3 : boundedInteger(args.limit, "limit", 1, 10);
     const visibleCharacterBudget = args.budget === undefined
       ? undefined
       : boundedInteger(args.budget, "budget", 256, 32000);
-    const { digest, budget, generatedAt, projectFilter } = await buildSessionDigest(this.aiosPath, {
-      project,
-      limit,
-      visibleCharacterBudget,
-    });
-    return JSON.stringify({
-      markdown: digest,
+    let envelope;
+    try {
+      envelope = await buildWorkingContextEnvelope(this.aiosPath, {
+        project,
+        limit,
+        visibleCharacterBudget,
+      });
+    } catch (error) {
+      if (
+        error?.code === "DOTAIOS_AMBIGUOUS_PROJECT"
+        || error?.cause?.code === "DOTAIOS_AMBIGUOUS_PROJECT"
+      ) {
+        throw protocolError(-32602, "project selector is ambiguous; use its stable id");
+      }
+      throw error;
+    }
+    const { digest, budget, generatedAt, projectFilter, operational } = envelope;
+    const metadata = {
       scope: { project: projectFilter },
       generated_at: generatedAt,
       budget,
-    }, null, 2);
+      operational,
+    };
+    if (JSON.stringify(metadata, null, 2).length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
+      throw new Error("Working-context metadata exceeded its fixed operational bound.");
+    }
+    return JSON.stringify({ markdown: digest, ...metadata }, null, 2);
   }
 
   async resolveSkill(args) {
     const intent = requireString(args.intent, "intent", 500);
     const limit = args.limit === undefined ? 1 : boundedInteger(args.limit, "limit", 1, 10);
+    const budget = args.budget === undefined
+      ? DEFAULT_RESULT_BUDGET
+      : boundedInteger(args.budget, "budget", 256, 32000);
     const skillsDir = path.join(this.aiosPath, "skills");
-    const skills = await collectSkills(this.aiosPath);
+    const reader = createEvidenceReader({ roots: [this.aiosPath] });
+    const skills = await collectSkills(this.aiosPath, { reader, root: this.aiosPath });
     const matches = rankSkills(intent, skills, { skillsDir })
       .slice(0, limit)
       .map((entry) => ({
@@ -150,22 +197,31 @@ class DotaiosMcpServer {
         reason: entry.reason,
         resource: `skills/${entry.dir}/SKILL.md`,
       }));
-    return JSON.stringify({ intent, matches }, null, 2);
+    return serializeBoundedSkillResults({ intent, matches, limit: budget });
   }
 
   async searchAios(args) {
     const query = requireString(args.query, "query", 500);
     const limit = args.limit === undefined ? 10 : boundedInteger(args.limit, "limit", 1, 20);
     const budget = args.budget === undefined
-      ? DEFAULT_SEARCH_BUDGET
+      ? DEFAULT_RESULT_BUDGET
       : boundedInteger(args.budget, "budget", 256, 32000);
     const scope = optionalString(args.scope) || "all";
     if (!SEARCH_SCOPES.includes(scope)) {
       throw protocolError(-32602, `scope must be one of: ${SEARCH_SCOPES.join(", ")}`);
     }
-    const config = await this.readConfig();
+    let reader = createEvidenceReader({ roots: [this.aiosPath] });
+    const config = await this.readConfig(reader);
     const vaultPath = resolveVaultPath(config, this.aiosPath);
-    const groups = await searchAios({ aiosPath: this.aiosPath, vaultPath, query, scope, limit });
+    reader = reader.withAuthorizedRoots([vaultPath]);
+    const groups = await searchAios({
+      aiosPath: this.aiosPath,
+      vaultPath,
+      query,
+      scope,
+      limit,
+      evidenceReader: reader
+    });
     return serializeBoundedSearchResults({ query, scope, groups, limit: budget });
   }
 
@@ -183,14 +239,20 @@ function tools() {
     {
       name: "read_working_context",
       title: "Read Working Context",
-      description: "Read the same bounded, project-filtered working context produced by dotaios brief --compact. This tool has no write side effects.",
+      description: "Read the same bounded, project-filtered working-context projection produced by dotaios brief --compact plus fixed operational compatibility state beside it. This tool has no write side effects.",
       inputSchema: {
         type: "object",
         additionalProperties: false,
         properties: {
-          project: { type: "string", description: "Optional project slug or stable id." },
+          project: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            pattern: "^(?=.*\\S)[^\\u0000-\\u001F\\u007F-\\u009F]*$",
+            description: "Optional project slug or stable id. Opaque identifiers without Unicode control characters are accepted within the 200-code-point bound."
+          },
           limit: { type: "integer", minimum: 1, maximum: 10, default: 3 },
-          budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000 },
+          budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000, description: "Character budget for canonical Markdown; bounded operational metadata is separate." },
         },
       },
     },
@@ -220,6 +282,7 @@ function tools() {
         properties: {
           intent: { type: "string", minLength: 1, maxLength: 500 },
           limit: { type: "integer", minimum: 1, maximum: 10, default: 1 },
+          budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000 },
         },
         required: ["intent"],
       },
@@ -232,7 +295,7 @@ function serializeBoundedSearchResults({ query, scope, groups, limit }) {
   let truncated = false;
   outer: for (const group of groups) {
     for (const rawResult of group.results || []) {
-      const result = sanitizeSearchValue(rawResult);
+      const result = sanitizeResultValue(rawResult);
       const candidate = [...selected, { scope: group.scope, ...result }];
       const candidateText = serializeSearchEnvelope({ query, scope, results: candidate, limit, truncated: false });
       if (candidateText.length > limit) {
@@ -253,17 +316,90 @@ function serializeBoundedSearchResults({ query, scope, groups, limit }) {
 
   if (serialized.length > limit) {
     const marker = "[query truncated]";
-    const overflow = serialized.length - limit;
-    const keep = Math.max(0, boundedQuery.length - overflow - marker.length);
-    boundedQuery = keep > 0 ? `${boundedQuery.slice(0, keep)}${marker}` : marker;
     truncated = true;
-    serialized = serializeSearchEnvelope({ query: boundedQuery, scope, results: selected, limit, truncated });
+    const fitted = fitSerializedString({
+      value: boundedQuery,
+      marker,
+      limit,
+      serialize: (candidate) => serializeSearchEnvelope({
+        query: candidate,
+        scope,
+        results: selected,
+        limit,
+        truncated
+      })
+    });
+    if (fitted) {
+      boundedQuery = fitted.value;
+      serialized = fitted.serialized;
+    }
   }
 
   if (serialized.length > limit) {
     throw protocolError(-32602, `budget ${limit} is too small for the search response envelope`);
   }
   return serialized;
+}
+
+function serializeBoundedSkillResults({ intent, matches, limit }) {
+  const selected = [];
+  let truncated = false;
+  for (const rawMatch of matches) {
+    const match = sanitizeResultValue(rawMatch, "", Number.POSITIVE_INFINITY);
+    const candidate = [...selected, match];
+    if (serializeSkillEnvelope({ intent, matches: candidate, limit, truncated: false }).length > limit) {
+      truncated = true;
+      break;
+    }
+    selected.push(match);
+  }
+
+  let boundedIntent = intent;
+  let serialized = serializeSkillEnvelope({ intent: boundedIntent, matches: selected, limit, truncated });
+  while (serialized.length > limit && selected.length > 0) {
+    selected.pop();
+    truncated = true;
+    serialized = serializeSkillEnvelope({ intent: boundedIntent, matches: selected, limit, truncated });
+  }
+
+  if (serialized.length > limit) {
+    const marker = "[intent truncated]";
+    truncated = true;
+    const fitted = fitSerializedString({
+      value: boundedIntent,
+      marker,
+      limit,
+      serialize: (candidate) => serializeSkillEnvelope({
+        intent: candidate,
+        matches: selected,
+        limit,
+        truncated
+      })
+    });
+    if (fitted) {
+      boundedIntent = fitted.value;
+      serialized = fitted.serialized;
+    }
+  }
+
+  if (serialized.length > limit) {
+    throw protocolError(-32602, `budget ${limit} is too small for the skill response envelope`);
+  }
+  return serialized;
+}
+
+function serializeSkillEnvelope({ intent, matches, limit, truncated }) {
+  let used = 0;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const serialized = JSON.stringify({
+      intent,
+      matches,
+      budget: { limit, used, truncated },
+    }, null, 2);
+    if (serialized.length === used) return serialized;
+    used = serialized.length;
+  }
+  throw new Error("Could not stabilize skill response budget metadata");
 }
 
 function serializeSearchEnvelope({ query, scope, results, limit, truncated }) {
@@ -281,21 +417,58 @@ function serializeSearchEnvelope({ query, scope, results, limit, truncated }) {
   throw new Error("Could not stabilize search response budget metadata");
 }
 
-function sanitizeSearchValue(value, key = "") {
-  if (Array.isArray(value)) return value.slice(0, 5).map((entry) => sanitizeSearchValue(entry));
+function fitSerializedString({ value, marker, limit, serialize }) {
+  const codePoints = Array.from(value);
+  let lower = 0;
+  let upper = codePoints.length;
+  let best = null;
+  while (lower <= upper) {
+    const count = Math.floor((lower + upper) / 2);
+    const candidate = count === 0
+      ? marker
+      : `${codePoints.slice(0, count).join("")}${marker}`;
+    const serialized = serialize(candidate);
+    if (serialized.length <= limit) {
+      best = { value: candidate, serialized };
+      lower = count + 1;
+    } else {
+      upper = count - 1;
+    }
+  }
+  return best;
+}
+
+function sanitizeResultValue(value, key = "", maximumArrayEntries = 5) {
+  if (Array.isArray(value)) {
+    return value
+      .slice(0, maximumArrayEntries)
+      .map((entry) => sanitizeResultValue(entry, "", maximumArrayEntries));
+  }
   if (value && typeof value === "object") {
     const sanitized = {};
     for (const [childKey, childValue] of Object.entries(value)) {
       if (/^(?:path|source_path|projectPath|readmePath|rootPath)$/i.test(childKey)) continue;
-      sanitized[childKey] = sanitizeSearchValue(childValue, childKey);
+      sanitized[childKey] = sanitizeResultValue(childValue, childKey, maximumArrayEntries);
     }
     return sanitized;
   }
   if (typeof value === "string") {
     const maximum = key === "content" || key === "summary" ? 800 : 300;
-    return value.length <= maximum ? value : `${value.slice(0, maximum - 16)}\n[truncated]`;
+    return truncateSanitizedString(value, maximum);
   }
   return value;
+}
+
+function truncateSanitizedString(value, maximum) {
+  if (value.length <= maximum) return value;
+  const marker = "\n[truncated]";
+  const available = maximum - marker.length;
+  let prefix = "";
+  for (const codePoint of Array.from(value)) {
+    if (prefix.length + codePoint.length > available) break;
+    prefix += codePoint;
+  }
+  return `${prefix}${marker}`;
 }
 
 function parseOptions(args) {
@@ -333,22 +506,45 @@ function requireString(value, name, maximumLength) {
   if (typeof value !== "string" || value.trim() === "") {
     throw protocolError(-32602, `${name} must be a non-empty string`);
   }
-  if (maximumLength && value.length > maximumLength) {
+  if (maximumLength && Array.from(value).length > maximumLength) {
     throw protocolError(-32602, `${name} must be at most ${maximumLength} characters`);
   }
   return value;
 }
 
-function optionalString(value) {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+function optionalString(value, name = "value", maximumLength = null) {
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || value.trim() === "") {
+    throw protocolError(-32602, `${name} must be a non-empty string`);
+  }
+  if (/\p{Cc}/u.test(value)) {
+    throw protocolError(-32602, `${name} must not contain control characters`);
+  }
+  if (maximumLength && Array.from(value).length > maximumLength) {
+    throw protocolError(-32602, `${name} must be at most ${maximumLength} characters`);
+  }
+  const result = value.trim();
+  return result;
+}
+
+function requireArgumentsObject(value) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw protocolError(-32602, "tool arguments must be an object");
+  }
+  return value;
+}
+
+function assertAllowedArguments(args, allowedNames) {
+  const allowed = new Set(allowedNames);
+  const unknown = Object.keys(args).find((name) => !allowed.has(name));
+  if (unknown) throw protocolError(-32602, "Unknown tool argument");
 }
 
 function boundedInteger(value, name, minimum, maximum) {
-  const number = Number(value);
-  if (!Number.isInteger(number) || number < minimum || number > maximum) {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < minimum || value > maximum) {
     throw protocolError(-32602, `${name} must be an integer from ${minimum} to ${maximum}`);
   }
-  return number;
+  return value;
 }
 
 function protocolError(code, message) {

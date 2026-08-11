@@ -48,14 +48,54 @@ Captured text is evidence, not automatically durable knowledge. Promotion to `co
 selects up to three ranked session-index records plus at most eight signals and
 eight events from today and yesterday, combines them with bounded daily and
 project context, applies one project filter to all three memory sources, and
-fits the result into a visible 6,000-character budget. When the budget is
-reached, lower-priority items are omitted and the rendered projection says so.
-The standard daily brief, session-start hooks, managed bridges, and the default
-hot-memory audit consume this shared selection instead of defining parallel
-windows. Explicit all-history audit and search remain opt-in operations.
+fits the canonical working-context projection into a visible 6,000-character
+budget. When the budget is reached, lower-priority items are omitted and the
+rendered projection says so. Compact CLI output, session-start hook JSON, and
+MCP wrap that unchanged projection in a read-only operational envelope.
+
+Within a project-scoped projection, a timeline row is global only when both
+`project` and `project_id` are absent or null. Every present attribution field
+must agree with the selected catalog identity. A unique slug, project alias, or
+stable id may stand alone; an alias shared by multiple catalog records requires
+the matching unique `project_id`. Malformed, conflicting, or differently
+attributed rows are excluded rather than widened into global context.
+
+Projection work is bounded separately from visible output. One projection may
+open at most 512 source files and reserve at most 16 MiB of raw source bytes.
+Ordinary context, daily, project README, and signal files are capped at 1 MiB
+each; `decisions/log.md` at 4 MiB; and the session index and event log at 8 MiB
+each. Project discovery stops at 256 entries. Signal discovery stops at 8,192
+directory entries and 64 files matching today or yesterday. An input that
+exceeds a limit fails closed with the same path-free working-context error; it
+is never silently truncated into a different selection. The configured AIOS
+root may be one stable symlink to its resolved boundary, while projected links
+below that boundary, special files, changed path components, and invalid UTF-8
+are refused. Embedded filesystems must provide handle-bound `open`, incremental
+`opendir`, `lstat`, and `realpath` operations; DotAIOS does not fall back to a
+path-only read. The configured `aios.json` file and its ancestor chain are
+snapshotted before and after selection, and a missing optional tail is accepted
+only while its nearest existing ancestor still resolves inside that same AIOS.
+Listed project directories are identity-checked around an optional missing
+README. Compact, hook-JSON, and lean reads are classified read-only at CLI
+dispatch and cannot launch the optional detached sync hook.
+
+Portable Node exposes snapshot-based containment rather than kernel-relative
+`openat2`/`NtCreateFile` semantics. DotAIOS therefore detects identity,
+timestamp, and ancestor changes at each observation boundary but does not claim
+to mathematically exclude a hostile swap-away-and-restore completed entirely
+between two checks. Byte-level zero-write guarantees likewise exclude
+filesystem-managed access-time metadata.
+
+Migration state stays beside user memory:
+the inspector reads only `aios.json` and owned transaction metadata, while a
+fixed notice may add at most 1,024 characters outside the projection budget. The
+standard daily brief, managed bridges, and the default hot-memory audit consume
+the shared selection instead of defining parallel windows. Explicit all-history
+audit and search remain opt-in operations.
 
 The optional MCP adapter exposes exactly `read_working_context`, `search_aios`,
-and `resolve_skill`. `read_working_context` calls the same core projection;
+and `resolve_skill`. `read_working_context` returns the same core projection plus
+a bounded `operational.migration` sibling;
 `search_aios` is the bounded on-demand search path, and `resolve_skill` routes
 workflow intent. There are no compatibility aliases.
 
@@ -73,10 +113,11 @@ There are two skill scopes. AIOS skills are authored in `~/aios/skills` and
 propagated globally. Project skills are authored in `<project>/skills` and
 propagated only inside that checkout by `dotaios attach`. Both scopes use the
 same `SKILL.md` contract; the registry declares their native targets. Symlinks,
-Hermes external directories, dry-runs, idempotency, and preservation of foreign
-entries are tested at the CLI seam. Native client discovery and invocation are
-not inferred from a successful filesystem check and require separate acceptance
-evidence.
+global Hermes external directories, dry-runs, idempotency, and preservation of
+foreign entries are tested at the CLI seam. Hermes has no project-local target:
+DotAIOS does not own the `HERMES_HOME` selector that would make a checkout-local
+config authoritative. Native client discovery and invocation are not inferred
+from a successful filesystem check and require separate acceptance evidence.
 
 Plugins are trusted local folders. Permission declarations are visible to users but are not sandbox enforcement. Remote/plugin marketplace installs are intentionally out of scope until provenance and stronger install controls exist.
 

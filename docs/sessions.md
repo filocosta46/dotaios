@@ -76,8 +76,16 @@ project is requested. It does not inject full saved transcripts. Use
 `dotaios search` when you need older or more detailed evidence.
 
 With the optional MCP adapter, `read_working_context` returns that same startup
-projection, `search_aios` performs the on-demand lookup, and `resolve_skill`
-routes a request to an installed workflow. Those are the adapter's only tools.
+projection plus bounded operational migration state beside it. Compact CLI and
+hook output render the same actionable fact before the projection. The
+operational notice does not change memory selection or the projection budget.
+Source reads also have a separate 16 MiB aggregate raw-input ceiling and fixed
+file/directory caps; oversize state fails closed instead of changing ordering or
+silently widening the session window. `search_aios` performs
+the on-demand lookup, and `resolve_skill` routes a request to an installed
+workflow. Those are the adapter's only tools. Compact text, hook JSON, and lean
+brief reads are classified read-only before CLI teardown, so even an explicitly
+enabled automatic sync hook cannot turn a context read into a detached writer.
 
 ## Promote something that should last
 

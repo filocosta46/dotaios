@@ -1,7 +1,9 @@
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { EvidenceReadError } from "./evidence-reader.mjs";
 import { readJsonl } from "./memory.mjs";
+import { isPathWithinLexically } from "./paths.mjs";
 
 export const SESSIONS_SUBDIR = "memory/sessions";
 const INDEX_FILENAME = "index.jsonl";
@@ -150,13 +152,27 @@ export async function writeSession(aiosPath, session) {
   return { filePath, relativePath, hash: bodyHash, skipped: false };
 }
 
-export async function readSessionIndex(aiosPath) {
+export async function readSessionIndex(aiosPath, options = {}) {
   const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
-  return readJsonl(indexPath);
+  return readJsonl(indexPath, options);
 }
 
-export async function filterSessions(aiosPath, { agent, project, since } = {}) {
-  const entries = await readSessionIndex(aiosPath);
+export async function filterSessions(aiosPath, {
+  agent,
+  project,
+  since,
+  readOnly = false,
+  filesystem,
+  reader,
+  root = aiosPath
+} = {}) {
+  const indexPath = path.join(aiosPath, SESSIONS_SUBDIR, INDEX_FILENAME);
+  const entries = reader
+    ? await reader.readJsonl(root, indexPath)
+    : await readSessionIndex(aiosPath, {
+        ...(filesystem ? { filesystem } : {}),
+        quarantine: !readOnly
+      });
   const sinceTs = since ? parseSinceFlag(since) : null;
 
   return entries.filter((entry) => {
@@ -185,12 +201,43 @@ export async function deleteSession(aiosPath, sessionId) {
   return entry;
 }
 
-export async function searchSessions(aiosPath, query, { agent, project, since, limit = 20 } = {}) {
-  const entries = await filterSessions(aiosPath, { agent, project, since });
+export async function searchSessions(aiosPath, query, {
+  agent,
+  project,
+  since,
+  limit = 20,
+  readOnly = false,
+  filesystem,
+  reader,
+  root = aiosPath
+} = {}) {
+  const entries = await filterSessions(aiosPath, {
+    agent,
+    project,
+    since,
+    readOnly,
+    filesystem,
+    reader,
+    root
+  });
   const lower = query.toLowerCase();
   const results = [];
+  const sessionsRoot = path.resolve(aiosPath, SESSIONS_SUBDIR);
 
   for (const entry of entries.slice().reverse()) {
+    let filePath = null;
+    if (reader) {
+      if (typeof entry.path !== "string" || entry.path.length === 0 || path.isAbsolute(entry.path)) {
+        throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
+      }
+      filePath = path.resolve(aiosPath, entry.path);
+      if (
+        !isPathWithinLexically(path.resolve(root), filePath)
+        || !isPathWithinLexically(sessionsRoot, filePath)
+      ) {
+        throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
+      }
+    }
     const titleMatch = (entry.title || "").toLowerCase().includes(lower);
     const agentMatch = (entry.agent || "").toLowerCase().includes(lower);
     const projectMatch = (entry.project || "").toLowerCase().includes(lower);
@@ -201,11 +248,15 @@ export async function searchSessions(aiosPath, query, { agent, project, since, l
       continue;
     }
 
-    const filePath = path.join(aiosPath, entry.path);
+    filePath ||= path.join(aiosPath, entry.path);
     let body;
     try {
-      body = await fs.readFile(filePath, "utf8");
-    } catch {
+      body = reader
+        ? await reader.readText(root, filePath)
+        : await fs.readFile(filePath, "utf8");
+      if (body === null) continue;
+    } catch (error) {
+      if (reader) throw error;
       continue;
     }
 

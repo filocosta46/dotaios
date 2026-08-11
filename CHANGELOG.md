@@ -4,6 +4,68 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Compact CLI, Gemini hook JSON, and MCP working-context reads now share one
+  operational migration envelope beside the unchanged canonical working-context
+  projection. The cheap session-start inspector reads only compatibility
+  metadata, reports
+  `current`, `schema_outdated`, `transaction_present`, or path-free
+  `inspection_failed`,
+  and never inventories protected memory shelves.
+- `dotaios connect gemini` now preflights all three managed artifacts and writes
+  `settings.json` last as the SessionStart activation point. Its generated hook
+  invokes the exact shipped DotAIOS package version instead of allowing an
+  opened project's local `dotaios` binary to shadow the command.
+- Project attachment no longer writes `<project>/.hermes/config.yaml`. Hermes
+  loads the config selected through `HERMES_HOME`, and DotAIOS does not own that
+  selector, so the earlier project target could look configured while remaining
+  inert in an ordinary launch. Existing checkout Hermes files are preserved.
+  Global `~/.hermes/config.yaml` and discovered profile registration remain
+  available as configuration evidence only.
+
+### Fixed
+
+- Canonical working-context reads no longer create corrupt-JSONL quarantine
+  files, follow projected sources outside the AIOS boundary, echo unbounded
+  project filters, or return absolute machine paths in internal MCP errors.
+  Source work is capped at 16 MiB and 512 files with fixed per-shelf and
+  directory limits; concurrent path-component changes and unsafe path-only
+  filesystem adapters fail closed. Opaque project IDs within the nonblank,
+  control-free, 200-Unicode-code-point boundary remain valid, while invalid or
+  ambiguous selectors can no longer silently widen scope. MCP integer fields
+  reject coercion and unknown argument names return one bounded generic error.
+  Scoped timeline rows are global only when both `project` and `project_id` are
+  absent; malformed or conflicting attribution is excluded, and an ambiguous
+  catalog alias requires a matching unique stable project id.
+  A handle-bound `aios.json` authority snapshot brackets each selection;
+  initially missing optional sources remain valid only under unchanged contained
+  ancestors. Compact, hook-JSON, and lean reads cannot launch the optional sync
+  hook after producing output.
+  Projection budgets retain their existing meaning; rendered operational notices
+  and non-projection MCP metadata have a separate fixed 1,024-character bound.
+  JSON escaping and protocol framing are representation costs, not operational
+  context, and are not subtracted from the projection budget.
+- Gemini connection now preserves every byte outside its one managed
+  `GEMINI.md` block, refuses malformed ownership markers, unsafe paths, foreign
+  hook scripts, invalid UTF-8 and incompatible settings shapes, and detects
+  concurrent edits before atomic replacement. It quotes hook paths containing
+  spaces, repairs one stale named DotAIOS hook, refuses ambiguous duplicates or
+  legacy MCP entries, preserves recovery-file permissions, and surfaces hook
+  failures instead of silently returning empty context.
+- The global Hermes YAML adapter now fails closed on invalid or ambiguous
+  documents, preserves comments and indentation, quotes punctuation-heavy
+  paths, rejects multiline injection and unsupported YAML shapes, and validates
+  the exact resulting path before writing. It rejects symlinked or non-regular
+  config targets and invalid UTF-8, serializes competing DotAIOS writers, and
+  detects external changes observed at guarded checkpoints. The live config
+  remains visible until an atomic replacement, and an exact-byte backup is
+  retained. An external editor that does not honor the DotAIOS lock still has a
+  narrow final check-to-rename race. Health inspection uses the same safe YAML
+  reader and registry key as activation. Custom external-directory adapters
+  now reject malformed dotted keys and control-character config paths instead
+  of normalizing a typo into a different key or crashing health inspection.
+
 ## [1.28.4] - 2026-08-06
 
 ### Added

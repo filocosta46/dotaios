@@ -1,11 +1,11 @@
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { readJson } from "../../../core/src/files.mjs";
+import { createEvidenceReader } from "../../../core/src/evidence-reader.mjs";
 import { markMatches, SEARCH_SCOPES, searchAios } from "../../../core/src/search.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { emitReliabilityMetric, hashMetricValue } from "../lib/reliability-metrics.mjs";
 
 const validScopes = new Set(SEARCH_SCOPES);
+const MAX_SEARCH_CONFIG_BYTES = 1024 * 1024;
 
 export async function searchCommand(args) {
   if (hasHelpFlag(args)) {
@@ -21,11 +21,15 @@ export async function searchCommand(args) {
   }
 
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
-  const startedAt = Date.now();
   await ensureAiosFolder(target);
 
-  const config = await readJson(path.join(target, "aios.json"), {});
+  let reader = createEvidenceReader({ roots: [target] });
+  const config = await reader.readJson(target, path.join(target, "aios.json"), {
+    invalidCode: "DOTAIOS_EVIDENCE_CONFIG_INVALID",
+    maxBytes: MAX_SEARCH_CONFIG_BYTES
+  });
   const vaultPath = resolveVaultPath(config, target);
+  reader = reader.withAuthorizedRoots([vaultPath]);
   const scope = options.scope || "all";
   const limit = options.limit;
   validateScope(scope);
@@ -39,7 +43,15 @@ export async function searchCommand(args) {
   if (options.since) sessionFilters.since = options.since;
 
   let totalResults = 0;
-  const groups = await searchAios({ aiosPath: target, vaultPath, query, scope, limit, sessionFilters });
+  const groups = await searchAios({
+    aiosPath: target,
+    vaultPath,
+    query,
+    scope,
+    limit,
+    sessionFilters,
+    evidenceReader: reader
+  });
   for (const group of groups) {
     if (group.results.length === 0) continue;
     printGroup(group.scope, group.results, query);
@@ -51,19 +63,6 @@ export async function searchCommand(args) {
   } else {
     console.log(`${totalResults} result(s) found.`);
   }
-
-  const elapsedMs = Date.now() - startedAt;
-  await emitReliabilityMetric(target, {
-    type: "search_run",
-    query_hash: hashMetricValue(query),
-    scope,
-    total_results: totalResults,
-    limit,
-    search_latency_ms: elapsedMs,
-    // Kept nullable by design; this requires an independent workflow evaluation.
-    first_recall_min: null,
-    p_at_5: null
-  });
 }
 
 function parseOptions(args = []) {

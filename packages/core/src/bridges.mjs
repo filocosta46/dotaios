@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { readJson } from "./files.mjs";
+import { isSafeRegistryPathText, parseExternalSkillsKey } from "./skill-config-key.mjs";
 
 export const MANAGED_START = "<!-- dotaios-managed:start -->";
 export const MANAGED_END = "<!-- dotaios-managed:end -->";
@@ -64,15 +65,15 @@ function normalizeSkillTarget(raw, { relativeOnly = false } = {}) {
   if (mode !== "symlink" && mode !== "config-external-dir") return null;
 
   const config = { mode };
-  if (typeof raw.dir === "string" && raw.dir.trim()) {
+  if (isSafeRegistryPathText(raw.dir)) {
     const dir = raw.dir.trim();
     if (!relativeOnly || isSafeRelativePath(dir)) config.dir = dir;
   }
-  if (typeof raw.configFile === "string" && raw.configFile.trim()) {
+  if (isSafeRegistryPathText(raw.configFile)) {
     const configFile = raw.configFile.trim();
     if (!relativeOnly || isSafeRelativePath(configFile)) config.configFile = configFile;
   }
-  if (typeof raw.key === "string" && raw.key.trim()) config.key = raw.key.trim();
+  if (parseExternalSkillsKey(raw.key)) config.key = raw.key;
 
   if (mode === "symlink" && !config.dir) return null;
   if (mode === "config-external-dir" && (!config.configFile || !config.key)) return null;
@@ -206,7 +207,7 @@ export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skil
   }
 
   lines.push("Working memory: route events, signals, and saved sessions only through the canonical bounded projection. Run `dotaios brief --compact` at session start; for project work, add `--project <slug-or-id>`. Do not load those memory stores directly or invent another recency window.");
-  lines.push("Optional MCP: `read_working_context` returns that same projection. The adapter exposes exactly `read_working_context`, `search_aios`, and `resolve_skill`; it has no compatibility aliases.");
+  lines.push("Optional MCP: `read_working_context` returns that same projection plus bounded operational compatibility state beside it. The adapter exposes exactly `read_working_context`, `search_aios`, and `resolve_skill`; it has no compatibility aliases.");
   lines.push(MANAGED_END, "");
 
   return lines.join("\n");

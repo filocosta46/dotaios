@@ -796,6 +796,11 @@ async function readProjectRecords(context) {
 
   const records = [];
   for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (entry.isSymbolicLink()) {
+      throw new Error(
+        "Project README path is outside the AIOS project shelf because its project directory is a symbolic link."
+      );
+    }
     if (!entry.isDirectory()) continue;
     try {
       validateSlug(entry.name);
@@ -805,12 +810,61 @@ async function readProjectRecords(context) {
       );
     }
     const readmePath = path.join(projectsPath, entry.name, "README.md");
+    const projectDirectoryPath = path.dirname(readmePath);
+    const projectDirectoryBefore = await context.fs.lstat(projectDirectoryPath);
+    if (
+      !projectDirectoryBefore.isDirectory()
+      || projectDirectoryBefore.isSymbolicLink()
+      || !await isPathWithin(context.aiosPath, projectDirectoryPath, { fileSystem: context.fs })
+    ) {
+      throw new Error("Project catalog changed while it was being read.");
+    }
     const source = await readMarkdownSource(context.fs, readmePath);
-    if (source === null) continue;
+    if (source === null) {
+      try {
+        await context.fs.lstat(readmePath);
+        const error = new Error("Project README changed while the working-context catalog was being read.");
+        error.code = "DOTAIOS_CONTEXT_SOURCE_CHANGED";
+        throw error;
+      } catch (error) {
+        if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+      }
+      let projectDirectoryAfter;
+      try {
+        projectDirectoryAfter = await context.fs.lstat(projectDirectoryPath);
+      } catch (error) {
+        if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+          const changed = new Error("Project catalog changed while it was being read.");
+          changed.code = "DOTAIOS_CONTEXT_SOURCE_CHANGED";
+          throw changed;
+        }
+        throw error;
+      }
+      if (
+        !sameProjectDirectory(projectDirectoryBefore, projectDirectoryAfter)
+        || projectDirectoryAfter.isSymbolicLink()
+        || !await isPathWithin(context.aiosPath, projectDirectoryPath, { fileSystem: context.fs })
+      ) {
+        const changed = new Error("Project catalog changed while it was being read.");
+        changed.code = "DOTAIOS_CONTEXT_SOURCE_CHANGED";
+        throw changed;
+      }
+      continue;
+    }
     records.push(projectRecord(entry.name, readmePath, source));
   }
   assertUniqueProjectIds(records);
   return records;
+}
+
+function sameProjectDirectory(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
 }
 
 function projectRecord(directorySlug, readmePath, source) {

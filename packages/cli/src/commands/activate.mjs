@@ -1,8 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
-import { pathExists, writeFileSafe } from "../../../core/src/files.mjs";
+import { pathExists, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
   MANAGED_END,
@@ -25,7 +24,6 @@ import {
   symlinkTargets,
   retiredSymlinkTargets,
   projectSymlinkTargets,
-  projectHermesConfigTargets,
   wellKnownSymlinkTargets
 } from "../../../core/src/skill-targets.mjs";
 import {
@@ -36,7 +34,7 @@ import {
   validateProjectPath,
   validateProjectSourcePath
 } from "../../../core/src/skills-install.mjs";
-import { discoverHermesConfigPaths, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
+import { discoverHermesConfigTargets, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const managedStart = MANAGED_START;
@@ -152,6 +150,7 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
   }
 
   const blockedContextCount = global.blockedContextCount + projectBlockedContextCount;
+  const blockedHermesCount = results.filter((entry) => entry.action === "hermes:conflict").length;
   if (blockedContextCount > 0) {
     process.exitCode = 1;
     console.error(
@@ -164,11 +163,18 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
       "Those files already existed and were left untouched. To keep what they say and add DotAIOS below it, run `dotaios activate --merge`."
     );
   }
+  if (blockedHermesCount > 0) {
+    process.exitCode = 1;
+    console.error(
+      `Activation needs attention: preserved ${blockedHermesCount} concurrent Hermes config edit(s). Re-run activation after reviewing the file.`
+    );
+  }
 
   return {
     detectedClientCount: global.installedCount,
     configuredContextCount: global.configuredContextCount,
     blockedContextCount,
+    blockedHermesCount,
     blockedCatalogCount: 0,
     results
   };
@@ -337,7 +343,14 @@ async function createGlobalBridges(
     }
   }
 
-  const skills = await installAllSkills(aiosPath, homePath, options, registry, installedAgentNames);
+  const skills = await installAllSkills(
+    aiosPath,
+    homePath,
+    options,
+    registry,
+    installedAgentNames,
+    lifecycle
+  );
   return {
     results: [...results, ...skills],
     installedCount,
@@ -379,7 +392,14 @@ async function previewSkillsIndex(aiosPath) {
 
 // Install DotAIOS skills natively into each documented client directory plus
 // the shared Agent Skills root, then register the source dir in Hermes config.
-async function installAllSkills(aiosPath, homePath, options, registry, installedAgentNames = new Set()) {
+async function installAllSkills(
+  aiosPath,
+  homePath,
+  options,
+  registry,
+  installedAgentNames = new Set(),
+  lifecycle = {}
+) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
@@ -413,12 +433,19 @@ async function installAllSkills(aiosPath, homePath, options, registry, installed
     results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: options.dryRun }));
   }
 
-  for (const configPath of await discoverHermesConfigPaths(homePath, registry)) {
+  for (const target of await discoverHermesConfigTargets(homePath, registry)) {
+    const { configPath, key } = target;
     const r = await ensureExternalSkillsDir({
       configPath,
       skillsPath: aiosSkillsDir,
+      key,
       dryRun: options.dryRun,
-      createMissing: true
+      createMissing: true,
+      boundaryRoot: homePath,
+      beforeReplace: lifecycle.beforeHermesReplace,
+      beforePublish: lifecycle.beforeHermesPublish,
+      beforeCommit: lifecycle.beforeHermesCommit,
+      beforeRename: lifecycle.beforeHermesRename
     });
     results.push({ action: `hermes:${r.action}`, path: configPath, note: r.reason });
   }
@@ -448,7 +475,7 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
   }
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = [
-    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project), {
+    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, resolvePath(options.home || os.homedir())), {
       ...options,
       projectRoot: projectPath,
       beforeReplace: lifecycle.beforeBridgeReplace,
@@ -468,7 +495,6 @@ async function propagateProjectSkills(projectPath, options, registry) {
   const skillsDir = path.join(projectPath, "skills");
   const symlinkTargetsForProject = projectSymlinkTargets(registry);
   const retiredTargetsForProject = retiredSymlinkTargets(registry);
-  const hermesTargetsForProject = projectHermesConfigTargets(registry);
   const details = [];
   const sourceSafety = await validateProjectSourcePath({
     projectRoot: projectPath,
@@ -552,25 +578,7 @@ async function propagateProjectSkills(projectPath, options, registry) {
     };
   }
 
-  for (const target of hermesTargetsForProject) {
-    const configPath = path.join(projectPath, target.configFile);
-    const safety = await validateProjectPath({ projectRoot: projectPath, targetPath: configPath });
-    if (!safety.safe) {
-      details.push({ action: "project-skills:unsafe-hermes-config", path: configPath, note: safety.reason });
-      continue;
-    }
-    const result = await ensureExternalSkillsDir({
-      configPath,
-      skillsPath: skillsDir,
-      key: target.key,
-      dryRun: options.dryRun,
-      createMissing: true
-    });
-    details.push({ action: `hermes:${result.action}`, path: configPath, note: result.reason });
-  }
-
   const linked = details.filter((result) => ["linked", "already-linked", "would link"].includes(result.action)).length;
-  const changed = details.filter((result) => result.action.startsWith("hermes:") && !result.action.endsWith("manual") && !result.action.endsWith("already-present")).length;
   const verb = skills.length === 0
     ? "checked"
     : (options.dryRun ? "would propagate" : "propagated");
@@ -579,10 +587,7 @@ async function propagateProjectSkills(projectPath, options, registry) {
     : skills.length === 1
     ? `skill ${skills[0].name}`
     : `${skills.length} skill(s)`;
-  const targetPaths = [
-    ...symlinkTargetsForProject.map((target) => target.dir),
-    ...hermesTargetsForProject.map((target) => target.configFile)
-  ];
+  const targetPaths = symlinkTargetsForProject.map((target) => target.dir);
   const targetLabel = targetPaths.length > 0 ? targetPaths.join(", ") : "no registered targets";
   const unsafe = details.filter((result) =>
     result.action === "skipped-unsafe-target"
@@ -591,7 +596,7 @@ async function propagateProjectSkills(projectPath, options, registry) {
   const safetyNote = unsafe.length > 0
     ? `; ${unsafe.length} unsafe target(s) skipped`
     : "";
-  const note = `${verb} ${skillLabel} to ${targetLabel}; ${linked} symlink action(s), ${changed} Hermes config action(s)${safetyNote}`;
+  const note = `${verb} ${skillLabel} to ${targetLabel}; ${linked} symlink action(s)${safetyNote}`;
   return { action: "project-skills", path: skillsDir, note };
 }
 
@@ -755,135 +760,6 @@ function concurrentBridgeResult(destination, preservedPath = null) {
   };
 }
 
-async function replaceFileIfUnchanged(
-  destination,
-  expected,
-  content,
-  {
-    boundaryRoot = null,
-    mode = 0o666,
-    beforeReplace = null,
-    beforePublish = null,
-    beforeCommit = null,
-    expectedStats = null
-  } = {}
-) {
-  const token = `${process.pid}-${randomUUID()}`;
-  const basename = path.basename(destination);
-  const staged = path.join(path.dirname(destination), `.${basename}.dotaios-${token}.next`);
-  const preservedPath = `${destination}.dotaios-backup-${token}`;
-  let claimed = false;
-  // The canonical bridge remains live while the replacement is staged and
-  // validated. Publication below preserves the old inode before claiming the
-  // destination with a no-clobber hard link.
-  await writeFileSafe(staged, content, "preserve", { boundaryRoot, mode });
-  await fs.chmod(staged, mode);
-
-  try {
-    await beforeReplace?.({ destination, current: expected, next: content, staged });
-    if (!await fileStillMatches(destination, expected, expectedStats)) {
-      return { replaced: false, preservedPath: null };
-    }
-
-    await beforePublish?.({ destination, current: expected, next: content, staged });
-    if (!await fileStillMatches(destination, expected, expectedStats)) {
-      return { replaced: false, preservedPath: null };
-    }
-
-    if (!await fileStillMatches(destination, expected, expectedStats)) {
-      return { replaced: false, preservedPath: null };
-    }
-
-    // First move the exact old inode to a unique visible backup. The new bridge
-    // is then linked into the empty path with no-clobber semantics. If an editor
-    // recreates the path, link() returns EEXIST and its bytes win.
-    await fs.rename(destination, preservedPath);
-    claimed = true;
-    if (!await movedFileStillMatches(preservedPath, expected, expectedStats)) {
-      await restorePreservedNoClobber(preservedPath, destination);
-      return { replaced: false, preservedPath };
-    }
-
-    await beforeCommit?.({ destination, current: expected, next: content, staged, preservedPath });
-    if (!await movedFileStillMatches(preservedPath, expected, expectedStats)) {
-      await restorePreservedNoClobber(preservedPath, destination);
-      return { replaced: false, preservedPath };
-    }
-
-    try {
-      await fs.link(staged, destination);
-    } catch (error) {
-      if (error?.code === "EEXIST") return { replaced: false, preservedPath };
-      throw error;
-    }
-    return { replaced: true, preservedPath };
-  } catch (error) {
-    if (claimed) await restorePreservedNoClobber(preservedPath, destination);
-    throw error;
-  } finally {
-    await fs.rm(staged, { force: true });
-  }
-}
-
-async function restorePreservedNoClobber(preservedPath, destination) {
-  try {
-    await fs.link(preservedPath, destination);
-    return true;
-  } catch (error) {
-    if (error?.code === "EEXIST") return false;
-    throw error;
-  }
-}
-
-async function fileStillMatches(destination, expected, expectedStats) {
-  const before = await lstatIfPresent(destination);
-  if (!sameRegularFile(before, expectedStats)) return false;
-
-  let current;
-  try {
-    current = await fs.readFile(destination, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
-  }
-  const after = await lstatIfPresent(destination);
-  return current === expected && sameRegularFile(after, before);
-}
-
-async function movedFileStillMatches(destination, expected, expectedStats) {
-  const before = await lstatIfPresent(destination);
-  if (!sameMovedRegularFile(before, expectedStats)) return false;
-
-  let current;
-  try {
-    current = await fs.readFile(destination, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") return false;
-    throw error;
-  }
-  const after = await lstatIfPresent(destination);
-  return current === expected && sameRegularFile(after, before);
-}
-
-function sameRegularFile(actual, expected) {
-  if (!actual?.isFile() || actual.isSymbolicLink() || !expected) return false;
-  return actual.dev === expected.dev
-    && actual.ino === expected.ino
-    && actual.size === expected.size
-    && actual.mtimeMs === expected.mtimeMs
-    && actual.ctimeMs === expected.ctimeMs
-    && (actual.mode & 0o777) === (expected.mode & 0o777);
-}
-
-function sameMovedRegularFile(actual, expected) {
-  if (!actual?.isFile() || actual.isSymbolicLink() || !expected) return false;
-  return actual.dev === expected.dev
-    && actual.ino === expected.ino
-    && actual.size === expected.size
-    && actual.mtimeMs === expected.mtimeMs
-    && (actual.mode & 0o777) === (expected.mode & 0o777);
-}
-
 async function lstatIfPresent(destination) {
   try {
     return await fs.lstat(destination);
@@ -942,16 +818,27 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
   };
 }
 
-function projectAgentsBridge(aiosPath, project) {
+function projectAgentsBridge(aiosPath, project, homePath) {
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
     `At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
     ...(project.registered ? [] : ["This checkout is not in the project catalog yet; run `dotaios project add <repo-path>` to enable automatic writer attribution."]),
     "",
-    `Before personal recommendations or cross-project planning, read: ${path.join(aiosPath, "AGENTS.md")}`,
+    `Before personal recommendations or cross-project planning, read: ${portableAiosPointer(aiosPath, homePath)}`,
     "",
     "Keep project-specific instructions in this file short. Durable personal context belongs in DotAIOS."
   ]);
+}
+
+// This bridge lands in a shared checkout that teammates clone, so an absolute
+// path would both publish the author's username and point every other reader
+// at a directory that does not exist on their machine.
+export function portableAiosPointer(aiosPath, homePath = os.homedir()) {
+  const relative = path.relative(homePath, aiosPath);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    return path.join(aiosPath, "AGENTS.md");
+  }
+  return `~/${path.join(relative, "AGENTS.md")}`;
 }
 
 function bridgeFile(title, lines) {

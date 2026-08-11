@@ -4,6 +4,12 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
+import {
+  assertSafeGeminiAiosPath,
+  mergeGeminiSettings,
+  writeGeminiBridge,
+  writeGeminiHookScript
+} from "../adapters/gemini.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { mcpLauncher } from "../lib/mcp-launcher.mjs";
 import {
@@ -362,6 +368,7 @@ function printAuthGuidance() {
 // --- Gemini CLI ---
 
 async function connectGemini(aiosPath, options) {
+  assertSafeGeminiAiosPath(aiosPath);
   const geminiDir = path.join(os.homedir(), ".gemini");
   const detected = await dirExists(geminiDir);
 
@@ -373,6 +380,7 @@ async function connectGemini(aiosPath, options) {
     console.log("\nWould write:");
     console.log("  ~/.gemini/GEMINI.md  — DotAIOS context bridge");
     console.log("  ~/.gemini/settings.json: SessionStart hook");
+    console.log("  ~/.gemini/dotaios-context-hook.sh  — pinned context command");
     return;
   }
 
@@ -382,107 +390,47 @@ async function connectGemini(aiosPath, options) {
   const hookScriptPath = path.join(geminiDir, "dotaios-context-hook.sh");
   const settingsPath = path.join(geminiDir, "settings.json");
 
-  // Merge settings first: it validates an existing settings.json and aborts on a
-  // malformed file before we write any other artifacts (no partial install).
-  await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath);
-  console.log("[ok] ~/.gemini/settings.json (SessionStart hook)");
+  // All three artifacts share this parent. Refuse an unsafe home/.gemini path
+  // before touching settings, the bridge, or the hook so a symlinked client
+  // directory cannot redirect a partial install outside the user's home.
+  await writeGeminiBridge(geminiMdPath, aiosPath, {
+    boundaryRoot: os.homedir(),
+    preflightOnly: true
+  });
+  await writeGeminiHookScript(hookScriptPath, aiosPath, {
+    boundaryRoot: os.homedir(),
+    preflightOnly: true
+  });
+  await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath, {
+    boundaryRoot: os.homedir(),
+    preflightOnly: true
+  });
+
+  // Publish the inert artifacts first. settings.json is the activation point,
+  // so it is written last and never points at an absent or refused hook.
+  await writeGeminiHookScript(hookScriptPath, aiosPath, { boundaryRoot: os.homedir() });
+  console.log("[ok] ~/.gemini/dotaios-context-hook.sh");
 
   await writeGeminiBridge(geminiMdPath, aiosPath);
   console.log("[ok] ~/.gemini/GEMINI.md");
 
-  await writeGeminiHookScript(hookScriptPath, aiosPath);
-  await fs.chmod(hookScriptPath, 0o755);
-  console.log("[ok] ~/.gemini/dotaios-context-hook.sh");
+  await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath, { boundaryRoot: os.homedir() });
+  console.log("[ok] ~/.gemini/settings.json (SessionStart hook)");
 
   await appendEvent(path.join(aiosPath, "memory", "events.jsonl"), {
     type: "connection",
-    summary: "Connected Gemini CLI via SessionStart hook",
+    summary: "Configured Gemini CLI SessionStart hook; invocation unverified",
     source: "dotaios connect gemini",
     connection: "gemini-cli"
   });
 
-  console.log("\nGemini CLI connected.");
+  console.log("\nGemini CLI configured; invocation is not yet verified.");
   // docs/client-support.md records that Gemini CLI could not produce an
   // invocation receipt in the bounded probe. Writing a hook file proves the
   // configuration, never that the client runs it — claiming otherwise is the
   // exact overclaim this project refuses to make about every other client.
   console.log("A SessionStart hook is installed. Whether your Gemini version runs it is client-side behaviour —");
   console.log("check the start of your next session to confirm your context arrives.");
-}
-
-async function writeGeminiBridge(filePath, aiosPath) {
-  const content = `# DotAIOS Context
-
-Your personal AI operating system is at \`${aiosPath}\`.
-
-- Full context guide: \`${aiosPath}/AGENTS.md\`
-- Skills index: \`${aiosPath}/skills/INDEX.md\`
-- Working memory: run \`dotaios brief --compact\`
-`;
-  await fs.writeFile(filePath, content, "utf8");
-}
-
-// Wrap a value in single quotes for safe use as a POSIX shell word. Any embedded
-// single quote is closed, escaped, and reopened ('\''), so no metacharacter in
-// the value (spaces, ", $, ;, backticks) can break out of the quoting. Used for
-// the AIOS path that gets baked into the generated Gemini hook script.
-export function shSingleQuote(value) {
-  return `'${String(value).replace(/'/g, "'\\''")}'`;
-}
-
-export function buildGeminiHookScript(aiosPath) {
-  return `#!/usr/bin/env bash
-# DotAIOS context injection for Gemini CLI SessionStart
-# Injects working memory digest as the first context turn.
-npx dotaios brief --compact --json --path ${shSingleQuote(aiosPath)} 2>/dev/null || echo '{}'
-`;
-}
-
-async function writeGeminiHookScript(scriptPath, aiosPath) {
-  await fs.writeFile(scriptPath, buildGeminiHookScript(aiosPath), "utf8");
-}
-
-export async function mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath) {
-  let settings = {};
-  let raw = null;
-  try {
-    raw = await fs.readFile(settingsPath, "utf8");
-  } catch {
-    raw = null;
-  }
-  if (raw !== null) {
-    try {
-      settings = JSON.parse(raw);
-    } catch {
-      throw new Error(`Existing ${settingsPath} is not valid JSON. Fix or remove it, then retry — refusing to overwrite it.`);
-    }
-  }
-
-  // Merge SessionStart hook (preserve any existing hooks)
-  if (!settings.hooks) settings.hooks = {};
-  if (!Array.isArray(settings.hooks.SessionStart)) settings.hooks.SessionStart = [];
-
-  const hookEntry = {
-    hooks: [{ type: "command", command: hookScriptPath, name: "dotaios-context", timeout: 10000 }]
-  };
-  const alreadyInstalled = settings.hooks.SessionStart.some(
-    (h) => Array.isArray(h.hooks) && h.hooks.some((hh) => hh.name === "dotaios-context")
-  );
-  if (!alreadyInstalled) {
-    settings.hooks.SessionStart.push(hookEntry);
-  }
-
-  removeLegacyGeminiMcpEntry(settings);
-
-  await fs.writeFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
-}
-
-function removeLegacyGeminiMcpEntry(settings) {
-  const entry = settings.mcp?.servers?.dotaios;
-  if (entry?.command !== "npx" || !Array.isArray(entry.args) || entry.args[0] !== "dotaios-mcp") return;
-  delete settings.mcp.servers.dotaios;
-  if (Object.keys(settings.mcp.servers).length === 0) delete settings.mcp.servers;
-  if (Object.keys(settings.mcp).length === 0) delete settings.mcp;
 }
 
 // --- OpenCode ---

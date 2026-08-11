@@ -90,12 +90,7 @@
       "skills": {
         "mode": "config-external-dir",
         "configFile": ".hermes/config.yaml",
-        "key": "skills.external_dirs",
-        "project": {
-          "mode": "config-external-dir",
-          "configFile": ".hermes/config.yaml",
-          "key": "skills.external_dirs"
-        }
+        "key": "skills.external_dirs"
       }
     }
   ],

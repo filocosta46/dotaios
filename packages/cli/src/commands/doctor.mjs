@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
@@ -61,6 +62,7 @@ export async function doctorCommand(args) {
   checks.push(checkTerminal());
   checks.push(await checkAiosFolder(target));
   checks.push(await checkAiosConfig(target));
+  checks.push(checkTrackedGitlinks(target));
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
@@ -100,6 +102,65 @@ const STATUS_TAGS = { ok: "[ok]", warn: "[warn]", fail: "[fail]" };
 
 function tag(status) {
   return STATUS_TAGS[status] || "[fail]";
+}
+
+// A gitlink (mode 160000) records another repository's commit id instead of the
+// files themselves, so every clone of this AIOS folder gets an empty directory
+// where the content appears to be, and nothing reports the loss. The sync
+// guards refuse to write new gitlinks but cannot see ones already committed.
+export function checkTrackedGitlinks(target, { runGit = readGitIndex } = {}) {
+  const name = "No nested Git repositories tracked in the AIOS folder";
+  const index = runGit(target);
+  if (index.kind === "not-a-repo") {
+    return { name, status: "ok", detail: "Folder is not a Git repository; nothing to check." };
+  }
+  // Anything else — git missing, index too large for the buffer, a timeout —
+  // means the check did not run. Reporting that as a pass would state a
+  // specific thing we did not verify, on the folders most likely to have
+  // accumulated a vendored repository.
+  if (index.kind === "unavailable") {
+    return {
+      name,
+      status: "warn",
+      detail: `Could not read the Git index (${index.reason}); this check did not run.`,
+      fix: "Ensure `git` is installed and the folder is readable, then re-run `dotaios doctor`."
+    };
+  }
+
+  const gitlinks = index.entries
+    .split("\0")
+    .filter((entry) => entry.startsWith("160000 "))
+    .map((entry) => entry.slice(entry.indexOf("\t") + 1))
+    .filter(Boolean);
+  if (gitlinks.length === 0) return { name, status: "ok" };
+
+  return {
+    name,
+    status: "warn",
+    detail: `${gitlinks.length} path(s) are committed as pointers to another repository, so a clone of this folder gets them empty: ${gitlinks.join(", ")}.`,
+    fix: `Remove the pointer and re-add the files, for each path: \`git rm --cached <path>\`, delete the nested \`.git\` directory inside it, then \`git add <path>\`.`
+  };
+}
+
+function readGitIndex(target) {
+  // -z turns off git's octal quoting of non-ASCII paths, so a reported path can
+  // be pasted straight into the suggested `git rm --cached` fix. The buffer is
+  // raised well past spawnSync's 1MB default, which a folder of a few thousand
+  // tracked files already exceeds.
+  const result = spawnSync("git", ["-C", target, "ls-files", "-s", "-z"], {
+    encoding: "utf8",
+    timeout: 15_000,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  if (result.error) {
+    return { kind: "unavailable", reason: result.error.code || "git could not be run" };
+  }
+  if (result.status !== 0) {
+    const stderr = String(result.stderr || "");
+    if (/not a git repository/i.test(stderr)) return { kind: "not-a-repo" };
+    return { kind: "unavailable", reason: stderr.trim().split("\n")[0] || `git exited ${result.status}` };
+  }
+  return { kind: "index", entries: result.stdout || "" };
 }
 
 function checkNodeVersion() {

@@ -2,6 +2,14 @@ import localFilesystem from "node:fs/promises";
 import path from "node:path";
 
 import { isoDate, readSignals as readMemorySignals } from "./memory.mjs";
+import {
+  ContainedReadError,
+  createContainedReadBudget,
+  createContainedReadFilesystem,
+  inspectContainedFile,
+  readContainedFile,
+  sameContainedFileSnapshot
+} from "./contained-read.mjs";
 import { readProjectCatalog } from "./projects.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
@@ -14,12 +22,27 @@ const MAX_CARRY_OVER_ITEMS = 5;
 const MAX_SIGNAL_ITEMS = 8;
 const MAX_EVENT_ITEMS = 8;
 const MAX_HEADER_CHARS = 800;
+const MAX_PROJECT_FILTER_CHARS = 200;
+const MEBIBYTE = 1024 * 1024;
+const MAX_PROJECTION_SOURCE_BYTES = 16 * MEBIBYTE;
+const MAX_PROJECTION_SOURCE_FILES = 512;
+const MAX_PROJECTION_DIRECTORY_ENTRIES = 10_000;
+const MAX_MARKDOWN_SOURCE_BYTES = 1 * MEBIBYTE;
+const MAX_DECISIONS_SOURCE_BYTES = 4 * MEBIBYTE;
+const MAX_TIMELINE_SOURCE_BYTES = 8 * MEBIBYTE;
+const MAX_SIGNAL_SOURCE_BYTES = 1 * MEBIBYTE;
+const MAX_SIGNAL_DIRECTORY_ENTRIES = 8_192;
+const MAX_SIGNAL_FILES = 64;
+const MAX_PROJECT_DIRECTORY_ENTRIES = 256;
+const MAX_PROJECT_README_BYTES = 1 * MEBIBYTE;
 
 const localClock = () => new Date();
 
 /**
  * Capture I/O dependencies once for consumers that build working context more
- * than once. Tests and embedders can supply an isolated filesystem and clock.
+ * than once. Tests and embedders can supply an isolated filesystem and clock;
+ * the filesystem must implement handle-bound open, incremental opendir, lstat,
+ * readdir, and realpath with Node's fs/promises-compatible behavior.
  */
 export function createWorkingContextProjection({
   filesystem = localFilesystem,
@@ -53,22 +76,52 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const requestedProject = normalizeProject(options.project);
   const sessionLimit = normalizeLimit(options.limit, DEFAULT_SESSION_LIMIT);
   const visibleCharacterBudget = normalizeBudget(options);
+  const readBudget = createContainedReadBudget({
+    maxBytes: MAX_PROJECTION_SOURCE_BYTES,
+    maxFiles: MAX_PROJECTION_SOURCE_FILES,
+    maxEntries: MAX_PROJECTION_DIRECTORY_ENTRIES
+  });
 
   const dailyDir = path.join(aiosPath, "memory", "daily");
-  const [identity, priorities, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] =
-    await Promise.all([
-      readText(filesystem, path.join(aiosPath, "context", "identity.md")),
-      readText(filesystem, path.join(aiosPath, "context", "priorities.md")),
-      readText(filesystem, path.join(aiosPath, "decisions", "log.md")),
-      readText(filesystem, path.join(dailyDir, `${today}.md`)),
-      readText(filesystem, path.join(dailyDir, `${yesterday}.md`)),
-      readJsonl(filesystem, path.join(aiosPath, "memory", "sessions", "index.jsonl")),
+  const projectFilesystem = createContainedReadFilesystem(aiosPath, filesystem, {
+    budget: readBudget,
+    maxEntries: MAX_PROJECT_DIRECTORY_ENTRIES,
+    maxFileBytes: MAX_PROJECT_README_BYTES,
+    fileTooLargeCode: "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE",
+    tooManyCode: "DOTAIOS_PROJECT_DIRECTORY_LIMIT_EXCEEDED"
+  });
+  let sources;
+  try {
+    const authorityPath = path.join(aiosPath, "aios.json");
+    const authorityBefore = await inspectContainedFile(aiosPath, authorityPath, { filesystem });
+    if (authorityBefore === null) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    sources = await Promise.all([
+      readText(filesystem, path.join(aiosPath, "context", "identity.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
+      readText(filesystem, path.join(aiosPath, "context", "priorities.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
+      readText(filesystem, path.join(aiosPath, "decisions", "log.md"), aiosPath, readBudget, MAX_DECISIONS_SOURCE_BYTES),
+      readText(filesystem, path.join(dailyDir, `${today}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
+      readText(filesystem, path.join(dailyDir, `${yesterday}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
+      readJsonl(
+        filesystem,
+        path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+        aiosPath,
+        readBudget,
+        MAX_TIMELINE_SOURCE_BYTES
+      ),
       readMemorySignals(
         path.join(aiosPath, "memory", "signals"),
         yesterday,
         today,
         {
+          boundaryRoot: aiosPath,
+          budget: readBudget,
           filesystem,
+          maxDirectoryEntries: MAX_SIGNAL_DIRECTORY_ENTRIES,
+          maxFileBytes: MAX_SIGNAL_SOURCE_BYTES,
+          maxFiles: MAX_SIGNAL_FILES,
+          quarantine: false,
           transform: (entry, { file, date, sourceLine }) => normalizeTimelineEntry(entry, {
             fallbackDate: date,
             sourcePath: path.posix.join("memory", "signals", file),
@@ -77,25 +130,39 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
         },
       ),
       readTimelineJsonl(filesystem, path.join(aiosPath, "memory", "events.jsonl"), {
+        boundaryRoot: aiosPath,
+        budget: readBudget,
+        maxBytes: MAX_TIMELINE_SOURCE_BYTES,
         sourcePath: "memory/events.jsonl",
       }),
-      readProjectCatalog({ aiosPath, fs: filesystem }),
+      readProjectCatalog({ aiosPath, fs: projectFilesystem }),
     ]);
+    const authorityAfter = await inspectContainedFile(aiosPath, authorityPath, { filesystem });
+    if (!sameContainedFileSnapshot(authorityBefore, authorityAfter)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+  } catch (cause) {
+    const error = new Error("DotAIOS could not read working context safely.", { cause });
+    error.code = "DOTAIOS_WORKING_CONTEXT_READ_FAILED";
+    throw error;
+  }
+  const [identity, priorities, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] = sources;
 
-  const projectFilter = resolveProjectFilter(requestedProject, projects);
+  const projectScope = resolveProjectScope(requestedProject, projects);
+  const projectFilter = projectScope?.filter || null;
   const sessions = stableSessionOrder(sessionEntries)
-    .filter((session) => matchesProject(session, projectFilter))
-    .map((session) => markUnscoped(session, projectFilter));
+    .filter((session) => matchesProject(session, projectScope))
+    .map((session) => markUnscoped(session, projectScope));
   const signals = stableTimelineOrder(signalEntries)
     .filter((signal) => isOperationalDate(signal.date, today, yesterday))
-    .filter((signal) => matchesProject(signal, projectFilter))
+    .filter((signal) => matchesProject(signal, projectScope))
     .filter(hasTimelineSummary)
-    .map((signal) => markUnscoped(signal, projectFilter));
+    .map((signal) => markUnscoped(signal, projectScope));
   const events = stableTimelineOrder(eventEntries)
     .filter((event) => isOperationalDate(event.date, today, yesterday))
-    .filter((event) => matchesProject(event, projectFilter))
+    .filter((event) => matchesProject(event, projectScope))
     .filter(hasTimelineSummary)
-    .map((event) => markUnscoped(event, projectFilter));
+    .map((event) => markUnscoped(event, projectScope));
   const deduped = dedupeUpdateChannels(signals, events);
 
   const candidates = {
@@ -414,18 +481,40 @@ function normalizeTimelineEntry(entry, {
 
 /**
  * Project filter for operational timeline rows.
- * Untagged (no `project`) entries are shared into every scoped projection and
- * later marked `unscoped` — intentional global carry, not a leak. Rows tagged
- * with a different project are excluded. Durable continuity beyond the
- * today+yesterday operational window requires promotion into durable surfaces
- * (project README, decisions, vault), not widening this filter.
+ * Entries with neither `project` nor `project_id` are shared into every scoped
+ * projection and later marked `unscoped` — intentional global carry, not a
+ * leak. Every present attribution field must agree with the selected catalog
+ * identity. Malformed, conflicting, and differently attributed rows fail
+ * closed. Durable continuity beyond the today+yesterday operational window
+ * requires promotion into durable surfaces (project README, decisions, vault),
+ * not widening this filter.
  */
-function matchesProject(entry, projectFilter) {
-  return !projectFilter || !entry.project || entry.project === projectFilter;
+function matchesProject(entry, projectScope) {
+  if (!projectScope) return true;
+  const project = readProjectAttribution(entry, "project");
+  const projectId = readProjectAttribution(entry, "project_id");
+  if (!project.present && !projectId.present) return true;
+  if (!project.valid || !projectId.valid) return false;
+  if (project.present && !projectScope.aliases.has(project.value)) return false;
+  if (projectId.present && projectId.value !== projectScope.id) return false;
+  if (project.present && !projectScope.uniqueAliases.has(project.value) && !projectId.present) return false;
+  return true;
 }
 
-function markUnscoped(entry, projectFilter) {
-  return projectFilter && !entry.project ? { ...entry, unscoped: true } : entry;
+function markUnscoped(entry, projectScope) {
+  return projectScope && isGloballyAttributed(entry) ? { ...entry, unscoped: true } : entry;
+}
+
+function readProjectAttribution(entry, key) {
+  const value = entry?.[key];
+  if (value === undefined || value === null) return { present: false, valid: true, value: null };
+  const valid = typeof value === "string" && value.length > 0 && value.trim() === value;
+  return { present: true, valid, value: valid ? value : null };
+}
+
+function isGloballyAttributed(entry) {
+  return !readProjectAttribution(entry, "project").present
+    && !readProjectAttribution(entry, "project_id").present;
 }
 
 function dedupeUpdateChannels(signals, events) {
@@ -448,14 +537,38 @@ function timelineKey(entry) {
   return [entry.type, entry.source, entry.project || "", entry.project_id || "", timelineSummary(entry)].join("\n");
 }
 
-function resolveProjectFilter(reference, projects) {
+function resolveProjectScope(reference, projects) {
   if (!reference) return null;
   const matches = projects.filter((project) =>
     project.id === reference || project.slug === reference || project.project === reference);
   if (matches.length > 1) {
-    throw new Error(`Project reference "${reference}" is ambiguous. Use its stable id.`);
+    const error = new TypeError(`Project reference "${reference}" is ambiguous. Use its stable id.`);
+    error.code = "DOTAIOS_AMBIGUOUS_PROJECT";
+    throw error;
   }
-  return matches[0]?.slug || reference;
+  const selected = matches[0] || null;
+  const filter = selected?.slug || reference;
+  const aliases = selected ? projectAliases(selected) : new Set([reference]);
+  const uniqueAliases = selected
+    ? new Set([...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1))
+    : new Set([reference]);
+  const selectedId = typeof selected?.id === "string" && selected.id.length > 0 ? selected.id : null;
+  const id = selectedId && projects.filter((project) => project.id === selectedId).length === 1
+    ? selectedId
+    : null;
+  return {
+    aliases,
+    filter,
+    id,
+    uniqueAliases,
+  };
+}
+
+function projectAliases(project) {
+  return new Set(
+    [project?.slug, project?.project, project?.id]
+      .filter((value) => typeof value === "string" && value.length > 0)
+  );
 }
 
 function isOperationalDate(date, today, yesterday) {
@@ -512,8 +625,8 @@ function syntheticProject(project) {
   };
 }
 
-async function readJsonl(filesystem, filePath) {
-  const content = await readText(filesystem, filePath);
+async function readJsonl(filesystem, filePath, boundaryRoot, budget, maxBytes) {
+  const content = await readText(filesystem, filePath, boundaryRoot, budget, maxBytes);
   return content.split(/\r?\n/).flatMap((line) => {
     if (!line.trim()) return [];
     try {
@@ -525,8 +638,14 @@ async function readJsonl(filesystem, filePath) {
   });
 }
 
-async function readTimelineJsonl(filesystem, filePath, { fallbackDate = null, sourcePath } = {}) {
-  const content = await readText(filesystem, filePath);
+async function readTimelineJsonl(filesystem, filePath, {
+  boundaryRoot,
+  budget,
+  fallbackDate = null,
+  maxBytes,
+  sourcePath
+} = {}) {
+  const content = await readText(filesystem, filePath, boundaryRoot, budget, maxBytes);
   return content.split(/\r?\n/).flatMap((line, index) => {
     if (!line.trim()) return [];
     try {
@@ -543,13 +662,14 @@ async function readTimelineJsonl(filesystem, filePath, { fallbackDate = null, so
   });
 }
 
-async function readText(filesystem, filePath) {
-  try {
-    return await filesystem.readFile(filePath, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return "";
-    throw error;
-  }
+async function readText(filesystem, filePath, boundaryRoot, budget, maxBytes) {
+  const content = await readContainedFile(boundaryRoot, filePath, {
+    budget,
+    filesystem,
+    encoding: "utf8",
+    maxBytes
+  });
+  return content === null ? "" : content;
 }
 
 function resolveDependencies(dependencies) {
@@ -567,8 +687,19 @@ function readClock(clock) {
 }
 
 function normalizeProject(project) {
-  const value = typeof project === "string" ? project.trim() : "";
-  return value || null;
+  if (project === undefined || project === null) return null;
+  if (typeof project !== "string") {
+    throw new TypeError("Working-context project filter must be a string");
+  }
+  if (Array.from(project).length > MAX_PROJECT_FILTER_CHARS) {
+    throw new TypeError(`Working-context project filter must be at most ${MAX_PROJECT_FILTER_CHARS} characters`);
+  }
+  if (/\p{Cc}/u.test(project)) {
+    throw new TypeError("Working-context project filter must be a project slug or stable id");
+  }
+  const value = project.trim();
+  if (!value) throw new TypeError("Working-context project filter must not be blank");
+  return value;
 }
 
 function normalizeLimit(limit, fallback) {

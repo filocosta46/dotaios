@@ -24,6 +24,8 @@ context in* automatically.
 When connected tools request startup continuity, events, signals, and saved
 sessions come through the same bounded projection produced by
 `dotaios brief --compact`; adapters do not define their own raw-memory window.
+Compatibility state stays in a fixed operational envelope beside that user
+memory, never inside the canonical projection or its budget.
 Where the optional MCP adapter is used, it exposes exactly
 `read_working_context`, `search_aios`, and `resolve_skill`.
 
@@ -34,11 +36,22 @@ dotaios connect gemini
 ```
 
 Installs three things in `~/.gemini/`:
-- a `GEMINI.md` bridge pointing Gemini at your `~/aios` folder,
-- a **SessionStart hook** configured to inject your working-memory digest (`dotaios brief --compact`) at session start — discovery and invocation remain client-version dependent, and
-- native workflow links shared with supported local agents.
+- a `GEMINI.md` bridge that preserves surrounding user instructions and points
+  Gemini at your AIOS folder,
+- a version-pinned `dotaios-context-hook.sh` command that produces the bounded
+  working-context JSON, and
+- a guarded `settings.json` merge that activates that command as a
+  **SessionStart hook**. Discovery and invocation remain client-version
+  dependent.
 
-If `~/.gemini/settings.json` already exists, DotAIOS merges into it and refuses to overwrite a file that is not valid JSON (no partial install).
+DotAIOS preflights all three files before writing and activates settings last.
+It refuses unsafe or ambiguous paths, malformed managed markers, foreign hook
+scripts, invalid UTF-8 or JSON, incompatible hook shapes, and concurrent edits.
+Existing settings fields and bytes outside the one managed `GEMINI.md` block
+are preserved; a failed preflight leaves every artifact untouched.
+
+Native workflow links are installed separately by `dotaios activate` and
+checked with `dotaios skills doctor`.
 
 ### OpenCode
 
@@ -64,7 +77,16 @@ Google documents separate Antigravity IDE, Antigravity CLI, and Antigravity 2.0
 surfaces with different global directories. This adapter names and configures
 the IDE surface specifically.
 
-For Hermes, DotAIOS adds your `~/aios/skills` folder to `skills.external_dirs` in `~/.hermes/config.yaml`.
+For Hermes, DotAIOS adds your `~/aios/skills` folder to
+`skills.external_dirs` in the existing `~/.hermes/config.yaml` and every
+discovered profile config under `~/.hermes/profiles/`. These are user-owned
+files: malformed or structurally ambiguous YAML is preserved and reported for
+manual review. DotAIOS also refuses symlinked or non-regular config targets,
+invalid UTF-8, and unsafe ancestor paths. A recoverable per-file lock serializes
+DotAIOS writers; external changes observed at guarded checkpoints are preserved.
+The final replacement is atomic and retains an exact-byte backup, although an
+external editor that does not honor the lock still has a narrow final
+check-to-rename race.
 
 The shared path is intentionally canonical. DotAIOS does not also populate a
 second client-native path when that would make a client discover duplicate
@@ -141,19 +163,26 @@ The bundled project targets are:
 
 - `<project>/.claude/skills/` for Claude Code;
 - `<project>/.agents/skills/` for Codex, Cursor, Gemini CLI, Kimi Code CLI,
-  OpenCode, and Antigravity IDE; and
-- `<project>/.hermes/config.yaml` with `<project>/skills` in
-  `skills.external_dirs` for Hermes.
+  OpenCode, and Antigravity IDE.
 
-Each target is a symlink or config entry pointing to the project's own
-`skills/` folder. Editing a project skill therefore does not change the global
+Each target is a symlink pointing to the project's own `skills/` folder.
+Editing a project skill therefore does not change the global
 AIOS skills. Existing real entries and foreign links are preserved, repeated
 attachment is idempotent, and `--dry-run` previews changes without writing.
-Attachment fails closed when a target root or Hermes config path is an
-unmanaged symlink, and a later attach removes only owned dangling skill links
-if the project deletes its `skills/` directory. Custom Hermes targets use the
-registry's declared `key` rather than assuming `skills.external_dirs`.
+Attachment fails closed when a target root is an unmanaged symlink, and a
+later attach removes only owned dangling skill links if the project deletes
+its `skills/` directory.
 Projects without a readable `skills/` directory are a no-op for this layer.
+
+DotAIOS does not configure a project-local Hermes file. Hermes reads
+`$HERMES_HOME/config.yaml`, and `attach` neither changes `HERMES_HOME` nor owns
+a project launcher that selects a checkout-local configuration. Writing
+`<project>/.hermes/config.yaml` would therefore look configured while remaining
+inert in an ordinary launch. Project-local Hermes support stays disabled until
+DotAIOS satisfies all re-entry gates in the accepted
+[Hermes support boundary](foundation-program/decisions/2026-08-09-hermes-support-boundary.md):
+an owned selector, version/capability policy, safe host mode, produced receipt,
+and one shared production/health/probe resolver.
 
 ```bash
 npx dotaios@latest attach /path/to/project --path ~/aios
@@ -193,8 +222,10 @@ directory. A custom Hermes-style runtime may instead use
 `"key": "skills.external_dirs"`; activation and `skills doctor` include that
 configuration surface as well.
 
-For a project-local custom runtime, add a `project` object under `skills` with
-the same shape and run `dotaios attach <project> --path ~/aios`.
+For a project-local custom runtime, only an explicit symlink-mode `project`
+target is currently supported. Project `config-external-dir` targets are
+ignored because the registry does not yet define or own the runtime selector
+that would load them.
 
 ---
 

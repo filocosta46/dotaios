@@ -8,8 +8,22 @@ The adapter is useful only when a local MCP-capable client cannot use those simp
 
 - Local stdio transport only. No background daemon.
 - Read-only. It cannot append memory, edit files, or run Google Workspace commands.
-- Bounded output with explicit truncation metadata.
+- Bounded canonical Markdown with explicit truncation metadata. Rendered
+  operational notices and non-Markdown response metadata are separately capped
+  at 1,024 characters.
 - Machine-specific paths are removed from returned search results.
+- Project filters must be nonblank after trimming, contain no Unicode `Cc`
+  control characters, and be at most 200 Unicode code points. Opaque stable IDs
+  within those bounds remain valid, including spaces, punctuation, and Unicode;
+  supplied wrong-type, control-bearing, or ambiguous selectors are specific
+  input errors rather than unscoped reads.
+- Tool arguments are runtime-validated as the advertised object shape: integer
+  fields are not coerced from strings or booleans, unknown keys are rejected,
+  and error messages never echo an unbounded key.
+- Working-context source work uses the same 16 MiB / 512-file projection budget
+  and per-shelf file and directory limits documented in
+  [Architecture](architecture.md). Internal read failures do not return absolute
+  local paths.
 - The selected AI provider may process any context returned to its client.
 
 ## Tools
@@ -18,9 +32,28 @@ The adapter exposes exactly these three read-only tool names:
 
 - `read_working_context`: return the same bounded, project-filtered projection as `dotaios brief --compact`; accepts optional `project`, session `limit`, and character `budget`
 - `search_aios`: search bounded local results by `query`, with optional `scope`, result `limit`, and character `budget`
-- `resolve_skill`: match an `intent` to installed workflows, with an optional result `limit`
+- `resolve_skill`: match an `intent` to installed workflows, with an optional
+  result `limit` and character `budget` from 256 to 32,000 (default 6,000);
+  the complete serialized response, including budget metadata, stays within it
 
 There are no compatibility aliases or additional MCP tools.
+
+For `read_working_context`, `budget` describes the canonical Markdown
+working-context projection, not operational compatibility metadata. The
+response keeps that Markdown unchanged in `markdown` and returns
+`operational.migration` beside it with one of
+four bounded states: `current`, `schema_outdated`, `transaction_present`, or
+`inspection_failed`. Every state includes fixed `severity` and `action` fields;
+the latter is either `null` or an object containing `command` and
+`path_scope: "configured_aios"`. The command must be run against the same AIOS
+folder configured for this adapter; no machine path is returned. A transaction
+directory proves only that metadata is present, not that its writer is dead, so
+the session-start envelope never instructs blind recovery.
+
+The 1,024-character allowance is measured over non-`markdown` metadata, not the
+JSON-encoded response. JSON escaping and protocol framing are representation
+costs and are not subtracted from the canonical projection budget. A valid
+bounded projection is never rejected merely because JSON escaping expands it.
 
 ## Preview client configuration
 

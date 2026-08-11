@@ -66,6 +66,24 @@ test("installing a raw skill also propagates it to native agent directories", ()
   }
 });
 
+test("installing a public plain-Markdown raw skill completes without partial failure", () => {
+  const { aiosPath, homePath, tempRoot } = setupAios();
+  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
+  const rawSkill = path.join(tempRoot, "plain-skill");
+  fs.mkdirSync(rawSkill, { recursive: true });
+  fs.writeFileSync(path.join(rawSkill, "SKILL.md"), "# Plain Skill\n\nFollow the reviewed workflow.\n");
+
+  const result = run(["install", rawSkill, "--path", aiosPath, "--home", homePath]);
+
+  assert.match(result.stdout, /Installed skill 'plain-skill'/);
+  assert.equal(fs.readFileSync(path.join(aiosPath, "skills", "plain-skill", "SKILL.md"), "utf8"), "# Plain Skill\n\nFollow the reviewed workflow.\n");
+  assert.match(fs.readFileSync(path.join(aiosPath, "skills", "INDEX.md"), "utf8"), /## plain-skill/);
+  assert.equal(
+    fs.readlinkSync(path.join(homePath, ".agents", "skills", "plain-skill")),
+    path.join(aiosPath, "skills", "plain-skill")
+  );
+});
+
 test("installing a plugin exposes its declared skill and propagates it natively", () => {
   const { aiosPath, homePath } = setupAios();
   fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });

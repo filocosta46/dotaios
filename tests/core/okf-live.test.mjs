@@ -123,6 +123,7 @@ test("decisions scope exists and finds entries in decisions/log.md", async () =>
 
 test("working-context projection includes the most recent decisions, bounded", async () => {
   const aios = tmpDir();
+  fs.writeFileSync(path.join(aios, "aios.json"), '{"schema_version":"1.2.0"}\n');
   fs.mkdirSync(path.join(aios, "context"), { recursive: true });
   fs.mkdirSync(path.join(aios, "memory"), { recursive: true });
   fs.mkdirSync(path.join(aios, "decisions"), { recursive: true });

@@ -21,6 +21,59 @@ test("project commands only request outer sync after an applied catalog change",
   assert.equal(skipsPortableMirrorSync("project", ["add", "/tmp/client", "--yes"]), false);
 });
 
+test("compact, hook JSON, and lean briefs are classified read-only and never spawn sync", async () => {
+  for (const args of [
+    ["--compact"],
+    ["--compact", "--json"],
+    ["--lean"]
+  ]) {
+    const readOnly = skipsPortableMirrorSync("brief", args);
+    assert.equal(readOnly, true, args.join(" "));
+    let spawned = false;
+    await fireSyncHook({
+      allowAutoSync: true,
+      command: "brief",
+      isSyncEnabled: async () => true,
+      readOnly,
+      spawnImpl: () => { spawned = true; },
+      testContext: null
+    });
+    assert.equal(spawned, false, args.join(" "));
+  }
+});
+
+test("search and skill lookup surfaces are classified read-only while skill writers are not", async () => {
+  const readOnlyCommands = [
+    ["search", ["continuity"]],
+    ["skills", []],
+    ["skills", ["audit"]],
+    ["skills", ["resolve", "plan my day"]],
+    ["skills", ["resolve", "--boot-context"]],
+    ["skills", ["sync-triggers"]],
+    ["skill", ["list"]]
+  ];
+
+  for (const [command, args] of readOnlyCommands) {
+    const readOnly = skipsPortableMirrorSync(command, args);
+    assert.equal(readOnly, true, `${command} ${args.join(" ")}`);
+    let spawned = false;
+    await fireSyncHook({
+      allowAutoSync: true,
+      command,
+      isSyncEnabled: async () => true,
+      readOnly,
+      spawnImpl: () => { spawned = true; },
+      testContext: null
+    });
+    assert.equal(spawned, false, `${command} ${args.join(" ")}`);
+  }
+
+  assert.equal(skipsPortableMirrorSync("skills", ["install", "/tmp/reviewed"]), false);
+  assert.equal(skipsPortableMirrorSync("skills", ["sync-triggers", "--apply"]), false);
+  assert.equal(skipsPortableMirrorSync("skill", ["add", "/tmp/reviewed"]), false);
+  assert.equal(skipsPortableMirrorSync("skill", ["remove", "reviewed"]), false);
+});
+
 test("fireSyncHook returns immediately when sync not enabled", async () => {
   let spawned = false;
   await fireSyncHook({

@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  ContainedReadError,
+  inspectContainedDirectory,
+  readContainedDirectory,
+  readContainedFile
+} from "./contained-read.mjs";
 import { schemaVersion } from "./schema.mjs";
 import { endsWithManagedWorkspaceIgnoreRule } from "./workspace-ignore.mjs";
 
@@ -91,6 +97,111 @@ export async function previewMigration({ aiosPath }) {
   if (preview.status !== "ready") return publicPreview(preview);
   const preservedPaths = await inventoryPreservedPaths(root);
   return publicPreview({ ...preview, plan: { ...preview.plan, preserved_paths: preservedPaths } });
+}
+
+/**
+ * Inspect only the compatibility metadata needed at session start.
+ *
+ * Unlike previewMigration, this deliberately does not build a plan or inventory
+ * protected shelves. It reads aios.json plus owned transaction directory names
+ * so every working-context adapter can surface action state without recursively
+ * reading the user's memory.
+ */
+export async function inspectMigrationState({ aiosPath }, dependencies = {}) {
+  const root = requireAiosPath(aiosPath);
+  const fileSystem = dependencies.filesystem || dependencies.fs || fs;
+  const configState = await readConfigState(root, fileSystem, { maxBytes: 1024 * 1024 });
+  assertSupportedSchema(configState.version);
+
+  const activeTransactions = await inspectActiveTransactions(root, fileSystem);
+  const confirmedConfig = await readConfigState(root, fileSystem, { maxBytes: 1024 * 1024 });
+  const confirmedTransactions = await inspectActiveTransactions(root, fileSystem);
+  if (
+    !configState.bytes.equals(confirmedConfig.bytes)
+    || JSON.stringify(activeTransactions) !== JSON.stringify(confirmedTransactions)
+  ) {
+    throw new MigrationError("STATE_CHANGED", "Migration compatibility state changed during inspection.");
+  }
+  if (activeTransactions.length > 0) {
+    return {
+      status: "transaction_present",
+      folder_schema_version: configState.version,
+      supported_schema_version: schemaVersion
+    };
+  }
+
+  if (configState.version === schemaVersion) {
+    return {
+      status: "current",
+      folder_schema_version: configState.version,
+      supported_schema_version: schemaVersion
+    };
+  }
+
+  return {
+    status: "schema_outdated",
+    folder_schema_version: configState.version,
+    supported_schema_version: schemaVersion
+  };
+}
+
+async function inspectActiveTransactions(root, fileSystem) {
+  try {
+    const migrationsRoot = migrationMetadataPath(root);
+    const metadataStats = await inspectContainedDirectory(root, migrationsRoot, { filesystem: fileSystem });
+    if (metadataStats === null) return [];
+
+    const ownerPath = path.join(migrationsRoot, "owner.json");
+    const owner = await readContainedFile(root, ownerPath, {
+      encoding: "utf8",
+      filesystem: fileSystem,
+      maxBytes: 4096
+    });
+    if (owner === null) {
+      const entries = await readContainedDirectory(root, migrationsRoot, {
+        filesystem: fileSystem,
+        maxEntries: 1
+      });
+      if (entries?.length === 0) return [];
+      throw new MigrationError("UNOWNED_METADATA", "Migration metadata has no recognized ownership marker.");
+    }
+    if (owner !== OWNER_CONTENT) {
+      throw new MigrationError("UNOWNED_METADATA", "Migration metadata has no recognized ownership marker.");
+    }
+
+    const transactionsRoot = path.join(migrationsRoot, "transactions");
+    const entries = await readContainedDirectory(root, transactionsRoot, {
+      filesystem: fileSystem,
+      maxEntries: 16,
+      readdirOptions: { withFileTypes: true },
+      tooManyCode: "TOO_MANY_TRANSACTIONS"
+    });
+    if (entries === null) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+
+    const ids = [];
+    for (const entry of entries) {
+      assertPlanId(entry.name);
+      if (!entry.isDirectory() || entry.isSymbolicLink()) {
+        throw new MigrationError("STATE_CHANGED", "Migration transaction metadata changed during inspection.");
+      }
+      ids.push(entry.name);
+    }
+    return ids.sort();
+  } catch (error) {
+    if (error instanceof ContainedReadError) {
+      if (error.code === "TOO_MANY_TRANSACTIONS") {
+        throw new MigrationError(
+          "TOO_MANY_TRANSACTIONS",
+          "Migration transaction metadata exceeds the inspection limit of 16."
+        );
+      }
+      const code = error.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED" ? "STATE_CHANGED" : "UNSAFE_METADATA";
+      throw new MigrationError(code, "Migration metadata could not be inspected safely.");
+    }
+    throw error;
+  }
 }
 
 export async function applyMigration({ aiosPath, planId, releaseVersion, signal = null }) {
@@ -335,13 +446,39 @@ function publicPreview(preview) {
   return { status: preview.status, plan: preview.plan };
 }
 
-async function readConfigState(root) {
+async function readConfigState(root, fileSystem = fs, { maxBytes = Infinity } = {}) {
   const filePath = path.join(root, "aios.json");
-  const stats = await lstatRegularFile(filePath, "aios.json");
-  const bytes = await fs.readFile(filePath);
+  let snapshot;
+  try {
+    snapshot = await readContainedFile(root, filePath, {
+      filesystem: fileSystem,
+      maxBytes,
+      returnSnapshot: true,
+      tooLargeCode: "CONFIG_TOO_LARGE"
+    });
+  } catch (error) {
+    if (error instanceof ContainedReadError) {
+      if (error.code === "CONFIG_TOO_LARGE") {
+        throw new MigrationError("CONFIG_TOO_LARGE", "aios.json exceeds the 1 MiB compatibility-inspection limit.");
+      }
+      if (error.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED") {
+        throw new MigrationError("CONFIG_CHANGED", "aios.json changed during compatibility inspection.");
+      }
+      throw new MigrationError("UNSAFE_FILE", "aios.json must be a contained regular file.");
+    }
+    throw error;
+  }
+  if (snapshot === null) {
+    throw new MigrationError("MISSING_FILE", "Required migration file is missing: aios.json");
+  }
+  const { content: bytes, stats } = snapshot;
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) {
+    throw new MigrationError("INVALID_CONFIG_ENCODING", "aios.json must be valid UTF-8.");
+  }
   let config;
   try {
-    config = JSON.parse(bytes.toString("utf8"));
+    config = JSON.parse(text);
   } catch {
     throw new MigrationError("INVALID_CONFIG", `Cannot migrate ${filePath}: it is not valid JSON.`);
   }

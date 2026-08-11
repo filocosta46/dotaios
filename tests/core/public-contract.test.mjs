@@ -19,6 +19,11 @@ async function npmPackDryRun() {
 }
 
 test("commercial website source stays outside the public repository", async () => {
+  try {
+    await fs.access(path.join(repoRoot, ".git"));
+  } catch {
+    return;
+  }
   const { stdout } = await run("git", ["-C", repoRoot, "ls-files", "--", "website"]);
   assert.equal(stdout.trim(), "");
 });
@@ -38,6 +43,41 @@ test("public claims stay inside the verified product boundary", async () => {
 
   assert.doesNotMatch(corpus, /gumroad\.com|lemonsqueezy\.com|updated weekly|refreshed every week/i);
   assert.doesNotMatch(corpus, /every AI reads|no cloud memory|native in every tool/i);
+});
+
+test("Hermes claims a global adapter without inventing a project-local selector", async () => {
+  const relativeFiles = [
+    "docs/adapters.md",
+    "docs/architecture.md",
+    "docs/client-support.md",
+    "docs/compatibility-acceptance.md",
+    "docs/getting-started.md"
+  ];
+  const documents = Object.fromEntries(await Promise.all(
+    relativeFiles.map(async (relativePath) => [
+      relativePath,
+      await fs.readFile(path.join(repoRoot, relativePath), "utf8")
+    ])
+  ));
+  const registry = JSON.parse(
+    await fs.readFile(path.join(repoRoot, "packages/core/src/agents.json"), "utf8")
+  );
+  const hermes = registry.agents.find((agent) => agent.name === "Hermes");
+  const corpus = Object.values(documents).join("\n");
+
+  assert.equal(hermes.skills.project, undefined);
+  assert.match(documents["docs/adapters.md"], /does not configure a project-local Hermes file/i);
+  assert.match(documents["docs/client-support.md"], /no project-local adapter/i);
+  assert.match(documents["docs/compatibility-acceptance.md"], /no bundled project target/i);
+  assert.doesNotMatch(corpus, /plus Hermes|<project>\/\.hermes\/config\.yaml.*for Hermes/is);
+
+  const install = await fs.readFile(path.join(repoRoot, "INSTALL.md"), "utf8");
+  const changelog = await fs.readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8");
+  const unreleased = changelog.split("## [Unreleased]")[1].split(/\n## \[/)[0];
+  assert.match(install, /1\.28\.4 removal contract/i);
+  assert.match(install, /\.hermes\/config\.yaml.*remove only that exact entry/is);
+  assert.doesNotMatch(install, /Current DotAIOS does not configure project-local Hermes/i);
+  assert.match(unreleased, /Project attachment no longer writes `<project>\/\.hermes\/config\.yaml`/i);
 });
 
 test("first-time onboarding stays human-run, pinned, and free of install lifecycle scripts", async () => {
@@ -223,7 +263,7 @@ test("public context guidance documents only the current MCP tools and one memor
   const contents = await Promise.all(
     relativeFiles.map((relativePath) => fs.readFile(path.join(repoRoot, relativePath), "utf8"))
   );
-  const [mcpDocumentation, , , , agentsTemplate] = contents;
+  const [mcpDocumentation, adaptersDocumentation, sessionsDocumentation, architectureDocumentation, agentsTemplate] = contents;
   const toolsSection = mcpDocumentation.split("## Tools")[1].split(/\n## /)[0];
   const documentedTools = [...toolsSection.matchAll(/^- `([a-z_]+)`:/gm)]
     .map((match) => match[1]);
@@ -237,6 +277,26 @@ test("public context guidance documents only the current MCP tools and one memor
 
   assert.deepEqual(documentedTools, ["read_working_context", "search_aios", "resolve_skill"]);
   assert.equal(retiredToolNames.some((name) => corpus.includes(name)), false);
+  assert.match(
+    mcpDocumentation,
+    /`current`, `schema_outdated`, `transaction_present`, or\s+`inspection_failed`/,
+    "the public MCP contract must freeze the four migration states"
+  );
+  assert.match(
+    mcpDocumentation,
+    /`path_scope: "configured_aios"`/,
+    "operational actions must target the same configured AIOS without leaking its path"
+  );
+  assert.match(
+    mcpDocumentation,
+    /1,024-character allowance[\s\S]*non-`markdown` metadata[\s\S]*JSON escaping and protocol framing are representation/i,
+    "the public budget contract must separate operational metadata from JSON representation cost"
+  );
+  assert.doesNotMatch(
+    [mcpDocumentation, adaptersDocumentation, sessionsDocumentation, architectureDocumentation].join("\n"),
+    /canonical (?:memory )?digest|startup digest|digest budget/i,
+    "public guidance must use the canonical working-context projection vocabulary"
+  );
   assert.match(
     agentsTemplate,
     /Do not preload `memory\/events\.jsonl`, `memory\/signals\/`, or `memory\/sessions\/`/,
