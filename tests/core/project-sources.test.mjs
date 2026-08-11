@@ -105,6 +105,44 @@ test("retrieval receipts survive structurally unselectable neighbor identities",
   }
 });
 
+test("retrieval refuses and receipts a readable collision replaced by a link", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const neighborReadme = path.join(fixture.aiosPath, "projects", "other-client", "README.md");
+    const outside = path.join(fixture.root, "outside-neighbor.md");
+    fs.writeFileSync(
+      neighborReadme,
+      "---\nid: acme-campaign\nproject: other-client\n---\n# Readable collision\n",
+    );
+    fs.writeFileSync(outside, "---\nid: unrelated\nproject: outside\n---\n");
+    const replacement = replaceOnNeighborFrontmatter(
+      createEvidenceReader({ roots: [fixture.aiosPath] }), neighborReadme, outside,
+    );
+
+    const result = await retrieveProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "acme-campaign",
+      task: CAMPAIGN_TASK,
+      evidenceReader: replacement.reader,
+    });
+
+    assert.equal(replacement.didReplace(), true);
+    assert.equal(result.decision, "refused");
+    assert.deepEqual(result.references, []);
+    const receiptPath = path.join(
+      fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+    );
+    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].decision, "refused");
+    assert.equal(receipts[0].receipt_id, result.receipt_id);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("core composes finite consent, metadata-only retrieval, provenance, and one receipt", assertCoreConsentSlice);
 
 test("portable source declarations require the exact bounded metadata-only schema", async (t) => {
@@ -1839,6 +1877,22 @@ function retrieveCampaignSource(fixture) {
     projectSelector: "acme-campaign",
     task: CAMPAIGN_TASK,
   });
+}
+
+function replaceOnNeighborFrontmatter(evidenceReader, targetPath, linkTarget) {
+  let replaced = false;
+  const reader = {
+    ...evidenceReader,
+    async readFrontmatter(root, filePath, options) {
+      if (!replaced && path.resolve(String(filePath)) === path.resolve(targetPath)) {
+        fs.rmSync(targetPath);
+        fs.symlinkSync(linkTarget, targetPath);
+        replaced = true;
+      }
+      return evidenceReader.readFrontmatter(root, filePath, options);
+    },
+  };
+  return Object.freeze({ reader: Object.freeze(reader), didReplace: () => replaced });
 }
 
 function failGrantGuardClear(paths, operationId, failRepublish) {

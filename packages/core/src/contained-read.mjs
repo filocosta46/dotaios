@@ -87,6 +87,36 @@ export async function inspectContainedFile(root, filePath, options = {}) {
   return readContainedFile(root, filePath, { ...options, snapshotOnly: true });
 }
 
+/** Observe one final path component without following links or reading bytes. */
+export async function inspectContainedPathEntry(root, filePath, options = {}) {
+  const filesystem = options.filesystem || localFilesystem;
+  if (!isPathWithinLexically(root, filePath)) throw new ContainedReadError();
+  let before;
+  try {
+    before = await filesystem.lstat(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      await assertMissingTailContained(root, filePath, filesystem);
+      await assertContainedDirectoriesUnchanged(root, filesystem, options.expectedDirectories);
+      return null;
+    }
+    throw error;
+  }
+  const ancestors = await inspectContainedAncestors(root, filePath, filesystem);
+  const confirmed = await lstatAfterObservation(filesystem, filePath);
+  if (!sameFile(before, confirmed)) {
+    throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+  }
+  await assertContainedAncestorsUnchanged(root, filePath, filesystem, ancestors);
+  await assertContainedDirectoriesUnchanged(root, filesystem, options.expectedDirectories);
+  const type = confirmed.isSymbolicLink()
+    ? "symbolic-link"
+    : confirmed.isFile()
+      ? "regular-file"
+      : "other";
+  return Object.freeze({ type, stats: confirmed, ancestors });
+}
+
 /** Snapshot regular-file metadata without opening or reading source bytes. */
 export async function inspectContainedFileMetadata(root, filePath, options = {}) {
   const filesystem = options.filesystem || localFilesystem;
@@ -139,10 +169,16 @@ export async function readContainedFile(root, filePath, options = {}) {
     before = await filesystem.lstat(filePath);
   } catch (error) {
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      if (options.expectedSnapshot) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
       await assertMissingTailContained(root, filePath, filesystem);
       return null;
     }
     throw error;
+  }
+  if (options.expectedSnapshot && !sameFile(options.expectedSnapshot.stats, before)) {
+    throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
   }
   if (!await isPathWithin(root, filePath, { fileSystem: filesystem })) {
     throw new ContainedReadError();
@@ -151,6 +187,15 @@ export async function readContainedFile(root, filePath, options = {}) {
   const ancestorsBefore = await inspectContainedAncestors(root, filePath, filesystem);
   const confirmedBefore = await lstatAfterObservation(filesystem, filePath);
   if (!sameFile(before, confirmedBefore)) {
+    throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+  }
+  if (
+    options.expectedSnapshot
+    && !sameContainedFileSnapshot(
+      options.expectedSnapshot,
+      { stats: confirmedBefore, ancestors: ancestorsBefore }
+    )
+  ) {
     throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
   }
   if (

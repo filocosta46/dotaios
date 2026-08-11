@@ -279,6 +279,44 @@ test("project identity isolation preserves strict and state-change failures", as
   });
 });
 
+test("project selection fails closed when a readable collision becomes linked", async () => {
+  const root = tmpDir();
+  const selectedPath = path.join(root, "projects", "acme-campaign");
+  const neighborPath = path.join(root, "projects", "legacy-neighbor");
+  fs.mkdirSync(selectedPath, { recursive: true });
+  fs.mkdirSync(neighborPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(selectedPath, "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Selected\n\nSELECTED_REPLACEMENT_CANARY\n",
+  );
+  const neighborReadme = path.join(neighborPath, "README.md");
+  const outside = path.join(root, "outside-neighbor.md");
+  fs.writeFileSync(
+    neighborReadme,
+    "---\nid: acme-campaign\nproject: legacy-neighbor\n---\n# Readable collision\n",
+  );
+  fs.writeFileSync(outside, "---\nid: unrelated\nproject: outside\n---\n");
+  const replacement = replaceOnNeighborFrontmatter(
+    createEvidenceReader({ roots: [root] }), neighborReadme, outside,
+  );
+
+  await assert.rejects(
+    () => searchAios({
+      aiosPath: root,
+      query: "SELECTED_REPLACEMENT_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+      evidenceReader: replacement.reader,
+    }),
+    (error) => {
+      assert.equal(replacement.didReplace(), true);
+      return error?.code === "DOTAIOS_EVIDENCE_PATH_UNSAFE"
+        || error?.code === "DOTAIOS_EVIDENCE_CHANGED";
+    },
+  );
+  assert.equal(replacement.didReplace(), true);
+});
+
 test("project identity resolution keeps legacy neighbors non-blocking and header-only", async (t) => {
   await t.test("direct slug scans only bounded neighboring identity headers", async () => {
     const fixture = createLegacyProjectShelf();
@@ -425,4 +463,20 @@ function createLegacyProjectShelf() {
     bodyOnlyReadme: path.join(bodyOnly, "README.md"),
     legacyReadmes: [bodyOnly, missingId, malformed].map((directory) => path.join(directory, "README.md"))
   };
+}
+
+function replaceOnNeighborFrontmatter(evidenceReader, targetPath, linkTarget) {
+  let replaced = false;
+  const reader = {
+    ...evidenceReader,
+    async readFrontmatter(root, filePath, options) {
+      if (!replaced && path.resolve(String(filePath)) === path.resolve(targetPath)) {
+        fs.rmSync(targetPath);
+        fs.symlinkSync(linkTarget, targetPath);
+        replaced = true;
+      }
+      return evidenceReader.readFrontmatter(root, filePath, options);
+    },
+  };
+  return Object.freeze({ reader: Object.freeze(reader), didReplace: () => replaced });
 }

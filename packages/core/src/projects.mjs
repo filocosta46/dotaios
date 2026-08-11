@@ -28,12 +28,10 @@ const PROJECT_STATE_VERSION = 1;
 const PROJECT_STATE_LOCK_FORMAT = "dotaios-project-state-lock/v1";
 const PROJECT_STATE_LOCK_STALE_MS = 5 * 60 * 1000;
 const PROJECT_DOMAINS = new Set(["build", "make", "sell"]);
-const UNSELECTABLE_PROJECT_IDENTITY_ERRORS = new Set([
+const UNSELECTABLE_PROJECT_IDENTITY_CONTENT_ERRORS = new Set([
   "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
   "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID",
   "DOTAIOS_EVIDENCE_INVALID_UTF8",
-  "DOTAIOS_EVIDENCE_NOT_REGULAR_FILE",
-  "DOTAIOS_EVIDENCE_PATH_UNSAFE",
 ]);
 
 /**
@@ -536,20 +534,24 @@ async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceR
     if (!strict) return null;
     throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project catalog contains an invalid slug");
   }
+  const readmePath = path.join(projectDirectory, "README.md");
+  const expectedEntry = strict ? null : await evidenceReader.inspectEntry(aiosPath, readmePath);
+  if (!strict && expectedEntry?.type !== "regular-file") return null;
   let frontmatter;
   try {
     frontmatter = await evidenceReader.readFrontmatter(
       aiosPath,
-      path.join(projectDirectory, "README.md"),
+      readmePath,
       {
         maxBytes: 16 * 1024,
         maxFileBytes: 1024 * 1024,
         allowMissing: !strict,
-        stopOnMissingFrontmatter: true
+        stopOnMissingFrontmatter: true,
+        expectedEntry
       }
     );
   } catch (error) {
-    if (!strict && UNSELECTABLE_PROJECT_IDENTITY_ERRORS.has(error?.code)) return null;
+    if (!strict && UNSELECTABLE_PROJECT_IDENTITY_CONTENT_ERRORS.has(error?.code)) return null;
     if (strict && error?.code === "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID") {
       throw projectSelectorError("DOTAIOS_PROJECT_CATALOG_INVALID", "project identity frontmatter is invalid");
     }
