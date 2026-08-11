@@ -536,7 +536,10 @@ async function readPortableProjectIdentity(aiosPath, projectDirectory, evidenceR
   }
   const readmePath = path.join(projectDirectory, "README.md");
   const expectedEntry = strict ? null : await evidenceReader.inspectEntry(aiosPath, readmePath);
-  if (!strict && expectedEntry?.type !== "regular-file") return null;
+  if (!strict && expectedEntry?.type !== "regular-file") {
+    await evidenceReader.inspectEntry(aiosPath, readmePath, { expectedEntry });
+    return null;
+  }
   let frontmatter;
   try {
     frontmatter = await evidenceReader.readFrontmatter(

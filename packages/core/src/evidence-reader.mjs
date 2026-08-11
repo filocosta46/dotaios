@@ -145,7 +145,7 @@ function createEvidenceReaderView(roots, state) {
     }
   }
 
-  async function inspectEntry(root, filePath) {
+  async function inspectEntry(root, filePath, options = {}) {
     const authorizedRoot = assertAuthorizedRoot(root);
     if (!isPathWithinLexically(authorizedRoot, filePath)) {
       throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
@@ -153,7 +153,10 @@ function createEvidenceReaderView(roots, state) {
     try {
       return await inspectContainedPathEntry(authorizedRoot, filePath, {
         filesystem,
-        expectedDirectories: expectedDirectoriesFor(authorizedRoot, filePath)
+        expectedDirectories: expectedDirectoriesFor(authorizedRoot, filePath),
+        ...(Object.hasOwn(options, "expectedEntry")
+          ? { expectedSnapshot: options.expectedEntry }
+          : {})
       });
     } catch (error) {
       throw normalizeEvidenceReadError(error);

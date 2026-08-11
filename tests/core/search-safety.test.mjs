@@ -191,7 +191,7 @@ test("project selection refuses a slug that collides with another project's stab
 });
 
 test("direct slug selection skips structurally unselectable neighbor identities", async (t) => {
-  for (const kind of ["linked", "oversized"]) {
+  for (const kind of ["missing", "linked", "special", "oversized"]) {
     await t.test(kind, async () => {
       const root = tmpDir();
       const selectedPath = path.join(root, "projects", "acme-campaign");
@@ -207,7 +207,9 @@ test("direct slug selection skips structurally unselectable neighbor identities"
         const outside = path.join(root, "outside-neighbor.md");
         fs.writeFileSync(outside, "---\nid: acme-campaign\nproject: legacy-neighbor\n---\n");
         fs.symlinkSync(outside, neighborReadme);
-      } else {
+      } else if (kind === "special") {
+        fs.mkdirSync(neighborReadme);
+      } else if (kind === "oversized") {
         fs.writeFileSync(neighborReadme, "x".repeat((1024 * 1024) + 1));
       }
 
@@ -310,11 +312,40 @@ test("project selection fails closed when a readable collision becomes linked", 
     }),
     (error) => {
       assert.equal(replacement.didReplace(), true);
-      return error?.code === "DOTAIOS_EVIDENCE_PATH_UNSAFE"
-        || error?.code === "DOTAIOS_EVIDENCE_CHANGED";
+      return error?.code === "DOTAIOS_EVIDENCE_CHANGED";
     },
   );
   assert.equal(replacement.didReplace(), true);
+});
+
+test("project selection fails closed when a missing identity becomes a readable collision", async () => {
+  const root = tmpDir();
+  const selectedPath = path.join(root, "projects", "acme-campaign");
+  const neighborPath = path.join(root, "projects", "legacy-neighbor");
+  fs.mkdirSync(selectedPath, { recursive: true });
+  fs.mkdirSync(neighborPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(selectedPath, "README.md"),
+    "---\nid: project-acme-001\nproject: acme-campaign\n---\n# Selected\n\nSELECTED_INSERTION_CANARY\n",
+  );
+  const neighborReadme = path.join(neighborPath, "README.md");
+  const insertion = insertCollisionAfterMissingInspection(
+    createEvidenceReader({ roots: [root] }), neighborReadme,
+  );
+
+  await assert.rejects(
+    () => searchAios({
+      aiosPath: root,
+      query: "SELECTED_INSERTION_CANARY",
+      scope: "projects",
+      projectSelector: "acme-campaign",
+      evidenceReader: insertion.reader,
+    }),
+    (error) => {
+      assert.equal(insertion.didInsert(), true);
+      return error?.code === "DOTAIOS_EVIDENCE_CHANGED";
+    },
+  );
 });
 
 test("project identity resolution keeps legacy neighbors non-blocking and header-only", async (t) => {
@@ -479,4 +510,23 @@ function replaceOnNeighborFrontmatter(evidenceReader, targetPath, linkTarget) {
     },
   };
   return Object.freeze({ reader: Object.freeze(reader), didReplace: () => replaced });
+}
+
+function insertCollisionAfterMissingInspection(evidenceReader, targetPath) {
+  let inserted = false;
+  const reader = {
+    ...evidenceReader,
+    async inspectEntry(root, filePath, options) {
+      const entry = await evidenceReader.inspectEntry(root, filePath, options);
+      if (!inserted && entry === null && path.resolve(String(filePath)) === path.resolve(targetPath)) {
+        fs.writeFileSync(
+          targetPath,
+          "---\nid: acme-campaign\nproject: legacy-neighbor\n---\n# Inserted collision\n",
+        );
+        inserted = true;
+      }
+      return entry;
+    },
+  };
+  return Object.freeze({ reader: Object.freeze(reader), didInsert: () => inserted });
 }

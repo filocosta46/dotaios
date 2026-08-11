@@ -90,6 +90,7 @@ export async function inspectContainedFile(root, filePath, options = {}) {
 /** Observe one final path component without following links or reading bytes. */
 export async function inspectContainedPathEntry(root, filePath, options = {}) {
   const filesystem = options.filesystem || localFilesystem;
+  const hasExpectedSnapshot = Object.hasOwn(options, "expectedSnapshot");
   if (!isPathWithinLexically(root, filePath)) throw new ContainedReadError();
   let before;
   try {
@@ -98,6 +99,9 @@ export async function inspectContainedPathEntry(root, filePath, options = {}) {
     if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
       await assertMissingTailContained(root, filePath, filesystem);
       await assertContainedDirectoriesUnchanged(root, filesystem, options.expectedDirectories);
+      if (hasExpectedSnapshot && options.expectedSnapshot !== null) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
       return null;
     }
     throw error;
@@ -109,12 +113,22 @@ export async function inspectContainedPathEntry(root, filePath, options = {}) {
   }
   await assertContainedAncestorsUnchanged(root, filePath, filesystem, ancestors);
   await assertContainedDirectoriesUnchanged(root, filesystem, options.expectedDirectories);
+  const snapshot = { stats: confirmed, ancestors };
+  if (
+    hasExpectedSnapshot
+    && (
+      options.expectedSnapshot === null
+      || !sameContainedFileSnapshot(options.expectedSnapshot, snapshot)
+    )
+  ) {
+    throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+  }
   const type = confirmed.isSymbolicLink()
     ? "symbolic-link"
     : confirmed.isFile()
       ? "regular-file"
       : "other";
-  return Object.freeze({ type, stats: confirmed, ancestors });
+  return Object.freeze({ type, ...snapshot });
 }
 
 /** Snapshot regular-file metadata without opening or reading source bytes. */

@@ -72,7 +72,7 @@ test("retrieval refuses a selector shared by a project slug and another stable i
 });
 
 test("retrieval receipts survive structurally unselectable neighbor identities", async (t) => {
-  for (const kind of ["linked", "oversized"]) {
+  for (const kind of ["missing", "linked", "special", "oversized"]) {
     await t.test(kind, async () => {
       const fixture = createProjectSourceRetrievalFixture();
       try {
@@ -83,6 +83,11 @@ test("retrieval receipts survive structurally unselectable neighbor identities",
           fs.writeFileSync(outside, "---\nid: acme-campaign\nproject: other-client\n---\n");
           fs.rmSync(neighborReadme);
           fs.symlinkSync(outside, neighborReadme);
+        } else if (kind === "missing") {
+          fs.rmSync(neighborReadme);
+        } else if (kind === "special") {
+          fs.rmSync(neighborReadme);
+          fs.mkdirSync(neighborReadme);
         } else {
           fs.writeFileSync(neighborReadme, "x".repeat((1024 * 1024) + 1));
         }
@@ -130,6 +135,7 @@ test("retrieval refuses and receipts a readable collision replaced by a link", a
 
     assert.equal(replacement.didReplace(), true);
     assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "source-changed");
     assert.deepEqual(result.references, []);
     const receiptPath = path.join(
       fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
@@ -137,6 +143,42 @@ test("retrieval refuses and receipts a readable collision replaced by a link", a
     const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
     assert.equal(receipts.length, 1);
     assert.equal(receipts[0].decision, "refused");
+    assert.equal(receipts[0].reason, "source-changed");
+    assert.equal(receipts[0].receipt_id, result.receipt_id);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("retrieval refuses and receipts a missing identity replaced by a readable collision", async () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    await applyCampaignGrant(fixture);
+    const neighborReadme = path.join(fixture.aiosPath, "projects", "other-client", "README.md");
+    fs.rmSync(neighborReadme);
+    const insertion = insertCollisionAfterMissingInspection(
+      createEvidenceReader({ roots: [fixture.aiosPath] }), neighborReadme,
+    );
+
+    const result = await retrieveProjectSource({
+      aiosPath: fixture.aiosPath,
+      homePath: fixture.homePath,
+      projectSelector: "acme-campaign",
+      task: CAMPAIGN_TASK,
+      evidenceReader: insertion.reader,
+    });
+
+    assert.equal(insertion.didInsert(), true);
+    assert.equal(result.decision, "refused");
+    assert.equal(result.reason, "source-changed");
+    assert.deepEqual(result.references, []);
+    const receiptPath = path.join(
+      fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl",
+    );
+    const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(receipts.length, 1);
+    assert.equal(receipts[0].decision, "refused");
+    assert.equal(receipts[0].reason, "source-changed");
     assert.equal(receipts[0].receipt_id, result.receipt_id);
   } finally {
     fixture.cleanup();
@@ -1893,6 +1935,25 @@ function replaceOnNeighborFrontmatter(evidenceReader, targetPath, linkTarget) {
     },
   };
   return Object.freeze({ reader: Object.freeze(reader), didReplace: () => replaced });
+}
+
+function insertCollisionAfterMissingInspection(evidenceReader, targetPath) {
+  let inserted = false;
+  const reader = {
+    ...evidenceReader,
+    async inspectEntry(root, filePath, options) {
+      const entry = await evidenceReader.inspectEntry(root, filePath, options);
+      if (!inserted && entry === null && path.resolve(String(filePath)) === path.resolve(targetPath)) {
+        fs.writeFileSync(
+          targetPath,
+          "---\nid: acme-campaign\nproject: other-client\n---\n# Inserted collision\n",
+        );
+        inserted = true;
+      }
+      return entry;
+    },
+  };
+  return Object.freeze({ reader: Object.freeze(reader), didInsert: () => inserted });
 }
 
 function failGrantGuardClear(paths, operationId, failRepublish) {

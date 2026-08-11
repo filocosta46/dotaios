@@ -1420,7 +1420,10 @@ function sameRootIdentity(left, right) {
 function stableReason(error) {
   if (error instanceof ProjectSourceError) return error.details.reason || error.code.replace(/^DOTAIOS_/, "").toLowerCase();
   if (error?.code === "DOTAIOS_PROJECT_SOURCE_STATE_INVALID") return "authorization-state-invalid";
-  if (error?.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED") return "source-changed";
+  if (
+    error?.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED"
+    || error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  ) return "source-changed";
   if (
     error?.code === "DOTAIOS_PROJECT_SOURCE_BOUND_EXCEEDED"
     || error?.code === "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED"
