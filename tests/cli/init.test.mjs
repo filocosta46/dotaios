@@ -174,6 +174,32 @@ test("init --force preserves an existing gitignore byte-for-byte", () => {
   assert.equal(fs.readFileSync(path.join(target, ".gitignore"), "utf8"), custom);
 });
 
+test("init refuses force and overwrite skill/catalog writes against an existing live AIOS store", () => {
+  for (const option of ["--force", "--overwrite"]) {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-managed-skill-writer-"));
+    const target = path.join(root, "aios");
+    const initial = spawnSync(process.execPath, [cli, "init", "--yes", "--path", target], { encoding: "utf8" });
+    assert.equal(initial.status, 0, initial.stderr);
+    const skillName = fs.readdirSync(path.join(target, "skills"), { withFileTypes: true })
+      .find((entry) => entry.isDirectory())?.name;
+    assert.ok(skillName);
+    fs.rmSync(path.join(target, "skills", skillName), { recursive: true });
+    const indexPath = path.join(target, "skills", "INDEX.md");
+    fs.writeFileSync(indexPath, "# user-preserved catalog\n");
+
+    const result = spawnSync(
+      process.execPath,
+      [cli, "init", "--yes", option, "--path", target],
+      { encoding: "utf8" }
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /ManagedSkillStore|existing live AIOS/i);
+    assert.equal(fs.existsSync(path.join(target, "skills", skillName)), false);
+    assert.equal(fs.readFileSync(indexPath, "utf8"), "# user-preserved catalog\n");
+  }
+});
+
 test("init --force refuses an existing ignore file that would strand current schema", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-unsafe-ignore-"));
   const target = path.join(root, "aios");

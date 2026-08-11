@@ -94,22 +94,22 @@ export async function installSymlinkSkills({
     }
     if (entry.kind === "symlink" && await isStaleDotaiosTempPath(resolvedEntryTarget)) {
       if (!dryRun) {
-        await fs.rm(dest, { recursive: true, force: true });
+        await fs.unlink(dest);
         await fs.symlink(source, dest, symlinkType);
       }
       results.push({ action: dryRun ? "would repair" : "repaired", path: dest });
       continue;
     }
-    // exists OR foreign symlink
-    if (!overwrite) {
-      results.push({ action: "kept", path: dest, note: "existing unmanaged entry" });
-      continue;
-    }
-    if (!dryRun) {
-      await fs.rm(dest, { recursive: true, force: true });
-      await fs.symlink(source, dest, symlinkType);
-    }
-    results.push({ action: dryRun ? "would relink" : "relinked", path: dest });
+    // Existing real entries and foreign links are never replacement authority.
+    // ManagedSkillStore has the only proof-bound path that may replace a
+    // selected native source directory.
+    results.push({
+      action: "kept",
+      path: dest,
+      note: overwrite
+        ? "existing unmanaged entry; overwrite cannot replace skill bytes"
+        : "existing unmanaged entry"
+    });
   }
   return results;
 }
@@ -141,7 +141,7 @@ export async function cleanupStaleLinks({ aiosPath, sourceDir = null, targetDir,
     try {
       await fs.access(target);                               // source still exists?
     } catch {
-      if (!dryRun) await fs.rm(dest, { force: true });
+      if (!dryRun) await fs.unlink(dest);
       removed.push({ action: dryRun ? "would remove" : "removed", path: dest });
     }
   }
@@ -174,7 +174,7 @@ export async function removeManagedSkillLinks({ aiosPath, sourceDir = null, targ
     if (!canonicalSource) continue;
     const target = resolveSymlinkTarget(dest, info.target);
     if (!isPathWithinLexically(root, target) || !(await samePath(target, canonicalSource))) continue;
-    if (!dryRun) await fs.rm(dest, { recursive: true, force: true });
+    if (!dryRun) await fs.unlink(dest);
     removed.push({ action: dryRun ? "would-remove" : "removed", path: dest });
   }
   return removed;
@@ -233,7 +233,7 @@ export async function removeManagedSkillAliases({ aiosPath, sourceDir = null, ta
   const aliases = await findManagedSkillAliases({ aiosPath, sourceDir, targetDir });
   const removed = [];
   for (const alias of aliases) {
-    if (!dryRun) await fs.rm(alias.path, { recursive: true, force: true });
+    if (!dryRun) await fs.unlink(alias.path);
     removed.push({
       action: dryRun ? "would-remove" : "removed",
       ...alias

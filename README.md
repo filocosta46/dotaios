@@ -106,6 +106,26 @@ npx -y dotaios@latest sync status
 
 Credentials stay on the machine and are not written into the Git remote URL. Managed project checkouts, external vault contents, secrets, and ignored local state are outside the mirror. Stop syncing and remove the local sync credential with `npx -y dotaios@latest sync logout`; the private repository remains in your GitHub account.
 
+## Managed Agent Skills
+
+AIOS real directories under `skills/<name>/SKILL.md` are canonical. Native
+agent folders are derived projections; linked shelf entries and real skills
+found only in native folders stay unroutable until explicit adoption.
+
+```sh
+dotaios skills inventory --json
+dotaios skills adopt /reviewed/local/skill --json
+dotaios skills adopt /reviewed/local/skill \
+  --apply <operation-id> --fingerprint <sha256>
+dotaios skills reconcile --json
+dotaios skills remove <name> --json
+```
+
+Preview commands are zero-write. Apply requires both exact tokens from the
+matching preview. Adoption copies the complete bounded regular-file bundle,
+never executes scripts, and refuses links, special or hardlinked files, stale
+proofs, unsafe parents, and foreign collisions.
+
 ## Updating
 
 First inspect the newest release metadata without executing it:

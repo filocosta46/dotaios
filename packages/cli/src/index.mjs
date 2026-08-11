@@ -64,7 +64,7 @@ Commands:
   index             Generate ~/aios/_index.md — table of contents across context and vault
   init              Scaffold ~/aios with local context templates
   ingest <input>    Copy material into vault/raw and log an event
-  install <path>    Validate and install a local plugin directory
+  install <path>    Preview or adopt a reviewed local Agent Skill bundle
   interview         Update your context by answering a few short questions
   memory <cmd>      Audit recent memory or promote captured evidence explicitly
   migrate           Preview, apply, or recover a versioned folder migration

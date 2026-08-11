@@ -164,7 +164,7 @@ List local manual schedules:
 npx dotaios@latest schedule list
 ```
 
-Your daily interface is your existing AI tool. You should not need to open DotAIOS directly except to check status, refresh your context, import material, ingest files, install trusted local plugins, or run manual schedules.
+Your daily interface is your existing AI tool. You should not need to open DotAIOS directly except to check status, refresh your context, import material, ingest files, adopt reviewed local Agent Skill bundles, or run manual schedules.
 
 Skills live in `~/aios/skills/<name>/SKILL.md`. Open any skill folder to see what it does, what it will not do, and how to ask for it. In Claude Code, skills appear as slash commands after `activate`; in other agents, ask naturally, such as "use the audit skill".
 
@@ -202,6 +202,6 @@ the same way:
 Skills folder for Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode, the
 Antigravity IDE global folder, and every existing Hermes root or discovered
 profile configuration, then verifies filesystem/configuration propagation.
-`dotaios skills doctor` reports configuration and discoverability
-per surface. A bounded client probe records invocation separately, while only
+`dotaios skills doctor` reports configuration and filesystem projection
+evidence per surface; it leaves discovery unprobed. A bounded client probe records invocation separately, while only
 `produced=yes` proves that the client used the skill.

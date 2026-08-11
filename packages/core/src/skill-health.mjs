@@ -9,7 +9,7 @@ import {
   isCommandAvailable,
   loadAgentRegistry
 } from "./bridges.mjs";
-import { renderResolver, renderSkillsIndex, collectSkills } from "./skills.mjs";
+import { collectSkills, renderResolverBytes, renderSkillsIndexBytes } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
 import { discoverHermesConfigTargets, inspectExternalSkillsDirs } from "./hermes-config.mjs";
 import { findManagedSkillAliases } from "./skills-install.mjs";
@@ -21,11 +21,11 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir(), de
   const catalogs = {
     index: await compareFile(
       path.join(skillsDir, "INDEX.md"),
-      `${renderSkillsIndex(sourceSkills)}\n`
+      renderSkillsIndexBytes(sourceSkills)
     ),
     resolver: await compareFile(
       path.join(skillsDir, "RESOLVER.md"),
-      `${renderResolver(sourceSkills)}\n`
+      renderResolverBytes(sourceSkills)
     )
   };
 
@@ -79,9 +79,10 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir(), de
     hermes,
     runtimes,
     verification: {
-      scope: "configuration-only",
+      scope: "configuration-and-projection-only",
       invocation: "not-run",
-      note: "A path-ready report does not prove that a client discovered or invoked a skill; run a bounded agent-specific smoke test for invocation evidence."
+      produced: "not-run",
+      note: "A projected path does not prove that a client discovered, invoked, or produced with a skill; run a bounded agent-specific probe for stronger evidence."
     },
     unsupported: [
       "Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode use the shared .agents/skills target; Antigravity IDE uses its documented global target.",
@@ -100,7 +101,7 @@ async function inspectRuntimes({ homePath, registry, targets, bridges, hermes, d
     const installed = await isAgentInstalled(homePath, agent, detection);
     const bridge = bridgeByName.get(agent.name);
     const configured = configuredStatus({ agent, installed, bridge, homePath, targetByDir, hermes });
-    const discoverable = discoverableStatus({ agent, installed, bridge, homePath, targetByDir, hermes });
+    const projected = projectedStatus({ agent, installed, bridge, homePath, targetByDir, hermes });
     const binary = installed
       ? await commandStatus(agent.command, detection)
       : "not-detected";
@@ -110,9 +111,11 @@ async function inspectRuntimes({ homePath, registry, targets, bridges, hermes, d
       installed,
       capabilities: {
         configured,
-        discoverable,
+        projected,
+        discoverable: "not-probed",
         binary,
-        invocation: "not-run"
+        invocation: "not-run",
+        produced: "not-run"
       },
       evidence: {
         bridge: bridge?.status || "not-detected",
@@ -141,19 +144,19 @@ function configuredStatus({ agent, installed, bridge, homePath, targetByDir, her
   return bridge?.status === "not-applicable" ? "not-declared" : "no";
 }
 
-function discoverableStatus({ agent, installed, bridge, homePath, targetByDir, hermes }) {
+function projectedStatus({ agent, installed, bridge, homePath, targetByDir, hermes }) {
   if (agent.skills?.mode === "symlink") {
     const target = targetByDir.get(agent.skills.dir);
     if (!target || target.status !== "active") return installed ? "no" : "not-detected";
-    return target.canonicalPresent ? "path-ready" : "no";
+    return target.canonicalPresent ? "yes" : "no";
   }
   if (agent.skills?.mode === "config-external-dir") {
     const expected = path.resolve(homePath, agent.skills.configFile);
     const key = agent.skills.key || "skills.external_dirs";
     const target = hermes.configs.find((entry) => entry.path === expected && entry.key === key);
-    return target?.status === "healthy" ? "path-ready" : (installed ? "no" : "not-detected");
+    return target?.status === "healthy" ? "yes" : (installed ? "no" : "not-detected");
   }
-  if (bridge?.status === "healthy") return "not-proven";
+  if (bridge?.status === "healthy") return "not-applicable";
   return installed ? "no" : "not-detected";
 }
 
@@ -193,8 +196,8 @@ async function commandStatus(command, detection) {
 
 async function compareFile(filePath, expected) {
   try {
-    const actual = await fs.readFile(filePath, "utf8");
-    return { path: filePath, present: true, current: actual === expected };
+    const actual = await fs.readFile(filePath);
+    return { path: filePath, present: true, current: actual.equals(expected) };
   } catch {
     return { path: filePath, present: false, current: false };
   }

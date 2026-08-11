@@ -3,7 +3,14 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { collectSkills, renderSkillsIndex, renderResolver, writeSkillsIndex } from "../../packages/core/src/skills.mjs";
+import {
+  collectSkills,
+  renderResolver,
+  renderResolverBytes,
+  renderSkillsIndex,
+  renderSkillsIndexBytes,
+  writeSkillsIndex
+} from "../../packages/core/src/skills.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 
@@ -146,6 +153,73 @@ test("renderResolver builds a trigger->skill table and falls back to description
 
 test("renderResolver handles an empty skill set", () => {
   assert.match(renderResolver([]), /No skills installed yet/);
+});
+
+test("catalog byte renderers use unsigned UTF-8 ordering for names and paths", () => {
+  const skills = [
+    { dir: "z-path", name: "same", description: "Z path.", triggers: [] },
+    { dir: "ä-path", name: "same", description: "Opaque path.", triggers: [] },
+    { dir: "opaque", name: "ä-skill", description: "Opaque name.", triggers: [] },
+    { dir: "lower", name: "z-skill", description: "Lower name.", triggers: [] },
+    { dir: "upper", name: "Z-skill", description: "Upper name.", triggers: [] }
+  ];
+
+  const index = renderSkillsIndexBytes(skills);
+  const resolver = renderResolverBytes(skills);
+
+  assert.ok(Buffer.isBuffer(index));
+  assert.ok(Buffer.isBuffer(resolver));
+  assert.equal(index.at(-1), 0x0a);
+  assert.equal(resolver.at(-1), 0x0a);
+  assert.ok(index.indexOf("## Z-skill") < index.indexOf("## z-skill"));
+  assert.ok(index.indexOf("## z-skill") < index.indexOf("## ä-skill"));
+  assert.ok(index.indexOf("skills/z-path/SKILL.md") < index.indexOf("skills/ä-path/SKILL.md"));
+  assert.deepEqual(renderSkillsIndexBytes([...skills].reverse()), index);
+  assert.deepEqual(renderResolverBytes([...skills].reverse()), resolver);
+});
+
+test("120 real skills render deterministic owned-only catalogs without body injection", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-large-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-large-outside-"));
+  t.after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+  const skillsDir = path.join(root, "skills");
+
+  for (let index = 119; index >= 0; index -= 1) {
+    const suffix = String(index).padStart(3, "0");
+    const skillDir = path.join(skillsDir, `skill-${suffix}`);
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      `---\nname: skill-${suffix}\ndescription: Owned skill ${suffix}.\ntriggers: run ${suffix}\n---\n\nFULL_SKILL_BODY_CANARY_${suffix}\n`
+    );
+  }
+
+  for (let index = 0; index < 5; index += 1) {
+    const linkedName = `linked-candidate-${index}`;
+    makeSkill(outside, linkedName, linkedName, `LINKED_METADATA_CANARY_${index}`);
+    fs.symlinkSync(path.join(outside, linkedName), path.join(skillsDir, linkedName), "dir");
+  }
+
+  const skills = await collectSkills(root);
+  const indexBytes = renderSkillsIndexBytes(skills);
+  const resolverBytes = renderResolverBytes(skills);
+
+  assert.equal(skills.length, 120);
+  assert.deepEqual(
+    skills.map(({ name }) => name),
+    Array.from({ length: 120 }, (_, index) => `skill-${String(index).padStart(3, "0")}`)
+  );
+  for (const catalog of [indexBytes, resolverBytes]) {
+    const text = catalog.toString("utf8");
+    assert.doesNotMatch(text, /FULL_SKILL_BODY_CANARY|LINKED_METADATA_CANARY|linked-candidate/);
+  }
+  assert.equal((indexBytes.toString("utf8").match(/^## skill-/gm) || []).length, 120);
+  assert.equal((resolverBytes.toString("utf8").match(/\| `skills\/skill-/g) || []).length, 120);
+  assert.deepEqual(renderSkillsIndexBytes([...skills].reverse()), indexBytes);
+  assert.deepEqual(renderResolverBytes([...skills].reverse()), resolverBytes);
 });
 
 test("writeSkillsIndex also writes skills/RESOLVER.md", async () => {
