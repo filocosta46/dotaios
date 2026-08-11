@@ -70,6 +70,56 @@ test("human grant preview presents the complete finite read consent", () => {
   }
 });
 
+test("advanced grant and revoke output separates portable and machine-local authorization effects", async (t) => {
+  await t.test("human preview and apply", () => {
+    const fixture = createProjectSourceRetrievalFixture();
+    try {
+      applySourceDeclaration(fixture);
+
+      const grantPreview = runCli(withoutJson(sourceGrantArgs(fixture)));
+      assert.equal(grantPreview.status, 0, grantPreview.stderr || grantPreview.stdout);
+      assertAuthorizationEffects(grantPreview.stdout, fixture, "grant");
+
+      const grantProof = runJson(sourceGrantArgs(fixture));
+      const grantApplied = runCli(withoutJson(sourceGrantArgs(fixture, grantProof)));
+      assert.equal(grantApplied.status, 0, grantApplied.stderr || grantApplied.stdout);
+      assertAuthorizationEffects(grantApplied.stdout, fixture, "grant");
+      assert.match(grantApplied.stdout, new RegExp(`Grant ID: ${grantProof.grant_id}`));
+
+      const revokePreview = runCli(withoutJson(sourceRevokeArgs(fixture, grantProof.grant_id)));
+      assert.equal(revokePreview.status, 0, revokePreview.stderr || revokePreview.stdout);
+      assertAuthorizationEffects(revokePreview.stdout, fixture, "revocation");
+
+      const revokeProof = runJson(sourceRevokeArgs(fixture, grantProof.grant_id));
+      const revokeApplied = runCli(withoutJson(sourceRevokeArgs(fixture, grantProof.grant_id, revokeProof)));
+      assert.equal(revokeApplied.status, 0, revokeApplied.stderr || revokeApplied.stdout);
+      assertAuthorizationEffects(revokeApplied.stdout, fixture, "revocation");
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  await t.test("JSON preview and apply", () => {
+    const fixture = createProjectSourceRetrievalFixture();
+    try {
+      applySourceDeclaration(fixture);
+
+      const grantPreview = runJson(sourceGrantArgs(fixture));
+      assertJsonAuthorizationEffects(grantPreview, fixture, "grant");
+      const grantApplied = runJson(sourceGrantArgs(fixture, grantPreview));
+      assertJsonAuthorizationEffects(grantApplied, fixture, "grant");
+      assert.equal(grantApplied.grant_id, grantPreview.grant_id);
+
+      const revokePreview = runJson(sourceRevokeArgs(fixture, grantApplied.grant_id));
+      assertJsonAuthorizationEffects(revokePreview, fixture, "revocation");
+      const revokeApplied = runJson(sourceRevokeArgs(fixture, grantApplied.grant_id, revokePreview));
+      assertJsonAuthorizationEffects(revokeApplied, fixture, "revocation");
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});
+
 test("project-source help is reachable at every nested boundary and explains search selectors", () => {
   for (const args of [
     ["project", "--help"],
@@ -154,6 +204,29 @@ test("guided connect and the project-search selector migration are documented", 
   assert.match(changelog, /`--session-project` remains the session-tag filter/);
 });
 
+test("project identity documentation matches the bounded cross-namespace collision scan", () => {
+  const architecture = fs.readFileSync(path.join(repoRoot, "docs", "architecture.md"), "utf8");
+  const plan = fs.readFileSync(
+    path.join(repoRoot, "docs", "plans", "2026-08-10-003-feat-consumer-project-source-retrieval-plan.md"),
+    "utf8",
+  );
+
+  assert.match(
+    architecture,
+    /both slug and stable-ID selectors\s+perform a bounded identity-only\s+catalog scan/i,
+  );
+  assert.match(architecture, /neighboring project bodies and source declarations\s+are never read/i);
+  assert.match(
+    plan,
+    /KTD15\.[\s\S]*both slug and stable-ID selectors perform a bounded identity-only scan/i,
+  );
+  assert.match(plan, /detect slug\/stable-ID namespace collisions/i);
+  assert.match(
+    plan,
+    /U4\.[\s\S]*both direct slug and stable-ID selectors scan bounded identity-only catalog headers/i,
+  );
+});
+
 test("guided connect resumes only matching source-only state and refuses mismatches", () => {
   const resumable = createProjectSourceRetrievalFixture();
   try {
@@ -205,6 +278,34 @@ function authorizeCliSource(fixture, verifyPreview = false) {
   assert.equal(applied.scope, "read");
   assert.match(applied.approved_at, /^\d{4}-\d{2}-\d{2}T/);
   return applied;
+}
+
+function applySourceDeclaration(fixture) {
+  const preview = runJson(sourceAddArgs(fixture));
+  assert.equal(runJson(sourceAddArgs(fixture, preview)).applied, true);
+}
+
+function withoutJson(args) {
+  return args.filter((argument) => argument !== "--json");
+}
+
+function assertAuthorizationEffects(output, fixture, authorizationEffect) {
+  assert.match(output, /Portable effect:\s+none/);
+  assert.match(output, new RegExp(`Machine-local authorization effect:\\s+${authorizationEffect}`));
+  assertPathFreeAuthorizationOutput(output, fixture);
+}
+
+function assertJsonAuthorizationEffects(result, fixture, authorizationEffect) {
+  assert.deepEqual(result.portable, { effect: "none" });
+  assert.deepEqual(result.machine_local, { authorization_effect: authorizationEffect });
+  assertPathFreeAuthorizationOutput(JSON.stringify(result), fixture);
+}
+
+function assertPathFreeAuthorizationOutput(output, fixture) {
+  assert.equal(output.includes(fixture.aiosPath), false);
+  assert.equal(output.includes(fixture.homePath), false);
+  assert.equal(output.includes(fixture.sourceRoot), false);
+  assert.doesNotMatch(output, /\.dotaios|project-sources\/grants|project-sources\/bindings/);
 }
 
 function assertAllowedCliRetrieval(fixture, grantApplied) {

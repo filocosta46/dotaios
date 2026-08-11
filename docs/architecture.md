@@ -36,10 +36,11 @@ source under `projects/<slug>/sources/`. The public workflow policy lives in
 `project-sources.mjs`; machine-local binding/grant persistence uses one
 versioned file per project/source coordinate so selected-project reads do not
 observe or contend with sibling authority. Guarded receipt publication remains
-private. A capability-passed identity
-resolver reads bounded project README frontmatter before either search or
-source discovery constructs a corpus. Only the selected project directory can
-then participate.
+private. Both slug and stable-ID selectors perform a bounded identity-only
+catalog scan through the capability-passed resolver to detect cross-namespace
+ambiguity. Neighboring project bodies and source declarations are never read;
+only bounded identity frontmatter participates. After unique resolution, only
+the selected project directory can enter search or source discovery.
 
 Local-folder retrieval enumerates contained metadata with raw UTF-8 name
 validation, finite depth/entry/file/path/output bounds, identity rechecks, and

@@ -1228,6 +1228,11 @@ async function assertPortableSourceDirectory(plan, directory, filesystem) {
 }
 
 function publicMutationResult(plan, additions = {}) {
+  const authorizationEffect = plan.operation === "grant"
+    ? "grant"
+    : plan.operation === "revoke"
+      ? "revocation"
+      : null;
   return Object.freeze({
     version: plan.version,
     operation: plan.operation,
@@ -1245,8 +1250,14 @@ function publicMutationResult(plan, additions = {}) {
     ...(Object.hasOwn(plan, "revoked_at") ? { revoked_at: additions.revoked_at ?? plan.revoked_at } : {}),
     ...(plan.expires_at ? { expires_at: plan.expires_at } : {}),
     ...(plan.recovery ? { recovery: true } : {}),
-    ...(plan.portable_path ? { portable: { path: plan.portable_path } } : {}),
-    machine_local: plan.machine_local,
+    ...(authorizationEffect
+      ? { portable: Object.freeze({ effect: "none" }) }
+      : plan.portable_path
+        ? { portable: { path: plan.portable_path } }
+        : {}),
+    machine_local: authorizationEffect
+      ? Object.freeze({ authorization_effect: authorizationEffect })
+      : plan.machine_local,
     ...additions
   });
 }

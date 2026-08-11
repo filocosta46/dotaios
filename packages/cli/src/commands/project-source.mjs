@@ -318,7 +318,14 @@ function printResult(output, result) {
   output.log(`Operation: ${result.operation_id}`);
   output.log(`Plan fingerprint: ${result.plan_fingerprint}`);
   if (result.portable?.path) output.log(`Portable effect: ${result.portable.path}`);
+  if (result.portable?.effect) output.log(`Portable effect: ${result.portable.effect}`);
   if (result.machine_local?.root) output.log(`Local folder: ${result.machine_local.root}`);
+  if (result.machine_local?.authorization_effect) {
+    output.log(`Machine-local authorization effect: ${result.machine_local.authorization_effect}`);
+  }
+  if (result.operation === "grant" && result.applied && result.grant_id) {
+    output.log(`Grant ID: ${result.grant_id}`);
+  }
 }
 
 function rejectYes(parsed) {
