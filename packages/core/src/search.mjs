@@ -6,6 +6,13 @@ import { resolvePortableProjectIdentity, validateProjectSelector } from "./proje
 export const SEARCH_SCOPES = ["memory", "vault", "context", "projects", "decisions", "skills", "references", "plugins", "sessions", "all"];
 
 const DEFAULT_LIMIT = 20;
+
+// memory/ holds two corpora, not one. events.jsonl and signals/ are append-only
+// streams; daily/ and inbox/ are Markdown notes a human wrote. Both are "my
+// memory" to the person asking, so a memory search has to read both. Missing
+// directories yield no files, so listing them here is safe on a fresh AIOS.
+const MEMORY_NOTE_DIRS = ["daily", "inbox"];
+
 const SKIP_DIR_NAMES = new Set([".git", "node_modules", ".obsidian", ".trash"]);
 const SECRET_FILE_PATTERNS = [
   /^\.env(?:\.|$)/,
@@ -165,11 +172,17 @@ async function searchScope(scope, {
     return searchSessionsScope(aiosPath, query, { limit, reader, ...sessionFilters });
   }
   if (scope === "memory") {
-    return searchMemoryDir(path.join(aiosPath, "memory"), query, {
-      limit,
-      reader,
-      root: aiosPath
-    });
+    const memoryDir = path.join(aiosPath, "memory");
+    const corpora = await Promise.all([
+      searchMemoryDir(memoryDir, query, { limit, reader, root: aiosPath }),
+      ...MEMORY_NOTE_DIRS.map((relative) => searchMarkdownDir(path.join(memoryDir, relative), query, {
+        limit,
+        sourcePrefix: `memory/${relative}`,
+        reader,
+        root: aiosPath
+      }))
+    ]);
+    return interleaveByRank(corpora, limit);
   }
   if (scope === "context") {
     return searchMarkdownDir(path.join(aiosPath, "context"), query, {
@@ -233,6 +246,25 @@ async function searchScope(scope, {
     });
   }
   return [];
+}
+
+// Each corpus arrives already ranked and already capped at the limit, but their
+// scores are not comparable: a JSONL entry and a Markdown line are scored by
+// different functions. Concatenating them would let a busy events.jsonl fill
+// the limit and hide every note, which is the bug this scope was widened to
+// fix. Round-robin keeps the best of each corpus at the top and guarantees a
+// note is reachable whenever one matched.
+function interleaveByRank(corpora, limit) {
+  const merged = [];
+  const deepest = Math.max(0, ...corpora.map((corpus) => corpus.length));
+  for (let position = 0; position < deepest && merged.length < limit; position += 1) {
+    for (const corpus of corpora) {
+      if (position >= corpus.length) continue;
+      merged.push(corpus[position]);
+      if (merged.length >= limit) break;
+    }
+  }
+  return merged;
 }
 
 export function matchQuery(text, query) {

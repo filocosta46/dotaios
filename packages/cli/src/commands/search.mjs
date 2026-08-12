@@ -166,7 +166,10 @@ function printGroup(scope, results, query) {
   console.log(`── ${scope}/ (${results.length} match${results.length > 1 ? "es" : ""}) ──`);
   for (const result of results) {
     if (scope === "memory") {
-      printMemoryResult(result, query);
+      // The memory scope mixes JSONL entries with Markdown notes from
+      // memory/daily and memory/inbox. Line-level matches mean it is a note.
+      if (Array.isArray(result.matches)) printMarkdownResult(result, query);
+      else printMemoryResult(result, query);
     } else if (scope === "sessions") {
       printSessionResult(result, query);
     } else {
