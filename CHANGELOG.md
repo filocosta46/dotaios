@@ -6,16 +6,22 @@ All notable changes to DotAIOS will be documented in this file.
 
 Your assistants no longer read your whole personal folder every time they start.
 
-Until now, connecting a tool put a line in its settings file that made it load
-all of `~/aios` at the beginning of every conversation — including conversations
-in unrelated projects that had nothing to do with you. Now that line says where
-the folder is and when to open it: when you are working inside it, or when you
-ask about yourself, your work, or one of your saved workflows. A question about
-some other codebase stays a question about that codebase.
+Until now, connecting Claude Code or Gemini CLI put a line in its settings file
+that made it load all of `~/aios` at the beginning of every conversation —
+including conversations in unrelated projects that had nothing to do with you.
+Now that line says where the folder is and when to open it: when you are working
+inside it, or when you ask about yourself, your work, or one of your saved
+workflows. A question about some other codebase stays a question about that
+codebase. (Codex was never affected: its bridge already pointed at the folder
+rather than importing it.)
 
 Nothing in your folder changed, and nothing you wrote in your tools' settings
 files was touched. To pick this up, run `npx dotaios activate` once. Until you
 do, everything keeps working the way it did.
+
+`npx dotaios doctor` now tells you when a bridge is still the older kind, and
+names that command. It used to report those bridges as healthy, so anyone who
+had already installed DotAIOS would never have found out.
 
 ## [2.0.2] - 2026-08-12
 

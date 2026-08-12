@@ -28,9 +28,14 @@ tested only when the current release has a fresh invocation receipt.
 
 | Host | Configured surface | Discoverability check | Invocation check |
 |---|---|---|---|
-| Claude Code | `~/.claude/CLAUDE.md`, global and project skill links | Start a fresh session and confirm `/context` lists the DotAIOS memory file | Run `dotaios skills probe --client claude-code --run --json`; pass only when `produced=yes` |
+| Claude Code | `~/.claude/CLAUDE.md`, global and project skill links | Start a fresh session and confirm `/context` lists `~/.claude/CLAUDE.md`, then confirm its managed block names the AIOS folder | Run `dotaios skills probe --client claude-code --run --json`; pass only when `produced=yes` |
 | Codex | `~/.codex/AGENTS.md`, `.agents/skills` | Start from a disposable project and inspect the loaded instruction chain | Run `dotaios skills probe --client codex --run --json`; pass only when `produced=yes` |
 | Cursor | Project `AGENTS.md`, project skill links | Open the attached project and confirm the root instructions are active | Ask a fresh project agent to return a disposable marker; preserve the transcript or screenshot |
+
+The bridge points at the AIOS folder and does not import it, so `~/aios/AGENTS.md`
+is deliberately absent from `/context`. Its presence there would mean the host
+had expanded an `@` reference and loaded the whole folder into every session,
+which is the condition this check exists to rule out — not evidence of a pass.
 
 The live probe requires the relevant client to be installed and authenticated.
 An authentication or entitlement failure is a limitation receipt, not a pass.
