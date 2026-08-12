@@ -18,6 +18,11 @@ export const requiredAiosFiles = [
   "context/north-star.md"
 ];
 
+// Present only while setup owns a scaffold it has not finished building. Once
+// init completes and its tree is verified, setup releases it. Anything that
+// reads an AIOS folder needs the same name for it, so it lives here once.
+export const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
+
 export function defaultAiosPath() {
   return path.join(os.homedir(), "aios");
 }

@@ -50,10 +50,43 @@ function temporarySiblingPath(destination) {
   );
 }
 
+const WRITE_FAILURE_REASONS = {
+  EACCES: "permission denied — check the folder's permissions",
+  EPERM: "the operation is not permitted — check the folder's permissions",
+  EROFS: "the filesystem is read-only",
+  ENOSPC: "no space left on the device"
+};
+
+// A POSIX errno is a diagnosis, not an explanation. Turn the ones a user can
+// actually act on into a sentence that names the path they own.
+export function describeFileError(error, subject) {
+  const reason = WRITE_FAILURE_REASONS[error?.code];
+  if (!reason) return error?.message || String(error);
+  return `Cannot write ${subject || error.path || "the destination"}: ${reason}`;
+}
+
+// The staged sibling is an implementation detail with a generated name that is
+// already deleted by the time anyone reads the error. Report the file the
+// caller asked for, and the cause, instead of a path nobody can act on.
+async function stage(destination, temporary, createTemporary) {
+  try {
+    await createTemporary(temporary);
+  } catch (error) {
+    if (!WRITE_FAILURE_REASONS[error?.code]) throw error;
+    const failure = new Error(describeFileError(error, destination));
+    failure.code = error.code;
+    // Keep the destination on the error: a later describeFileError() with no
+    // explicit subject would otherwise fall back to naming nothing at all.
+    failure.path = destination;
+    failure.cause = error;
+    throw failure;
+  }
+}
+
 async function replaceWithTemporaryFile(destination, createTemporary) {
   const temporary = temporarySiblingPath(destination);
   try {
-    await createTemporary(temporary);
+    await stage(destination, temporary, createTemporary);
     // rename(2) replaces a leaf symlink rather than following it. The caller's
     // lstat check rejects pre-existing unsafe leaves; this atomic replacement
     // also keeps a last-moment leaf swap from redirecting bytes elsewhere.
@@ -86,7 +119,7 @@ async function publishTemporaryWithoutReplacing(temporary, destination) {
 async function createOrKeepWithTemporaryFile(destination, createTemporary) {
   const temporary = temporarySiblingPath(destination);
   try {
-    await createTemporary(temporary);
+    await stage(destination, temporary, createTemporary);
     return await publishTemporaryWithoutReplacing(temporary, destination);
   } finally {
     await fs.rm(temporary, { force: true }).catch(() => {});

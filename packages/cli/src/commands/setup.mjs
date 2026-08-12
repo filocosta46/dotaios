@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { assertUniqueOptions, hasHelpFlag } from "../lib/args.mjs";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { SETUP_TRANSACTION_FILE, defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import { parseJsonlLine } from "../../../core/src/jsonl.mjs";
@@ -20,7 +20,7 @@ import {
   isAgentInstalled,
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
-import { wellKnownSymlinkTargets } from "../../../core/src/skill-targets.mjs";
+import { symlinkTargets } from "../../../core/src/skill-targets.mjs";
 import {
   LIGHTPANDA_VERSION,
   downloadLightpanda,
@@ -54,7 +54,6 @@ Options:
   --overwrite         Replace generated files in the target folder
 `;
 
-const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
 const SETUP_TRANSACTION_FORMAT = "dotaios-setup-transaction/v1";
 
 export async function setupCommand(args, { lifecycle = {} } = {}) {
@@ -102,6 +101,13 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
     if (setupTransactionActive) {
       await assertCompletedSetupTransactionTree(aiosPath, setupTransactionActive.transaction, passthrough);
+      // The marker means "setup owns a partial scaffold it created in an empty
+      // target". That ownership is discharged the moment init has finished and
+      // its tree has been verified — the scaffold is no longer partial. Holding
+      // it across step 2 wedged the folder permanently, because step 2 rewrites
+      // skills/_registry.json and the manifest could then never match again:
+      // the identical re-run, --force, --overwrite and --merge all refused.
+      await releaseSetupTransaction(aiosPath, setupTransactionActive);
     }
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
@@ -162,16 +168,25 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     process.exitCode = 1;
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
     console.error(`Step 2 failed: ${err.message}`);
-    console.error("Fix the reported problem, then re-run the identical `dotaios setup` command.");
     console.error("");
   }
   if (!activateOk) {
     console.log("");
     console.log("Folder created. Tool connection needs attention; setup stopped before optional features.");
-    if (blockedContextCount > 0 || blockedCatalogCount > 0) {
-      console.log(`Preserved ${blockedContextCount} client bridge collision(s) and ${blockedCatalogCount} skill catalog collision(s).`);
+    // Never send them back to `dotaios setup`: the folder now exists, so setup
+    // has nothing left to do and will only report that. `activate` is the one
+    // command that can still finish the job, and for a preserved collision the
+    // non-destructive form is the one activate already named above.
+    // activate has already named what is blocked and how to fix each one.
+    // Restating it here is how setup came to call a permission error a
+    // "collision" the user could not find anywhere on screen.
+    if (blockedCatalogCount > 0) {
+      console.log(`Preserved ${blockedCatalogCount} skill catalog collision(s).`);
     }
-    console.log("Fix the reported collision, then re-run the identical `dotaios setup` command.");
+    if (blockedContextCount === 0 && blockedCatalogCount === 0) {
+      console.log("Fix the problem reported above, then run `dotaios activate`.");
+    }
+    console.log("Then check the result with `dotaios doctor`.");
     await emitReliabilityMetric(aiosPath, {
       type: "install_end",
       command: "setup",
@@ -181,15 +196,6 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
       duration_ms: Date.now() - startedAt
     });
     return;
-  }
-
-  if (setupTransactionActive) {
-    if (!await unlinkSetupMarkerTempIfSameFile(
-      setupTransactionPath(aiosPath),
-      setupTransactionActive.markerStats
-    )) {
-      throw new Error("Setup recovery marker changed before completion; refusing to remove it.");
-    }
   }
 
   // GitHub cross-device sync prompt — skip in non-interactive or non-TTY mode
@@ -415,18 +421,17 @@ async function previewSetupTarget(aiosPath) {
 
 async function printClientPreview(aiosPath, homePath) {
   const registry = await loadAgentRegistry(null);
-  const activeSkillDirs = new Set(wellKnownSymlinkTargets().map((target) => target.dir));
+  // The writer projects skills into every symlink target regardless of what is
+  // detected. The preview must read the same set, or it promises less than the
+  // run delivers.
+  const skillDirs = symlinkTargets(registry).map((target) => target.dir);
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
     const installed = await isAgentInstalled(homePath, agent);
     if (!installed) {
-      console.log(`[would skip] ${destination} (${agent.name} not detected)`);
+      console.log(`[would skip] ${destination} (${agent.name} not detected${skillLinkCaveat(agent, homePath, skillDirs)})`);
       continue;
-    }
-
-    if (agent.skills?.mode === "symlink" && agent.skills.dir) {
-      activeSkillDirs.add(agent.skills.dir);
     }
 
     if (!agent.bridge) {
@@ -437,7 +442,7 @@ async function printClientPreview(aiosPath, homePath) {
     console.log(await previewManagedBridge(destination));
   }
 
-  for (const relativeDir of activeSkillDirs) {
+  for (const relativeDir of skillDirs) {
     const targetDir = path.join(homePath, relativeDir);
     const stats = await lstatIfPresent(targetDir);
     if (!stats) {
@@ -448,6 +453,18 @@ async function printClientPreview(aiosPath, homePath) {
       console.log(`[would add missing managed skill links] ${targetDir} (existing unmanaged entries preserved)`);
     }
   }
+}
+
+// Some agents keep their skill-link directory underneath their own detect path,
+// so "[would skip] ~/.gemini/antigravity" sat above "[would create managed skill
+// links] ~/.gemini/antigravity/skills" and read as a contradiction. Where that
+// overlap exists, name the directory that still gets written. Agents projecting
+// into the shared ~/.agents/skills need no such note — nothing is created under
+// the path their skip line names.
+function skillLinkCaveat(agent, homePath, skillDirs) {
+  const dir = agent.skills?.mode === "symlink" ? agent.skills.dir : null;
+  if (!dir || !skillDirs.includes(dir) || !dir.startsWith(`${agent.detect}/`)) return "";
+  return `; managed skill links are still published in ${path.join(homePath, dir)}`;
 }
 
 async function previewManagedBridge(destination) {
@@ -523,6 +540,12 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
 
 function setupTransactionPath(aiosPath) {
   return path.join(aiosPath, SETUP_TRANSACTION_FILE);
+}
+
+async function releaseSetupTransaction(aiosPath, active) {
+  if (!await unlinkSetupMarkerTempIfSameFile(setupTransactionPath(aiosPath), active.markerStats)) {
+    throw new Error("Setup recovery marker changed before completion; refusing to remove it.");
+  }
 }
 
 async function hasSetupTransaction(aiosPath) {

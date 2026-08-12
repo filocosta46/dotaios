@@ -36,12 +36,6 @@ export function symlinkTargets(registry = bundledRegistry) {
   return out;
 }
 
-export function wellKnownSymlinkTargets(registry = bundledRegistry) {
-  return wellKnownFrom(registry)
-    .filter((target) => target?.mode === "symlink" && target.dir)
-    .map((target) => ({ dir: target.dir }));
-}
-
 export function retiredSymlinkTargets(registry = bundledRegistry) {
   return retiredFrom(registry).map((dir) => ({ dir }));
 }

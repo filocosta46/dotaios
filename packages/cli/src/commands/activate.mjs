@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathExists, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
+import { describeFileError, pathExists, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
   MANAGED_END,
@@ -22,8 +22,7 @@ import { registerProject, resolveProjectContext } from "../../../core/src/projec
 import {
   symlinkTargets,
   retiredSymlinkTargets,
-  projectSymlinkTargets,
-  wellKnownSymlinkTargets
+  projectSymlinkTargets
 } from "../../../core/src/skill-targets.mjs";
 import {
   installSymlinkSkills,
@@ -39,6 +38,49 @@ import { createManagedSkillStore } from "../../../core/src/managed-skill-store.m
 
 const managedStart = MANAGED_START;
 const managedEnd = MANAGED_END;
+
+// One authored remedy for a preserved bridge collision, because `setup` reports
+// the same state and must not invent a second, different instruction for it.
+// Without this line the only documented way forward was --overwrite, which
+// replaces the file and silently stops the user's own instructions applying.
+export const BRIDGE_COLLISION_REMEDY =
+  "Those files already existed and were left untouched. To keep what they say and add DotAIOS below it, run `dotaios activate --merge`.";
+
+// A blocked bridge has several very different causes and each needs its own
+// answer. `--merge` keeps what a file already says and adds DotAIOS below it,
+// which resolves exactly one of them: an unmanaged file DotAIOS declined to
+// replace. It cannot merge a path that is not a regular file, it cannot settle
+// a concurrent edit, and it cannot make a directory writable. Both activate and
+// setup read this one function so a single run cannot be described two ways.
+export function bridgeAttentionLines(blockedBridges) {
+  const lines = [];
+  const report = (entries, headline, remedy, detail) => {
+    if (entries.length === 0) return;
+    lines.push(`Activation needs attention: ${entries.length} ${headline}`);
+    for (const entry of entries) lines.push(`  ${detail(entry)}`);
+    lines.push(remedy);
+  };
+
+  report(
+    blockedBridges.filter((entry) => entry.action === "kept"),
+    "client bridge collision(s).",
+    BRIDGE_COLLISION_REMEDY,
+    (entry) => entry.path
+  );
+  report(
+    blockedBridges.filter((entry) => entry.action === "failed"),
+    "client bridge(s) could not be written.",
+    "Every other client was still connected. Fix the folders above, then run `dotaios activate` again.",
+    (entry) => entry.note || entry.path
+  );
+  report(
+    blockedBridges.filter((entry) => !["kept", "failed"].includes(entry.action)),
+    "client bridge(s) were left untouched.",
+    "Review each path above, then run `dotaios activate` again. `--merge` cannot resolve these.",
+    (entry) => `${entry.path}${entry.note ? ` (${entry.note})` : ""}`
+  );
+  return lines;
+}
 
 export async function activateCommand(args, { lifecycle = {} } = {}) {
   if (hasHelpFlag(args)) {
@@ -85,9 +127,21 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
 
   // Refresh before writing bridges. Dry-run renders the same catalog in memory
   // so its bridge preview is current without touching INDEX.md or RESOLVER.md.
-  const { skillsIndex, skillsCatalog } = options.dryRun
-    ? await previewSkillsIndex(aiosPath)
-    : await reconcileGlobalSkillStore(aiosPath, homePath);
+  // Skill projection runs before any bridge is written, so an unwritable
+  // projection target used to strand every client — including the ones whose
+  // own directories were perfectly fine. The catalog it produces is computable
+  // in memory, so fall back to that and let the bridges through.
+  let skillsIndex;
+  let skillsCatalog;
+  let skillStoreFailure = null;
+  try {
+    ({ skillsIndex, skillsCatalog } = options.dryRun
+      ? await previewSkillsIndex(aiosPath)
+      : await reconcileGlobalSkillStore(aiosPath, homePath));
+  } catch (error) {
+    skillStoreFailure = error;
+    ({ skillsIndex, skillsCatalog } = await previewSkillsIndex(aiosPath));
+  }
 
   // Setup uses preserve mode as a compare-and-publish boundary. If another
   // writer won either catalog path with different bytes, stop before writing
@@ -119,7 +173,7 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     detectedAgentNames
   );
   const results = [...global.results];
-  let projectBlockedContextCount = 0;
+  const projectBlockedBridges = [];
 
   if (options.project) {
     const projectResults = await createProjectBridges(
@@ -130,7 +184,7 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     );
     results.push(...projectResults);
     if (!isConfiguredBridgeAction(projectResults[0]?.action)) {
-      projectBlockedContextCount = 1;
+      projectBlockedBridges.push(projectResults[0] ?? { action: "failed", path: options.project });
     }
   }
 
@@ -161,19 +215,19 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     console.log("\nFor Cursor project rules, run `dotaios attach <project-dir>` inside a project.");
   }
 
-  const blockedContextCount = global.blockedContextCount + projectBlockedContextCount;
+  const blockedBridges = [...global.blockedBridges, ...projectBlockedBridges];
+  const blockedContextCount = blockedBridges.length;
   const blockedHermesCount = results.filter((entry) => entry.action === "hermes:conflict").length;
   if (blockedContextCount > 0) {
     process.exitCode = 1;
+    for (const line of bridgeAttentionLines(blockedBridges)) console.error(line);
+  }
+  if (skillStoreFailure) {
+    process.exitCode = 1;
     console.error(
-      `Activation needs attention: ${blockedContextCount} client bridge collision(s).`
+      `Activation needs attention: managed skill links could not be published. ${describeFileError(skillStoreFailure)}`
     );
-    // Without this line the only documented way forward was --overwrite, which
-    // replaces the file and silently stops the user's own instructions from
-    // applying. Name the non-destructive option first.
-    console.error(
-      "Those files already existed and were left untouched. To keep what they say and add DotAIOS below it, run `dotaios activate --merge`."
-    );
+    console.error("The client bridges above were still written. Fix that folder, then run `dotaios activate` again.");
   }
   if (blockedHermesCount > 0) {
     process.exitCode = 1;
@@ -341,7 +395,7 @@ async function createGlobalBridges(
   const results = [];
   let installedCount = 0;
   let configuredContextCount = 0;
-  let blockedContextCount = 0;
+  const blockedBridges = [];
   const installedAgentNames = new Set();
 
   for (const agent of registry) {
@@ -364,22 +418,31 @@ async function createGlobalBridges(
       continue;
     }
 
-    const result = await writeManagedFile(
-      destination,
-      await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog }),
-      {
-        ...options,
-        boundaryRoot: homePath,
-        beforeReplace: lifecycle.beforeBridgeReplace,
-        beforePublish: lifecycle.beforeBridgePublish,
-        beforeCommit: lifecycle.beforeBridgeCommit
-      }
-    );
+    // One client's directory must not decide the fate of the others. Before
+    // this, the first rejection unwound the whole command: the clients after it
+    // in registry order were never attempted, and the ones already written were
+    // never even reported, because printResults runs downstream of the throw.
+    let result;
+    try {
+      result = await writeManagedFile(
+        destination,
+        await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog }),
+        {
+          ...options,
+          boundaryRoot: homePath,
+          beforeReplace: lifecycle.beforeBridgeReplace,
+          beforePublish: lifecycle.beforeBridgePublish,
+          beforeCommit: lifecycle.beforeBridgeCommit
+        }
+      );
+    } catch (error) {
+      result = { action: "failed", path: destination, note: `${agent.name}: ${error.message}` };
+    }
     results.push(result);
     if (isConfiguredBridgeAction(result.action)) {
       configuredContextCount += 1;
     } else {
-      blockedContextCount += 1;
+      blockedBridges.push(result);
     }
   }
 
@@ -388,14 +451,13 @@ async function createGlobalBridges(
     homePath,
     options,
     registry,
-    installedAgentNames,
     lifecycle
   );
   return {
     results: [...results, ...skills],
     installedCount,
     configuredContextCount,
-    blockedContextCount
+    blockedBridges
   };
 }
 
@@ -448,23 +510,12 @@ async function installAllSkills(
   homePath,
   options,
   registry,
-  installedAgentNames = new Set(),
   lifecycle = {}
 ) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
   const results = [];
-  const activeTargetDirs = new Set(wellKnownSymlinkTargets(registry).map((target) => target.dir));
-  for (const agent of registry) {
-    if (
-      installedAgentNames.has(agent.name.toLowerCase())
-      && agent.skills?.mode === "symlink"
-      && agent.skills.dir
-    ) {
-      activeTargetDirs.add(agent.skills.dir);
-    }
-  }
   for (const target of retiredSymlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     // Global projection deletion belongs to ManagedSkillStore's exact
@@ -476,7 +527,10 @@ async function installAllSkills(
       }));
     }
   }
-  for (const target of symlinkTargets(registry).filter((entry) => activeTargetDirs.has(entry.dir))) {
+  // Every symlink target, not just the detected ones: the real activation
+  // reconciles all of them through ManagedSkillStore, so narrowing the preview
+  // here made --dry-run promise less than the run writes.
+  for (const target of symlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     // A real activation has already reconciled canonical projections through
     // ManagedSkillStore. Keep the legacy installer only for zero-write preview;

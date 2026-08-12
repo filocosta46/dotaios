@@ -158,22 +158,80 @@ test("an activation failure exits non-zero and records a failed install", () => 
   ).trim().split("\n").map((line) => JSON.parse(line));
   const installEnd = rows.findLast((row) => row.type === "install_end");
   assert.equal(installEnd?.outcome, "fail", "a failed activation is a failed install, not a warning");
+  // This used to assert the opposite — that a failed activation retained the
+  // marker so the identical retry could recover. That only ever worked when
+  // step 2 failed before writing skills/_registry.json; once it got as far as
+  // that write, the manifest could never match and every retry refused. The
+  // folder is complete either way, so setup releases ownership after init and
+  // points at the command that can still finish the job.
   assert.equal(
     fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
-    true,
-    "a failed activation must retain the exact setup ownership marker for a safe identical retry"
+    false,
+    "a complete folder must not be left owned by an unfinished setup marker"
   );
-  assert.match(`${result.stdout}\n${result.stderr}`, /re-run the identical `dotaios setup` command/i);
+  assert.doesNotMatch(
+    `${result.stdout}\n${result.stderr}`,
+    /re-run the identical `dotaios setup` command/,
+    "setup has nothing left to do on a folder it already built"
+  );
+  assert.match(`${result.stdout}\n${result.stderr}`, /dotaios activate/);
 
   fs.unlinkSync(invalidHomePath);
   fs.mkdirSync(invalidHomePath);
   const retry = runSetup(sandbox, ["--yes", "--all", "--home", invalidHomePath]);
   assert.equal(retry.status, 0, `${retry.stdout}\n${retry.stderr}`);
-  assert.match(retry.stdout, /Recovered an unfinished folder/);
+  assert.match(retry.stdout, /already set up/i);
+  assert.match(retry.stdout, /dotaios activate/, "the retry names the command that connects the tools");
+});
+
+// The wedge this pins: setup used to hold its scaffold marker across step 2,
+// but step 2 rewrites skills/_registry.json, so the marker's manifest could
+// never match again. Every documented retry then refused — identical re-run
+// ("already exists and is not empty"), --force and --overwrite ("an unfinished
+// setup marker is present"), --merge ("already exists and is not empty") — a
+// closed loop, triggered by the most ordinary state there is: already having a
+// ~/.claude/CLAUDE.md.
+test("a preserved bridge collision leaves a folder the documented retry can finish", () => {
+  const sandbox = makeSandbox("setup-bridge-collision-wedge");
+  const userBridge = path.join(sandbox.homePath, ".claude", "CLAUDE.md");
+  fs.mkdirSync(path.dirname(userBridge), { recursive: true });
+  fs.writeFileSync(userBridge, "Always answer in Italian. Never use emoji.\n");
+
+  const first = runSetup(sandbox, ["--yes"]);
+  const markerPath = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");
+
+  assert.notEqual(first.status, 0, "an unresolved collision is still a failed connect");
   assert.equal(
-    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    fs.existsSync(markerPath),
     false,
-    "the successful identical retry must close the setup transaction"
+    "init finished and its tree was verified, so setup no longer owns a partial scaffold"
+  );
+  assert.match(
+    `${first.stdout}${first.stderr}`,
+    /dotaios activate --merge/,
+    "setup must name the remedy that actually works"
+  );
+  assert.doesNotMatch(
+    `${first.stdout}\n${first.stderr}`,
+    /re-run the identical `dotaios setup` command/,
+    "re-running setup is exactly what does not work here"
+  );
+
+  const retry = runSetup(sandbox, ["--yes"]);
+  assert.equal(retry.status, 0, `the retry must not refuse:\n${retry.stdout}\n${retry.stderr}`);
+  assert.doesNotMatch(`${retry.stdout}${retry.stderr}`, /already exists and is not empty/);
+
+  const forced = runSetup(sandbox, ["--yes", "--force"]);
+  assert.doesNotMatch(
+    `${forced.stdout}${forced.stderr}`,
+    /unfinished setup marker/,
+    "no orphaned marker survives to refuse the other half of the loop"
+  );
+
+  assert.equal(
+    fs.readFileSync(userBridge, "utf8"),
+    "Always answer in Italian. Never use emoji.\n",
+    "the user's own file stays untouched throughout"
   );
 });
 
@@ -563,7 +621,11 @@ test("setup recovers a crash between linking and unlinking its private marker", 
   );
 });
 
-test("the identical setup command recovers a hard interruption after activation persists skills-first", () => {
+// A hard kill during step 2 is the case that used to strand the folder forever:
+// init is done, so the scaffold is whole, but the marker was still held and its
+// manifest no longer matched. Releasing after init means the interruption
+// leaves the one state that is honestly recoverable — a complete folder.
+test("a hard interruption during activation leaves a complete folder, not an orphaned marker", () => {
   const sandbox = makeSandbox("setup-activation-config-interrupt");
   const first = runSetup(sandbox, ["--yes", "--skills-first"], {
     DOTAIOS_TEST_INTERRUPT_SETUP_AFTER_ACTIVATION_CONFIG: "1"
@@ -572,14 +634,18 @@ test("the identical setup command recovers a hard interruption after activation 
   assert.equal(first.signal, "SIGKILL", `expected interruption after the activation config write:\n${first.stdout}\n${first.stderr}`);
   const interruptedConfig = JSON.parse(fs.readFileSync(path.join(sandbox.aiosPath, "aios.json"), "utf8"));
   assert.equal(interruptedConfig.skills_first, true, "activation must persist the preference before interruption");
-  assert.ok(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")));
+  assert.equal(
+    fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")),
+    false,
+    "a SIGKILL after init must not leave a marker no later command can clear"
+  );
 
   const retry = runSetup(sandbox, ["--yes", "--skills-first"]);
 
-  assert.equal(retry.status, 0, `the identical retry must accept only activation's expected config transition:\n${retry.stdout}\n${retry.stderr}`);
+  assert.equal(retry.status, 0, `the retry must not refuse:\n${retry.stdout}\n${retry.stderr}`);
   assert.equal(JSON.parse(fs.readFileSync(path.join(sandbox.aiosPath, "aios.json"), "utf8")).skills_first, true);
-  assert.equal(fs.existsSync(path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json")), false);
-  assert.match(`${retry.stdout}${retry.stderr}`, /unfinished folder/i);
+  assert.match(retry.stdout, /already set up/i);
+  assert.match(retry.stdout, /dotaios activate/, "the retry names the command that connects the tools");
 });
 
 test("an arbitrary aios.json edit after interruption blocks recovery without changing its bytes", () => {

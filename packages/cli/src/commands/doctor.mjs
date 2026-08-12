@@ -3,18 +3,20 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { SETUP_TRANSACTION_FILE, defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import {
   MANAGED_END,
   MANAGED_START,
   bridgePath,
+  bridgePointer,
   findManagedBlock,
   isAgentInstalled,
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
+import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
 import { checkForUpdate } from "../adapters/npm-registry.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
@@ -46,7 +48,7 @@ Options:
   --home <dir>  Check agent bridges somewhere other than your home
 `;
 
-export async function doctorCommand(args) {
+export async function doctorCommand(args, { detection } = {}) {
   if (hasHelpFlag(args)) {
     console.log(HELP_TEXT);
     return;
@@ -61,12 +63,13 @@ export async function doctorCommand(args) {
   checks.push(checkNodeVersion());
   checks.push(checkTerminal());
   checks.push(await checkAiosFolder(target));
+  checks.push(await checkUnfinishedSetup(target));
   checks.push(await checkAiosConfig(target));
   checks.push(checkTrackedGitlinks(target));
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
-  checks.push(...await checkAgentBridges(target, homePath));
+  checks.push(...await checkAgentBridges(target, homePath, detection));
 
   console.log("DotAIOS doctor");
   console.log("");
@@ -198,6 +201,18 @@ async function checkAiosFolder(target) {
     status: "fail",
     detail: "No folder found at this path.",
     fix: "Run `npx dotaios setup` to create it."
+  };
+}
+
+async function checkUnfinishedSetup(target) {
+  if (!await pathExists(path.join(target, SETUP_TRANSACTION_FILE))) {
+    return { name: "Setup completed", status: "ok" };
+  }
+  return {
+    name: "Setup completed",
+    status: "fail",
+    detail: "An unfinished setup still owns this folder, so its files may be incomplete.",
+    fix: `Run \`npx dotaios setup${pathOptionFor(target)}\` again to finish it.`
   };
 }
 
@@ -464,17 +479,16 @@ function skipReason(skipped) {
   return "update check unavailable";
 }
 
-async function checkAgentBridges(target, homePath) {
+async function checkAgentBridges(target, homePath, detection = {}) {
   const results = [];
   let foundBridge = false;
   let foundNativeRuntime = false;
   let anyInstalled = false;
 
   const registry = await loadAgentRegistry(target);
+  const runtimes = await readNativeRuntimes(target, homePath, detection);
   for (const agent of registry) {
-    const filePath = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
-
-    if (!await isAgentInstalled(homePath, agent)) {
+    if (!await isAgentInstalled(homePath, agent, detection)) {
       results.push({
         name: `${agent.name} (not installed)`,
         status: "ok",
@@ -485,15 +499,16 @@ async function checkAgentBridges(target, homePath) {
     anyInstalled = true;
 
     if (!agent.bridge) {
-      foundNativeRuntime = true;
-      results.push({
-        name: `${agent.name} native skills`,
-        status: "ok",
-        detail: "Runtime has no DotAIOS bridge file; native skill configuration is checked separately."
-      });
+      const verdict = nativeRuntimeCheck(agent, target, runtimes);
+      results.push(verdict);
+      // Only a runtime that really is configured counts as something being
+      // connected. Counting an unconfigured one here suppressed the
+      // "At least one AI tool connected" warning below.
+      if (verdict.status === "ok") foundNativeRuntime = true;
       continue;
     }
 
+    const filePath = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
     let content;
     try {
       content = await fs.readFile(filePath, "utf8");
@@ -508,31 +523,39 @@ async function checkAgentBridges(target, homePath) {
     }
 
     const managedBlock = findManagedBlock(content);
-    const expectedEntrypoint = path.join(target, "AGENTS.md");
-    const expectedPointer = agent.include === "@"
-      ? `@${expectedEntrypoint}`
-      : `DotAIOS entrypoint (read this file first): ${expectedEntrypoint}`;
+    const { entrypoint, accepted } = bridgePointer(agent, target);
     const managedLines = managedBlock?.text.split(/\r?\n/) || [];
-    const hasExactPointer = managedLines.includes(expectedPointer)
-      || managedLines.includes(`Read ${expectedEntrypoint} first.`);
+    const hasExactPointer = accepted.some((pointer) => managedLines.includes(pointer));
     if (hasExactPointer) {
       if (managedBlock.text.includes("read_session_digest")) {
         results.push({
           name: `${agent.name} bridge`,
           status: "warn",
           detail: "Managed bridge predates v1.23 and still calls the retired read_session_digest surface.",
-          fix: `Run \`npx dotaios activate --path ${target} --overwrite\` to refresh it.`
+          fix: `Run \`${repointCommand(target)}\` to refresh it.`
+        });
+      } else if (!await pathExists(entrypoint)) {
+        // The pointer is right and the file it names is gone. This needs its own
+        // branch: falling through to the repoint case below would call a correct
+        // pointer wrong and hand the user a command that cannot restore the file.
+        results.push({
+          name: `${agent.name} bridge`,
+          status: "warn",
+          detail: `Bridge points at this AIOS folder, but its entrypoint is missing (${entrypoint}).`,
+          fix: `Run \`npx dotaios init${pathOptionFor(target)}\` to restore the missing base files.`
         });
       } else {
         results.push({ name: `${agent.name} bridge`, status: "ok" });
       }
+      // The bridge does point here, so the aggregate "nothing is connected"
+      // warning would be a second, less specific report of the same fact.
       foundBridge = true;
     } else if (managedBlock) {
       results.push({
         name: `${agent.name} bridge`,
         status: "warn",
         detail: "Bridge points to a different AIOS folder.",
-        fix: `Run \`npx dotaios activate --path ${target} --overwrite\` to repoint.`
+        fix: `Run \`${repointCommand(target)}\` to repoint.`
       });
     } else if (content.includes(MANAGED_START) || content.includes(MANAGED_END)) {
       results.push({
@@ -546,7 +569,9 @@ async function checkAgentBridges(target, homePath) {
         name: `${agent.name} bridge`,
         status: "warn",
         detail: "Existing unmanaged file. DotAIOS will not overwrite.",
-        fix: `Inspect ${filePath}; if safe to replace, run \`npx dotaios activate --overwrite\`.`
+        // activate's own remedy for this exact file is --merge. doctor used to
+        // answer --overwrite, which replaces what the user wrote.
+        fix: `Inspect ${filePath}; to keep what it says and add DotAIOS below it, run \`npx dotaios activate --merge\`.`
       });
     }
   }
@@ -568,6 +593,56 @@ async function checkAgentBridges(target, homePath) {
   }
 
   return results;
+}
+
+// A runtime with no bridge file keeps its skills in its own configuration, so
+// the only honest answer comes from reading that configuration. inspectSkillHealth
+// already does exactly this for every mode; doctor consumes it rather than
+// growing a third reader of the same files.
+async function readNativeRuntimes(aiosPath, homePath, detection) {
+  try {
+    const { runtimes } = await inspectSkillHealth({ aiosPath, homePath, detection });
+    return new Map(runtimes.map((runtime) => [runtime.name, runtime]));
+  } catch {
+    // An unreadable AIOS folder is already reported by the folder and config
+    // checks above. It must not stop the agent section from finishing.
+    return null;
+  }
+}
+
+function nativeRuntimeCheck(agent, target, runtimes) {
+  const name = `${agent.name} native skills`;
+  const capabilities = runtimes?.get(agent.name)?.capabilities;
+  if (!capabilities) {
+    return {
+      name,
+      status: "warn",
+      detail: "Could not read this AIOS folder, so its native skill configuration is unverified.",
+      fix: `Fix the AIOS folder problems above, then run \`npx dotaios doctor${pathOptionFor(target)}\` again.`
+    };
+  }
+  if (capabilities.configured === "yes" && capabilities.projected === "yes") {
+    return { name, status: "ok" };
+  }
+  const skillsDir = path.join(target, "skills");
+  if (agent.skills?.mode === "config-external-dir") {
+    return {
+      name,
+      status: "warn",
+      detail: `Detected, but ~/${agent.skills.configFile} does not list ${skillsDir}.`,
+      fix: `Add ${skillsDir} to ${agent.skills.key || "skills.external_dirs"} in ~/${agent.skills.configFile}, then run \`npx dotaios skills doctor\`.`
+    };
+  }
+  return {
+    name,
+    status: "warn",
+    detail: `Detected, but ~/${agent.skills?.dir} has no live links to ${skillsDir}.`,
+    fix: `Run \`npx dotaios activate${pathOptionFor(target)}\` to connect its skills.`
+  };
+}
+
+function repointCommand(target) {
+  return `npx dotaios activate${pathOptionFor(target)} --overwrite`;
 }
 
 function pathOptionFor(target) {
