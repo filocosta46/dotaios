@@ -5,8 +5,8 @@ DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of i
 > **Audience.** DotAIOS free core is for people already using local agents and comfortable with Node / `npx`. Setup is run by the user in a system terminal. An agent may inspect or verify it, but should not fetch remote instructions and execute them. See the [README](../README.md) for the product promise and honest limits.
 
 ```bash
-npx dotaios@2.0.0 setup --dry-run
-npx dotaios@2.0.0 setup
+npx dotaios@2.0.1 setup --dry-run
+npx dotaios@2.0.1 setup
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
@@ -69,7 +69,7 @@ After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Curs
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
 
 ```bash
-npx dotaios@2.0.0 init --vault-path ~/my-vault
+npx dotaios@2.0.1 init --vault-path ~/my-vault
 ```
 
 Check setup health:

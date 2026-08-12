@@ -73,19 +73,23 @@ test("Hermes claims a global adapter without inventing a project-local selector"
 
   const install = await fs.readFile(path.join(repoRoot, "INSTALL.md"), "utf8");
   const changelog = await fs.readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8");
-  // Unreleased piu' la release piu' recente: rilasciare una voce non la rende
-  // non documentata, e legarla alla sola Unreleased blocca ogni rilascio.
-  const finestraRecente = changelog.split("## [Unreleased]")[1].split(/\n## \[/).slice(0, 2).join("\n## [");
-  const unreleased = finestraRecente;
-  assert.match(install, /2\.0\.0 removal contract/i);
+  // Cerca in tutto il CHANGELOG. Questa e' una proprieta' permanente del
+  // prodotto, documentata una volta nella release che l'ha cambiata: una
+  // finestra sulle ultime due sezioni la perde al primo rilascio successivo,
+  // che e' esattamente come "legarla alla sola Unreleased" bloccava ogni
+  // rilascio prima di essere allargata.
+  const documentato = changelog;
+  // The removal-contract version is asserted from package.json in the
+  // onboarding test below. A second, hardcoded copy here would pin one release
+  // forever and fail every bump after it.
   assert.match(install, /\.hermes\/config\.yaml.*remove only that exact entry/is);
   assert.doesNotMatch(install, /Current DotAIOS does not configure project-local Hermes/i);
-  assert.match(unreleased, /Project attachment no longer writes `<project>\/\.hermes\/config\.yaml`/i);
+  assert.match(documentato, /Project attachment no longer writes `<project>\/\.hermes\/config\.yaml`/i);
 });
 
 test("first-time onboarding stays human-run, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "2.0.0", "the public onboarding contract must target the release candidate");
+  assert.equal(pkg.version, "2.0.1", "the public onboarding contract must target the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
   }
