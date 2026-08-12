@@ -20,7 +20,7 @@ import {
   isAgentInstalled,
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
-import { wellKnownSymlinkTargets } from "../../../core/src/skill-targets.mjs";
+import { symlinkTargets } from "../../../core/src/skill-targets.mjs";
 import {
   LIGHTPANDA_VERSION,
   downloadLightpanda,
@@ -418,18 +418,17 @@ async function previewSetupTarget(aiosPath) {
 
 async function printClientPreview(aiosPath, homePath) {
   const registry = await loadAgentRegistry(null);
-  const activeSkillDirs = new Set(wellKnownSymlinkTargets().map((target) => target.dir));
+  // The writer projects skills into every symlink target regardless of what is
+  // detected. The preview must read the same set, or it promises less than the
+  // run delivers.
+  const skillDirs = symlinkTargets(registry).map((target) => target.dir);
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
     const installed = await isAgentInstalled(homePath, agent);
     if (!installed) {
-      console.log(`[would skip] ${destination} (${agent.name} not detected)`);
+      console.log(`[would skip] ${destination} (${agent.name} not detected${skillLinkCaveat(agent, homePath, skillDirs)})`);
       continue;
-    }
-
-    if (agent.skills?.mode === "symlink" && agent.skills.dir) {
-      activeSkillDirs.add(agent.skills.dir);
     }
 
     if (!agent.bridge) {
@@ -440,7 +439,7 @@ async function printClientPreview(aiosPath, homePath) {
     console.log(await previewManagedBridge(destination));
   }
 
-  for (const relativeDir of activeSkillDirs) {
+  for (const relativeDir of skillDirs) {
     const targetDir = path.join(homePath, relativeDir);
     const stats = await lstatIfPresent(targetDir);
     if (!stats) {
@@ -451,6 +450,18 @@ async function printClientPreview(aiosPath, homePath) {
       console.log(`[would add missing managed skill links] ${targetDir} (existing unmanaged entries preserved)`);
     }
   }
+}
+
+// Some agents keep their skill-link directory underneath their own detect path,
+// so "[would skip] ~/.gemini/antigravity" sat above "[would create managed skill
+// links] ~/.gemini/antigravity/skills" and read as a contradiction. Where that
+// overlap exists, name the directory that still gets written. Agents projecting
+// into the shared ~/.agents/skills need no such note — nothing is created under
+// the path their skip line names.
+function skillLinkCaveat(agent, homePath, skillDirs) {
+  const dir = agent.skills?.mode === "symlink" ? agent.skills.dir : null;
+  if (!dir || !skillDirs.includes(dir) || !dir.startsWith(`${agent.detect}/`)) return "";
+  return `; managed skill links are still published in ${path.join(homePath, dir)}`;
 }
 
 async function previewManagedBridge(destination) {

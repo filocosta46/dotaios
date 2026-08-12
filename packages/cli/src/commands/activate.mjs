@@ -22,8 +22,7 @@ import { registerProject, resolveProjectContext } from "../../../core/src/projec
 import {
   symlinkTargets,
   retiredSymlinkTargets,
-  projectSymlinkTargets,
-  wellKnownSymlinkTargets
+  projectSymlinkTargets
 } from "../../../core/src/skill-targets.mjs";
 import {
   installSymlinkSkills,
@@ -390,7 +389,6 @@ async function createGlobalBridges(
     homePath,
     options,
     registry,
-    installedAgentNames,
     lifecycle
   );
   return {
@@ -450,23 +448,12 @@ async function installAllSkills(
   homePath,
   options,
   registry,
-  installedAgentNames = new Set(),
   lifecycle = {}
 ) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
 
   const results = [];
-  const activeTargetDirs = new Set(wellKnownSymlinkTargets(registry).map((target) => target.dir));
-  for (const agent of registry) {
-    if (
-      installedAgentNames.has(agent.name.toLowerCase())
-      && agent.skills?.mode === "symlink"
-      && agent.skills.dir
-    ) {
-      activeTargetDirs.add(agent.skills.dir);
-    }
-  }
   for (const target of retiredSymlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     // Global projection deletion belongs to ManagedSkillStore's exact
@@ -478,7 +465,10 @@ async function installAllSkills(
       }));
     }
   }
-  for (const target of symlinkTargets(registry).filter((entry) => activeTargetDirs.has(entry.dir))) {
+  // Every symlink target, not just the detected ones: the real activation
+  // reconciles all of them through ManagedSkillStore, so narrowing the preview
+  // here made --dry-run promise less than the run writes.
+  for (const target of symlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
     // A real activation has already reconciled canonical projections through
     // ManagedSkillStore. Keep the legacy installer only for zero-write preview;

@@ -52,6 +52,62 @@ test("setup --dry-run previews concrete actions without DotAIOS-managed changes"
   }
 });
 
+// The preview built its own answer to "which skill-link directories get
+// written" instead of reading the one the writer uses. It promised one
+// directory while the run created three. On a machine with Claude Code
+// installed only the Antigravity line is visibly missing, so this fixture must
+// keep every agent undetected — no client directories and no agent binaries on
+// PATH — or the test passes while .claude/skills is still under-reported.
+function skillDirsUnder(root) {
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of fsSync.readdirSync(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const full = path.join(dir, entry.name);
+      if (entry.name === "skills") found.push(full);
+      else walk(full);
+    }
+  };
+  walk(root);
+  return found.sort();
+}
+
+test("setup --dry-run promises every skill-link directory the real run creates", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-skilldirs-"));
+  const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
+  const cli = path.resolve(repoRoot, "packages/cli/src/index.mjs");
+  const env = { ...process.env, PATH: "/usr/bin:/bin" };
+  const target = ["--path", aiosPath, "--home", homePath];
+
+  try {
+    const preview = spawnSync(process.execPath, [cli, "setup", "--dry-run", ...target], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(preview.status, 0, preview.stderr);
+    const promised = [...preview.stdout.matchAll(/\[would create managed skill links\] (\S+)/g)]
+      .map((match) => match[1])
+      .sort();
+
+    const real = spawnSync(process.execPath, [cli, "setup", "--yes", "--skip-reveal", ...target], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(real.status, 0, `${real.stdout}\n${real.stderr}`);
+    const created = skillDirsUnder(homePath);
+
+    assert.deepEqual(promised, created, "the preview must name exactly the directories the run creates");
+    assert.deepEqual(created, [
+      path.join(homePath, ".agents", "skills"),
+      path.join(homePath, ".claude", "skills"),
+      path.join(homePath, ".gemini", "antigravity", "skills")
+    ].sort(), "all three projection roots are written with nothing detected");
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test("setup --dry-run reports an unmanaged bridge collision without changing it", () => {
   const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-collision-"));
   const aiosPath = path.join(tmp, "aios");
