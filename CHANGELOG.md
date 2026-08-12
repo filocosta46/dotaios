@@ -4,6 +4,18 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-08-12
+
+Same DotAIOS as 2.0.1. This release exists so you can check where it came from.
+
+INSTALL.md asks you to compare the published package's `gitHead` against the
+matching source tag before you run anything. On 2.0.1 that field was missing, so
+the check you were told to make returned nothing. 2.0.2 carries it, and the
+instructions work as written.
+
+If you already installed 2.0.1 there is nothing to redo — the two releases
+contain the same files.
+
 ## [2.0.1] - 2026-08-12
 
 Fixes for the first ten minutes: installing DotAIOS, connecting your AI tools,
