@@ -132,9 +132,14 @@ test("first-time onboarding stays human-run, pinned, and free of install lifecyc
   // store: it is a plaintext field in ~/.dotaios/sync.json at mode 0600. A
   // reader deciding whether to trust sync with a GitHub token is exactly the
   // reader that claim misleads, so name the real file and rule the store out.
-  assert.match(documents["INSTALL.md"], /`~\/\.dotaios\/sync\.json`/, "INSTALL must name where the sync token is actually stored");
-  assert.match(documents["INSTALL.md"], /does not use the macOS Keychain or\s+another operating-system credential store/i, "INSTALL must not imply an OS credential store it does not use");
-  assert.doesNotMatch(corpus, /[Cc]redentials stay in the\s+machine credential store/, "no public page may claim an OS credential store");
+  // Assert against unwrapped prose: these are sentences, and a reflow must not
+  // be able to silently drop a disclosure the reader is owed.
+  const unwrapped = Object.fromEntries(
+    relativeFiles.map((relativePath) => [relativePath, documents[relativePath].replace(/\s+/g, " ")])
+  );
+  assert.match(unwrapped["INSTALL.md"], /plaintext in `~\/\.dotaios\/sync\.json`/, "INSTALL must disclose that the sync token is stored in plaintext, and where");
+  assert.match(unwrapped["INSTALL.md"], /does not use the macOS Keychain or another operating-system credential store/i, "INSTALL must not imply an OS credential store it does not use");
+  assert.doesNotMatch(corpus.replace(/\s+/g, " "), /[Cc]redentials stay in the machine credential store/, "no public page may claim an OS credential store");
   assert.match(documents["INSTALL.md"], new RegExp(`${pkg.version.replaceAll(".", "\\.")} removal contract`, "i"), "INSTALL must scope removal instructions to the installed release");
   assert.match(documents["INSTALL.md"], /doctor --path <aios-path>/i, "INSTALL must make custom-path removal inspectable");
   assert.match(documents["INSTALL.md"], /retired `~\/\.cursor\/skills`.*`~\/\.gemini\/skills`.*`~\/\.gemini\/config\/skills`/is, "INSTALL must cover retired global skill targets");

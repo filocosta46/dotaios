@@ -169,30 +169,59 @@ test("doctor warns when the bridge points at this AIOS folder but its entrypoint
 // to remove, and it keeps expanding the whole folder into every session until
 // the user re-runs activate. Nothing else in the product tells them to, so if
 // this row is [ok] the fix ships and reaches only new installs.
-const legacyImportBridge = (target) => [
+const olderBridgeWith = (pointer) => (target) => [
   "# DotAIOS Claude Code Bridge",
   "",
   MANAGED_START,
   "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
   "",
-  `@${path.join(target, "AGENTS.md")}`,
+  typeof pointer === "function" ? pointer(target) : pointer,
   "",
   "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
   MANAGED_END,
   ""
 ].join("\n");
 
-test("doctor tells an already-installed user to re-run activate for an older bridge", (t) => {
-  const output = runDoctor(t, "doctor-legacy-bridge", legacyImportBridge, { entrypoint: true });
+const legacyImportBridge = olderBridgeWith((target) => `@${path.join(target, "AGENTS.md")}`);
 
-  assert.match(output, /\[warn\] Claude Code bridge/);
-  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
-  // The remedy has to name the command that rewrites the block. It is the only
-  // one that does, and the user has no other signal that anything is stale.
-  assert.match(output, /dotaios activate/);
-  // Not "points to a different AIOS folder": the folder is right, the spelling
-  // is old. Saying it is wrong sends the user to --overwrite for no reason.
-  assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
+// Every retired spelling gets the same verdict, taken from bridgePointer rather
+// than hardcoded here — a spelling added to `retired` without a doctor branch
+// would otherwise keep reporting [ok] exactly like the `@` import did.
+for (const [index, retiredPointer] of bridgePointer("/placeholder").retired.entries()) {
+  test(`doctor tells an already-installed user to re-run activate for retired pointer ${index}`, (t) => {
+    const output = runDoctor(
+      t,
+      `doctor-legacy-bridge-${index}`,
+      olderBridgeWith((target) => retiredPointer.replace("/placeholder", target)),
+      { entrypoint: true }
+    );
+
+    assert.match(output, /\[warn\] Claude Code bridge/);
+    assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+    // The remedy has to name the command that rewrites the block. It is the only
+    // one that does, and the user has no other signal that anything is stale.
+    assert.match(output, /dotaios activate/);
+    // Not "points to a different AIOS folder": the folder is right, the spelling
+    // is old. Saying it is wrong sends the user to --overwrite for no reason.
+    assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
+  });
+}
+
+// Only the `@` spelling is expanded by the host, so only it is described that
+// way. Telling a Codex user their bridge loaded the whole folder would describe
+// a problem their prose pointer never had.
+test("only the @ import is described as loading the whole folder", (t) => {
+  const importing = runDoctor(t, "doctor-legacy-import-detail", legacyImportBridge, { entrypoint: true });
+  assert.match(importing, /loads your whole AIOS folder into every session/);
+
+  const prose = runDoctor(
+    t,
+    "doctor-legacy-prose-detail",
+    olderBridgeWith((target) => `DotAIOS entrypoint (read this file first): ${path.join(target, "AGENTS.md")}`),
+    { entrypoint: true }
+  );
+  assert.match(prose, /\[warn\] Claude Code bridge/);
+  assert.doesNotMatch(prose, /loads your whole AIOS folder/);
 });
 
 // An old bridge is stale, not broken. Warning is what gets a non-developer to

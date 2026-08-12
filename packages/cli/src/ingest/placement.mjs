@@ -156,15 +156,19 @@ export async function placeMarkdown(opts) {
     };
   }
 
-  await fs.mkdir(path.dirname(destination), { recursive: true });
+  // `mkdir -p` traverses a symlinked directory without complaint, so creating
+  // the parents here would walk straight out of the vault before the writer
+  // ever saw the path. writeFileSafe creates them one checked segment at a
+  // time; only the boundary itself is ours to make.
+  await fs.mkdir(vaultRoot, { recursive: true });
 
   if (exists) {
     const existing = await fs.readFile(destination, "utf8");
     const addition = stripFrontmatter(body).trim();
     const merged = `${existing.replace(/\s*$/, "")}\n\n## Ingested ${todayStamp(now)}\n\n${addition}\n`;
-    await writeFileSafe(destination, merged, "overwrite");
+    await writeFileSafe(destination, merged, "overwrite", { boundaryRoot: vaultRoot });
   } else {
-    await writeFileSafe(destination, ensureTrailingNewline(body), "overwrite");
+    await writeFileSafe(destination, ensureTrailingNewline(body), "overwrite", { boundaryRoot: vaultRoot });
   }
 
   await appendEvent(eventsPath, {
@@ -209,7 +213,7 @@ async function placeRaw({ rawDir, eventsPath, baseSlug, source, title, body, kin
   }
 
   await fs.mkdir(rawDir, { recursive: true });
-  await writeFileSafe(target.destination, ensureTrailingNewline(body), "overwrite");
+  await writeFileSafe(target.destination, ensureTrailingNewline(body), "overwrite", { boundaryRoot: rawDir });
 
   await appendEvent(eventsPath, {
     type: "ingest",
@@ -244,7 +248,7 @@ async function placeSignal({ rawDir, signalsDir, eventsPath, baseSlug, source, t
     const target = await resolveMarkdownDestination({ rawDir, baseSlug, source, overwrite });
     if (target.action !== "skip") {
       await fs.mkdir(rawDir, { recursive: true });
-      await writeFileSafe(target.destination, ensureTrailingNewline(body), "overwrite");
+      await writeFileSafe(target.destination, ensureTrailingNewline(body), "overwrite", { boundaryRoot: rawDir });
     }
     destination = target.destination;
   }

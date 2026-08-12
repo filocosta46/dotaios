@@ -102,6 +102,34 @@ test("a long signal refuses a raw destination that is a symlink out of the vault
   assert.equal(fs.readFileSync(box.outside, "utf8"), outsideContent());
 });
 
+// Guarding only the leaf file is not enough: `vault/wiki/<slug>/_index.md` has
+// an intermediate directory, and `mkdir -p` happily traverses a symlinked one.
+// The leaf it then creates is a perfectly ordinary file, so a leaf-only check
+// sees nothing wrong while the bytes land outside the vault.
+test("ingest refuses a shelf directory that is a symlink out of the vault", async (t) => {
+  const box = sandbox(t, "ingest-parent-link");
+  const outsideDir = path.join(box.root, "outside", "acme");
+  fs.mkdirSync(outsideDir, { recursive: true });
+  fs.mkdirSync(path.join(box.vaultRoot, "wiki"), { recursive: true });
+  fs.symlinkSync(outsideDir, path.join(box.vaultRoot, "wiki", "acme"));
+
+  await assert.rejects(() => place(box, { shelf: "wiki", name: "acme" }), /unsafe managed (directory|root)|outside the managed file boundary/i);
+
+  assert.equal(fs.existsSync(path.join(outsideDir, "_index.md")), false, "nothing may be created outside the vault");
+});
+
+test("ingest refuses a raw directory that is a symlink out of the vault", async (t) => {
+  const box = sandbox(t, "ingest-rawdir-link");
+  const outsideDir = path.join(box.root, "outside", "raw");
+  fs.mkdirSync(outsideDir, { recursive: true });
+  fs.mkdirSync(box.vaultRoot, { recursive: true });
+  fs.symlinkSync(outsideDir, box.rawDir);
+
+  await assert.rejects(() => place(box, { shelf: "raw" }), /unsafe managed (directory|root)|outside the managed file boundary/i);
+
+  assert.deepEqual(fs.readdirSync(outsideDir), [], "nothing may be created outside the vault");
+});
+
 // Refusing the symlink must not cost the ordinary path anything: these shelves
 // are the product's durable knowledge surface and have to keep working.
 test("an ordinary durable write still lands inside the vault", async (t) => {
