@@ -29,6 +29,28 @@ import { createSessionTransactionManager } from "./session-store-transactions.mj
 
 const STORE_RELATIVE = ".dotaios/session-store";
 const LOCK_FORMAT = "dotaios-session-store-lock/v1";
+
+// Losing a race for the lock arrives as a thrown error, not as a failed
+// acquisition. Both of these are raised while inspecting a lock another
+// process is publishing or releasing at that exact moment: the caller never
+// reached the stored sessions, so there is nothing to distrust and nothing to
+// roll back. The outer loop already owns the retry budget, so it retries.
+//
+// Tampering is not caught here. prepareOperationalRoot() checks ownership,
+// permissions and symlinks before the loop starts, and it rejects in 0 ms
+// without ever entering a retry -- see tests/core/session-store-contention.test.mjs.
+const CONTENDED_ACQUISITION_CODES = new Set([
+  "DOTAIOS_OWNED_STATE_INVALID",
+  "DOTAIOS_OPERATION_LOCK_REMOVED",
+]);
+
+// Contention clears within an attempt or two; a store left holding a poisoned
+// lock from a dead owner raises the same code forever. Both look identical from
+// here, so the streak is what separates them: retry a handful of times, and
+// treat a condition that survives that as the answer rather than as noise.
+// Without this cap a permanently broken store costs the caller the whole
+// 30s budget to learn what it could have learned in a fraction of a second.
+const MAX_CONSECUTIVE_CONTENDED_RETRIES = 8;
 const DEFAULT_LIMITS = Object.freeze({
   maxCanonicalFiles: 512,
   maxCanonicalBytes: 16 * 1024 * 1024,
@@ -357,6 +379,8 @@ export function createSessionStore(options = {}) {
   async function mutate(callback, operation) {
     try { await prepareOperationalRoot(); } catch (error) { throw publicError(error); }
     const deadline = Date.now() + limits.lockTimeoutMs;
+    let unresolved = null;
+    let contendedStreak = 0;
     const mutation = Object.freeze({
       check() {
         if (Date.now() > deadline) refuse("DOTAIOS_SESSION_STORE_DEADLINE");
@@ -376,12 +400,31 @@ export function createSessionStore(options = {}) {
           retainOnError: (error) => error?.code === "DOTAIOS_SESSION_STORE_POISONED",
         });
         if (result.acquired) return result.value;
+        // A clean "busy" answer means the condition the previous attempt hit
+        // has cleared, so it is no longer the caller's news.
+        unresolved = null;
+        contendedStreak = 0;
       } catch (error) {
-        if (error?.code === "DOTAIOS_SESSION_STORE_DEADLINE") break;
-        throw publicError(error);
+        if (error?.code === "DOTAIOS_SESSION_STORE_DEADLINE") {
+          // Only mutation.check() raises this, and it runs inside the locked
+          // section -- so reaching it proves the lock was acquired and any
+          // earlier contention had cleared. Ran out of time, nothing to report.
+          unresolved = null;
+          break;
+        }
+        if (!CONTENDED_ACQUISITION_CODES.has(error?.code)) throw publicError(error);
+        unresolved = error;
+        contendedStreak += 1;
+        if (contendedStreak > MAX_CONSECUTIVE_CONTENDED_RETRIES) throw publicError(error);
       }
       await delay(25 + Math.floor(Math.random() * 20));
     }
+    // Retrying is only allowed to hide a condition that went away. One that
+    // outlived the whole budget is not contention -- a symlinked lock reports
+    // the same code every single attempt -- and reporting it as "busy, try
+    // again" would turn a tampered store into an install that quietly never
+    // saves. Whatever the last attempt saw is what the caller hears.
+    if (unresolved) throw publicError(unresolved);
     if (operation === "capture") return Object.freeze({ outcome: "refused", committed: false, reason: "contention" });
     refuse("DOTAIOS_SESSION_STORE_CONTENTION");
   }
