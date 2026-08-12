@@ -13,6 +13,9 @@ async function makeMinimalAios(base) {
     path.join(aiosPath, "aios.json"),
     JSON.stringify({ schema_version: "1.0.0", ai_tools: [], created_at: new Date().toISOString() })
   );
+  // A real AIOS folder always has its entrypoint. Without it, bridge tests here
+  // land in doctor's missing-entrypoint branch instead of the one they target.
+  await fs.writeFile(path.join(aiosPath, "AGENTS.md"), "# My AIOS\n");
   return aiosPath;
 }
 

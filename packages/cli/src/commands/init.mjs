@@ -10,6 +10,7 @@ import { createAiosConfig } from "../../../core/src/schema.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasStableManagedWorkspaceIgnoreRule } from "../../../core/src/workspace-ignore.mjs";
 import {
+  SETUP_TRANSACTION_FILE,
   defaultAiosPath,
   expandHome,
   isPathWithin,
@@ -19,7 +20,6 @@ import {
 import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
-const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
 const BASE_TREE_DIRS = [
   "context/domains",
   "projects",

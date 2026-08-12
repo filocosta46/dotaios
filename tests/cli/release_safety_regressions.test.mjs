@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { MANAGED_END, MANAGED_START } from "../../packages/core/src/bridges.mjs";
+import { SETUP_TRANSACTION_FILE } from "../../packages/core/src/paths.mjs";
 import { createAiosConfig } from "../../packages/core/src/schema.mjs";
 import { initCommand } from "../../packages/cli/src/commands/init.mjs";
 
@@ -23,7 +24,12 @@ function makeSandbox(t, label) {
   };
 }
 
-function runDoctor(t, label, bridgeContent) {
+function runDoctor(t, label, bridgeContent, {
+  entrypoint = false,
+  removeAiosFolder = false,
+  setupMarker = false,
+  expectStatus = 0
+} = {}) {
   const sandbox = makeSandbox(t, label);
   const bridgePath = path.join(sandbox.homePath, ".claude", "CLAUDE.md");
   fs.mkdirSync(sandbox.aiosPath, { recursive: true });
@@ -33,7 +39,19 @@ function runDoctor(t, label, bridgeContent) {
     path.join(sandbox.aiosPath, "aios.json"),
     `${JSON.stringify(createAiosConfig({ aiTools: [] }), null, 2)}\n`
   );
+  if (entrypoint) {
+    fs.writeFileSync(path.join(sandbox.aiosPath, "AGENTS.md"), "# My AIOS\n");
+  }
+  if (setupMarker) {
+    fs.writeFileSync(
+      path.join(sandbox.aiosPath, SETUP_TRANSACTION_FILE),
+      `${JSON.stringify({ format: "dotaios-setup-transaction/v1", pid: 999999 })}\n`
+    );
+  }
   fs.writeFileSync(bridgePath, bridgeContent(sandbox.aiosPath));
+  if (removeAiosFolder) {
+    fs.rmSync(sandbox.aiosPath, { recursive: true, force: true });
+  }
 
   const result = spawnSync(process.execPath, [
     cli,
@@ -51,7 +69,7 @@ function runDoctor(t, label, bridgeContent) {
     }
   });
 
-  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.status, expectStatus, result.stderr);
   return result.stdout;
 }
 
@@ -119,6 +137,73 @@ test("doctor ignores an expected-path comment inside a valid block with the wron
   assert.match(output, /\[warn\] Claude Code bridge/);
   assert.match(output, /bridge points to a different AIOS folder/i);
   assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+});
+
+// A bridge was validated by comparing the pointer line against a path doctor
+// computed itself. Both sides came from the same in-memory target string, so
+// they agreed perfectly while the file the pointer names was gone: doctor
+// reported [ok] and then told the user to read a file that does not exist.
+const managedPointerBridge = (target) => [
+  MANAGED_START,
+  `@${path.join(target, "AGENTS.md")}`,
+  MANAGED_END,
+  ""
+].join("\n");
+
+test("doctor warns when the bridge points at this AIOS folder but its entrypoint is gone", (t) => {
+  const output = runDoctor(t, "doctor-missing-entrypoint", managedPointerBridge);
+
+  assert.match(output, /\[warn\] Claude Code bridge/);
+  assert.match(output, /AGENTS\.md/);
+  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+  // The pointer is correct — repointing is not the remedy and cannot help.
+  assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
+});
+
+test("doctor warns about the bridge when the whole AIOS folder was removed", (t) => {
+  const output = runDoctor(t, "doctor-removed-folder", managedPointerBridge, {
+    removeAiosFolder: true,
+    expectStatus: 1
+  });
+
+  assert.match(output, /\[warn\] Claude Code bridge/);
+  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+});
+
+// Nothing else in the suite asserts a GREEN bridge; every other bridge
+// assertion is doesNotMatch(/\[ok\]/). Without this, a fix that makes the
+// bridge check warn forever would pass the whole suite.
+test("doctor reports a healthy Claude bridge when the entrypoint really is there", (t) => {
+  const output = runDoctor(t, "doctor-healthy-bridge", managedPointerBridge, { entrypoint: true });
+
+  assert.match(output, /\[ok\] Claude Code bridge/);
+  assert.doesNotMatch(output, /\[warn\] Claude Code bridge/);
+});
+
+// A marker on disk means init never finished, so the scaffold is still partial.
+// doctor knew nothing about it and closed with "DotAIOS works".
+test("doctor reports an unfinished setup instead of calling the folder healthy", (t) => {
+  const output = runDoctor(t, "doctor-unfinished-setup", managedPointerBridge, {
+    entrypoint: true,
+    setupMarker: true,
+    expectStatus: 1
+  });
+
+  assert.match(output, /\[fail\] Setup completed/);
+  assert.match(output, /dotaios setup/);
+  assert.doesNotMatch(output, /DotAIOS works/);
+});
+
+// doctor sent users to `activate --overwrite` for a file it had just called
+// unmanaged, while activate's own remedy for the same file is `--merge`.
+test("doctor names the non-destructive remedy for an unmanaged bridge file", (t) => {
+  const output = runDoctor(t, "doctor-unmanaged-remedy", () => "My own notes for Claude.\n", {
+    entrypoint: true
+  });
+
+  assert.match(output, /\[warn\] Claude Code bridge/);
+  assert.match(output, /activate --merge/);
+  assert.doesNotMatch(output, /activate --overwrite/);
 });
 
 test("activate and attach report a preserved foreign project bridge as blocking", (t) => {

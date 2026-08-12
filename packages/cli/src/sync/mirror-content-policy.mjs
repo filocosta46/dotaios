@@ -4,6 +4,7 @@ import {
   classifyProjectRemote,
   projectRemotesMatch
 } from "../../../core/src/project-workspaces.mjs";
+import { SETUP_TRANSACTION_FILE } from "../../../core/src/paths.mjs";
 
 export function findGitlinks(lsFilesStdout) {
   return parseIndexEntries(lsFilesStdout)
@@ -59,7 +60,7 @@ function isSensitiveMirrorPath(candidate) {
   if (/^(?:credentials|token)\./.test(basename)) return true;
   if (/\.(?:key|pem|token|credentials)$/.test(basename)) return true;
   if (basename === ".ds_store") return true;
-  if (basename === ".dotaios-setup-transaction.json") return true;
+  if (basename === SETUP_TRANSACTION_FILE) return true;
   if (/^\.dotaios-setup-.*\.tmp$/.test(basename)) return true;
   if (portablePath.startsWith(".dotaios/migrations/transactions/")) return true;
   if (

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { SETUP_TRANSACTION_FILE, defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import {
@@ -61,6 +61,7 @@ export async function doctorCommand(args) {
   checks.push(checkNodeVersion());
   checks.push(checkTerminal());
   checks.push(await checkAiosFolder(target));
+  checks.push(await checkUnfinishedSetup(target));
   checks.push(await checkAiosConfig(target));
   checks.push(checkTrackedGitlinks(target));
   checks.push(await checkMemoryHealth(target));
@@ -198,6 +199,18 @@ async function checkAiosFolder(target) {
     status: "fail",
     detail: "No folder found at this path.",
     fix: "Run `npx dotaios setup` to create it."
+  };
+}
+
+async function checkUnfinishedSetup(target) {
+  if (!await pathExists(path.join(target, SETUP_TRANSACTION_FILE))) {
+    return { name: "Setup completed", status: "ok" };
+  }
+  return {
+    name: "Setup completed",
+    status: "fail",
+    detail: "An unfinished setup still owns this folder, so its files may be incomplete.",
+    fix: `Run \`npx dotaios setup${pathOptionFor(target)}\` again to finish it.`
   };
 }
 
@@ -523,9 +536,21 @@ async function checkAgentBridges(target, homePath) {
           detail: "Managed bridge predates v1.23 and still calls the retired read_session_digest surface.",
           fix: `Run \`npx dotaios activate --path ${target} --overwrite\` to refresh it.`
         });
+      } else if (!await pathExists(expectedEntrypoint)) {
+        // The pointer is right and the file it names is gone. This needs its own
+        // branch: falling through to the repoint case below would call a correct
+        // pointer wrong and hand the user a command that cannot restore the file.
+        results.push({
+          name: `${agent.name} bridge`,
+          status: "warn",
+          detail: `Bridge points at this AIOS folder, but its entrypoint is missing (${expectedEntrypoint}).`,
+          fix: `Run \`npx dotaios init --path ${target}\` to restore the missing base files.`
+        });
       } else {
         results.push({ name: `${agent.name} bridge`, status: "ok" });
       }
+      // The bridge does point here, so the aggregate "nothing is connected"
+      // warning would be a second, less specific report of the same fact.
       foundBridge = true;
     } else if (managedBlock) {
       results.push({
@@ -546,7 +571,9 @@ async function checkAgentBridges(target, homePath) {
         name: `${agent.name} bridge`,
         status: "warn",
         detail: "Existing unmanaged file. DotAIOS will not overwrite.",
-        fix: `Inspect ${filePath}; if safe to replace, run \`npx dotaios activate --overwrite\`.`
+        // activate's own remedy for this exact file is --merge. doctor used to
+        // answer --overwrite, which replaces what the user wrote.
+        fix: `Inspect ${filePath}; to keep what it says and add DotAIOS below it, run \`npx dotaios activate --merge\`.`
       });
     }
   }

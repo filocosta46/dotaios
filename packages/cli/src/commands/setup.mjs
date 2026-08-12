@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { assertUniqueOptions, hasHelpFlag } from "../lib/args.mjs";
-import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
+import { SETUP_TRANSACTION_FILE, defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { pathExists } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import { parseJsonlLine } from "../../../core/src/jsonl.mjs";
@@ -54,7 +54,6 @@ Options:
   --overwrite         Replace generated files in the target folder
 `;
 
-const SETUP_TRANSACTION_FILE = ".dotaios-setup-transaction.json";
 const SETUP_TRANSACTION_FORMAT = "dotaios-setup-transaction/v1";
 
 export async function setupCommand(args, { lifecycle = {} } = {}) {
