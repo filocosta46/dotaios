@@ -28,7 +28,7 @@ import {
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
-import { activateCommand, plannedActivationConfigPatch } from "./activate.mjs";
+import { activateCommand, BRIDGE_COLLISION_REMEDY, plannedActivationConfigPatch } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
 import {
   emitReliabilityMetric,
@@ -102,6 +102,13 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
     if (setupTransactionActive) {
       await assertCompletedSetupTransactionTree(aiosPath, setupTransactionActive.transaction, passthrough);
+      // The marker means "setup owns a partial scaffold it created in an empty
+      // target". That ownership is discharged the moment init has finished and
+      // its tree has been verified — the scaffold is no longer partial. Holding
+      // it across step 2 wedged the folder permanently, because step 2 rewrites
+      // skills/_registry.json and the manifest could then never match again:
+      // the identical re-run, --force, --overwrite and --merge all refused.
+      await releaseSetupTransaction(aiosPath, setupTransactionActive);
     }
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "init", run_id: runId });
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "init", run_id: runId, outcome: "ok" });
@@ -167,11 +174,18 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   }
   if (!activateOk) {
     console.log("");
-    console.log("Folder created. Tool connection needs attention; setup stopped before optional features.");
+    console.log("Your folder is complete. Only the AI-tool connection is left.");
+    // Never send them back to `dotaios setup`: the folder now exists, so setup
+    // has nothing left to do and will only report that. `activate` is the one
+    // command that can still finish the job, and for a preserved collision the
+    // non-destructive form is the one activate already named above.
     if (blockedContextCount > 0 || blockedCatalogCount > 0) {
       console.log(`Preserved ${blockedContextCount} client bridge collision(s) and ${blockedCatalogCount} skill catalog collision(s).`);
+      console.log(BRIDGE_COLLISION_REMEDY);
+    } else {
+      console.log("Fix the problem reported above, then run `dotaios activate`.");
     }
-    console.log("Fix the reported collision, then re-run the identical `dotaios setup` command.");
+    console.log("Then check the result with `dotaios doctor`.");
     await emitReliabilityMetric(aiosPath, {
       type: "install_end",
       command: "setup",
@@ -181,15 +195,6 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
       duration_ms: Date.now() - startedAt
     });
     return;
-  }
-
-  if (setupTransactionActive) {
-    if (!await unlinkSetupMarkerTempIfSameFile(
-      setupTransactionPath(aiosPath),
-      setupTransactionActive.markerStats
-    )) {
-      throw new Error("Setup recovery marker changed before completion; refusing to remove it.");
-    }
   }
 
   // GitHub cross-device sync prompt — skip in non-interactive or non-TTY mode
@@ -523,6 +528,12 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
 
 function setupTransactionPath(aiosPath) {
   return path.join(aiosPath, SETUP_TRANSACTION_FILE);
+}
+
+async function releaseSetupTransaction(aiosPath, active) {
+  if (!await unlinkSetupMarkerTempIfSameFile(setupTransactionPath(aiosPath), active.markerStats)) {
+    throw new Error("Setup recovery marker changed before completion; refusing to remove it.");
+  }
 }
 
 async function hasSetupTransaction(aiosPath) {

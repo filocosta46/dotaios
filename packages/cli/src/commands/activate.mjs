@@ -40,6 +40,13 @@ import { createManagedSkillStore } from "../../../core/src/managed-skill-store.m
 const managedStart = MANAGED_START;
 const managedEnd = MANAGED_END;
 
+// One authored remedy for a preserved bridge collision, because `setup` reports
+// the same state and must not invent a second, different instruction for it.
+// Without this line the only documented way forward was --overwrite, which
+// replaces the file and silently stops the user's own instructions applying.
+export const BRIDGE_COLLISION_REMEDY =
+  "Those files already existed and were left untouched. To keep what they say and add DotAIOS below it, run `dotaios activate --merge`.";
+
 export async function activateCommand(args, { lifecycle = {} } = {}) {
   if (hasHelpFlag(args)) {
     printActivateHelp();
@@ -168,12 +175,7 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     console.error(
       `Activation needs attention: ${blockedContextCount} client bridge collision(s).`
     );
-    // Without this line the only documented way forward was --overwrite, which
-    // replaces the file and silently stops the user's own instructions from
-    // applying. Name the non-destructive option first.
-    console.error(
-      "Those files already existed and were left untouched. To keep what they say and add DotAIOS below it, run `dotaios activate --merge`."
-    );
+    console.error(BRIDGE_COLLISION_REMEDY);
   }
   if (blockedHermesCount > 0) {
     process.exitCode = 1;
