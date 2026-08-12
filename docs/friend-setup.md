@@ -14,7 +14,7 @@ You do not need a GitHub account, npm account, or paid plan.
 ## 1. Preview
 
 ```sh
-npx dotaios@1.28.4 setup --dry-run
+npx dotaios@2.0.0 setup --dry-run
 ```
 
 npm may ask to download the pinned package. The DotAIOS preview itself does not
@@ -27,7 +27,7 @@ Want to inspect the package first? Follow the provenance checks in
 ## 2. Set up
 
 ```sh
-npx dotaios@1.28.4 setup
+npx dotaios@2.0.0 setup
 ```
 
 Answer the short questions. Existing unmanaged files are preserved. Private
@@ -37,8 +37,8 @@ browser helper all default to No.
 ## 3. Verify
 
 ```sh
-npx dotaios@1.28.4 doctor
-npx dotaios@1.28.4 skills doctor
+npx dotaios@2.0.0 doctor
+npx dotaios@2.0.0 skills doctor
 ```
 
 Then open the AI tool you use and ask:
@@ -51,7 +51,7 @@ managed configuration.
 ## If setup stops
 
 - Existing `~/aios`: do not delete it. Run
-  `npx dotaios@1.28.4 doctor` and inspect the folder.
+  `npx dotaios@2.0.0 doctor` and inspect the folder.
 - Existing AI-tool instructions: DotAIOS preserves them. Read the reported
   collision before deciding whether to change anything.
 - `npx: command not found`: install the Node.js LTS release from

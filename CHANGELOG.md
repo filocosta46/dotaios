@@ -4,7 +4,33 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-08-12
+
+Your adopted Agent Skills now have exactly one owner: your AIOS folder. Native
+client folders became projections of it. Everything you already have keeps
+working and nothing is deleted, but the rule about who may write what has
+changed, which is why this is a 2 and not a 1.29.
+
+### If you are upgrading
+
+- **Nothing is required of you.** Existing skill folders stay where they are and
+  stay readable. There is no migration to run and no file to hand-edit.
+- **Skills adopted into `~/.claude/skills` or `~/.agents/skills` are now
+  projections.** The real skill lives in `AIOS/skills/<name>/SKILL.md`. Native
+  folders that were never adopted stay visible and untouched, reported as
+  discovered-unmanaged rather than silently taken over.
+- **Run the read-only checks first.** `dotaios doctor`, then
+  `dotaios skills doctor`. Both report without writing.
+
 ### Added
+
+- Search now covers `memory/daily/` and `memory/inbox/`. A note captured on a
+  phone and filed into the inbox was not in the corpus at all: a term that
+  appeared only there returned "No results found".
+- Search now finds a note when you ask for it in a different tense or number.
+  A conversation filed as "Meeting with Racing Bulls" was unreachable from
+  "what meetings did I have". Exact matches still rank first; a matched
+  inflection ranks below every literal kind.
 
 - Managed Agent Skill adoption is now preview-first and exact-proof. AIOS real
   skill directories are canonical; native folders are projections. Inventory
@@ -19,6 +45,9 @@ All notable changes to DotAIOS will be documented in this file.
   matching source-only completion can resume safely.
 
 ### Changed
+
+- CI runs push builds only on `main`. Every commit previously triggered the
+  full matrix twice, once for the push and once for the pull request.
 
 - Raw/single-skill local install and removal now delegate to
   `ManagedSkillStore`; plugin-package copying and registry-only deletion are
@@ -48,6 +77,11 @@ All notable changes to DotAIOS will be documented in this file.
   available as configuration evidence only.
 
 ### Fixed
+
+- Newly created project READMEs use ordinary block frontmatter. They were
+  written as a single-line YAML flow mapping, so any tool that added a key of
+  its own produced an unparseable file. `dotaios export-okf` did exactly that
+  and exported nothing.
 
 - Canonical working-context reads no longer create corrupt-JSONL quarantine
   files, follow projected sources outside the AIOS boundary, echo unbounded
@@ -88,7 +122,6 @@ All notable changes to DotAIOS will be documented in this file.
   reader and registry key as activation. Custom external-directory adapters
   now reject malformed dotted keys and control-character config paths instead
   of normalizing a typo into a different key or crashing health inspection.
-
 ## [1.28.4] - 2026-08-06
 
 ### Added
