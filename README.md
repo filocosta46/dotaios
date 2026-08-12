@@ -23,8 +23,8 @@ You need Node.js 20 or newer. You do not need a GitHub or DotAIOS account.
 Run these commands yourself in Terminal, PowerShell, or another system shell. The first command previews the selected folder, detected clients, and collisions without creating `~/aios` or changing client configuration or sync. npm may download and cache the named package. The second command runs the same pinned release and guides you through setup:
 
 ```sh
-npx dotaios@1.28.4 setup --dry-run
-npx dotaios@1.28.4 setup
+npx dotaios@2.0.0 setup --dry-run
+npx dotaios@2.0.0 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
@@ -40,19 +40,19 @@ That section tells the assistant to preview first and to ask before every write,
 Afterward, either you or the assistant can verify the local installation with:
 
 ```sh
-npx dotaios@1.28.4 doctor
+npx dotaios@2.0.0 doctor
 ```
 
 ### Verify before running
 
-The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `1.28.4` maps to Git tag [`v1.28.4`](https://github.com/filocosta46/dotaios/releases/tag/v1.28.4).
+The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `2.0.0` maps to Git tag [`v2.0.0`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.0).
 
 These commands inspect registry provenance and packaged contents without running DotAIOS setup:
 
 ```sh
-npm view dotaios@1.28.4 version dist.integrity dist.tarball gitHead
-npm view dotaios@1.28.4 scripts
-npm pack dotaios@1.28.4 --dry-run
+npm view dotaios@2.0.0 version dist.integrity dist.tarball gitHead
+npm view dotaios@2.0.0 scripts
+npm pack dotaios@2.0.0 --dry-run
 ```
 
 Those three commands show you the publisher, the integrity record, and every file in the package before anything runs. The package defines no `preinstall`, `install`, or `postinstall` script, so nothing executes until you invoke the CLI yourself. The commands above omit `npx -y` on purpose, so npm still asks you to confirm the pinned package — approve it once what you see matches what you expect. Interactive setup then offers private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every one of them defaults to No. [INSTALL.md](INSTALL.md) has the full sequence and [the security model](docs/security.md) has the package and permission boundaries.
