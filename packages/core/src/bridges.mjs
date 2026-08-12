@@ -259,13 +259,22 @@ export async function isCommandAvailable(
 // references (headless fleet workers, MCP-only clients, browser-paste users)
 // still see the catalog at boot. Default stays pointer-mode to keep bridge
 // files small.
-export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skillsCatalog } = {}) {
+// The one spelling of "this bridge points at this AIOS folder". The writer
+// emits `current`; a reader must accept every form in `accepted`, because
+// bridges written by older releases are still valid. Both sides share this
+// because they had drifted apart into a pure string comparison neither owned.
+export function bridgePointer(agent, aiosPath) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
-  const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
-  const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
-  const pointerLine = agent.include === "@"
+  const current = agent.include === "@"
     ? `@${entrypoint}`
     : `DotAIOS entrypoint (read this file first): ${entrypoint}`;
+  return { entrypoint, current, accepted: [current, `Read ${entrypoint} first.`] };
+}
+
+export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skillsCatalog } = {}) {
+  const { entrypoint, current: pointerLine } = bridgePointer(agent, aiosPath);
+  const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
+  const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
 
   const lines = [
     `# DotAIOS ${agent.name} Bridge`,

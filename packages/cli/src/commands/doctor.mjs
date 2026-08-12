@@ -10,6 +10,7 @@ import {
   MANAGED_END,
   MANAGED_START,
   bridgePath,
+  bridgePointer,
   findManagedBlock,
   isAgentInstalled,
   loadAgentRegistry
@@ -522,30 +523,26 @@ async function checkAgentBridges(target, homePath, detection = {}) {
     }
 
     const managedBlock = findManagedBlock(content);
-    const expectedEntrypoint = path.join(target, "AGENTS.md");
-    const expectedPointer = agent.include === "@"
-      ? `@${expectedEntrypoint}`
-      : `DotAIOS entrypoint (read this file first): ${expectedEntrypoint}`;
+    const { entrypoint, accepted } = bridgePointer(agent, target);
     const managedLines = managedBlock?.text.split(/\r?\n/) || [];
-    const hasExactPointer = managedLines.includes(expectedPointer)
-      || managedLines.includes(`Read ${expectedEntrypoint} first.`);
+    const hasExactPointer = accepted.some((pointer) => managedLines.includes(pointer));
     if (hasExactPointer) {
       if (managedBlock.text.includes("read_session_digest")) {
         results.push({
           name: `${agent.name} bridge`,
           status: "warn",
           detail: "Managed bridge predates v1.23 and still calls the retired read_session_digest surface.",
-          fix: `Run \`npx dotaios activate --path ${target} --overwrite\` to refresh it.`
+          fix: `Run \`${repointCommand(target)}\` to refresh it.`
         });
-      } else if (!await pathExists(expectedEntrypoint)) {
+      } else if (!await pathExists(entrypoint)) {
         // The pointer is right and the file it names is gone. This needs its own
         // branch: falling through to the repoint case below would call a correct
         // pointer wrong and hand the user a command that cannot restore the file.
         results.push({
           name: `${agent.name} bridge`,
           status: "warn",
-          detail: `Bridge points at this AIOS folder, but its entrypoint is missing (${expectedEntrypoint}).`,
-          fix: `Run \`npx dotaios init --path ${target}\` to restore the missing base files.`
+          detail: `Bridge points at this AIOS folder, but its entrypoint is missing (${entrypoint}).`,
+          fix: `Run \`npx dotaios init${pathOptionFor(target)}\` to restore the missing base files.`
         });
       } else {
         results.push({ name: `${agent.name} bridge`, status: "ok" });
@@ -558,7 +555,7 @@ async function checkAgentBridges(target, homePath, detection = {}) {
         name: `${agent.name} bridge`,
         status: "warn",
         detail: "Bridge points to a different AIOS folder.",
-        fix: `Run \`npx dotaios activate --path ${target} --overwrite\` to repoint.`
+        fix: `Run \`${repointCommand(target)}\` to repoint.`
       });
     } else if (content.includes(MANAGED_START) || content.includes(MANAGED_END)) {
       results.push({
@@ -642,6 +639,10 @@ function nativeRuntimeCheck(agent, target, runtimes) {
     detail: `Detected, but ~/${agent.skills?.dir} has no live links to ${skillsDir}.`,
     fix: `Run \`npx dotaios activate${pathOptionFor(target)}\` to connect its skills.`
   };
+}
+
+function repointCommand(target) {
+  return `npx dotaios activate${pathOptionFor(target)} --overwrite`;
 }
 
 function pathOptionFor(target) {

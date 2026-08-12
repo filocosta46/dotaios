@@ -99,6 +99,10 @@ export async function inspectExternalSkillsDirs(
   }
 }
 
+// Both the lstat and the readFile can lose the race with a config being
+// removed. One outcome, described once.
+const CONFIG_NOT_FOUND = { action: "manual", reason: "config not found" };
+
 // Conservative, semantic-guarded editor for `skills.external_dirs` in Hermes
 // config.yaml. The line editor preserves ordinary formatting and comments;
 // YAML preflight plus candidate validation fail closed on shapes it cannot
@@ -131,7 +135,7 @@ export async function ensureExternalSkillsDir({
   try {
     stats = await fs.lstat(configPath);
   } catch (error) {
-    if (error?.code === "ENOENT") return { action: "manual", reason: "config not found" };
+    if (error?.code === "ENOENT") return CONFIG_NOT_FOUND;
     throw error;
   }
   if (!stats.isFile() || stats.isSymbolicLink()) {
@@ -146,7 +150,7 @@ export async function ensureExternalSkillsDir({
   try {
     sourceBytes = await fs.readFile(configPath);
   } catch (error) {
-    if (error?.code === "ENOENT") return { action: "manual", reason: "config not found" };
+    if (error?.code === "ENOENT") return CONFIG_NOT_FOUND;
     throw error;
   }
   const text = sourceBytes.toString("utf8");
