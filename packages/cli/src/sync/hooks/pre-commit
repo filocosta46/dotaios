@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+
+import { spawnSync } from "node:child_process";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { readProjectCatalog } from "../../../../core/src/projects.mjs";
+import {
+  assertMirrorContentSafe,
+  findGitlinks,
+  findWorkspaceIndexEntries
+} from "../mirror-content-policy.mjs";
+
+const inheritedIndex = process.env.GIT_INDEX_FILE;
+const baseEnvironment = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !key.startsWith("GIT_"))
+);
+const outerEnvironment = {
+  ...baseEnvironment,
+  ...(inheritedIndex ? { GIT_INDEX_FILE: inheritedIndex } : {})
+};
+
+function runGit(args, { workspace = false } = {}) {
+  return spawnSync("git", args, {
+    encoding: "utf8",
+    env: workspace ? baseEnvironment : outerEnvironment,
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+}
+
+const inspected = runGit(["ls-files", "-s", "-z"]);
+
+if (inspected.status !== 0) {
+  process.stderr.write("DotAIOS could not validate the candidate Git index; commit refused.\n");
+  process.exit(1);
+}
+
+const gitlinks = findGitlinks(inspected.stdout);
+
+if (gitlinks.length > 0) {
+  process.stderr.write(
+    "DotAIOS refused the commit because its candidate index contains a nested Git repository pointer.\n"
+  );
+  process.stderr.write(gitlinks.map((entry) => `  ${entry}`).join("\n") + "\n");
+  process.exit(1);
+}
+
+const workspaceEntries = findWorkspaceIndexEntries(inspected.stdout);
+
+if (workspaceEntries.length > 0) {
+  process.stderr.write(
+    "DotAIOS refused the commit because its candidate index contains entries under workspaces/.\n"
+  );
+  process.stderr.write(workspaceEntries.map((entry) => `  ${entry}`).join("\n") + "\n");
+  process.exit(1);
+}
+
+async function readCandidateProjectCatalog() {
+  const listed = runGit(["ls-files", "-z", "--", "projects"]);
+  if (listed.status !== 0) {
+    throw new Error("the candidate project catalog could not be listed");
+  }
+  const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-candidate-catalog-"));
+  try {
+    const readmes = listed.stdout.split("\0").filter((candidate) =>
+      /^projects\/[^/]+\/README\.md$/.test(candidate)
+    );
+    for (const candidate of readmes) {
+      const shown = runGit(["show", `:${candidate}`]);
+      if (shown.status !== 0) {
+        throw new Error(`the candidate catalog entry ${candidate} could not be read`);
+      }
+      const target = path.join(temporaryRoot, ...candidate.split("/"));
+      await fs.mkdir(path.dirname(target), { recursive: true });
+      await fs.writeFile(target, shown.stdout, "utf8");
+    }
+    return await readProjectCatalog({ aiosPath: temporaryRoot });
+  } finally {
+    await fs.rm(temporaryRoot, { recursive: true, force: true });
+  }
+}
+
+try {
+  const ignored = runGit(["check-ignore", "--no-index", "-q", "--", "workspaces/"]);
+  if (ignored.status !== 0 && ignored.status !== 1) {
+    throw new Error("the /workspaces/ ignore boundary could not be inspected");
+  }
+  const projectCatalog = await readCandidateProjectCatalog();
+  await assertMirrorContentSafe({
+    root: process.cwd(),
+    indexedEntries: inspected.stdout,
+    workspacesRootIgnored: ignored.status === 0,
+    inspectWholeTree: true,
+    projectCatalog,
+    inspectWorkspaceRepository: async (workspacePath) => {
+      const topLevel = runGit(["-C", workspacePath, "rev-parse", "--show-toplevel"], { workspace: true });
+      const head = runGit(["-C", workspacePath, "rev-parse", "--verify", "HEAD"], { workspace: true });
+      const origin = runGit(["-C", workspacePath, "remote", "get-url", "origin"], { workspace: true });
+      return {
+        topLevelPath: topLevel.status === 0 ? topLevel.stdout.trim() : null,
+        head: head.status === 0 && /^[0-9a-f]{40,64}$/i.test(head.stdout.trim())
+          ? head.stdout.trim()
+          : null,
+        remoteUrl: origin.status === 0 ? origin.stdout.trim() : null
+      };
+    }
+  });
+} catch (error) {
+  process.stderr.write(`DotAIOS refused the commit because its complete candidate mirror is unsafe.\n${error.message}\n`);
+  process.exit(1);
+}

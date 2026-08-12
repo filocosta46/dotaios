@@ -1,0 +1,14 @@
+{
+  "name": "@dotaios/mcp",
+  "version": "1.23.0",
+  "private": true,
+  "description": "Local MCP server for DotAIOS memory and context.",
+  "type": "module",
+  "bin": {
+    "dotaios-mcp": "src/server.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}
