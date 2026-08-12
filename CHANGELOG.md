@@ -4,6 +4,30 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-12
+
+Fixes for the first ten minutes: installing DotAIOS, connecting your AI tools,
+and checking that it worked. Nothing you already have changes, and there is
+nothing to run after updating.
+
+### Fixed
+
+- Setup no longer gets stuck when you already have a `CLAUDE.md` of your own.
+  That ordinary situation could leave a half-made folder that no documented
+  command would finish — including running setup again exactly as it told you to.
+- One folder DotAIOS cannot write to no longer costs you the rest. The run used
+  to stop there, so tools further down the list were never set up, and nothing
+  told you which ones had worked.
+- When a file cannot be written, DotAIOS now names that file and the reason,
+  instead of a temporary name of its own that no longer exists by the time you
+  read the message.
+- `dotaios doctor` no longer reports tools you never installed as working.
+- `dotaios doctor` no longer gives a clean report when the folder it points at
+  is gone — including the case where the folder is still there but the file your
+  AI tools actually read has been deleted.
+- The install preview now lists every folder the real install writes to. It used
+  to name one and write three.
+
 ## [2.0.0] - 2026-08-12
 
 Your adopted Agent Skills now have exactly one owner: your AIOS folder. Native
