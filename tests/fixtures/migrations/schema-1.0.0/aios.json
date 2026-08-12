@@ -1,7 +1,0 @@
-{
-  "created_at": "2025-11-02T09:30:00.000Z",
-  "schema_version" : "1.0.0",
-  "ai_tools": ["claude-code", "codex"],
-  "vault_path": null,
-  "local_preference": "keep-this-exactly"
-}
