@@ -83,6 +83,7 @@ test("activation resolves native skill targets from a project-owned registry", (
   const mismatchedReport = JSON.parse(mismatchedDoctor.stdout);
   const customRuntime = mismatchedReport.runtimes.find((entry) => entry.name === "Custom Hermes");
   assert.equal(customRuntime.capabilities.configured, "no");
-  assert.equal(customRuntime.capabilities.discoverable, "no");
+  assert.equal(customRuntime.capabilities.projected, "no");
+  assert.equal(customRuntime.capabilities.discoverable, "not-probed");
   assert.deepEqual(customRuntime.evidence.hermesConfigs.map((entry) => entry.key), ["runner.skill_paths"]);
 });

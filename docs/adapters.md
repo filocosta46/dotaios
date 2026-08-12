@@ -106,7 +106,7 @@ dotaios skills doctor --json
 ```
 
 `skills doctor` is read-only. It checks the generated catalogs, native-link
-coverage, managed bridges, and Hermes root/profile configuration. It reports
+projection coverage, managed bridges, and Hermes root/profile configuration. It reports
 Hermes as a native runtime without expecting a bridge file. If a temporary
 setup path tries to overwrite the real global bridges, `activate` refuses it;
 use a permanent AIOS folder instead.
@@ -141,12 +141,12 @@ preview an explicit cleanup first, then apply it only after review:
 
 ```
 dotaios skills install --dry-run --prune-aliases
-dotaios skills install --prune-aliases
 ```
 
-The prune flag removes only exact managed alias symlinks. It never removes real
-directories, broken foreign links, or links whose target does not match the
-canonical source. Foreign real-directory collisions still require an explicit
+The global prune flag is preview-only in this release. ManagedSkillStore does
+not accept historical alias shape as deletion authority, so a real prune
+refuses with proof-first guidance. Project-local aliases remain separate
+project authority. Foreign real-directory collisions still require an explicit
 ownership decision.
 
 ### Project-owned skill adapters

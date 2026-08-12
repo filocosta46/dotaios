@@ -1,8 +1,15 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { readJson } from "./files.mjs";
+import { createRequire } from "node:module";
 import { isSafeRegistryPathText, parseExternalSkillsKey } from "./skill-config-key.mjs";
+
+const MAX_AGENT_REGISTRY_BYTES = 1024 * 1024;
+const MAX_AGENT_REGISTRY_ENTRIES = 256;
+const MAX_AGENT_FIELD_BYTES = 1024;
+const MAX_AGENT_SKILL_TARGETS = 128;
+const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
+const require = createRequire(import.meta.url);
+const bundledAgentRegistry = require("./agents.json");
 
 export const MANAGED_START = "<!-- dotaios-managed:start -->";
 export const MANAGED_END = "<!-- dotaios-managed:end -->";
@@ -25,8 +32,6 @@ export function findManagedBlock(text) {
 
 // The canonical entrypoint every bridge points at. One front door for every agent.
 export const AGENT_ENTRYPOINT = "AGENTS.md";
-
-const defaultRegistryPath = fileURLToPath(new URL("./agents.json", import.meta.url));
 
 // Each agent record:
 //   name    human label
@@ -52,7 +57,7 @@ function normalizeAgent(raw) {
 
 function normalizeSkills(raw) {
   if (!raw || typeof raw !== "object") return null;
-  const config = normalizeSkillTarget(raw);
+  const config = normalizeSkillTarget(raw, { relativeOnly: true });
   if (!config) return null;
 
   const project = normalizeSkillTarget(raw.project, { relativeOnly: true });
@@ -86,7 +91,7 @@ function isSafeRelativePath(value) {
     && !value.split(/[\\/]+/).includes("..");
 }
 
-function normalizeRegistry(data) {
+export function normalizeAgentRegistry(data) {
   const list = Array.isArray(data?.agents) ? data.agents : [];
   return list.map(normalizeAgent).filter(Boolean);
 }
@@ -96,16 +101,104 @@ function normalizeRegistry(data) {
 // defaults; new names are appended. This is how a user (or Filippo) adds a
 // new AI tool without a code release.
 export async function loadAgentRegistry(aiosPath) {
-  const defaults = normalizeRegistry(await readJson(defaultRegistryPath, { agents: [] }));
+  const defaultValue = bundledAgentRegistry;
+  assertAgentRegistryBounds(defaultValue);
+  const defaults = normalizeAgentRegistry(defaultValue);
 
   if (!aiosPath) return defaults;
-  const userRegistry = normalizeRegistry(await readJson(path.join(aiosPath, "agents.json"), { agents: [] }));
+  const userValue = await readStrictRegistryJson(path.join(aiosPath, "agents.json"), { allowMissing: true });
+  if (userValue) assertAgentRegistryBounds(userValue);
+  const userRegistry = normalizeAgentRegistry(userValue || { agents: [] });
   if (userRegistry.length === 0) return defaults;
 
   const byName = new Map();
   for (const agent of defaults) byName.set(agent.name.toLowerCase(), agent);
   for (const agent of userRegistry) byName.set(agent.name.toLowerCase(), agent);
-  return [...byName.values()];
+  const merged = [...byName.values()];
+  const targets = new Set(
+    merged
+      .filter((agent) => agent.skills?.mode === "symlink")
+      .map((agent) => agent.skills.dir)
+  );
+  if (targets.size > MAX_AGENT_SKILL_TARGETS) {
+    throw new Error(`Agent registry exceeds the ${MAX_AGENT_SKILL_TARGETS}-target bound.`);
+  }
+  return merged;
+}
+
+function assertAgentRegistryBounds(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value) || !Array.isArray(value.agents)) {
+    throw new Error("Agent registry must contain an agents array.");
+  }
+  if (value.agents.length > MAX_AGENT_REGISTRY_ENTRIES) {
+    throw new Error(`Agent registry exceeds the ${MAX_AGENT_REGISTRY_ENTRIES}-entry bound.`);
+  }
+  for (const raw of value.agents) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const values = [raw.name, raw.detect, raw.command, raw.bridge, raw.include];
+    for (const target of [raw.skills, raw.skills?.project]) {
+      if (!target || typeof target !== "object" || Array.isArray(target)) continue;
+      values.push(target.mode, target.dir, target.configFile, target.key);
+    }
+    if (values.some((field) => (
+      typeof field === "string" && Buffer.byteLength(field, "utf8") > MAX_AGENT_FIELD_BYTES
+    ))) throw new Error(`Agent registry field exceeds the ${MAX_AGENT_FIELD_BYTES}-byte bound.`);
+  }
+}
+
+async function readStrictRegistryJson(filePath, { allowMissing = false } = {}) {
+  let before;
+  try {
+    before = await fs.lstat(filePath, { bigint: true });
+  } catch (error) {
+    if (allowMissing && error?.code === "ENOENT") return null;
+    throw error;
+  }
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n) {
+    throw new Error("Agent registry must be a single-link regular file.");
+  }
+  if (before.size > BigInt(MAX_AGENT_REGISTRY_BYTES)) {
+    throw new Error(`Agent registry exceeds the ${MAX_AGENT_REGISTRY_BYTES}-byte bound.`);
+  }
+  const handle = await fs.open(filePath, "r");
+  let bytes;
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (
+      !opened.isFile()
+      || opened.nlink !== 1n
+      || opened.dev !== before.dev
+      || opened.ino !== before.ino
+      || opened.size !== before.size
+    ) throw new Error("Agent registry changed while opening.");
+    bytes = Buffer.alloc(Number(opened.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (read.bytesRead === 0) break;
+      offset += read.bytesRead;
+    }
+    const after = await handle.stat({ bigint: true });
+    if (
+      offset !== bytes.length
+      || after.dev !== opened.dev
+      || after.ino !== opened.ino
+      || after.size !== opened.size
+    ) throw new Error("Agent registry changed while reading.");
+  } finally {
+    await handle.close();
+  }
+  let text;
+  try {
+    text = STRICT_UTF8.decode(bytes);
+  } catch {
+    throw new Error("Agent registry is not valid UTF-8.");
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error("Agent registry is not valid JSON.");
+  }
 }
 
 export function bridgePath(homePath, agent) {

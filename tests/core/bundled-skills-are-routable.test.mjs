@@ -42,7 +42,7 @@ test("every bundled skill exposes its routing phrases where hosts read them", as
   assert.deepEqual(
     missing,
     [],
-    `these bundled skills declare triggers no host can see. Run \`dotaios skills sync-triggers --path . --apply\`:\n${missing.join("\n")}`
+    `these bundled skills declare triggers no host can see. Update their owned frontmatter before release:\n${missing.join("\n")}`
   );
 });
 

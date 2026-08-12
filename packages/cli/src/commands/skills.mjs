@@ -3,19 +3,24 @@ import os from "node:os";
 import path from "node:path";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
-import { collectSkills, planTriggerVisibility, applyTriggerVisibility } from "../../../core/src/skills.mjs";
+import { collectSkills, planTriggerVisibility } from "../../../core/src/skills.mjs";
 import { rankSkills, resolveIntent, renderBootContext } from "../../../core/src/skill-resolver.mjs";
 import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
 import { activateCommand } from "./activate.mjs";
 import { formatProbeResult, runSkillInvocationProbe } from "../lib/skill-invocation-probe.mjs";
+import { createManagedSkillStore } from "../../../core/src/managed-skill-store.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios skills [name]
   dotaios skills install [options]
+  dotaios skills inventory [options]
+  dotaios skills adopt <local-folder> [options]
+  dotaios skills reconcile [options]
+  dotaios skills remove <name> [options]
   dotaios skills doctor [options]
   dotaios skills probe [options]
   dotaios skills resolve "<intent>" [options]
-  dotaios skills sync-triggers [--apply]
+  dotaios skills sync-triggers
 
 List installed skills, show detail for one skill, or resolve a free-text intent
 to the skill that handles it.
@@ -39,6 +44,14 @@ Resolve options:
   --limit <n>     Cap the number of matches (default 1, ignored with --all)
   --boot-context  Print Markdown context to capture and append to an agent prompt
   --path <dir>    Use a non-default AIOS folder
+
+Managed store options:
+  --path <dir>             Use a non-default AIOS folder
+  --home <dir>             Use a disposable/native home root
+  --json                   Print the exact structured proof or result
+  --source-kind <kind>     Bind an explicit reviewed/native/shelf source kind
+  --apply <operation-id>   Apply only the exact displayed operation
+  --fingerprint <sha256>   Require the displayed plan fingerprint
 
 Probe options:
   --client <name>    Required: codex, gemini, claude-code, hermes, cursor, or antigravity
@@ -64,6 +77,11 @@ export async function skillsCommand(args) {
 
   if (args[0] === "resolve") {
     await resolveSkillCommand(args.slice(1));
+    return;
+  }
+
+  if (["inventory", "adopt", "reconcile", "remove"].includes(args[0])) {
+    await managedStoreCommand(args[0], args.slice(1));
     return;
   }
 
@@ -99,8 +117,146 @@ export async function skillsCommand(args) {
   }
 }
 
-// Preview-first, matching the promotion boundary: plan and print by default,
-// write only under an explicit --apply.
+async function managedStoreCommand(subcommand, args) {
+  const options = parseManagedStoreOptions(args);
+  const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
+  const homePath = path.resolve(expandHome(options.home || os.homedir()));
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  let result;
+
+  if (subcommand === "inventory") {
+    if (options.positionals.length > 0 || options.apply || options.fingerprint) {
+      throw new Error("Usage: dotaios skills inventory [--path <aios>] [--home <home>] [--json]");
+    }
+    result = await store.inspect();
+  } else if (subcommand === "adopt") {
+    const [sourcePath] = options.positionals;
+    if (!sourcePath || options.positionals.length !== 1) {
+      throw new Error("Usage: dotaios skills adopt <local-folder> [--apply <operation-id> --fingerprint <sha256>]");
+    }
+    if (Boolean(options.apply) !== Boolean(options.fingerprint)) {
+      throw new Error("--apply and --fingerprint are required together");
+    }
+    result = options.apply
+      ? await store.applyAdoption({
+          sourcePath: path.resolve(expandHome(sourcePath)),
+          sourceKind: options.sourceKind,
+          operationId: options.apply,
+          planFingerprint: options.fingerprint
+        })
+      : await store.previewAdoption({
+          sourcePath: path.resolve(expandHome(sourcePath)),
+          sourceKind: options.sourceKind
+        });
+  } else if (subcommand === "reconcile") {
+    if (options.positionals.length > 0 || Boolean(options.apply) !== Boolean(options.fingerprint)) {
+      throw new Error("Usage: dotaios skills reconcile [--apply <operation-id> --fingerprint <sha256>]");
+    }
+    result = await store.reconcile(options.apply
+      ? { apply: true, operationId: options.apply, planFingerprint: options.fingerprint }
+      : {});
+  } else {
+    const [name] = options.positionals;
+    if (!name || options.positionals.length !== 1 || Boolean(options.apply) !== Boolean(options.fingerprint)) {
+      throw new Error("Usage: dotaios skills remove <name> [--apply <operation-id> --fingerprint <sha256>]");
+    }
+    result = await store.remove(options.apply
+      ? { name, apply: true, operationId: options.apply, planFingerprint: options.fingerprint }
+      : { name });
+  }
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+  printManagedStoreResult(subcommand, result);
+}
+
+function parseManagedStoreOptions(args) {
+  const options = {
+    path: null,
+    home: null,
+    json: false,
+    apply: null,
+    fingerprint: null,
+    sourceKind: null,
+    positionals: []
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--path") {
+      options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--home") {
+      options.home = readOptionValue(args, index, "--home");
+      index += 1;
+    } else if (arg === "--source-kind") {
+      options.sourceKind = readOptionValue(args, index, "--source-kind");
+      index += 1;
+    } else if (arg === "--apply") {
+      options.apply = readOptionValue(args, index, "--apply");
+      index += 1;
+    } else if (arg === "--fingerprint") {
+      options.fingerprint = readOptionValue(args, index, "--fingerprint");
+      index += 1;
+    } else if (arg === "--json") {
+      options.json = true;
+    } else if (arg.startsWith("--")) {
+      throw new Error(`Unknown skills ${args[0] || "managed-store"} option: ${arg}`);
+    } else {
+      options.positionals.push(arg);
+    }
+  }
+  return options;
+}
+
+function printManagedStoreResult(subcommand, result) {
+  if (subcommand === "inventory") {
+    console.log(`Owned skills: ${result.owned.length}`);
+    console.log(`Discovered unmanaged: ${result.discovered_unmanaged.length}`);
+    console.log(`Excluded unsafe: ${result.excluded_unsafe.length}`);
+    console.log(`Retained recovery: ${(result.retained_recovery || []).length}`);
+    for (const entry of result.discovered_unmanaged) {
+      if (["discovered-native-directory", "discovered-canonical-link"].includes(entry.source_kind)) {
+        console.log(`- candidate ${entry.name} (${entry.source_kind})`);
+      } else {
+        console.log(`- unmanaged ${entry.name} (${entry.source_kind}; not directly adoptable)`);
+      }
+    }
+    for (const entry of result.excluded_unsafe) console.log(`- excluded ${entry.name}: ${entry.reason}`);
+    for (const entry of result.retained_recovery || []) {
+      console.log(`- retained ${entry.name} (${entry.operation_id})`);
+    }
+    return;
+  }
+  if (result.plan_fingerprint) {
+    console.log(`${subcommand} preview: ${result.operation_id}`);
+    console.log(`Plan fingerprint: ${result.plan_fingerprint}`);
+    if (result.skill) {
+      console.log(`Skill: ${result.skill.name} (${result.skill.bundle_digest})`);
+      console.log(`Bundle: ${result.skill.files.length} regular file(s), ${result.skill.scripts.length} script(s), ${result.skill.executables.length} executable(s)`);
+    }
+    for (const collision of result.collisions || []) {
+      console.log(`Collision: ${collision.coordinate} (${collision.classification})`);
+    }
+    for (const projection of result.projections || []) {
+      console.log(`Projection: ${projection.relative_path} (${projection.classification}; ${projection.hosts.join(", ")})`);
+    }
+    for (const unresolved of result.unresolved || []) {
+      console.log(`Needs attention: ${unresolved.relative_path || unresolved.name} (${unresolved.classification || unresolved.kind})`);
+    }
+    console.log("Preview only. Re-run with --apply <operation-id> --fingerprint <sha256>.");
+    return;
+  }
+  console.log(`${subcommand}: ${result.status}${result.name ? ` (${result.name})` : ""}`);
+  if (result.recovery_retained) {
+    console.log("Recovery retained locally; inspect `dotaios skills inventory` before any future cleanup.");
+  }
+}
+
+// This compatibility command is preview-only. Managed skill bodies have no
+// mutation escape hatch; callers edit the owned source explicitly and then
+// reconcile derived state.
 async function syncTriggersCommand(args) {
   let apply = false;
   let pathOption = null;
@@ -121,19 +277,19 @@ async function syncTriggersCommand(args) {
   }
 
   console.log(`${plan.length} skill(s) keep their routing phrases in \`triggers:\`, which no agent reads.`);
-  console.log("Copying them into `when_to_use:` puts them in the listing your agents route on.\n");
+  console.log("An explicit edit can copy them into `when_to_use:`, which is the listing your agents route on.\n");
   for (const entry of plan) {
     console.log(`  ${entry.dir}`);
     console.log(`    when_to_use: ${entry.whenToUse}`);
   }
 
   if (!apply) {
-    console.log("\nPreview only. Re-run with --apply to write these lines.");
+    console.log("\nPreview only. Edit the owned SKILL.md files explicitly, then run `dotaios skills reconcile`.");
     return;
   }
-
-  const written = await applyTriggerVisibility(aiosPath, plan);
-  console.log(`\nUpdated ${written.length} skill(s). Run \`dotaios activate\` to refresh your agents.`);
+  throw new Error(
+    "Managed skills cannot be rewritten by sync-triggers. Edit the owned SKILL.md files explicitly, then run `dotaios skills reconcile`."
+  );
 }
 
 async function probeSkillCommand(args) {
@@ -215,7 +371,7 @@ async function doctorSkillCommand(args) {
     }
     for (const runtime of report.runtimes) {
       const capabilities = runtime.capabilities;
-      console.log(`${runtime.name}: configured=${capabilities.configured} discoverable=${capabilities.discoverable} binary=${capabilities.binary} invocation=${capabilities.invocation}`);
+      console.log(`${runtime.name}: configured=${capabilities.configured} projected=${capabilities.projected} discoverable=${capabilities.discoverable} binary=${capabilities.binary} invocation=${capabilities.invocation} produced=${capabilities.produced}`);
     }
     console.log(`Verification scope: ${report.verification.scope}; invocation=${report.verification.invocation}`);
     for (const issue of report.issues) console.log(`- ${issue}`);

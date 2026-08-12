@@ -14,6 +14,21 @@ const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const TRIGGER_SEPARATOR_RE = /[·,]/;
 const TRIGGER_JOINER = " · ";
 
+// Catalog order is part of the portable artifact. Locale-aware comparison can
+// produce different bytes across hosts, so names and paths use unsigned UTF-8
+// byte order everywhere this module establishes their order.
+export function compareUtf8Bytes(left, right) {
+  return Buffer.compare(Buffer.from(String(left), "utf8"), Buffer.from(String(right), "utf8"));
+}
+
+function compareSkills(left, right) {
+  return compareUtf8Bytes(left.name, right.name) || compareUtf8Bytes(left.dir, right.dir);
+}
+
+function orderedSkills(skills) {
+  return [...skills].sort(compareSkills);
+}
+
 // Scan <aiosPath>/skills/ for every <name>/SKILL.md and return its metadata.
 export async function collectSkills(aiosPath, { reader = null, root = aiosPath } = {}) {
   const activeReader = reader || createEvidenceReader({
@@ -26,6 +41,10 @@ export async function collectSkills(aiosPath, { reader = null, root = aiosPath }
     skipLinkedEntries: true,
     skipEntry: (name) => name.startsWith(".") || name.startsWith("_")
   });
+  directories.sort((left, right) => compareUtf8Bytes(
+    path.relative(skillsDir, left),
+    path.relative(skillsDir, right)
+  ));
 
   const skills = [];
   for (const directoryPath of directories) {
@@ -51,7 +70,7 @@ export async function collectSkills(aiosPath, { reader = null, root = aiosPath }
     });
   }
 
-  skills.sort((a, b) => a.name.localeCompare(b.name));
+  skills.sort(compareSkills);
   return skills;
 }
 
@@ -113,49 +132,6 @@ export async function planTriggerVisibility(aiosPath) {
     }));
 }
 
-// Routing phrases are the user's own words, so the writer has to survive their
-// punctuation. A YAML plain scalar cannot hold ": " or " #", cannot open with an
-// indicator character, and cannot carry leading or trailing space — any of those
-// makes the whole frontmatter unparseable, which drops the skill from the very
-// host listing this field exists to reach. Fall back to a double-quoted scalar;
-// JSON's escape set is a subset of YAML's, and the YAML parser restores the
-// scalar on read.
-const YAML_PLAIN_UNSAFE_RE = /^[-?:,[\]{}#&*!|>'"%@`]|:\s|\s#|[\n\r\t]/;
-
-function yamlScalar(value) {
-  const unsafe = value === "" || value !== value.trim() || YAML_PLAIN_UNSAFE_RE.test(value);
-  return unsafe ? JSON.stringify(value) : value;
-}
-
-// Apply a plan produced by planTriggerVisibility. Appends one `when_to_use:`
-// line to the frontmatter and touches nothing else — the existing `triggers:`
-// list stays authoritative for DotAIOS's own resolver, and the body is never
-// rewritten. Skills absent from the supplied plan are never opened.
-export async function applyTriggerVisibility(aiosPath, plan) {
-  const written = [];
-
-  for (const entry of plan) {
-    const content = await fs.readFile(entry.path, "utf8");
-    const frontmatter = content.match(FRONTMATTER_RE);
-    if (!frontmatter) continue;
-    if (/^when_to_use:/m.test(frontmatter[1])) continue;
-
-    // Both replacements take a function, not a string: `$&`, `` $` ``, `$'` and
-    // `$$` in a routing phrase would otherwise expand as replacement patterns
-    // and splice the frontmatter into itself. The captured newline is reused so
-    // a CRLF-authored file does not come back with mixed line endings.
-    const line = `when_to_use: ${yamlScalar(entry.whenToUse)}`;
-    const updated = content.replace(FRONTMATTER_RE, (block) =>
-      block.replace(/(\r?\n)---$/, (_match, eol) => `${eol}${line}${eol}---`)
-    );
-
-    await fs.writeFile(entry.path, updated);
-    written.push(entry);
-  }
-
-  return written;
-}
-
 // Render the human- and agent-readable skills index.
 export function renderSkillsIndex(skills) {
   const lines = [
@@ -175,7 +151,7 @@ export function renderSkillsIndex(skills) {
   if (skills.length === 0) {
     lines.push("_No skills installed yet. Add a reviewed local folder with_ `dotaios skill add <local-folder>`.", "");
   } else {
-    for (const skill of skills) {
+    for (const skill of orderedSkills(skills)) {
       lines.push(`## ${skill.name}`, "");
       if (skill.description) lines.push(skill.description, "");
       lines.push(`Run it: read \`skills/${skill.dir}/SKILL.md\` and follow the steps.`, "");
@@ -213,7 +189,7 @@ export function renderResolver(skills) {
   }
 
   lines.push("| If the user wants… | Run this skill |", "| --- | --- |");
-  for (const skill of skills) {
+  for (const skill of orderedSkills(skills)) {
     const hints = skill.triggers && skill.triggers.length
       ? skill.triggers.join(" · ")
       : (skill.description || skill.name);
@@ -221,6 +197,17 @@ export function renderResolver(skills) {
   }
   lines.push("");
   return lines.join("\n");
+}
+
+// Pure catalog-artifact boundaries. ManagedSkillStore owns transactional
+// publication; these functions only turn an owned-skill inventory into exact,
+// portable bytes.
+export function renderSkillsIndexBytes(skills) {
+  return Buffer.from(`${renderSkillsIndex(skills)}\n`, "utf8");
+}
+
+export function renderResolverBytes(skills) {
+  return Buffer.from(`${renderResolver(skills)}\n`, "utf8");
 }
 
 async function lstatIfPresent(filePath) {
@@ -257,7 +244,8 @@ async function assertSafeCatalogFiles(paths) {
   }
 }
 
-// Regenerate <aiosPath>/skills/RESOLVER.md from the skills currently on disk.
+// Compatibility writer for existing setup callers. ManagedSkillStore owns
+// transactional catalog publication for managed-skill lifecycle operations.
 export async function writeResolver(aiosPath) {
   await ensureRealSkillsDirectory(aiosPath);
   const skills = await collectSkills(aiosPath);
@@ -265,16 +253,17 @@ export async function writeResolver(aiosPath) {
   await assertSafeCatalogFiles([resolverPath]);
   await writeFileSafe(
     resolverPath,
-    `${renderResolver(skills)}\n`,
+    renderResolverBytes(skills),
     "overwrite",
     { boundaryRoot: aiosPath }
   );
   return { path: resolverPath, count: skills.length };
 }
 
-// Regenerate the agent-facing skill files (INDEX.md + RESOLVER.md) from the
-// skills currently on disk. Called after any operation that can change the
-// installed skill set.
+// Compatibility writer for existing setup callers. ManagedSkillStore owns
+// transactional INDEX.md + RESOLVER.md publication for managed-skill lifecycle
+// operations; this wrapper delegates exact artifact creation to the pure
+// renderers above.
 export async function writeSkillsIndex(aiosPath, { writeMode = "overwrite" } = {}) {
   if (!["overwrite", "preserve"].includes(writeMode)) {
     throw new Error(`Unsupported skill catalog write mode: ${writeMode}`);
@@ -286,13 +275,13 @@ export async function writeSkillsIndex(aiosPath, { writeMode = "overwrite" } = {
   await assertSafeCatalogFiles([indexPath, resolverPath]);
   const indexResult = await writeCatalogFile(
     indexPath,
-    `${renderSkillsIndex(skills)}\n`,
+    renderSkillsIndexBytes(skills),
     writeMode,
     aiosPath
   );
   const resolverResult = await writeCatalogFile(
     resolverPath,
-    `${renderResolver(skills)}\n`,
+    renderResolverBytes(skills),
     writeMode,
     aiosPath
   );
@@ -314,7 +303,7 @@ async function writeCatalogFile(filePath, content, writeMode, boundaryRoot) {
   // An identical winner is harmless; different bytes belong to another writer
   // and must survive for the caller to report as a collision.
   try {
-    return await fs.readFile(filePath, "utf8") === content
+    return (await fs.readFile(filePath)).equals(content)
       ? { action: "unchanged", path: filePath }
       : result;
   } catch {

@@ -57,6 +57,11 @@ test("search and skill lookup surfaces are classified read-only while skill writ
     ["skills", ["resolve", "plan my day"]],
     ["skills", ["resolve", "--boot-context"]],
     ["skills", ["sync-triggers"]],
+    ["skills", ["sync-triggers", "--apply"]],
+    ["skills", ["inventory"]],
+    ["skills", ["adopt", "/tmp/reviewed"]],
+    ["skills", ["reconcile"]],
+    ["skills", ["remove", "reviewed"]],
     ["skill", ["list"]]
   ];
 
@@ -76,7 +81,9 @@ test("search and skill lookup surfaces are classified read-only while skill writ
   }
 
   assert.equal(skipsPortableMirrorSync("skills", ["install", "/tmp/reviewed"]), false);
-  assert.equal(skipsPortableMirrorSync("skills", ["sync-triggers", "--apply"]), false);
+  assert.equal(skipsPortableMirrorSync("skills", ["adopt", "/tmp/reviewed", "--apply", "op"]), false);
+  assert.equal(skipsPortableMirrorSync("skills", ["reconcile", "--apply", "op"]), false);
+  assert.equal(skipsPortableMirrorSync("skills", ["remove", "reviewed", "--apply", "op"]), false);
   assert.equal(skipsPortableMirrorSync("skill", ["add", "/tmp/reviewed"]), false);
   assert.equal(skipsPortableMirrorSync("skill", ["remove", "reviewed"]), false);
 });

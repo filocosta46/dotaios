@@ -12,7 +12,7 @@ export function skipsPortableMirrorSync(command, args = []) {
   }
   if (command === "skills") {
     if (args[0] === "install") return false;
-    if (args[0] === "sync-triggers" && args.includes("--apply")) return false;
+    if (["adopt", "reconcile", "remove"].includes(args[0]) && args.includes("--apply")) return false;
     return true;
   }
   if (command === "skill" && args[0] === "list") return true;

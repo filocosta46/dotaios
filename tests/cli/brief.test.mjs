@@ -39,6 +39,19 @@ function yesterday() {
   return isoDate(date);
 }
 
+test("compact brief never injects owned skill bodies", () => {
+  const { aiosPath } = setupAios();
+  const canary = "FULL_SKILL_BODY_MUST_STAY_LAZY_94A7";
+  fs.appendFileSync(
+    path.join(aiosPath, "skills", "plan-today", "SKILL.md"),
+    `\n## Lazy-only instructions\n\n${canary}\n${"body ".repeat(20_000)}\n`
+  );
+
+  const result = run(["brief", "--compact", "--budget", "6000", "--path", aiosPath]);
+  assert.doesNotMatch(result.stdout, new RegExp(canary));
+  assert.ok(result.stdout.length <= 6000);
+});
+
 test("brief writes a ## Brief section into today's daily note", () => {
   const { aiosPath } = setupAios();
   fs.writeFileSync(path.join(aiosPath, "context", "priorities.md"), [

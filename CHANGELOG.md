@@ -18,6 +18,12 @@ All notable changes to DotAIOS will be documented in this file.
 - The save-session workflow now submits bounded prepared schema-1 Markdown on
   standard input through `dotaios capture import prepared`, including supported
   `turns: 0` summaries.
+- Managed Agent Skill adoption is now preview-first and exact-proof. AIOS real
+  skill directories are canonical; native folders are projections. Inventory
+  separates owned, discovered-unmanaged, and excluded-unsafe entries, while
+  bounded bundle adoption preserves opaque assets, inventories scripts without
+  running them, journals catalog/projection publication, and supports guarded
+  reconcile and receipt-backed whole-root removal.
 - Project sources now have a guided `project source connect` preview and one
   `--yes` confirmation that combines the portable source declaration,
   machine-local folder binding, and finite read grant without asking the user
@@ -40,6 +46,12 @@ All notable changes to DotAIOS will be documented in this file.
 - Managed mirror rules exclude the private `.dotaios/session-store/` recovery
   tree, and mirror content validation refuses that tree if it is forced or
   staged. Session Markdown remains canonical; the journal does not replicate.
+- Raw/single-skill local install and removal now delegate to
+  `ManagedSkillStore`; plugin-package copying and registry-only deletion are
+  retired. Multi-skill and code-only plugin packages refuse before mutation.
+  Google connection setup no longer creates a skill or writes skill inventory.
+- Skill health reports configuration and filesystem projection separately from
+  unprobed discovery, invocation, and produced-output evidence.
 - `search --project` now selects the portable project corpus by slug or stable
   ID; `--session-project` remains the session-tag filter for the pre-existing
   session attribution behavior.
