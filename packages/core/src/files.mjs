@@ -75,6 +75,9 @@ async function stage(destination, temporary, createTemporary) {
     if (!WRITE_FAILURE_REASONS[error?.code]) throw error;
     const failure = new Error(describeFileError(error, destination));
     failure.code = error.code;
+    // Keep the destination on the error: a later describeFileError() with no
+    // explicit subject would otherwise fall back to naming nothing at all.
+    failure.path = destination;
     failure.cause = error;
     throw failure;
   }

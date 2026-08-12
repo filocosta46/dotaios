@@ -46,23 +46,39 @@ const managedEnd = MANAGED_END;
 export const BRIDGE_COLLISION_REMEDY =
   "Those files already existed and were left untouched. To keep what they say and add DotAIOS below it, run `dotaios activate --merge`.";
 
-// A blocked bridge has two very different causes and they need different
-// answers. `--merge` keeps what a file already says and adds DotAIOS below it;
-// it cannot help a directory that refuses to be written at all. Both activate
-// and setup read this one function so a single run cannot be described two ways.
+// A blocked bridge has several very different causes and each needs its own
+// answer. `--merge` keeps what a file already says and adds DotAIOS below it,
+// which resolves exactly one of them: an unmanaged file DotAIOS declined to
+// replace. It cannot merge a path that is not a regular file, it cannot settle
+// a concurrent edit, and it cannot make a directory writable. Both activate and
+// setup read this one function so a single run cannot be described two ways.
 export function bridgeAttentionLines(blockedBridges) {
-  const failed = blockedBridges.filter((entry) => entry.action === "failed");
-  const collisions = blockedBridges.filter((entry) => entry.action !== "failed");
   const lines = [];
-  if (collisions.length > 0) {
-    lines.push(`Activation needs attention: ${collisions.length} client bridge collision(s).`);
-    lines.push(BRIDGE_COLLISION_REMEDY);
-  }
-  if (failed.length > 0) {
-    lines.push(`Activation needs attention: ${failed.length} client bridge(s) could not be written.`);
-    for (const entry of failed) lines.push(`  ${entry.note || entry.path}`);
-    lines.push("Every other client was still connected. Fix the folders above, then run `dotaios activate` again.");
-  }
+  const report = (entries, headline, remedy, detail) => {
+    if (entries.length === 0) return;
+    lines.push(`Activation needs attention: ${entries.length} ${headline}`);
+    for (const entry of entries) lines.push(`  ${detail(entry)}`);
+    lines.push(remedy);
+  };
+
+  report(
+    blockedBridges.filter((entry) => entry.action === "kept"),
+    "client bridge collision(s).",
+    BRIDGE_COLLISION_REMEDY,
+    (entry) => entry.path
+  );
+  report(
+    blockedBridges.filter((entry) => entry.action === "failed"),
+    "client bridge(s) could not be written.",
+    "Every other client was still connected. Fix the folders above, then run `dotaios activate` again.",
+    (entry) => entry.note || entry.path
+  );
+  report(
+    blockedBridges.filter((entry) => !["kept", "failed"].includes(entry.action)),
+    "client bridge(s) were left untouched.",
+    "Review each path above, then run `dotaios activate` again. `--merge` cannot resolve these.",
+    (entry) => `${entry.path}${entry.note ? ` (${entry.note})` : ""}`
+  );
   return lines;
 }
 
