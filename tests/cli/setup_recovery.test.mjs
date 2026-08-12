@@ -170,7 +170,7 @@ test("an activation failure exits non-zero and records a failed install", () => 
     "a complete folder must not be left owned by an unfinished setup marker"
   );
   assert.doesNotMatch(
-    result.stdout,
+    `${result.stdout}\n${result.stderr}`,
     /re-run the identical `dotaios setup` command/,
     "setup has nothing left to do on a folder it already built"
   );
@@ -212,7 +212,7 @@ test("a preserved bridge collision leaves a folder the documented retry can fini
     "setup must name the remedy that actually works"
   );
   assert.doesNotMatch(
-    first.stdout,
+    `${first.stdout}\n${first.stderr}`,
     /re-run the identical `dotaios setup` command/,
     "re-running setup is exactly what does not work here"
   );

@@ -169,12 +169,11 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     process.exitCode = 1;
     await emitReliabilityMetric(aiosPath, { type: "setup_phase_end", phase: "activate", run_id: runId, outcome: "fail" });
     console.error(`Step 2 failed: ${err.message}`);
-    console.error("Fix the reported problem, then re-run the identical `dotaios setup` command.");
     console.error("");
   }
   if (!activateOk) {
     console.log("");
-    console.log("Your folder is complete. Only the AI-tool connection is left.");
+    console.log("Folder created. Tool connection needs attention; setup stopped before optional features.");
     // Never send them back to `dotaios setup`: the folder now exists, so setup
     // has nothing left to do and will only report that. `activate` is the one
     // command that can still finish the job, and for a preserved collision the
