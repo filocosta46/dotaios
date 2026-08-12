@@ -33,9 +33,9 @@ Setup creates `~/aios`, then connects supported AI apps detected on the machine.
 
 Open Claude Code, Codex, Cursor, or any assistant that can run commands, and paste:
 
-> Please help me install DotAIOS. Read https://github.com/filocosta46/dotaios and follow the "If an AI assistant is helping you" section of INSTALL.md. Show me the preview first, explain it in plain language, and ask me before anything on my computer changes.
+> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/main/INSTALL.md — the "If an AI assistant is helping you" section.
 
-That section tells the assistant to preview first and to ask before every write, so you stay in control of each step. A careful assistant should be willing to help on those terms — and if it declines, run the two commands above yourself instead.
+That section carries the whole journey: it installs Node.js if the machine does not have it, previews what will change, runs setup, and relays setup's own questions to you. Those questions all default to No and are the ones you decide. If the assistant declines, run the two commands above yourself instead.
 
 Afterward, either you or the assistant can verify the local installation with:
 
