@@ -8,6 +8,7 @@ import {
   MANAGED_START,
   bridgeContent,
   bridgePath,
+  bridgePointer,
   findManagedBlock,
   isAgentInstalled,
   loadAgentRegistry
@@ -93,6 +94,76 @@ test("managed bridges route working memory through the canonical projection", as
     ["google", "calendar", "agenda"], ["google", "drive", "search"]
   ].map((parts) => parts.join("_"));
   assert.equal(retiredToolNames.some((name) => content.includes(name)), false);
+});
+
+// The bridge file is loaded by the host on every launch, in every directory.
+// Naming the folder is the job; importing it is the bug, because an @-reference
+// is expanded by the host at launch and drags the whole router into a session
+// that never asked for the person.
+test("the global bridge names the AIOS folder instead of importing it", async () => {
+  const aiosPath = "/tmp/example-aios";
+  // The shipped registry, not hand-made agents: the @-import only ever reached
+  // users through the agents that actually get a bridge file written for them.
+  const bridged = (await loadAgentRegistry()).filter((agent) => agent.bridge);
+  assert.ok(bridged.length >= 3, "the registry must still ship bridge-writing agents");
+
+  for (const agent of bridged) {
+    const block = findManagedBlock(await bridgeContent(agent, aiosPath));
+    assert.ok(block, `${agent.name}: one managed block`);
+    const managed = block.text;
+
+    assert.ok(
+      managed.includes(path.join(aiosPath, "AGENTS.md")),
+      `${agent.name}: the entrypoint must be findable on request`
+    );
+    assert.equal(
+      managed.includes(`@${aiosPath}`),
+      false,
+      `${agent.name}: an @-reference is an import, not a pointer`
+    );
+    assert.match(managed, /working directory/i, `${agent.name}: the unless-rule names the cwd case`);
+    assert.match(managed, /user asks/i, `${agent.name}: the unless-rule names the on-request case`);
+    assert.equal(
+      /before recommendations that depend on identity/.test(managed),
+      false,
+      `${agent.name}: no always-on identity read`
+    );
+    assert.equal(
+      /at session start/.test(managed),
+      false,
+      `${agent.name}: no always-on boot order`
+    );
+    assert.ok(
+      managed.length < 1500,
+      `${agent.name}: an always-loaded block stays small (${managed.length} characters)`
+    );
+  }
+});
+
+// doctor decides "this bridge points here" by matching whole managed lines
+// against bridgePointer().accepted. Changing what activate writes without
+// teaching doctor both spellings would warn on every install: the fresh ones
+// because the new line is unknown, the old ones because they were never rewritten.
+test("every bridge this release writes carries a pointer line doctor accepts", async () => {
+  const aiosPath = "/tmp/example-aios";
+  const entrypoint = path.join(aiosPath, "AGENTS.md");
+  const { current, accepted } = bridgePointer(aiosPath);
+
+  for (const agent of (await loadAgentRegistry()).filter((agent) => agent.bridge)) {
+    const block = findManagedBlock(await bridgeContent(agent, aiosPath));
+    assert.ok(
+      block.text.split(/\r?\n/).includes(current),
+      `${agent.name}: managed block must contain the pointer line verbatim`
+    );
+  }
+
+  for (const legacy of [
+    `@${entrypoint}`,
+    `DotAIOS entrypoint (read this file first): ${entrypoint}`,
+    `Read ${entrypoint} first.`
+  ]) {
+    assert.ok(accepted.includes(legacy), `bridges written before this release stay valid: ${legacy}`);
+  }
 });
 
 test("user Antigravity overrides replace the bundled adapter by stable name", async () => {

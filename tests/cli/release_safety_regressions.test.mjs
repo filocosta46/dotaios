@@ -160,6 +160,27 @@ test("doctor warns when the bridge points at this AIOS folder but its entrypoint
   assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
 });
 
+// Changing what activate writes must not turn every already-installed bridge
+// into a warning. Users upgrade by running activate again, and until they do,
+// the file on their disk is the one an older release wrote.
+test("doctor still reports a healthy bridge written by an earlier release", (t) => {
+  const output = runDoctor(t, "doctor-legacy-bridge", (target) => [
+    "# DotAIOS Claude Code Bridge",
+    "",
+    MANAGED_START,
+    "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
+    "",
+    `@${path.join(target, "AGENTS.md")}`,
+    "",
+    "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
+    MANAGED_END,
+    ""
+  ].join("\n"), { entrypoint: true });
+
+  assert.match(output, /\[ok\] Claude Code bridge/);
+  assert.doesNotMatch(output, /\[warn\] Claude Code bridge/);
+});
+
 test("doctor warns about the bridge when the whole AIOS folder was removed", (t) => {
   const output = runDoctor(t, "doctor-removed-folder", managedPointerBridge, {
     removeAiosFolder: true,
