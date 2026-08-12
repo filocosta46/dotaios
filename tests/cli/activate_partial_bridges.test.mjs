@@ -113,7 +113,78 @@ test("a bridge write failure is reported per client, not as one aborted run", { 
     /Step 2 failed/,
     "a single client problem is not a whole-activation crash"
   );
+  // `--merge` keeps what a file already says. It cannot help a directory that
+  // refuses to be written, so offering it here would just waste a retry.
+  assert.doesNotMatch(output, /activate --merge/, "the collision remedy is wrong for a permission failure");
 
   // The remaining client landing is what makes the retry finish the job.
+  fs.rmSync(sandbox.root, { recursive: true, force: true });
+});
+
+// The counter this defect corrupts was asserted nowhere in the suite. A throw
+// produced no result object, so it never incremented and the run reported
+// neither the failure nor the successes.
+test("a bridge that could not be written is counted as blocked", { skip: !rootless }, async () => {
+  const sandbox = makeSandbox();
+  const blocked = path.join(sandbox.homePath, ".codex");
+  fs.chmodSync(blocked, 0o500);
+  const previousExitCode = process.exitCode;
+
+  const { activateCommand } = await import(
+    path.join(repoRoot, "packages", "cli", "src", "commands", "activate.mjs")
+  );
+  const origLog = console.log.bind(console);
+  const origError = console.error.bind(console);
+  console.log = () => {};
+  console.error = () => {};
+
+  let activation;
+  try {
+    activation = await activateCommand(["--path", sandbox.aiosPath, "--home", sandbox.homePath]);
+  } finally {
+    console.log = origLog;
+    console.error = origError;
+    process.exitCode = previousExitCode;
+    fs.chmodSync(blocked, 0o755);
+  }
+
+  assert.equal(activation.blockedContextCount, 1, "the unwritable client is counted, not lost to a throw");
+  assert.ok(activation.configuredContextCount >= 2, "the writable clients are still counted as configured");
+  const failed = activation.results.filter((entry) => entry.action === "failed");
+  assert.equal(failed.length, 1);
+  assert.match(failed[0].path, /\.codex[/\\]AGENTS\.md$/, "the result names the bridge, not a staged sibling");
+
+  fs.rmSync(sandbox.root, { recursive: true, force: true });
+});
+
+// The skill store runs before the bridge loop, so this failure stranded every
+// client at once — including the ones whose own directories were fine.
+test("an unwritable skills projection target does not strand every client", { skip: !rootless }, () => {
+  const sandbox = makeSandbox();
+  const blocked = path.join(sandbox.homePath, ".claude");
+  fs.chmodSync(blocked, 0o500);
+
+  let result;
+  try {
+    result = runActivate(sandbox);
+  } finally {
+    fs.chmodSync(blocked, 0o755);
+  }
+
+  const output = `${result.stdout}${result.stderr}`;
+  assert.equal(
+    fs.existsSync(path.join(sandbox.homePath, ".codex", "AGENTS.md")),
+    true,
+    "a client with a writable directory is connected even when projection fails"
+  );
+  assert.equal(
+    fs.existsSync(path.join(sandbox.homePath, ".gemini", "GEMINI.md")),
+    true,
+    "every remaining client is connected"
+  );
+  assert.notEqual(result.status, 0, "a failed projection is still a failed activation");
+  assert.match(output, /skill links could not be published/i, "the run says what failed");
+  assert.doesNotMatch(output, /EACCES/, "the raw POSIX code is not the user-facing message");
+
   fs.rmSync(sandbox.root, { recursive: true, force: true });
 });

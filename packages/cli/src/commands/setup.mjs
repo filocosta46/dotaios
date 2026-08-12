@@ -28,7 +28,7 @@ import {
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
-import { activateCommand, BRIDGE_COLLISION_REMEDY, plannedActivationConfigPatch } from "./activate.mjs";
+import { activateCommand, plannedActivationConfigPatch } from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
 import {
   emitReliabilityMetric,
@@ -177,10 +177,13 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     // has nothing left to do and will only report that. `activate` is the one
     // command that can still finish the job, and for a preserved collision the
     // non-destructive form is the one activate already named above.
-    if (blockedContextCount > 0 || blockedCatalogCount > 0) {
-      console.log(`Preserved ${blockedContextCount} client bridge collision(s) and ${blockedCatalogCount} skill catalog collision(s).`);
-      console.log(BRIDGE_COLLISION_REMEDY);
-    } else {
+    // activate has already named what is blocked and how to fix each one.
+    // Restating it here is how setup came to call a permission error a
+    // "collision" the user could not find anywhere on screen.
+    if (blockedCatalogCount > 0) {
+      console.log(`Preserved ${blockedCatalogCount} skill catalog collision(s).`);
+    }
+    if (blockedContextCount === 0 && blockedCatalogCount === 0) {
       console.log("Fix the problem reported above, then run `dotaios activate`.");
     }
     console.log("Then check the result with `dotaios doctor`.");

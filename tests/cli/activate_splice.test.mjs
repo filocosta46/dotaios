@@ -176,24 +176,29 @@ describe("activate — managed block splicing", () => {
       const { bridge, original, backup } = await seedManagedBridge(dirs.homePath);
       let observedStagedState = false;
 
-      await assert.rejects(
-        activate(
-          ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
-          {
-            lifecycle: {
-              beforeBridgePublish: async ({ destination, staged }) => {
-                if (destination !== bridge) return;
-                observedStagedState = true;
-                assert.equal(await fs.readFile(bridge, "utf8"), original);
-                assert.equal(await exists(staged), true, "the replacement must already be staged");
-                throw new Error("simulated interruption after staging");
-              }
+      // This used to assert that activation rejected. It no longer does: one
+      // client's write failing is now reported and the run carries on to the
+      // rest. The staging invariants below are what this test is actually for,
+      // and they are unchanged — plus the interruption is now reported at all,
+      // which it was not when the rejection discarded every result.
+      const activation = await activate(
+        ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
+        {
+          lifecycle: {
+            beforeBridgePublish: async ({ destination, staged }) => {
+              if (destination !== bridge) return;
+              observedStagedState = true;
+              assert.equal(await fs.readFile(bridge, "utf8"), original);
+              assert.equal(await exists(staged), true, "the replacement must already be staged");
+              throw new Error("simulated interruption after staging");
             }
           }
-        ),
-        /simulated interruption after staging/
+        }
       );
 
+      const failed = activation.results.find((entry) => entry.action === "failed" && entry.path === bridge);
+      assert.ok(failed, "the interrupted client is reported, not silently dropped");
+      assert.match(failed.note, /simulated interruption after staging/);
       assert.equal(observedStagedState, true, "the test must stop at the staged pre-publication state");
       assert.equal(await fs.readFile(bridge, "utf8"), original);
       assert.equal(await exists(backup), false, "an interrupted replacement must not create a backup");
@@ -246,24 +251,25 @@ describe("activate — managed block splicing", () => {
       const { bridge, original } = await seedManagedBridge(dirs.homePath);
       let claimed = false;
 
-      await assert.rejects(
-        activate(
-          ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
-          {
-            lifecycle: {
-              beforeBridgeCommit: async ({ destination, preservedPath }) => {
-                if (destination !== bridge) return;
-                claimed = true;
-                assert.equal(await fs.readFile(destination, "utf8"), original);
-                assert.equal(await fs.readFile(preservedPath, "utf8"), original);
-                throw new Error("simulated interruption after preservation");
-              }
+      // Same contract change as the staging test above: reported, not thrown.
+      const activation = await activate(
+        ["--path", dirs.aiosPath, "--home", dirs.homePath, "--all"],
+        {
+          lifecycle: {
+            beforeBridgeCommit: async ({ destination, preservedPath }) => {
+              if (destination !== bridge) return;
+              claimed = true;
+              assert.equal(await fs.readFile(destination, "utf8"), original);
+              assert.equal(await fs.readFile(preservedPath, "utf8"), original);
+              throw new Error("simulated interruption after preservation");
             }
           }
-        ),
-        /simulated interruption after preservation/
+        }
       );
 
+      const failed = activation.results.find((entry) => entry.action === "failed" && entry.path === bridge);
+      assert.ok(failed, "the interrupted client is reported, not silently dropped");
+      assert.match(failed.note, /simulated interruption after preservation/);
       assert.equal(claimed, true, "the test must stop after the old bytes are preserved");
       assert.equal(await fs.readFile(bridge, "utf8"), original);
       const preserved = (await fs.readdir(path.dirname(bridge)))
