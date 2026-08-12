@@ -14,9 +14,7 @@ test("activate creates global and project agent bridges for installed tools", ()
 
   run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath]);
 
-  assert.match(read(path.join(homePath, ".claude", "CLAUDE.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
-  assert.match(read(path.join(homePath, ".codex", "AGENTS.md")), new RegExp(escapeRegex(path.join(aiosPath, "AGENTS.md"))));
-  assert.match(read(path.join(homePath, ".gemini", "GEMINI.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
+  assertBridgesPointWithoutImporting(homePath, aiosPath);
   assert.equal(fs.existsSync(path.join(projectPath, ".cursor", "rules", "dotaios.mdc")), false);
   assert.match(read(path.join(projectPath, "AGENTS.md")), /DotAIOS Project Bridge/);
 });
@@ -41,10 +39,24 @@ test("activate --all connects every known tool even when not detected", () => {
 
   run(["activate", "--path", aiosPath, "--home", homePath, "--all"]);
 
-  assert.match(read(path.join(homePath, ".claude", "CLAUDE.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
-  assert.match(read(path.join(homePath, ".codex", "AGENTS.md")), new RegExp(escapeRegex(path.join(aiosPath, "AGENTS.md"))));
-  assert.match(read(path.join(homePath, ".gemini", "GEMINI.md")), new RegExp(`@${escapeRegex(path.join(aiosPath, "AGENTS.md"))}`));
+  assertBridgesPointWithoutImporting(homePath, aiosPath);
 });
+
+// Every bridge names the entrypoint so an agent can find it when the user asks,
+// and none of them writes `@<path>`: the hosts that understand `@` expand it
+// while loading the file, which imports the folder into every session instead.
+function assertBridgesPointWithoutImporting(homePath, aiosPath) {
+  const entrypoint = path.join(aiosPath, "AGENTS.md");
+  for (const bridge of [
+    [".claude", "CLAUDE.md"],
+    [".codex", "AGENTS.md"],
+    [".gemini", "GEMINI.md"]
+  ]) {
+    const content = read(path.join(homePath, ...bridge));
+    assert.match(content, new RegExp(escapeRegex(entrypoint)), bridge.join("/"));
+    assert.equal(content.includes(`@${aiosPath}`), false, `${bridge.join("/")} must not import the folder`);
+  }
+}
 
 test("retired 1.x catalog commands fail with a boundary-safe migration message", () => {
   for (const command of ["license", "market"]) {

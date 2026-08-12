@@ -464,3 +464,34 @@ test("a new folder ships a scheduled memory check, not just a skills-symlink che
   assert.ok(enabled.length >= 3, "every shipped schedule declares its enabled state");
   assert.ok(enabled.every((line) => line.includes("false")), "shipped schedules must default to off");
 });
+
+// init's scaffold list and the folder's own documentation had drifted apart in
+// both directions: it created `archives/`, which nothing in the product writes,
+// documents, or reads, and it did not create `memory/inbox/`, which the shipped
+// AGENTS.md tells every agent to check at session start, the bundled
+// process-inbox skill is built around, and search.mjs indexes as a note
+// directory. A user following their own AGENTS.md had to guess the folder.
+test("init scaffolds the folders the product documents, and no undocumented ones", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-scaffold-"));
+  const target = path.join(root, "aios");
+  try {
+    const result = spawnSync(process.execPath, [cli, "init", "--yes", "--path", target], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+
+    assert.ok(
+      fs.existsSync(path.join(target, "memory", "inbox")),
+      "memory/inbox is named in the shipped AGENTS.md and process-inbox skill, so init must create it"
+    );
+    assert.equal(
+      fs.existsSync(path.join(target, "archives")),
+      false,
+      "archives/ is written by nothing and explained nowhere; do not scaffold a folder the user cannot interpret"
+    );
+
+    // The AGENTS.md the user is handed must actually describe their folder.
+    const agents = fs.readFileSync(path.join(target, "AGENTS.md"), "utf8");
+    assert.match(agents, /memory\/inbox/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

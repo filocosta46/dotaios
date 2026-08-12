@@ -10,6 +10,8 @@ DotAIOS is a local file convention.
 - Codex: `~/.codex/AGENTS.md`
 - Gemini CLI: `~/.gemini/GEMINI.md`
 
+A bridge names the folder and states when to open it — when the working directory is inside it, or when the user asks. It never references the entrypoint as `@<path>`, because the hosts that understand `@` expand it while loading the bridge, which would import the folder into every session in every directory instead of pointing at it.
+
 `dotaios attach <project>` writes the shared project-level `AGENTS.md` bridge. Cursor reads that root file directly, so DotAIOS does not add a duplicate always-applied Cursor rule. A managed legacy `.cursor/rules/dotaios.mdc` is removed during attachment; unmanaged files are preserved. If the checkout owns a `skills/` directory, DotAIOS also links those project skills into the explicit project-native targets declared in `packages/core/src/agents.json`. The global `~/aios/skills` surface is not replaced or copied into the project. Existing unmanaged files are preserved unless the user passes `--overwrite`.
 
 ## Context

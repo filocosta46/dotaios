@@ -109,7 +109,10 @@ describe("activate — managed block splicing", () => {
 
       // The block itself is regenerated, and its content is stable run to run.
       assert.doesNotMatch(blocks[0], /stale generated content/);
-      assert.match(blocks[0], /DotAIOS context/);
+      assert.ok(
+        blocks[0].includes(path.join(dirs.aiosPath, "AGENTS.md")),
+        "the regenerated block must point at this AIOS folder"
+      );
       assert.equal(blocks[1], blocks[0]);
       assert.equal(blocks[2], blocks[0]);
     } finally {

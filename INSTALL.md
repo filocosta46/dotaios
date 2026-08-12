@@ -188,9 +188,14 @@ setup or later run:
 npx -y dotaios@2.0.2 sync setup
 ```
 
-The mirror must be a private repository you control. Credentials stay in the
-machine credential store and are not written into the repository URL. Stop sync
-and remove its local credential with:
+The mirror must be a private repository you control. The access token is stored
+on this machine only, as plaintext in `~/.dotaios/sync.json`, readable by your
+user account alone. It is never written into the repository URL and never enters
+your `~/aios` folder, so it cannot be synced. DotAIOS does not use the macOS
+Keychain or another operating-system credential store, so anything that can read
+your user account's files can read that token. Give it the narrowest scope you
+can, and revoke it on GitHub if the machine is lost. Stop sync and remove the
+token with:
 
 ```sh
 npx -y dotaios@2.0.2 sync logout

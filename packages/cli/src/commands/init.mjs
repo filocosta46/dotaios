@@ -27,10 +27,12 @@ const BASE_TREE_DIRS = [
   "memory/signals",
   "memory/daily",
   "memory/sessions",
+  // The shipped AGENTS.md tells agents to check this at session start and the
+  // bundled process-inbox skill is built around it, so the folder has to exist.
+  "memory/inbox",
   "skills",
   "plugins",
-  "decisions",
-  "archives"
+  "decisions"
 ];
 const BUILT_IN_VAULT_DIRS = [
   "vault/wiki",

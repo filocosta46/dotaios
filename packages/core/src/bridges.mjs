@@ -37,7 +37,6 @@ export const AGENT_ENTRYPOINT = "AGENTS.md";
 //   name    human label
 //   detect  path under the user's home that exists when the tool is installed
 //   bridge  path under the user's home where DotAIOS writes the bridge file
-//   include "@" if the agent auto-includes a file referenced as @path, "" otherwise
 function normalizeAgent(raw) {
   if (!raw || typeof raw.name !== "string" || !raw.name.trim()) return null;
   const bridge = raw.bridge == null
@@ -50,7 +49,6 @@ function normalizeAgent(raw) {
     detect: typeof raw.detect === "string" && raw.detect.trim() ? raw.detect.trim() : raw.bridge,
     ...(typeof raw.command === "string" && raw.command.trim() ? { command: raw.command.trim() } : {}),
     bridge,
-    include: raw.include === "@" ? "@" : "",
     ...(skills ? { skills } : {})
   };
 }
@@ -135,7 +133,7 @@ function assertAgentRegistryBounds(value) {
   }
   for (const raw of value.agents) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
-    const values = [raw.name, raw.detect, raw.command, raw.bridge, raw.include];
+    const values = [raw.name, raw.detect, raw.command, raw.bridge];
     for (const target of [raw.skills, raw.skills?.project]) {
       if (!target || typeof target !== "object" || Array.isArray(target)) continue;
       values.push(target.mode, target.dir, target.configFile, target.key);
@@ -252,40 +250,57 @@ export async function isCommandAvailable(
   return false;
 }
 
-// The managed bridge-file body for one agent. Always points at the single
-// canonical AGENTS.md front door inside the AIOS folder. When `skillsFirst` is
-// true, the skill catalog (INDEX.md + RESOLVER.md) is INLINED into the managed
-// block instead of just pointed at, so agents that do not auto-follow file
-// references (headless fleet workers, MCP-only clients, browser-paste users)
-// still see the catalog at boot. Default stays pointer-mode to keep bridge
-// files small.
 // The one spelling of "this bridge points at this AIOS folder". The writer
 // emits `current`; a reader must accept every form in `accepted`, because
 // bridges written by older releases are still valid. Both sides share this
 // because they had drifted apart into a pure string comparison neither owned.
-export function bridgePointer(agent, aiosPath) {
+//
+// The pointer names the folder in prose and never as `@<path>`. Hosts that
+// support `@` expand it while loading the file, so an @-reference in a
+// user-global bridge is not a pointer at all: it imports the whole folder
+// router into every session, in every directory, for every request.
+//
+// `accepted` answers "is this one of ours?" and `current` answers "is this the
+// one we write today?". They are different questions and a reader that only
+// asks the first calls a stale bridge healthy: `accepted` deliberately includes
+// retired spellings so an upgrade does not turn every installed bridge red, and
+// nothing else in the product rewrites a bridge on upgrade. Callers that report
+// health must ask both.
+export function bridgePointer(aiosPath) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
-  const current = agent.include === "@"
-    ? `@${entrypoint}`
-    : `DotAIOS entrypoint (read this file first): ${entrypoint}`;
-  return { entrypoint, current, accepted: [current, `Read ${entrypoint} first.`] };
+  const current = `DotAIOS keeps the user's personal context in a folder at ${aiosPath} (entrypoint: ${entrypoint}).`;
+  // Older releases wrote these. A user upgrades by running activate again, so
+  // until they do, the file on their disk is one of these and still points here.
+  const retired = [
+    `@${entrypoint}`,
+    `DotAIOS entrypoint (read this file first): ${entrypoint}`,
+    `Read ${entrypoint} first.`
+  ];
+  return { entrypoint, current, retired, accepted: [current, ...retired] };
 }
 
-export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skillsCatalog } = {}) {
-  const { entrypoint, current: pointerLine } = bridgePointer(agent, aiosPath);
+// The managed block itself: a pointer to the AIOS folder and the rule for when
+// to open it, not the folder's contents. Every host loads this file on every
+// launch, so a session in an unrelated repository must end up with the path and
+// the rule, and nothing else. When `skillsFirst` is true the skill catalog
+// (INDEX.md + RESOLVER.md) is INLINED instead of pointed at, for agents that do
+// not follow file references at all (headless fleet workers, MCP-only clients,
+// browser-paste users). Default stays pointer-mode.
+//
+// The block is identical for every agent — only the file header around it names
+// one. It lives here, alone, because `connect gemini` splices the same markers
+// into the same file `activate` writes: a second body meant whichever command
+// ran last silently replaced the other's.
+export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skillsCatalog } = {}) {
+  const { current: pointerLine } = bridgePointer(aiosPath);
   const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
   const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
 
   const lines = [
-    `# DotAIOS ${agent.name} Bridge`,
-    "",
     MANAGED_START,
-    "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
-    "",
     pointerLine,
-    "",
-    "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
-    ""
+    `Leave that folder closed unless the working directory is inside it, or the user asks about their context, who they are, what they are working on, or one of their saved workflows.`,
+    `When you do open it, read ${AGENT_ENTRYPOINT} first, then run \`dotaios brief --compact\` (add \`--project <slug-or-id>\` for project work); route events, signals, and saved sessions only through the canonical bounded projection.`
   ];
 
   if (skillsFirst) {
@@ -293,6 +308,7 @@ export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skil
       skillsCatalog?.indexText ?? readCatalogFile(skillsIndex),
       skillsCatalog?.resolverText ?? readCatalogFile(resolver)
     ]);
+    lines.push("");
     lines.push("## Skills first (inlined by `dotaios activate --skills-first`)");
     lines.push("");
     lines.push("Match the user's intent to a skill below, then open that skill's SKILL.md before acting. If nothing fits, hand-roll the work and offer to skillify a repeat.");
@@ -304,15 +320,27 @@ export async function bridgeContent(agent, aiosPath, { skillsFirst = false, skil
       lines.push("### Skill resolver", "", resolverText.trim(), "");
     }
   } else {
-    lines.push(`Skills: read ${skillsIndex} to see all available skills and how to run them.`);
-    lines.push(`Routing: to choose a skill for a request, match the user's intent against ${resolver} (trigger phrases -> skill), then open that SKILL.md before acting. If the user keeps repeating a workflow, offer to run the skillify skill to make it reusable (draft it, then ask before saving).`);
+    // A path, not a catalog. Skills are linked into each host's native skills
+    // directory, but the routing table is what turns "do the thing I always do"
+    // into the right workflow, and only this line says where it lives.
+    lines.push(`Skill routing: ${resolver} maps a request to one of the user's saved workflows; read it when a request looks like one, then open that SKILL.md before acting.`);
   }
 
-  lines.push("Working memory: route events, signals, and saved sessions only through the canonical bounded projection. Run `dotaios brief --compact` at session start; for project work, add `--project <slug-or-id>`. Do not load those memory stores directly or invent another recency window.");
-  lines.push("Optional MCP: `read_working_context` returns that same projection plus bounded operational compatibility state beside it. The adapter exposes exactly `read_working_context`, `search_aios`, and `resolve_skill`; it has no compatibility aliases.");
-  lines.push(MANAGED_END, "");
+  lines.push("Optional MCP: the adapter exposes exactly `read_working_context`, `search_aios`, and `resolve_skill`; it has no compatibility aliases.");
+  lines.push(MANAGED_END);
 
   return lines.join("\n");
+}
+
+// The whole bridge file for one agent: the shared managed block under a header
+// that names the host. Only the header differs between agents.
+export async function bridgeContent(agent, aiosPath, options = {}) {
+  return [
+    `# DotAIOS ${agent.name} Bridge`,
+    "",
+    await bridgeManagedBlock(aiosPath, options),
+    ""
+  ].join("\n");
 }
 
 async function readCatalogFile(filePath) {

@@ -1725,7 +1725,7 @@ async function readAgentRegistryForStore(settings) {
 
 function assertAgentRegistryFieldBounds(raw, limits) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return;
-  for (const value of [raw.name, raw.detect, raw.command, raw.bridge, raw.include]) {
+  for (const value of [raw.name, raw.detect, raw.command, raw.bridge]) {
     if (typeof value === "string" && Buffer.byteLength(value, "utf8") > limits.maxAgentFieldBytes) {
       throw managedError("bundle_bound_exceeded", "agent_registry_field_bound_exceeded");
     }

@@ -5,7 +5,6 @@
       "detect": ".claude",
       "command": "claude",
       "bridge": ".claude/CLAUDE.md",
-      "include": "@",
       "skills": {
         "mode": "symlink",
         "dir": ".claude/skills",
@@ -17,7 +16,6 @@
       "detect": ".codex",
       "command": "codex",
       "bridge": ".codex/AGENTS.md",
-      "include": "",
       "skills": {
         "mode": "symlink",
         "dir": ".agents/skills",
@@ -29,7 +27,6 @@
       "detect": ".gemini",
       "command": "gemini",
       "bridge": ".gemini/GEMINI.md",
-      "include": "@",
       "skills": {
         "mode": "symlink",
         "dir": ".agents/skills",
@@ -40,7 +37,6 @@
       "name": "Cursor",
       "detect": ".cursor",
       "bridge": null,
-      "include": "",
       "skills": {
         "mode": "symlink",
         "dir": ".agents/skills",
@@ -51,7 +47,6 @@
       "name": "Antigravity",
       "detect": ".gemini/antigravity",
       "bridge": null,
-      "include": "",
       "skills": {
         "mode": "symlink",
         "dir": ".gemini/antigravity/skills",
@@ -63,7 +58,6 @@
       "detect": ".kimi-code",
       "command": "kimi",
       "bridge": null,
-      "include": "",
       "skills": {
         "mode": "symlink",
         "dir": ".agents/skills",
@@ -75,7 +69,6 @@
       "detect": ".config/opencode",
       "command": "opencode",
       "bridge": null,
-      "include": "",
       "skills": {
         "mode": "symlink",
         "dir": ".agents/skills",

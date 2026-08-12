@@ -77,7 +77,11 @@ test("connect gemini creates the bridge when none exists", () => {
     const after = fs.readFileSync(bridge, "utf8");
     assert.match(after, /<!-- dotaios-managed:start -->/);
     assert.match(after, /<!-- dotaios-managed:end -->/);
-    assert.match(after, /Working memory/);
+    // The block connect writes is the one activate writes: it names the folder
+    // and carries the rule for when to open it. Asserting connect's own older
+    // wording here is what let the two bodies drift apart in the first place.
+    assert.match(after, new RegExp(`personal context in a folder at ${aios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    assert.match(after, /Leave that folder closed unless/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }
@@ -286,3 +290,69 @@ test("connect gemini preflights a foreign hook before changing bridge or setting
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+// `activate` and `connect gemini` both own the single managed block in
+// ~/.gemini/GEMINI.md, and they used to write different bodies into it: the
+// last command run silently replaced the other's, and connect's older body
+// reinstated the always-on shape this release removed. doctor then called the
+// result "a different AIOS folder" — false, the block names the folder — and
+// offered `activate --overwrite`, which undid connect. Running one documented
+// command after another must converge, not ping-pong.
+test("activate and connect gemini agree on the managed block", () => {
+  const { base, aios, bridge } = sandbox();
+  try {
+    const activate = runActivate(base, aios);
+    assert.equal(activate.status, 0, activate.stderr);
+    const afterActivate = findBlock(fs.readFileSync(bridge, "utf8"));
+
+    const connect = connectGemini(base, aios);
+    assert.equal(connect.status, 0, connect.stderr);
+    const afterConnect = findBlock(fs.readFileSync(bridge, "utf8"));
+
+    assert.equal(afterConnect, afterActivate, "connect must not rewrite the block activate owns");
+    // The rule this release exists to add has to survive the second command.
+    assert.match(afterConnect, /Leave that folder closed unless/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("doctor stays green after connect gemini", () => {
+  const { base, aios } = sandbox();
+  try {
+    assert.equal(runActivate(base, aios).status, 0);
+    assert.equal(connectGemini(base, aios).status, 0);
+
+    const doctor = spawnSync(process.execPath, [cli, "doctor", "--path", aios, "--home", base], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: base, DOTAIOS_NO_UPDATE_CHECK: "1" }
+    });
+
+    assert.match(doctor.stdout, /\[ok\] Gemini bridge/);
+    assert.doesNotMatch(doctor.stdout, /Bridge points to a different AIOS folder/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// activate refuses to wire a temp AIOS folder into the *real* home, so its
+// process HOME must differ from the --home it is asked to write. connect resolves
+// the bridge from os.homedir() and needs HOME to be the sandbox itself.
+function runActivate(base, aios) {
+  const processHome = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-activate-home-"));
+  try {
+    return spawnSync(process.execPath, [cli, "activate", "--path", aios, "--home", base], {
+      encoding: "utf8",
+      env: { ...process.env, HOME: processHome }
+    });
+  } finally {
+    fs.rmSync(processHome, { recursive: true, force: true });
+  }
+}
+
+function findBlock(content) {
+  const start = content.indexOf("<!-- dotaios-managed:start -->");
+  const end = content.indexOf("<!-- dotaios-managed:end -->");
+  assert.ok(start >= 0 && end > start, "expected one managed block");
+  return content.slice(start, end + "<!-- dotaios-managed:end -->".length);
+}

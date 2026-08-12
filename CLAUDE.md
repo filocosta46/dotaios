@@ -98,10 +98,17 @@ Windows (`lightpanda.exe` path).
 
 ## Key modules in `packages/core/src/`
 
+Ordered largest first — the four biggest modules were missing from this table,
+which is the one place someone looks to find them.
+
 | File | What it does |
 |---|---|
-| `paths.mjs` | Default paths (`~/aios`, `~/.dotaios`), vault/sync path resolution |
+| `managed-skill-store.mjs` | Transactional skill install/remove: journal, staging, `_registry.json` inventory, and receipts/recovery under `~/.dotaios/managed-skills` so an interruption is always resumable |
 | `projects.mjs` | Portable project records plus machine-local checkout mapping and diagnostics |
+| `project-sources.mjs` | Consent-gated reads of folders *outside* the AIOS: bindings, expiring grants, and one receipt per access ([ADR 0002](docs/adr/0002-managed-project-workspaces.md) neighbours) |
+| `migrations.mjs` | Versioned, preview-first folder migrations selected by the folder's schema version, not the package version ([ADR 0001](docs/adr/0001-versioned-aios-folder-migrations.md)) |
+| `project-workspaces.mjs` | Managed checkouts under `workspaces/`, mirror-boundary verification, and restore transactions ([ADR 0002](docs/adr/0002-managed-project-workspaces.md)) |
+| `paths.mjs` | Default paths (`~/aios`, `~/.dotaios`), vault/sync path resolution |
 | `memory.mjs` | Read/write events + signals (JSONL). Exports `isoDate()` (**local** date), tolerant `readJsonl()` |
 | `sessions.mjs` | Session index read/write under `withIndexLock()` (cross-process file lock) |
 | `promotion.mjs` | Preview/apply memory promotion with shelf containment, drift checks, and receipts |
