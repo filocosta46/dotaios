@@ -4,7 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { MANAGED_END, MANAGED_START } from "../../packages/core/src/bridges.mjs";
+import { MANAGED_END, MANAGED_START, bridgePointer } from "../../packages/core/src/bridges.mjs";
 import { SETUP_TRANSACTION_FILE } from "../../packages/core/src/paths.mjs";
 import { createAiosConfig } from "../../packages/core/src/schema.mjs";
 import { initCommand } from "../../packages/cli/src/commands/init.mjs";
@@ -143,9 +143,13 @@ test("doctor ignores an expected-path comment inside a valid block with the wron
 // computed itself. Both sides came from the same in-memory target string, so
 // they agreed perfectly while the file the pointer names was gone: doctor
 // reported [ok] and then told the user to read a file that does not exist.
+//
+// The pointer comes from the writer, not a literal: a bridge spelled the way an
+// older release spelled it is a different case with a different verdict, and
+// hardcoding one here let these tests drift into asserting it by accident.
 const managedPointerBridge = (target) => [
   MANAGED_START,
-  `@${path.join(target, "AGENTS.md")}`,
+  bridgePointer(target).current,
   MANAGED_END,
   ""
 ].join("\n");
@@ -160,25 +164,44 @@ test("doctor warns when the bridge points at this AIOS folder but its entrypoint
   assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
 });
 
-// Changing what activate writes must not turn every already-installed bridge
-// into a warning. Users upgrade by running activate again, and until they do,
-// the file on their disk is the one an older release wrote.
-test("doctor still reports a healthy bridge written by an earlier release", (t) => {
-  const output = runDoctor(t, "doctor-legacy-bridge", (target) => [
-    "# DotAIOS Claude Code Bridge",
-    "",
-    MANAGED_START,
-    "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
-    "",
-    `@${path.join(target, "AGENTS.md")}`,
-    "",
-    "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
-    MANAGED_END,
-    ""
-  ].join("\n"), { entrypoint: true });
+// The bridge an older release wrote is still ours and still names this folder,
+// so doctor must not call it wrong. But it is the `@` import this release exists
+// to remove, and it keeps expanding the whole folder into every session until
+// the user re-runs activate. Nothing else in the product tells them to, so if
+// this row is [ok] the fix ships and reaches only new installs.
+const legacyImportBridge = (target) => [
+  "# DotAIOS Claude Code Bridge",
+  "",
+  MANAGED_START,
+  "Read the user's DotAIOS context before recommendations that depend on identity, priorities, active work, memory, or writing style.",
+  "",
+  `@${path.join(target, "AGENTS.md")}`,
+  "",
+  "AGENTS.md is the single source of truth for this folder: who the user is, how it is organized, the rules, and the installed skills.",
+  MANAGED_END,
+  ""
+].join("\n");
 
-  assert.match(output, /\[ok\] Claude Code bridge/);
-  assert.doesNotMatch(output, /\[warn\] Claude Code bridge/);
+test("doctor tells an already-installed user to re-run activate for an older bridge", (t) => {
+  const output = runDoctor(t, "doctor-legacy-bridge", legacyImportBridge, { entrypoint: true });
+
+  assert.match(output, /\[warn\] Claude Code bridge/);
+  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+  // The remedy has to name the command that rewrites the block. It is the only
+  // one that does, and the user has no other signal that anything is stale.
+  assert.match(output, /dotaios activate/);
+  // Not "points to a different AIOS folder": the folder is right, the spelling
+  // is old. Saying it is wrong sends the user to --overwrite for no reason.
+  assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
+});
+
+// An old bridge is stale, not broken. Warning is what gets a non-developer to
+// act; failing would tell every existing user their install is broken during an
+// upgrade they have not run yet.
+test("an older bridge is a warning, not a doctor failure", (t) => {
+  const output = runDoctor(t, "doctor-legacy-bridge-exit", legacyImportBridge, { entrypoint: true });
+
+  assert.match(output, /DotAIOS works/);
 });
 
 test("doctor warns about the bridge when the whole AIOS folder was removed", (t) => {

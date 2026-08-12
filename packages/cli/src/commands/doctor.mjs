@@ -523,7 +523,7 @@ async function checkAgentBridges(target, homePath, detection = {}) {
     }
 
     const managedBlock = findManagedBlock(content);
-    const { entrypoint, accepted } = bridgePointer(target);
+    const { entrypoint, current, retired, accepted } = bridgePointer(target);
     const managedLines = managedBlock?.text.split(/\r?\n/) || [];
     const hasExactPointer = accepted.some((pointer) => managedLines.includes(pointer));
     if (hasExactPointer) {
@@ -543,6 +543,25 @@ async function checkAgentBridges(target, homePath, detection = {}) {
           status: "warn",
           detail: `Bridge points at this AIOS folder, but its entrypoint is missing (${entrypoint}).`,
           fix: `Run \`npx dotaios init${pathOptionFor(target)}\` to restore the missing base files.`
+        });
+      } else if (!managedLines.includes(current)) {
+        // Ours, and pointing at the right folder, but written by an older
+        // release. Accepting the spelling is what keeps an upgrade from turning
+        // every installed bridge red; reporting it healthy is what stopped the
+        // fix from ever reaching anyone already installed. `activate` is the
+        // only thing that rewrites the block, and nothing else asks them to.
+        //
+        // Only the `@` spelling is expanded by the host, so only it costs the
+        // user the whole folder on every request. The other retired spellings
+        // are prose and merely out of date; saying otherwise would be false.
+        const stale = retired.filter((pointer) => managedLines.includes(pointer));
+        results.push({
+          name: `${agent.name} bridge`,
+          status: "warn",
+          detail: stale.some((pointer) => pointer.startsWith("@"))
+            ? "Bridge is from an older version and still loads your whole AIOS folder into every session."
+            : "Bridge is from an older version and does not match what this release writes.",
+          fix: `Run \`${refreshCommand(target)}\` to update it.`
         });
       } else {
         results.push({ name: `${agent.name} bridge`, status: "ok" });
@@ -643,6 +662,13 @@ function nativeRuntimeCheck(agent, target, runtimes) {
 
 function repointCommand(target) {
   return `npx dotaios activate${pathOptionFor(target)} --overwrite`;
+}
+
+// A managed block DotAIOS already owns is spliced in place without --overwrite,
+// and the text the user wrote around it is preserved. Only an unmanaged file
+// needs the overwriting form, so do not send someone there to fix our own block.
+function refreshCommand(target) {
+  return `npx dotaios activate${pathOptionFor(target)}`;
 }
 
 function pathOptionFor(target) {

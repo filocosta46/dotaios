@@ -259,6 +259,13 @@ export async function isCommandAvailable(
 // support `@` expand it while loading the file, so an @-reference in a
 // user-global bridge is not a pointer at all: it imports the whole folder
 // router into every session, in every directory, for every request.
+//
+// `accepted` answers "is this one of ours?" and `current` answers "is this the
+// one we write today?". They are different questions and a reader that only
+// asks the first calls a stale bridge healthy: `accepted` deliberately includes
+// retired spellings so an upgrade does not turn every installed bridge red, and
+// nothing else in the product rewrites a bridge on upgrade. Callers that report
+// health must ask both.
 export function bridgePointer(aiosPath) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
   const current = `DotAIOS keeps the user's personal context in a folder at ${aiosPath} (entrypoint: ${entrypoint}).`;
@@ -269,7 +276,7 @@ export function bridgePointer(aiosPath) {
     `DotAIOS entrypoint (read this file first): ${entrypoint}`,
     `Read ${entrypoint} first.`
   ];
-  return { entrypoint, current, accepted: [current, ...retired] };
+  return { entrypoint, current, retired, accepted: [current, ...retired] };
 }
 
 // The managed bridge-file body for one agent: a pointer to the AIOS folder and
