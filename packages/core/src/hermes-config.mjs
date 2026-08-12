@@ -44,11 +44,6 @@ export async function discoverHermesConfigTargets(homePath, registry = []) {
   return targets;
 }
 
-export async function readExternalSkillsDirs(configPath, key = "skills.external_dirs") {
-  const inspection = await inspectExternalSkillsDirs(configPath, key);
-  return inspection.status === "missing" ? null : inspection.values;
-}
-
 export async function inspectExternalSkillsDirs(
   configPath,
   key = "skills.external_dirs",

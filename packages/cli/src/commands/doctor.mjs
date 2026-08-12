@@ -15,6 +15,7 @@ import {
   loadAgentRegistry
 } from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
+import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
 import { checkForUpdate } from "../adapters/npm-registry.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
@@ -46,7 +47,7 @@ Options:
   --home <dir>  Check agent bridges somewhere other than your home
 `;
 
-export async function doctorCommand(args) {
+export async function doctorCommand(args, { detection } = {}) {
   if (hasHelpFlag(args)) {
     console.log(HELP_TEXT);
     return;
@@ -67,7 +68,7 @@ export async function doctorCommand(args) {
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
-  checks.push(...await checkAgentBridges(target, homePath));
+  checks.push(...await checkAgentBridges(target, homePath, detection));
 
   console.log("DotAIOS doctor");
   console.log("");
@@ -477,17 +478,16 @@ function skipReason(skipped) {
   return "update check unavailable";
 }
 
-async function checkAgentBridges(target, homePath) {
+async function checkAgentBridges(target, homePath, detection = {}) {
   const results = [];
   let foundBridge = false;
   let foundNativeRuntime = false;
   let anyInstalled = false;
 
   const registry = await loadAgentRegistry(target);
+  const runtimes = await readNativeRuntimes(target, homePath, detection);
   for (const agent of registry) {
-    const filePath = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
-
-    if (!await isAgentInstalled(homePath, agent)) {
+    if (!await isAgentInstalled(homePath, agent, detection)) {
       results.push({
         name: `${agent.name} (not installed)`,
         status: "ok",
@@ -498,15 +498,16 @@ async function checkAgentBridges(target, homePath) {
     anyInstalled = true;
 
     if (!agent.bridge) {
-      foundNativeRuntime = true;
-      results.push({
-        name: `${agent.name} native skills`,
-        status: "ok",
-        detail: "Runtime has no DotAIOS bridge file; native skill configuration is checked separately."
-      });
+      const verdict = nativeRuntimeCheck(agent, target, runtimes);
+      results.push(verdict);
+      // Only a runtime that really is configured counts as something being
+      // connected. Counting an unconfigured one here suppressed the
+      // "At least one AI tool connected" warning below.
+      if (verdict.status === "ok") foundNativeRuntime = true;
       continue;
     }
 
+    const filePath = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
     let content;
     try {
       content = await fs.readFile(filePath, "utf8");
@@ -595,6 +596,52 @@ async function checkAgentBridges(target, homePath) {
   }
 
   return results;
+}
+
+// A runtime with no bridge file keeps its skills in its own configuration, so
+// the only honest answer comes from reading that configuration. inspectSkillHealth
+// already does exactly this for every mode; doctor consumes it rather than
+// growing a third reader of the same files.
+async function readNativeRuntimes(aiosPath, homePath, detection) {
+  try {
+    const { runtimes } = await inspectSkillHealth({ aiosPath, homePath, detection });
+    return new Map(runtimes.map((runtime) => [runtime.name, runtime]));
+  } catch {
+    // An unreadable AIOS folder is already reported by the folder and config
+    // checks above. It must not stop the agent section from finishing.
+    return null;
+  }
+}
+
+function nativeRuntimeCheck(agent, target, runtimes) {
+  const name = `${agent.name} native skills`;
+  const capabilities = runtimes?.get(agent.name)?.capabilities;
+  if (!capabilities) {
+    return {
+      name,
+      status: "warn",
+      detail: "Could not read this AIOS folder, so its native skill configuration is unverified.",
+      fix: `Fix the AIOS folder problems above, then run \`npx dotaios doctor${pathOptionFor(target)}\` again.`
+    };
+  }
+  if (capabilities.configured === "yes" && capabilities.projected === "yes") {
+    return { name, status: "ok" };
+  }
+  const skillsDir = path.join(target, "skills");
+  if (agent.skills?.mode === "config-external-dir") {
+    return {
+      name,
+      status: "warn",
+      detail: `Detected, but ~/${agent.skills.configFile} does not list ${skillsDir}.`,
+      fix: `Add ${skillsDir} to ${agent.skills.key || "skills.external_dirs"} in ~/${agent.skills.configFile}, then run \`npx dotaios skills doctor\`.`
+    };
+  }
+  return {
+    name,
+    status: "warn",
+    detail: `Detected, but ~/${agent.skills?.dir} has no live links to ${skillsDir}.`,
+    fix: `Run \`npx dotaios activate${pathOptionFor(target)}\` to connect its skills.`
+  };
 }
 
 function pathOptionFor(target) {
