@@ -523,7 +523,7 @@ async function checkAgentBridges(target, homePath, detection = {}) {
     }
 
     const managedBlock = findManagedBlock(content);
-    const { entrypoint, accepted } = bridgePointer(agent, target);
+    const { entrypoint, accepted } = bridgePointer(target);
     const managedLines = managedBlock?.text.split(/\r?\n/) || [];
     const hasExactPointer = accepted.some((pointer) => managedLines.includes(pointer));
     if (hasExactPointer) {

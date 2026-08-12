@@ -103,7 +103,9 @@ describe("activateCommand --skills-first", () => {
 
     const bridge = await fs.readFile(path.join(homePath, ".claude", "CLAUDE.md"), "utf8");
     assert.doesNotMatch(bridge, /Skills first \(inlined by/);
-    assert.match(bridge, /read .*skills\/INDEX\.md/);
+    // Pointer mode names the routing table; only --skills-first inlines a catalog.
+    assert.match(bridge, /skills\/RESOLVER\.md/);
+    assert.doesNotMatch(bridge, /## test-skill/);
   });
 
   it("dry-run previews skills-first activation without changing any filesystem state", async () => {

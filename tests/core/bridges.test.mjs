@@ -79,10 +79,7 @@ test("agent detection recognizes a declared command on PATH without a config fol
 });
 
 test("managed bridges route working memory through the canonical projection", async () => {
-  const content = await bridgeContent(
-    { name: "Test Agent", include: "" },
-    "/tmp/example-aios"
-  );
+  const content = await bridgeContent({ name: "Test Agent" }, "/tmp/example-aios");
 
   assert.match(content, /events, signals, and saved sessions only through the canonical bounded projection/);
   assert.match(content, /dotaios brief --compact/);
