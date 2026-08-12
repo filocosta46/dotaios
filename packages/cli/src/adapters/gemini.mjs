@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { MANAGED_END, MANAGED_START, findManagedBlock } from "../../../core/src/bridges.mjs";
+import { MANAGED_END, MANAGED_START, bridgeManagedBlock, findManagedBlock } from "../../../core/src/bridges.mjs";
 import {
   replaceFileIfUnchanged,
   validateManagedFilePath,
@@ -18,15 +18,6 @@ export function assertSafeGeminiAiosPath(aiosPath) {
   }
 }
 
-export function geminiBridgeBlock(aiosPath) {
-  return `${MANAGED_START}
-Your personal AI operating system is at \`${aiosPath}\`.
-
-- Full context guide: \`${aiosPath}/AGENTS.md\`
-- Skills index: \`${aiosPath}/skills/INDEX.md\`
-- Working memory: run \`dotaios brief --compact\`
-${MANAGED_END}`;
-}
 
 // A Gemini user may already have instructions in GEMINI.md. DotAIOS owns only
 // one complete managed block and preserves every byte around it.
@@ -43,7 +34,10 @@ export async function writeGeminiBridge(
   } = {}
 ) {
   const stats = await validateManagedFilePath(filePath, boundaryRoot);
-  const block = geminiBridgeBlock(aiosPath);
+  // The same block `activate` writes, from its one owner. A second body here
+  // meant whichever of the two commands ran last silently replaced the other's,
+  // and connect's older body reinstated the always-on shape this release removed.
+  const block = await bridgeManagedBlock(aiosPath);
   if (!stats) {
     if (preflightOnly) return { action: "would-create" };
     const created = await writeFileSafe(filePath, `# DotAIOS Context\n\n${block}\n`, "preserve", {
