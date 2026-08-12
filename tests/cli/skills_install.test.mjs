@@ -53,7 +53,12 @@ test("installing a raw skill also propagates it to native agent directories", ()
     "---\nname: demo-skill\ndescription: A test skill\n---\n\n# Demo\n"
   );
 
-  run(["install", rawSkill, "--path", aiosPath, "--home", homePath]);
+  const preview = run(["skills", "adopt", rawSkill, "--path", aiosPath, "--home", homePath, "--json"]);
+  const proof = JSON.parse(preview.stdout);
+  run([
+    "skills", "adopt", rawSkill, "--path", aiosPath, "--home", homePath,
+    "--apply", proof.operation_id, "--fingerprint", proof.plan_fingerprint
+  ]);
 
   const source = path.join(aiosPath, "skills", "demo-skill");
   for (const target of [
@@ -66,22 +71,17 @@ test("installing a raw skill also propagates it to native agent directories", ()
   }
 });
 
-test("installing a public plain-Markdown raw skill completes without partial failure", () => {
+test("adoption refuses a plain-Markdown raw skill without required Agent Skills metadata", () => {
   const { aiosPath, homePath, tempRoot } = setupAios();
   fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
   const rawSkill = path.join(tempRoot, "plain-skill");
   fs.mkdirSync(rawSkill, { recursive: true });
   fs.writeFileSync(path.join(rawSkill, "SKILL.md"), "# Plain Skill\n\nFollow the reviewed workflow.\n");
 
-  const result = run(["install", rawSkill, "--path", aiosPath, "--home", homePath]);
-
-  assert.match(result.stdout, /Installed skill 'plain-skill'/);
-  assert.equal(fs.readFileSync(path.join(aiosPath, "skills", "plain-skill", "SKILL.md"), "utf8"), "# Plain Skill\n\nFollow the reviewed workflow.\n");
-  assert.match(fs.readFileSync(path.join(aiosPath, "skills", "INDEX.md"), "utf8"), /## plain-skill/);
-  assert.equal(
-    fs.readlinkSync(path.join(homePath, ".agents", "skills", "plain-skill")),
-    path.join(aiosPath, "skills", "plain-skill")
-  );
+  const result = run(["skills", "adopt", rawSkill, "--path", aiosPath, "--home", homePath], { allowNonZero: true });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /frontmatter/i);
+  assert.equal(fs.existsSync(path.join(aiosPath, "skills", "plain-skill")), false);
 });
 
 test("installing a plugin exposes its declared skill and propagates it natively", () => {
@@ -89,7 +89,12 @@ test("installing a plugin exposes its declared skill and propagates it natively"
   fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
   const pluginPath = path.join(repoRoot, "examples", "plugins", "hello-memory");
 
-  run(["install", pluginPath, "--path", aiosPath, "--home", homePath]);
+  const preview = run(["skills", "adopt", pluginPath, "--path", aiosPath, "--home", homePath, "--json"]);
+  const proof = JSON.parse(preview.stdout);
+  run([
+    "skills", "adopt", pluginPath, "--path", aiosPath, "--home", homePath,
+    "--apply", proof.operation_id, "--fingerprint", proof.plan_fingerprint
+  ]);
 
   const source = path.join(aiosPath, "skills", "hello-memory");
   assert.ok(fs.existsSync(path.join(source, "SKILL.md")));
@@ -103,9 +108,22 @@ test("installing a plugin exposes its declared skill and propagates it natively"
 
 test("removing a plugin removes its exposed skill and native links", () => {
   const { aiosPath, homePath } = setupAios();
+  fs.mkdirSync(homePath, { recursive: true });
   const pluginPath = path.join(repoRoot, "examples", "plugins", "hello-memory");
-  run(["install", pluginPath, "--path", aiosPath, "--home", homePath]);
-  run(["skill", "remove", "hello-memory", "--path", aiosPath, "--home", homePath]);
+  const adoption = JSON.parse(run([
+    "skills", "adopt", pluginPath, "--path", aiosPath, "--home", homePath, "--json"
+  ]).stdout);
+  run([
+    "skills", "adopt", pluginPath, "--path", aiosPath, "--home", homePath,
+    "--apply", adoption.operation_id, "--fingerprint", adoption.plan_fingerprint
+  ]);
+  const removal = JSON.parse(run([
+    "skills", "remove", "hello-memory", "--path", aiosPath, "--home", homePath, "--json"
+  ]).stdout);
+  run([
+    "skills", "remove", "hello-memory", "--path", aiosPath, "--home", homePath,
+    "--apply", removal.operation_id, "--fingerprint", removal.plan_fingerprint
+  ]);
 
   assert.equal(fs.existsSync(path.join(aiosPath, "skills", "hello-memory")), false);
   assert.equal(fs.existsSync(path.join(homePath, ".agents", "skills", "hello-memory")), false);
@@ -154,8 +172,8 @@ test("skills doctor human output labels configuration evidence separately from i
     ["skills", "doctor", "--path", aiosPath, "--home", homePath],
     { allowNonZero: true }
   );
-  assert.match(result.stdout, /Verification scope: configuration-only; invocation=not-run/);
-  assert.match(result.stdout, /configured=yes discoverable=path-ready/);
+  assert.match(result.stdout, /Verification scope: configuration-and-projection-only; invocation=not-run/);
+  assert.match(result.stdout, /configured=yes projected=yes discoverable=not-probed/);
 });
 
 test("alias pruning is explicit, dry-run first, and preserves the ordinary install path", () => {
@@ -181,11 +199,13 @@ test("alias pruning is explicit, dry-run first, and preserves the ordinary insta
   assert.match(preview.stdout, /would-remove.*daily-planning/);
   assert.equal(fs.lstatSync(alias).isSymbolicLink(), true);
 
-  run([
+  const refused = run([
     "skills", "install", "--path", aiosPath, "--home", homePath, "--all",
     "--prune-aliases"
-  ]);
-  assert.equal(fs.existsSync(alias), false);
+  ], { allowNonZero: true });
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stderr, /ManagedSkillStore removal proof/i);
+  assert.equal(fs.lstatSync(alias).isSymbolicLink(), true);
   assert.equal(fs.readlinkSync(path.join(targetDir, "plan-today")), source);
 });
 
@@ -236,7 +256,7 @@ test("activation covers detected native clients and every Hermes profile without
   }
   assert.equal(fs.readFileSync(path.join(foreign, "SKILL.md"), "utf8"), "foreign skill\n");
   for (const retiredDir of [path.join(homePath, ".cursor", "skills"), path.join(homePath, ".gemini", "skills")]) {
-    assert.equal(fs.existsSync(path.join(retiredDir, skillName)), false);
+    assert.equal(fs.lstatSync(path.join(retiredDir, skillName)).isSymbolicLink(), true);
     assert.equal(fs.readFileSync(path.join(retiredDir, "coding-standards", "SKILL.md"), "utf8"), "foreign skill\n");
   }
 

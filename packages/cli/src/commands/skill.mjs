@@ -1,26 +1,27 @@
-import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { readJson } from "../../../core/src/files.mjs";
-import { writeSkillsIndex } from "../../../core/src/skills.mjs";
+import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { activateCommand } from "./activate.mjs";
 import { installCommand } from "./install.mjs";
+import { createManagedSkillStore } from "../../../core/src/managed-skill-store.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios skill <subcommand> [options]
 
 Subcommands:
-  add <local-folder>  Install a reviewed local skill or plugin folder.
-  list                Show every skill currently installed.
-  remove <name>       Remove a previously installed plugin from your AIOS.
+  add <local-folder>  Preview adoption of a reviewed local skill or plugin folder.
+  list                Show owned, discovered-unmanaged, and unsafe skills.
+  remove <name>       Preview or exactly remove one managed skill.
 
-This is the friendly alias for plugin install/uninstall. Skills are reusable
-agent workflows. Plugins are skills that ship with code.
+This is the friendly alias for reviewed local Agent Skill adoption and managed
+removal. A manifest may identify one skill bundle; its executable code is not installed.
 
 Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --home <dir>  Write native agent bridges and skills under this home directory
+  --apply <id>  Apply only the exact displayed plan
+  --fingerprint <sha256>  Require the displayed plan fingerprint
+  --json        Print structured inventory/proof/result output
 `;
 
 export async function skillCommand(args) {
@@ -42,6 +43,9 @@ export async function skillCommand(args) {
     const installArgs = [...positionals];
     if (options.path) installArgs.push("--path", options.path);
     if (options.home) installArgs.push("--home", options.home);
+    if (options.apply) installArgs.push("--apply", options.apply);
+    if (options.fingerprint) installArgs.push("--fingerprint", options.fingerprint);
+    if (options.json) installArgs.push("--json");
     await installCommand(installArgs);
     return;
   }
@@ -63,7 +67,7 @@ export async function skillCommand(args) {
 }
 
 function parseOptions(args = []) {
-  const options = { home: null, path: null };
+  const options = { home: null, path: null, apply: null, fingerprint: null, json: false };
   const positionals = [];
   let subcommand = null;
 
@@ -75,6 +79,14 @@ function parseOptions(args = []) {
     } else if (arg === "--home") {
       options.home = readOptionValue(args, index, "--home");
       index += 1;
+    } else if (arg === "--apply") {
+      options.apply = readOptionValue(args, index, "--apply");
+      index += 1;
+    } else if (arg === "--fingerprint") {
+      options.fingerprint = readOptionValue(args, index, "--fingerprint");
+      index += 1;
+    } else if (arg === "--json") {
+      options.json = true;
     } else if (!arg.startsWith("--") && !subcommand) {
       subcommand = arg;
     } else if (!arg.startsWith("--")) {
@@ -89,65 +101,49 @@ function parseOptions(args = []) {
 
 async function listSkills(options) {
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
-  await ensureAiosFolder(target);
-
-  const registryPath = path.join(target, "skills", "_registry.json");
-  const registry = await readJson(registryPath, { skills: [], plugins: [] });
-
-  console.log(`Skills in ${target}/skills/`);
-  console.log("");
-
-  const skills = registry.skills || [];
-  if (skills.length === 0) {
-    console.log("  (no skills yet)");
-  } else {
-    for (const name of skills) {
-      console.log(`  - ${name}`);
-    }
+  const store = createManagedSkillStore({
+    aiosPath: target,
+    homePath: path.resolve(expandHome(options.home || os.homedir()))
+  });
+  const inventory = await store.inspect();
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(inventory, null, 2)}\n`);
+    return;
   }
-
-  const plugins = registry.plugins || [];
-  if (plugins.length > 0) {
-    console.log("");
-    console.log("Installed plugins:");
-    for (const plugin of plugins) {
-      console.log(`  - ${plugin.name}@${plugin.version}  (${plugin.path})`);
-    }
-  }
-
-  console.log("");
-  console.log("Add a reviewed local skill: `dotaios skill add <local-folder>`");
+  console.log(`Owned skills in ${target}/skills/:`);
+  for (const entry of inventory.owned) console.log(`  - ${entry.name}`);
+  if (inventory.owned.length === 0) console.log("  (no owned skills yet)");
+  console.log(`Discovered unmanaged: ${inventory.discovered_unmanaged.length}`);
+  console.log(`Excluded unsafe: ${inventory.excluded_unsafe.length}`);
+  console.log(`Retained recovery: ${(inventory.retained_recovery || []).length}`);
 }
 
 async function removeSkill(name, options) {
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
-  await ensureAiosFolder(target);
-
-  const registryPath = path.join(target, "skills", "_registry.json");
-  const registry = await readJson(registryPath, { skills: [], plugins: [] });
-  const plugins = registry.plugins || [];
-  const plugin = plugins.find((entry) => entry.name === name);
-
-  if (!plugin) {
-    throw new Error(`No installed plugin named "${name}". Run \`dotaios skill list\` to see what is installed.`);
+  if (Boolean(options.apply) !== Boolean(options.fingerprint)) {
+    throw new Error("--apply and --fingerprint are required together");
   }
-
-  const pluginDir = path.join(target, plugin.path);
-  await fs.rm(pluginDir, { recursive: true, force: true });
-
-  const removedSkillSet = new Set(plugin.skills || []);
-  registry.plugins = plugins.filter((entry) => entry.name !== name);
-  registry.skills = (registry.skills || []).filter((skill) => !removedSkillSet.has(skill));
-
-  for (const skill of removedSkillSet) {
-    await fs.rm(path.join(target, "skills", skill), { recursive: true, force: true });
+  const store = createManagedSkillStore({
+    aiosPath: target,
+    homePath: path.resolve(expandHome(options.home || os.homedir()))
+  });
+  const result = options.apply
+    ? await store.remove({
+        name,
+        apply: true,
+        operationId: options.apply,
+        planFingerprint: options.fingerprint
+      })
+    : await store.remove({ name });
+  if (options.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  else if (result.plan_fingerprint) {
+    console.log(`Removal preview: ${result.operation_id}`);
+    console.log(`Plan fingerprint: ${result.plan_fingerprint}`);
+    console.log("No files changed. Re-run with --apply <id> --fingerprint <sha256>.");
+  } else {
+    console.log(`Removed ${name}.`);
+    if (result.recovery_retained) {
+      console.log("Recovery retained locally; inspect `dotaios skill list` before any future cleanup.");
+    }
   }
-
-  await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
-  await writeSkillsIndex(target);
-  const activationArgs = ["--path", target];
-  if (options.home) activationArgs.push("--home", options.home);
-  await activateCommand(activationArgs);
-  console.log(`Removed ${name} from ${pluginDir}.`);
-  console.log("Refreshed skills/INDEX.md.");
 }

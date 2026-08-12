@@ -79,7 +79,8 @@ export async function initCommand(args, lifecycle = {}) {
   }
   const exists = await pathExists(target);
 
-  if (exists && await pathExists(path.join(target, "aios.json"))) {
+  const existingAiosStore = exists && await pathExists(path.join(target, "aios.json"));
+  if (existingAiosStore) {
     const migration = await previewMigration({ aiosPath: target });
     if (migration.status === "ready") {
       throw new Error(
@@ -89,6 +90,12 @@ export async function initCommand(args, lifecycle = {}) {
     }
     if (migration.status === "recovery_required") {
       throw new Error("An interrupted migration must be recovered before init can inspect this folder. Run `dotaios migrate --recover`.");
+    }
+    if (options.force && !lifecycle.allowSetupTransactionRecovery) {
+      throw new Error(
+        "Refusing init writes against an existing live AIOS store. " +
+        "Canonical skills and catalogs are owned by ManagedSkillStore; use `dotaios skills adopt` or `dotaios skills reconcile`."
+      );
     }
   }
 
@@ -492,7 +499,7 @@ function starterFileContents(data) {
       "    command: \"dotaios memory audit --all-memory\"",
       "    enabled: false"
     ].join("\n") + "\n",
-    "skills/_registry.json": "{\n  \"skills\": [\"plan-today\", \"today\", \"closeday\", \"audit\", \"ingest\", \"import-context\", \"memory-maintenance\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"weekly-review\"]\n}\n"
+    "skills/_registry.json": "{\n  \"format\": \"dotaios-skill-install-inventory/v2\",\n  \"skills\": [\"audit\", \"closeday\", \"import-context\", \"ingest\", \"memory-maintenance\", \"plan-today\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"today\", \"weekly-review\"],\n  \"managed\": [],\n  \"plugins\": []\n}\n"
   };
 }
 

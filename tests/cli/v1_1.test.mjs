@@ -21,7 +21,7 @@ test("activate creates global and project agent bridges for installed tools", ()
   assert.match(read(path.join(projectPath, "AGENTS.md")), /DotAIOS Project Bridge/);
 });
 
-test("activate skips AI tools that are not installed on the machine", () => {
+test("activate skips absent client bridges while keeping native skill projections explicit", () => {
   const { aiosPath, homePath } = setupAios();
 
   const result = run(["activate", "--path", aiosPath, "--home", homePath], {
@@ -30,8 +30,8 @@ test("activate skips AI tools that are not installed on the machine", () => {
 
   assert.equal(fs.existsSync(path.join(homePath, ".claude", "CLAUDE.md")), false);
   assert.equal(fs.existsSync(path.join(homePath, ".codex", "AGENTS.md")), false);
-  assert.equal(fs.existsSync(path.join(homePath, ".claude")), false);
-  assert.equal(fs.existsSync(path.join(homePath, ".gemini")), false);
+  assert.equal(fs.existsSync(path.join(homePath, ".claude", "skills")), true);
+  assert.equal(fs.existsSync(path.join(homePath, ".gemini", "antigravity", "skills")), true);
   assert.equal(fs.existsSync(path.join(homePath, ".agents", "skills")), true);
   assert.match(result.stdout, /No known AI tools were detected/);
 });

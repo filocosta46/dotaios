@@ -146,6 +146,12 @@ test("registry normalization rejects malformed external-dir keys and control-cha
               configFile: ".bad-path\0/config.yaml",
               key: "runner.skill_paths"
             }
+          },
+          {
+            name: "Absolute Skill Runtime",
+            detect: ".absolute-skill",
+            bridge: null,
+            skills: { mode: "symlink", dir: "/" }
           }
         ]
       })
@@ -154,6 +160,27 @@ test("registry normalization rejects malformed external-dir keys and control-cha
     const registry = await loadAgentRegistry(root);
     assert.equal(registry.find((agent) => agent.name === "Bad Key Runtime").skills, undefined);
     assert.equal(registry.find((agent) => agent.name === "Bad Path Runtime").skills, undefined);
+    assert.equal(registry.find((agent) => agent.name === "Absolute Skill Runtime").skills, undefined);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("agent registry loading refuses linked, oversized, and invalid UTF-8 configuration", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-strict-registry-"));
+  const outside = path.join(root, "outside.json");
+  const registryPath = path.join(root, "agents.json");
+  try {
+    await fs.writeFile(outside, JSON.stringify({ agents: [] }));
+    await fs.symlink(outside, registryPath);
+    await assert.rejects(() => loadAgentRegistry(root), /single-link regular file/i);
+
+    await fs.unlink(registryPath);
+    await fs.writeFile(registryPath, Buffer.alloc(1024 * 1024 + 1, 0x20));
+    await assert.rejects(() => loadAgentRegistry(root), /byte bound/i);
+
+    await fs.writeFile(registryPath, Buffer.from([0x7b, 0xff, 0x7d]));
+    await assert.rejects(() => loadAgentRegistry(root), /UTF-8/i);
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

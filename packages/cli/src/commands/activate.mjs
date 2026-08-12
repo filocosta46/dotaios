@@ -15,8 +15,7 @@ import {
 import {
   collectSkills,
   renderResolver,
-  renderSkillsIndex,
-  writeSkillsIndex
+  renderSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
 import { registerProject, resolveProjectContext } from "../../../core/src/projects.mjs";
@@ -36,6 +35,7 @@ import {
 } from "../../../core/src/skills-install.mjs";
 import { discoverHermesConfigTargets, ensureExternalSkillsDir } from "../../../core/src/hermes-config.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { createManagedSkillStore } from "../../../core/src/managed-skill-store.mjs";
 
 const managedStart = MANAGED_START;
 const managedEnd = MANAGED_END;
@@ -47,6 +47,12 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
   }
 
   const options = parseOptions(args);
+  if (options.pruneAliases && !options.dryRun && !options.project) {
+    throw new Error(
+      "Global skill alias deletion requires a ManagedSkillStore removal proof. "
+      + "Use --dry-run to inspect candidates; project-local aliases remain a separate attach scope."
+    );
+  }
   const aiosPath = resolvePath(options.path || defaultAiosPath());
   const homePath = resolvePath(options.home || os.homedir());
   const [realHomePath, realUserHomePath] = await Promise.all([
@@ -72,16 +78,16 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     await lifecycle.afterConfigPersisted?.({ aiosPath, configPatch });
   }
 
+  // Detection must be observed before reconciliation creates native projection
+  // directories. A projected path is evidence of projection only; it must never
+  // bootstrap itself into a claim that the corresponding client is installed.
+  const detectedAgentNames = await detectInstalledAgentNames(aiosPath, homePath, options);
+
   // Refresh before writing bridges. Dry-run renders the same catalog in memory
   // so its bridge preview is current without touching INDEX.md or RESOLVER.md.
   const { skillsIndex, skillsCatalog } = options.dryRun
     ? await previewSkillsIndex(aiosPath)
-    : {
-        skillsIndex: await writeSkillsIndex(aiosPath, {
-          writeMode: lifecycle.skillsIndexWriteMode || "overwrite"
-        }),
-        skillsCatalog: undefined
-      };
+    : await reconcileGlobalSkillStore(aiosPath, homePath);
 
   // Setup uses preserve mode as a compare-and-publish boundary. If another
   // writer won either catalog path with different bytes, stop before writing
@@ -109,7 +115,8 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     options,
     skillsFirst,
     skillsCatalog,
-    lifecycle
+    lifecycle,
+    detectedAgentNames
   );
   const results = [...global.results];
   let projectBlockedContextCount = 0;
@@ -130,6 +137,11 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
   printResults("DotAIOS activated", results);
   const refreshAction = options.dryRun ? "would refresh" : "refreshed";
   console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} workflow(s) indexed)`);
+  if (skillsIndex.unresolvedProjections?.length > 0) {
+    console.warn(
+      `[skills] preserved ${skillsIndex.unresolvedProjections.length} unmanaged native projection collision(s); run \`dotaios skills inventory\` to review adoption candidates.`
+    );
+  }
   if (skillsFirst) {
     const verb = options.dryRun ? "would inline" : "inline";
     console.log(`[skills-first] bridge files ${verb} the current skill catalog.`);
@@ -177,6 +189,33 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     blockedHermesCount,
     blockedCatalogCount: 0,
     results
+  };
+}
+
+async function reconcileGlobalSkillStore(aiosPath, homePath) {
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const proof = await store.reconcile();
+  const applied = await store.reconcile({
+    apply: true,
+    operationId: proof.operation_id,
+    planFingerprint: proof.plan_fingerprint
+  });
+  return {
+    skillsIndex: {
+      path: path.join(aiosPath, "skills", "INDEX.md"),
+      resolverPath: path.join(aiosPath, "skills", "RESOLVER.md"),
+      count: applied.skill_count,
+      conflicts: [],
+      unresolvedProjections: proof.unresolved,
+      results: applied.repairs.map((repair) => ({
+        action: repair.kind === "projection" ? "linked" : "updated",
+        path: repair.relative_path || repair.name
+      }))
+    },
+    skillsCatalog: {
+      indexText: applied.catalog.index_text,
+      resolverText: applied.catalog.resolver_text
+    }
   };
 }
 
@@ -268,7 +307,7 @@ Options:
   --dry-run             Show what would be written without changing files
   --merge               Keep an existing bridge file and add DotAIOS below it
   --overwrite           Replace existing unmanaged bridge files
-  --prune-aliases       Remove only exact DotAIOS frontmatter alias links
+  --prune-aliases       Preview exact global aliases; real global prune refuses without a store proof
   --skills-first        Inline the skill catalog (INDEX+RESOLVER) into every bridge
                         file so agents that don't follow file refs still see it.
                         Persists into aios.json; re-run activate without the flag
@@ -295,7 +334,8 @@ async function createGlobalBridges(
   options,
   skillsFirst = false,
   skillsCatalog,
-  lifecycle = {}
+  lifecycle = {},
+  detectedAgentNames = new Set()
 ) {
   const registry = await loadAgentRegistry(aiosPath);
   const results = [];
@@ -306,7 +346,7 @@ async function createGlobalBridges(
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
-    const installed = options.all || await isAgentInstalled(homePath, agent);
+    const installed = detectedAgentNames.has(agent.name.toLowerCase());
 
     if (!installed) {
       results.push({ action: "skipped", path: destination, note: `${agent.name} not detected on this machine` });
@@ -357,6 +397,17 @@ async function createGlobalBridges(
     configuredContextCount,
     blockedContextCount
   };
+}
+
+async function detectInstalledAgentNames(aiosPath, homePath, options) {
+  const registry = await loadAgentRegistry(aiosPath);
+  const detected = new Set();
+  for (const agent of registry) {
+    if (options.all || await isAgentInstalled(homePath, agent)) {
+      detected.add(agent.name.toLowerCase());
+    }
+  }
+  return detected;
 }
 
 function isConfiguredBridgeAction(action) {
@@ -416,21 +467,33 @@ async function installAllSkills(
   }
   for (const target of retiredSymlinkTargets(registry)) {
     const targetDir = path.join(homePath, target.dir);
-    results.push(...await removeManagedSkillLinks({
-      aiosPath, targetDir, dryRun: options.dryRun
-    }));
+    // Global projection deletion belongs to ManagedSkillStore's exact
+    // receipt/proof transaction. Keep this legacy path zero-write so activate
+    // cannot unlink a projection outside the store lock.
+    if (options.dryRun) {
+      results.push(...await removeManagedSkillLinks({
+        aiosPath, targetDir, dryRun: true
+      }));
+    }
   }
   for (const target of symlinkTargets(registry).filter((entry) => activeTargetDirs.has(entry.dir))) {
     const targetDir = path.join(homePath, target.dir);
-    results.push(...await installSymlinkSkills({
-      aiosPath, targetDir, dryRun: options.dryRun, overwrite: options.overwrite
-    }));
-    if (options.pruneAliases) {
-      results.push(...await removeManagedSkillAliases({
-        aiosPath, targetDir, dryRun: options.dryRun
+    // A real activation has already reconciled canonical projections through
+    // ManagedSkillStore. Keep the legacy installer only for zero-write preview;
+    // the remaining passes own alias/stale cleanup rather than publication.
+    if (options.dryRun) {
+      results.push(...await installSymlinkSkills({
+        aiosPath, targetDir, dryRun: true, overwrite: false
       }));
     }
-    results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: options.dryRun }));
+    if (options.dryRun && options.pruneAliases) {
+      results.push(...await removeManagedSkillAliases({
+        aiosPath, targetDir, dryRun: true
+      }));
+    }
+    if (options.dryRun) {
+      results.push(...await cleanupStaleLinks({ aiosPath, targetDir, dryRun: true }));
+    }
   }
 
   for (const target of await discoverHermesConfigTargets(homePath, registry)) {

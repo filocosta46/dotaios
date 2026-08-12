@@ -90,7 +90,6 @@ export async function connectCommand(args) {
     console.log("\nWould verify auth with `gws auth status`.");
     console.log("Would write `connections/apis/google-workspace.md`.");
     console.log("Would update `connections/registry.md`.");
-    console.log("Would add `skills/google-workspace/SKILL.md`.");
     console.log("Would log a non-secret connection event in `memory/events.jsonl`.");
     printReadFirstScope();
     return;
@@ -128,7 +127,6 @@ export async function connectCommand(args) {
   console.log("\nConnected Google Workspace");
   console.log("[ok] connections/apis/google-workspace.md");
   console.log("[ok] connections/registry.md");
-  console.log("[ok] skills/google-workspace/SKILL.md");
   console.log("[ok] memory/events.jsonl");
   printReadFirstScope();
 }
@@ -194,10 +192,6 @@ async function writeGoogleConnection(target, { versionText }) {
 
   await updateConnectionsRegistry(path.join(target, "connections", "registry.md"));
 
-  const skillDir = path.join(target, "skills", "google-workspace");
-  await fs.mkdir(skillDir, { recursive: true });
-  await writeIfMissing(path.join(skillDir, "SKILL.md"), googleWorkspaceSkill());
-  await updateSkillRegistry(path.join(target, "skills", "_registry.json"), "google-workspace");
 }
 
 async function updateConnectionsRegistry(registryPath) {
@@ -224,27 +218,6 @@ async function updateConnectionsRegistry(registryPath) {
 
   await fs.mkdir(path.dirname(registryPath), { recursive: true });
   await fs.writeFile(registryPath, `${lines.join("\n")}\n`);
-}
-
-async function updateSkillRegistry(registryPath, skillName) {
-  let registry = { skills: [] };
-  try {
-    registry = JSON.parse(await fs.readFile(registryPath, "utf8"));
-  } catch {
-    registry = { skills: [] };
-  }
-
-  registry.skills = Array.from(new Set([...(registry.skills || []), skillName])).sort();
-  await fs.mkdir(path.dirname(registryPath), { recursive: true });
-  await fs.writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`);
-}
-
-async function writeIfMissing(filePath, content) {
-  try {
-    await fs.access(filePath);
-  } catch {
-    await fs.writeFile(filePath, content);
-  }
 }
 
 function googleConnectionDoc({ versionText }) {
@@ -286,61 +259,6 @@ dotaios google drive find "budget"
 - Reading Gmail, Calendar, and Drive through the listed wrappers is allowed when the user asks.
 - Sending email, changing mail, creating events, or writing Drive content is outside this connection's scope.
 - Do not paste OAuth client secrets, refresh tokens, or credential files into agent chat.
-`;
-}
-
-function googleWorkspaceSkill() {
-  return `---
-name: google-workspace
-description: "Use the local gws CLI for optional, read-first Gmail, Calendar, and Drive workflows."
----
-
-# Google Workspace
-
-Use \`gws\` for Google Workspace access. DotAIOS does not store Google credentials; auth is managed by \`gws\`. This optional connection exposes only DotAIOS read-first Gmail, Calendar, and Drive workflows. The requested OAuth scopes are read-only, but an existing grant's scope is not verified by \`gws auth status\`.
-
-## Before Use
-
-\`\`\`bash
-gws auth status
-\`\`\`
-
-If auth is not ready, ask the user to run:
-
-\`\`\`bash
-${gwsReadOnlyLoginCommand()}
-\`\`\`
-
-## Safe Read-First Commands
-
-\`\`\`bash
-dotaios google inbox
-dotaios google gmail search "from:alice@example.com newer_than:7d"
-dotaios google gmail read <message-id>
-dotaios google agenda --today
-dotaios google calendar prep --today
-dotaios google agenda --week
-dotaios google drive --page-size 10
-dotaios google drive find "budget"
-\`\`\`
-
-Use \`--json\` on safe read commands when an agent or local automation needs structured output.
-
-## Source Attribution
-
-When using Google output in an answer, name the source service and command, such as:
-
-- Source: Gmail via \`dotaios google gmail search\`
-- Source: Calendar via \`dotaios google calendar prep\`
-- Source: Drive via \`dotaios google drive find\`
-
-## Approval Rules
-
-- Ask before sending, replying, forwarding, labeling, archiving, or deleting email.
-- Ask before creating, editing, moving, or deleting calendar events.
-- Do not use raw \`gws\` write commands through this DotAIOS connection. DotAIOS does not expose them, and an existing \`gws\` grant may have broader scopes than the requested setup.
-- Ask before saving Google-derived facts into \`context/\`, \`vault/wiki/\`, \`vault/org/\`, or CRM notes.
-- Never request or expose OAuth client secrets, refresh tokens, or credential files in chat.
 `;
 }
 

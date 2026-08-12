@@ -164,8 +164,10 @@ test("inspectSkillHealth flags readable foreign aliases that can confuse a clien
   assert.equal(target.complete, false);
   const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
   assert.equal(runtime.capabilities.configured, "yes");
-  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.capabilities.projected, "yes");
+  assert.equal(runtime.capabilities.discoverable, "not-probed");
   assert.equal(runtime.capabilities.invocation, "not-run");
+  assert.equal(runtime.capabilities.produced, "not-run");
   assert.equal(runtime.evidence.skillTarget.canonicalPresent, true);
   assert.equal(report.healthy, false);
 });
@@ -192,8 +194,10 @@ test("inspectSkillHealth identifies a canonical frontmatter alias separately", a
   assert.equal(target.complete, false);
   const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
   assert.equal(runtime.capabilities.configured, "yes");
-  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.capabilities.projected, "yes");
+  assert.equal(runtime.capabilities.discoverable, "not-probed");
   assert.equal(runtime.capabilities.invocation, "not-run");
+  assert.equal(runtime.capabilities.produced, "not-run");
   assert.equal(runtime.evidence.skillTarget.canonicalPresent, true);
 });
 
@@ -223,9 +227,11 @@ test("inspectSkillHealth separates configured and discoverable from unverified i
 
   assert.deepEqual(runtime.capabilities, {
     configured: "yes",
-    discoverable: "path-ready",
+    projected: "yes",
+    discoverable: "not-probed",
     binary: "available",
-    invocation: "not-run"
+    invocation: "not-run",
+    produced: "not-run"
   });
   assert.equal(runtime.installed, true);
   assert.equal(report.healthy, true);
@@ -253,7 +259,8 @@ test("inspectSkillHealth keeps warning-only foreign extras path-ready", async ()
   const report = await inspectSkillHealth({ aiosPath, homePath });
   const runtime = report.runtimes.find((entry) => entry.name === "Probe Agent");
 
-  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.capabilities.projected, "yes");
+  assert.equal(runtime.capabilities.discoverable, "not-probed");
   assert.equal(runtime.evidence.skillTarget.canonicalPresent, true);
   assert.equal(runtime.evidence.skillTarget.complete, false);
 });
@@ -299,7 +306,8 @@ test("inspectSkillHealth keeps missing, broken, and same-name foreign canonical 
     assert.equal(target.canonicalPresent, false, current.name);
     assert.equal(target.complete, false, current.name);
     assert.equal(runtime.capabilities.configured, "yes", current.name);
-    assert.equal(runtime.capabilities.discoverable, "no", current.name);
+    assert.equal(runtime.capabilities.projected, "no", current.name);
+    assert.equal(runtime.capabilities.discoverable, "not-probed", current.name);
     assert.equal(runtime.capabilities.invocation, "not-run", current.name);
     assert.equal(runtime.evidence.skillTarget.canonicalPresent, false, current.name);
   }
@@ -329,7 +337,8 @@ test("inspectSkillHealth keeps configured paths separate from runtime installati
 
   assert.equal(runtime.installed, false);
   assert.equal(runtime.capabilities.configured, "yes");
-  assert.equal(runtime.capabilities.discoverable, "path-ready");
+  assert.equal(runtime.capabilities.projected, "yes");
+  assert.equal(runtime.capabilities.discoverable, "not-probed");
   assert.equal(runtime.capabilities.binary, "not-detected");
   assert.equal(runtime.capabilities.invocation, "not-run");
   assert.equal(report.healthy, true);
@@ -351,7 +360,8 @@ test("inspectSkillHealth reports Kimi Code CLI and OpenCode as separate runtimes
     assert.ok(runtime, `${name} should have its own runtime row`);
     assert.equal(runtime.installed, true);
     assert.equal(runtime.capabilities.configured, "yes");
-    assert.equal(runtime.capabilities.discoverable, "path-ready");
+    assert.equal(runtime.capabilities.projected, "yes");
+    assert.equal(runtime.capabilities.discoverable, "not-probed");
     assert.equal(runtime.capabilities.invocation, "not-run");
   }
 });

@@ -730,7 +730,6 @@ exit 1
   const recordPaths = [
     path.join(aiosPath, "connections", "apis", "google-workspace.md"),
     path.join(aiosPath, "connections", "registry.md"),
-    path.join(aiosPath, "skills", "google-workspace", "SKILL.md"),
     path.join(aiosPath, "memory", "events.jsonl")
   ];
   const records = recordPaths.map((recordPath) => fs.readFileSync(recordPath, "utf8")).join("\n");
@@ -739,4 +738,5 @@ exit 1
   assert.match(records, /Version: 9\.8\.7/);
   assert.doesNotMatch(records, new RegExp(gwsBin.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(records, /TOPSECRET|refresh_token|Binary:/);
+  assert.equal(fs.existsSync(path.join(aiosPath, "skills", "google-workspace")), false);
 });
