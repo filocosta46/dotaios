@@ -1125,7 +1125,7 @@ async function readMarkdownSource(fileSystem, readmePath) {
 
   const match = FRONTMATTER_RE.exec(content);
   if (!match) {
-    return { body: content, content, document: parseDocument("{}\n"), metadata: {} };
+    return { body: content, content, document: parseDocument("\n"), metadata: {} };
   }
   const document = parseDocument(match[1], { strict: true, uniqueKeys: true });
   if (document.errors.length > 0) {
@@ -1144,7 +1144,7 @@ async function readMarkdownSource(fileSystem, readmePath) {
 }
 
 function renderProjectReadme(source, metadata) {
-  const document = source?.document || parseDocument("{}\n");
+  const document = source?.document || parseDocument("\n");
   for (const [key, value] of Object.entries(metadata)) {
     document.set(key, value);
   }
