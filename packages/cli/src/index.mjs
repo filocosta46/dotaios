@@ -66,6 +66,7 @@ Commands:
   ingest <input>    Copy material into vault/raw and log an event
   install <path>    Preview or adopt a reviewed local Agent Skill bundle
   interview         Update your context by answering a few short questions
+  mcp <cmd>         Print the read-only MCP server config to add to a client
   memory <cmd>      Audit recent memory or promote captured evidence explicitly
   migrate           Preview, apply, or recover a versioned folder migration
   plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
