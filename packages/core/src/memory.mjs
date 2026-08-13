@@ -245,16 +245,8 @@ const ARCHIVE_TAIL_BYTES = 262_144;
 const ARCHIVE_ROTATE_BYTES = 2 * 1024 * 1024;
 const ARCHIVE_LINE_MAX_BYTES = 4 * 1024 * 1024;
 const EVENT_COMPACTION_PENDING_CONTRACT = "dotaios-event-compaction/v1";
-const EVENT_COMPACTION_AUTHORITY_KEYS = [
-  "phase",
-  "beforeHash",
-  "afterHash",
-  "pendingHash",
-  "pendingRecords",
-  "archiveRecordsBefore",
-  "archiveChainBefore",
-  "archiveChainAfter"
-];
+const EVENT_COMPACTION_PENDING_MAGIC_PREFIX = "#!dotaios-event-compaction";
+const EVENT_COMPACTION_PENDING_MAGIC = `${EVENT_COMPACTION_PENDING_MAGIC_PREFIX}/v1`;
 // Distinguishes marker-protocol generations from ambiguous overlap left by the
 // previous markerless rotator. It is durable before any new rotation begins.
 const ARCHIVE_ROTATION_FORMAT = '{"version":1,"protocol":"durable-marker"}\n';
@@ -481,26 +473,35 @@ function identifyTransactionLiveState(eventsContent, transaction) {
   if (eventsHash === transaction.beforeHash) return "before";
   if (eventsHash === transaction.afterHash) return "after";
 
-  for (let index = 0; index < eventsContent.length; index += 1) {
-    if (eventsContent[index] !== "\n") continue;
-    const suffix = eventsContent.slice(index + 1);
-    if (!isCompleteJsonlSuffix(suffix)) continue;
-    const prefixHash = archiveContentHash(eventsContent.slice(0, index + 1));
-    if (prefixHash === transaction.beforeHash) return "before";
-    if (prefixHash === transaction.afterHash) return "after";
+  // Validate each potential suffix record exactly once, then hash the live
+  // bytes once from left to right. Hash.copy() snapshots the prefix state at a
+  // newline without re-hashing every earlier byte for every boundary.
+  if (!eventsContent.endsWith("\n")) return null;
+  const records = splitArchiveRecords(eventsContent);
+  const validSuffix = new Array(records.length + 1).fill(false);
+  validSuffix[records.length] = true;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    validSuffix[index] = validSuffix[index + 1] && isCompleteJsonlRecord(records[index]);
+  }
+
+  const prefixHash = crypto.createHash("sha256");
+  for (let index = 0; index < records.length - 1; index += 1) {
+    prefixHash.update(records[index]);
+    if (!validSuffix[index + 1]) continue;
+    const digest = prefixHash.copy().digest("hex");
+    if (digest === transaction.beforeHash) return "before";
+    if (digest === transaction.afterHash) return "after";
   }
   return null;
 }
 
-function isCompleteJsonlSuffix(content) {
-  if (!content || !content.endsWith("\n")) return false;
-  const lines = content.slice(0, -1).split("\n");
-  if (lines.some((line) => !line.trim())) return false;
+function isCompleteJsonlRecord(record) {
+  if (!record.endsWith("\n")) return false;
+  const line = record.slice(0, -1);
+  if (!line.trim()) return false;
   try {
-    return lines.every((line) => {
-      const entry = JSON.parse(line);
-      return entry !== null && typeof entry === "object" && !Array.isArray(entry);
-    });
+    const entry = JSON.parse(line);
+    return entry !== null && typeof entry === "object" && !Array.isArray(entry);
   } catch {
     return false;
   }
@@ -621,32 +622,22 @@ function extendArchiveRecordChain(chain, line) {
 }
 
 function parsePendingArchiveArtifact(content) {
-  const newline = content.indexOf("\n");
-  if (newline < 0) {
-    if (isTransactionShapedPendingHeader(content)) throw archiveStateError();
-    return { kind: "legacy", payload: content, pendingLines: content.trim() ? [content] : [] };
+  if (!content.startsWith(`${EVENT_COMPACTION_PENDING_MAGIC}\n`)) {
+    if (content.startsWith(EVENT_COMPACTION_PENDING_MAGIC_PREFIX)) throw archiveStateError();
+    return parseLegacyPendingArchive(content);
   }
-  const headerLine = content.slice(0, newline);
+  const headerStart = EVENT_COMPACTION_PENDING_MAGIC.length + 1;
+  const headerEnd = content.indexOf("\n", headerStart);
+  if (headerEnd < 0) throw archiveStateError();
+  const headerLine = content.slice(headerStart, headerEnd);
   let transaction;
   try {
     transaction = JSON.parse(headerLine);
   } catch {
-    if (isTransactionShapedPendingHeader(headerLine)) throw archiveStateError();
-    return {
-      kind: "legacy",
-      payload: content,
-      pendingLines: content.split("\n").filter((line) => line.trim())
-    };
+    throw archiveStateError();
   }
-  if (transaction?.artifact_contract !== EVENT_COMPACTION_PENDING_CONTRACT) {
-    if (isTransactionShapedPendingHeader(headerLine, transaction)) throw archiveStateError();
-    return {
-      kind: "legacy",
-      payload: content,
-      pendingLines: content.split("\n").filter((line) => line.trim())
-    };
-  }
-  const payload = content.slice(newline + 1);
+  if (transaction?.artifact_contract !== EVENT_COMPACTION_PENDING_CONTRACT) throw archiveStateError();
+  const payload = content.slice(headerEnd + 1);
   const pendingLines = payload.split("\n").filter((line) => line.trim());
   if (
     !["prepared", "ready"].includes(transaction.phase)
@@ -675,21 +666,18 @@ function parsePendingArchiveArtifact(content) {
   return { kind: "transaction", transaction, payload, pendingLines };
 }
 
-function isTransactionShapedPendingHeader(headerLine, parsedHeader) {
-  if (parsedHeader && typeof parsedHeader === "object" && !Array.isArray(parsedHeader)) {
-    if (Object.hasOwn(parsedHeader, "artifact_contract")) return true;
-    return EVENT_COMPACTION_AUTHORITY_KEYS
-      .filter((key) => Object.hasOwn(parsedHeader, key))
-      .length >= 2;
+function parseLegacyPendingArchive(content) {
+  const pendingLines = content.split("\n").filter((line) => line.trim());
+  try {
+    for (const line of pendingLines) JSON.parse(line);
+  } catch {
+    throw archiveStateError();
   }
-  if (/"artifact_contract"\s*:/.test(headerLine)) return true;
-  return EVENT_COMPACTION_AUTHORITY_KEYS
-    .filter((key) => new RegExp(`"${key}"\\s*:`).test(headerLine))
-    .length >= 2;
+  return { kind: "legacy", payload: content, pendingLines };
 }
 
 function renderPendingArchiveArtifact(transaction, payload) {
-  return `${JSON.stringify(transaction)}\n${payload}`;
+  return `${EVENT_COMPACTION_PENDING_MAGIC}\n${JSON.stringify(transaction)}\n${payload}`;
 }
 
 async function removeObservedArchiveFile(filePath, expectedStats, fileSystem) {

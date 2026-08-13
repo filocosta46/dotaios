@@ -809,6 +809,11 @@ function validateManifest(manifest) {
   }
   const queryIds = new Set((manifest.queries || []).map(({ id }) => id));
   for (const id of ["no-hit", "low-hit", "high-hit"]) if (!queryIds.has(id)) throw new Error(`Missing ${id} query.`);
+  for (const query of manifest.queries || []) {
+    if (!["none", "fixed-indices", "modulo"].includes(query.expectation?.kind)) {
+      throw new Error(`Unsupported query expectation kind for ${query.id}.`);
+    }
+  }
   if (!Number.isSafeInteger(manifest.protocol?.coldSamples) || manifest.protocol.coldSamples < 1) throw new Error("Cold samples must be positive.");
   if (!Number.isSafeInteger(manifest.protocol?.warmupSamples) || manifest.protocol.warmupSamples < 1) throw new Error("Warm-up samples must be positive.");
   if (!Number.isSafeInteger(manifest.protocol?.measuredSamples) || manifest.protocol.measuredSamples < 20) throw new Error("Measured samples must be at least 20.");

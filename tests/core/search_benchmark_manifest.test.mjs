@@ -45,14 +45,20 @@ function declaredManifestReceipt(receiptPath, receipt) {
 }
 
 function expectedReportResults(query, selection, manifest) {
-  let indices = [];
-  if (query.expectation.kind === "fixed-indices") indices = query.expectation.fileIndices;
-  if (query.expectation.kind === "modulo") {
+  let indices;
+  if (query.expectation.kind === "none") {
+    indices = [];
+  } else if (query.expectation.kind === "fixed-indices") {
+    indices = query.expectation.fileIndices;
+  } else if (query.expectation.kind === "modulo") {
+    indices = [];
     for (
       let index = query.expectation.remainder;
       index < selection.fileCount;
       index += query.expectation.modulo
     ) indices.push(index);
+  } else {
+    throw new Error(`Unsupported query expectation kind: ${query.expectation.kind}.`);
   }
   const paths = indices.map((index) => {
     const file = `note-${String(index).padStart(5, "0")}.md`;
@@ -347,6 +353,16 @@ test("manifest validation rejects malformed harness sampling and scenario fields
     mutate(invalid);
     assert.throws(() => manifestReceipt(invalid));
   }
+});
+
+test("the public manifest receipt rejects unknown query expectation kinds", async () => {
+  const manifest = await loadManifest(manifestPath);
+  manifest.queries[0].expectation.kind = "future-kind";
+
+  assert.throws(
+    () => manifestReceipt(manifest),
+    /unsupported query expectation kind/i
+  );
 });
 
 test("benchmark commands reserve exclusive output before reading or timing fixtures", async (t) => {

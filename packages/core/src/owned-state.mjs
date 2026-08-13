@@ -36,13 +36,7 @@ export async function validateOwnedDirectoryIfPresent(directory, {
 export function assertOwnedFileStats(stats, mode = 0o600, {
   platform = process.platform
 } = {}) {
-  if (!stats || !stats.isFile() || stats.isSymbolicLink()) throw ownedStateError();
-  const nlink = typeof stats.nlink === "bigint" ? Number(stats.nlink) : stats.nlink;
-  if (nlink !== 1) throw ownedStateError();
-  if (platform === "win32") return;
-  if (stats.uid !== currentUid() || (stats.mode & 0o777) !== mode) {
-    throw ownedStateError();
-  }
+  assertOwnedPublicationFile(stats, mode, 1, platform);
 }
 
 export function sameFileIdentity(left, right) {

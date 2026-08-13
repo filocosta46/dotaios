@@ -15,6 +15,8 @@ import {
 } from "../../packages/core/src/memory.mjs";
 import { searchMemoryDir } from "../../packages/core/src/search.mjs";
 
+const EVENT_COMPACTION_PENDING_MAGIC = "#!dotaios-event-compaction/v1";
+
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-memsafe-test-"));
 }
@@ -297,7 +299,7 @@ test("compaction recovery rejects a truncated transaction batch", async () => {
   assert.equal(fs.existsSync(`${archivePath}.pending`), true);
 });
 
-test("transaction-shaped pending artifacts with corrupt, missing, or unknown contracts fail closed", async (t) => {
+test("marked pending artifacts with corrupt, missing, or unknown contracts fail closed", async (t) => {
   const cases = [
     {
       name: "corrupt envelope",
@@ -322,6 +324,16 @@ test("transaction-shaped pending artifacts with corrupt, missing, or unknown con
         artifact_contract: "dotaios-event-compaction/v999",
         phase: "ready"
       })
+    },
+    {
+      name: "unknown marker version",
+      marker: "#!dotaios-event-compaction/v999",
+      header: JSON.stringify({ artifact_contract: "dotaios-event-compaction/v1" })
+    },
+    {
+      name: "one-byte marker corruption",
+      marker: "#!dotaios-event-compactioo/v1",
+      header: JSON.stringify({ artifact_contract: "dotaios-event-compaction/v1" })
     }
   ];
 
@@ -332,7 +344,7 @@ test("transaction-shaped pending artifacts with corrupt, missing, or unknown con
       const archivePath = path.join(dir, "events-archive.jsonl");
       const pendingPath = `${archivePath}.pending`;
       const archiveBefore = '{"type":"existing-archive"}\n';
-      const pendingBefore = `${fixture.header}\n{"type":"staged-payload"}\n`;
+      const pendingBefore = `${fixture.marker || EVENT_COMPACTION_PENDING_MAGIC}\n${fixture.header}\n{"type":"staged-payload"}\n`;
       seedEvents(eventsPath, 2);
       fs.writeFileSync(archivePath, archiveBefore, { mode: 0o600 });
       fs.writeFileSync(pendingPath, pendingBefore, { mode: 0o600 });
@@ -358,7 +370,10 @@ test("a raw legacy pending JSONL batch remains recoverable", async () => {
   const archivePath = path.join(dir, "events-archive.jsonl");
   const legacy = JSON.stringify({
     ts: "2025-12-31T23:59:59.000Z",
-    type: "legacy-pending"
+    type: "legacy-pending",
+    artifact_contract: "dotaios-event-compaction/v1",
+    phase: "ready",
+    pendingRecords: 99
   });
   const live = JSON.stringify({
     ts: "2026-01-01T00:00:00.000Z",
@@ -401,7 +416,7 @@ test("a crash after pending publication cannot route a new batch through legacy 
   );
   assert.equal(interrupted, true);
   assert.equal(fs.existsSync(`${archivePath}.pending`), true);
-  const preparedHeader = JSON.parse(readLines(`${archivePath}.pending`)[0]);
+  const preparedHeader = JSON.parse(readLines(`${archivePath}.pending`)[1]);
   assert.equal(preparedHeader.artifact_contract, "dotaios-event-compaction/v1");
   assert.equal(preparedHeader.phase, "prepared",
     "every new pending batch must atomically carry prepared transaction authority");
@@ -488,6 +503,41 @@ test("prepared recovery preserves complete records appended by an older writer",
     [...readEventsArchiveLines(dir), ...readLines(eventsPath)],
     [...original, suffix, suffix],
     "suffix recovery preserves byte-identical complete appends as distinct records"
+  );
+});
+
+test("prepared recovery scans a large live prefix in bounded time", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const original = seedEvents(eventsPath, 5_000);
+  const suffix = JSON.stringify({
+    ts: "2026-01-01T00:01:00.000Z",
+    type: "older-writer-suffix"
+  });
+  let interrupted = false;
+  const filesystem = {
+    ...fsp,
+    async link(source, destination) {
+      const result = await fsp.link(source, destination);
+      if (!interrupted && destination === `${archivePath}.pending`) {
+        interrupted = true;
+        throw new Error("injected-crash:prepared-published");
+      }
+      return result;
+    }
+  };
+
+  await assert.rejects(compactEvents(eventsPath, 1, { filesystem }));
+  fs.appendFileSync(eventsPath, `${suffix}\n`);
+  const started = performance.now();
+  await compactEvents(eventsPath, 1);
+  const elapsedMs = performance.now() - started;
+
+  assert.ok(elapsedMs < 2_000, `large recovery took ${elapsedMs.toFixed(1)}ms`);
+  assert.deepEqual(
+    [...readEventsArchiveLines(dir), ...readLines(eventsPath)],
+    [...original, suffix]
   );
 });
 
@@ -583,7 +633,7 @@ test("a crash after ready publication still cannot replace live memory until ret
   );
   assert.equal(interrupted, true);
   assert.deepEqual(readLines(eventsPath), original, "ready evidence still precedes the live commit point");
-  assert.equal(JSON.parse(readLines(`${archivePath}.pending`)[0]).phase, "ready");
+  assert.equal(JSON.parse(readLines(`${archivePath}.pending`)[1]).phase, "ready");
 
   await compactEvents(eventsPath, 1);
 
@@ -646,7 +696,7 @@ test("ready recovery preserves complete records appended after the live commit",
     compactEvents(eventsPath, 1, { filesystem: fault.filesystem }),
     /injected-crash:link:2/
   );
-  assert.equal(JSON.parse(readLines(`${archivePath}.pending`)[0]).phase, "ready");
+  assert.equal(JSON.parse(readLines(`${archivePath}.pending`)[1]).phase, "ready");
   assert.equal(readLines(eventsPath).length, 1, "the live replacement committed before this crash");
   fs.appendFileSync(eventsPath, `${suffix}\n${suffix}\n`);
 
