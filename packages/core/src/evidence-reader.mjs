@@ -12,7 +12,8 @@ import {
   readContainedFile,
   readContainedSnapshotDirectory,
   readContainedSnapshotFile,
-  sameContainedDirectorySnapshot
+  sameContainedDirectorySnapshot,
+  sameContainedFileMetadataSnapshot
 } from "./contained-read.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 
@@ -113,7 +114,8 @@ function createEvidenceReaderView(roots, state) {
     scopeDiscovery = false,
     executionBudget = budget,
     demandBudget = budget,
-    observedFiles = []
+    observedFiles = new Map(),
+    transactionState = null
   } = state;
   const authorizedRoots = [...new Set((roots || []).map((root) => path.resolve(root)))];
   if (authorizedRoots.length === 0) throw new TypeError("Evidence readers require an authorized root.");
@@ -259,11 +261,6 @@ function createEvidenceReaderView(roots, state) {
     } catch (error) {
       throw normalizeEvidenceReadError(error);
     }
-    observedFiles.push(Object.freeze({
-      root: metadata.root,
-      filePath: metadata.filePath,
-      expectedEntry: metadata.expectedEntry
-    }));
     return Object.freeze({ kind: "text", content });
   }
 
@@ -324,13 +321,15 @@ function createEvidenceReaderView(roots, state) {
       throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
     }
     try {
-      return await inspectContainedPathEntry(authorizedRoot, filePath, {
+      const observation = await inspectContainedPathEntry(authorizedRoot, filePath, {
         filesystem,
         expectedDirectories: expectedDirectoriesFor(authorizedRoot, filePath),
         ...(Object.hasOwn(options, "expectedEntry")
           ? { expectedSnapshot: options.expectedEntry }
           : {})
       });
+      rememberFileObservation(authorizedRoot, filePath, observation);
+      return observation;
     } catch (error) {
       throw normalizeEvidenceReadError(error);
     }
@@ -626,6 +625,7 @@ function createEvidenceReaderView(roots, state) {
           filesystem,
           expectedDirectories: [{ path: path.resolve(directoryPath), snapshot: observed.snapshot }]
         });
+        rememberFileObservation(root, filePath, expectedEntry);
         if (!expectedEntry || expectedEntry.type !== "regular-file") {
           throw new EvidenceReadError("DOTAIOS_EVIDENCE_NOT_REGULAR_FILE");
         }
@@ -763,174 +763,210 @@ function createEvidenceReaderView(roots, state) {
       maxFiles: available.files,
       maxEntries: available.entries
     });
-    const prepared = [];
-    for (const scope of scopes) {
+    const prepared = scopes.map((scope) => {
       const scopeDemandBudget = createContainedReadBudget({
         maxBytes: scopeLimits.maxBytes,
         maxFiles: scopeLimits.maxFiles,
         maxEntries: scopeLimits.maxEntries,
         dimensionCodes: true
       });
-      const beforeDiscovery = budget.snapshot();
-      const discoveryBudget = combineContainedReadBudgets(budget, scopeDemandBudget);
-      const scopeReader = createEvidenceReaderView(authorizedRoots, {
-        filesystem,
-        effectiveLimits: scopeLimits,
-        budget: discoveryBudget,
-        executionBudget: budget,
-        demandBudget: scopeDemandBudget,
-        observedDirectories: new Map(),
-        observedFiles: [],
-        collectRequestObservations: true,
-        dimensionCodes: true,
-        scopeDiscovery: true
-      });
-      const item = {
+      return {
         scope,
         value: null,
         demandBudget: scopeDemandBudget,
         materialized: emptyDemand(),
         error: null,
-        reader: scopeReader
+        reader: null,
+        observedDirectories: new Map(),
+        observedFiles: new Map(),
+        transactionState: { active: true }
       };
-      try {
-        item.value = await inspectScope(scope, scopeReader);
-      } catch (error) {
-        item.error = normalizeEvidenceReadError(error);
-      }
-      item.materialized = subtractDemand(budget.snapshot(), beforeDiscovery);
-      prepared.push(item);
-    }
-
-    let fatal = prepared.find(({ error }) => error && !SKIPPABLE_SCOPE_CODES.has(error.code));
-    if (fatal) throw fatal.error;
-
-    const preliminary = allocateScopeDemands(
-      prepared.map((item) => ({
-        ...item,
-        observedDemand: item.demandBudget.snapshot(),
-        demand: subtractDemand(item.demandBudget.snapshot(), item.materialized)
-      })),
-      budget.remaining(),
-      available
-    );
-
-    for (const item of prepared) {
-      if (!preliminary.admitted.has(item.scope)) continue;
-      const beforeDiscovery = budget.snapshot();
-      try {
-        item.value = await discoverScope(item.scope, item.reader, item.value);
-      } catch (error) {
-        item.error = normalizeEvidenceReadError(error);
-      }
-      item.materialized = addDemand(
-        item.materialized,
-        subtractDemand(budget.snapshot(), beforeDiscovery)
-      );
-    }
-
-    fatal = prepared.find(({ error }) => error && !SKIPPABLE_SCOPE_CODES.has(error.code));
-    if (fatal) throw fatal.error;
-
-    for (const item of prepared) {
-      for (const [key, observation] of item.reader.observations()) {
-        const retained = observedDirectories.get(key);
-        if (retained && !sameContainedDirectorySnapshot(retained.snapshot, observation.snapshot)) {
-          throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
-        }
-        if (!retained) observedDirectories.set(key, observation);
-      }
-    }
-
-    const candidates = prepared.filter((item) => preliminary.admitted.has(item.scope));
-    const finalAllocation = allocateScopeDemands(
-      candidates.map((item) => ({
-        ...item,
-        observedDemand: item.demandBudget.snapshot(),
-        demand: subtractDemand(item.demandBudget.snapshot(), item.materialized)
-      })),
-      budget.remaining(),
-      available
-    );
-    const allocation = Object.freeze({
-      admitted: finalAllocation.admitted,
-      omissions: freezeOmissions([
-        ...preliminary.omissions,
-        ...finalAllocation.omissions
-      ])
     });
-    const admitted = new Map();
-    for (const item of candidates) {
-      if (!allocation.admitted.has(item.scope)) continue;
-      admitted.set(item.scope, await executeScope(item.scope, item.reader, item.value));
-    }
-    let active = true;
-    const transaction = Object.freeze({
-      has(scope) {
-        if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
-        return admitted.has(scope);
-      },
-      get(scope) {
-        if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
-        return admitted.get(scope);
-      },
-      omissions: allocation.omissions
+    const createScopeReader = (item, phaseBudget = null) => createEvidenceReaderView(authorizedRoots, {
+      filesystem,
+      effectiveLimits: scopeLimits,
+      budget: phaseBudget
+        ? combineContainedReadBudgets(budget, item.demandBudget, phaseBudget)
+        : combineContainedReadBudgets(budget, item.demandBudget),
+      executionBudget: phaseBudget
+        ? combineContainedReadBudgets(budget, phaseBudget)
+        : budget,
+      demandBudget: item.demandBudget,
+      observedDirectories: item.observedDirectories,
+      observedFiles: item.observedFiles,
+      transactionState: item.transactionState,
+      collectRequestObservations: true,
+      dimensionCodes: true,
+      scopeDiscovery: true
     });
 
-    let result;
     try {
-      result = await callback(transaction);
-    } finally {
-      active = false;
-    }
-    try {
+      const inspectionPhases = createFairPhaseBudgets(budget.remaining(), prepared.length);
       for (const item of prepared) {
-        for (const observation of item.reader.fileObservations()) {
-          await inspectEntry(observation.root, observation.filePath, {
-            expectedEntry: observation.expectedEntry
-          });
+        const phase = inspectionPhases.next();
+        const beforeInspection = budget.snapshot();
+        item.reader = createScopeReader(item, phase.budget);
+        try {
+          item.value = await inspectScope(item.scope, item.reader);
+        } catch (error) {
+          item.error = normalizeEvidenceReadError(error);
+        } finally {
+          phase.settle();
+        }
+        item.materialized = subtractDemand(budget.snapshot(), beforeInspection);
+      }
+
+      let fatal = prepared.find(({ error }) => error && !SKIPPABLE_SCOPE_CODES.has(error.code));
+      if (fatal) throw fatal.error;
+
+      const preliminary = allocateScopeDemands(
+        prepared.map((item) => ({
+          ...item,
+          observedDemand: item.demandBudget.snapshot(),
+          demand: subtractDemand(item.demandBudget.snapshot(), item.materialized)
+        })),
+        budget.remaining(),
+        available
+      );
+
+      const candidates = prepared.filter((item) => preliminary.admitted.has(item.scope));
+      const discoveryPhases = createFairPhaseBudgets(budget.remaining(), candidates.length);
+      for (const item of candidates) {
+        const phase = discoveryPhases.next();
+        const beforeDiscovery = budget.snapshot();
+        item.reader = createScopeReader(item, phase.budget);
+        try {
+          item.value = await discoverScope(item.scope, item.reader, item.value);
+        } catch (error) {
+          item.error = normalizeEvidenceReadError(error);
+        } finally {
+          phase.settle();
+        }
+        item.materialized = addDemand(
+          item.materialized,
+          subtractDemand(budget.snapshot(), beforeDiscovery)
+        );
+      }
+
+      fatal = prepared.find(({ error }) => error && !SKIPPABLE_SCOPE_CODES.has(error.code));
+      if (fatal) throw fatal.error;
+
+      for (const item of prepared) {
+        for (const [key, observation] of item.reader.observations()) {
+          const retained = observedDirectories.get(key);
+          if (retained && !sameContainedDirectorySnapshot(retained.snapshot, observation.snapshot)) {
+            throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
+          }
+          if (!retained) observedDirectories.set(key, observation);
         }
       }
-      await revalidateObservedDirectories();
-      return result;
-    } catch (error) {
-      throw normalizeEvidenceReadError(error);
+
+      const finalAllocation = allocateScopeDemands(
+        candidates.map((item) => ({
+          ...item,
+          observedDemand: item.demandBudget.snapshot(),
+          demand: subtractDemand(item.demandBudget.snapshot(), item.materialized)
+        })),
+        budget.remaining(),
+        available
+      );
+      const allocation = Object.freeze({
+        admitted: finalAllocation.admitted,
+        omissions: freezeOmissions([
+          ...preliminary.omissions,
+          ...finalAllocation.omissions
+        ])
+      });
+      const admitted = new Map();
+      for (const item of candidates) {
+        if (!allocation.admitted.has(item.scope)) continue;
+        item.reader = createScopeReader(item);
+        admitted.set(item.scope, await executeScope(item.scope, item.reader, item.value));
+      }
+      let active = true;
+      const transaction = Object.freeze({
+        has(scope) {
+          if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
+          return admitted.has(scope);
+        },
+        get(scope) {
+          if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
+          return admitted.get(scope);
+        },
+        omissions: allocation.omissions
+      });
+
+      let result;
+      try {
+        result = await callback(transaction);
+      } finally {
+        active = false;
+      }
+      try {
+        for (const item of prepared) {
+          for (const observation of item.reader.fileObservations()) {
+            await inspectEntry(observation.root, observation.filePath, {
+              expectedEntry: observation.expectedEntry
+            });
+          }
+        }
+        await revalidateObservedDirectories();
+        return result;
+      } catch (error) {
+        throw normalizeEvidenceReadError(error);
+      }
+    } finally {
+      for (const item of prepared) item.transactionState.active = false;
     }
   }
 
   return Object.freeze({
     roots: Object.freeze([...authorizedRoots]),
     withAuthorizedRoots(additionalRoots) {
+      assertViewActive();
       const additions = Array.isArray(additionalRoots) ? additionalRoots : [additionalRoots];
       if (additions.some((root) => typeof root !== "string" || root.length === 0)) {
         throw new TypeError("Authorized evidence roots must be non-empty paths.");
       }
       return createEvidenceReaderView([...authorizedRoots, ...additions], state);
     },
-    readText,
-    readJson,
-    readJsonl,
-    prepareJsonl,
-    prepareJsonlMetadata,
-    materializePreparedJsonl,
-    readPreparedJsonl,
-    prepareTextContent,
-    prepareTextMetadata,
-    materializePreparedText,
-    readPreparedText,
-    readFrontmatter,
-    inspectEntry,
-    listFiles,
-    listDirectories,
-    listDirectory,
-    withTextCorpus,
-    prepareTextCorpus,
-    withPreparedTextCorpus,
-    withScopePreflight,
-    observations: () => new Map(observedDirectories),
-    fileObservations: () => [...observedFiles],
-    snapshot: () => budget.snapshot()
+    readText: guardReaderOperation(readText),
+    readJson: guardReaderOperation(readJson),
+    readJsonl: guardReaderOperation(readJsonl),
+    prepareJsonl: guardReaderOperation(prepareJsonl),
+    prepareJsonlMetadata: guardReaderOperation(prepareJsonlMetadata),
+    materializePreparedJsonl: guardReaderOperation(materializePreparedJsonl),
+    readPreparedJsonl: guardReaderOperation(readPreparedJsonl),
+    prepareTextContent: guardReaderOperation(prepareTextContent),
+    prepareTextMetadata: guardReaderOperation(prepareTextMetadata),
+    materializePreparedText: guardReaderOperation(materializePreparedText),
+    readPreparedText: guardReaderOperation(readPreparedText),
+    readFrontmatter: guardReaderOperation(readFrontmatter),
+    inspectEntry: guardReaderOperation(inspectEntry),
+    listFiles: guardReaderOperation(listFiles),
+    listDirectories: guardReaderOperation(listDirectories),
+    listDirectory: guardReaderOperation(listDirectory),
+    withTextCorpus: guardReaderOperation(withTextCorpus),
+    prepareTextCorpus: guardReaderOperation(prepareTextCorpus),
+    withPreparedTextCorpus: guardReaderOperation(withPreparedTextCorpus),
+    withScopePreflight: guardReaderOperation(withScopePreflight),
+    observations: guardReaderOperation(() => new Map(observedDirectories)),
+    fileObservations: guardReaderOperation(() => [...observedFiles.values()]),
+    snapshot: guardReaderOperation(() => budget.snapshot())
   });
+
+  function assertViewActive() {
+    if (transactionState && !transactionState.active) {
+      throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
+    }
+  }
+
+  function guardReaderOperation(operation) {
+    return (...args) => {
+      assertViewActive();
+      return operation(...args);
+    };
+  }
 
   function reserveDiscoveredEntries(count) {
     if (executionBudget.remaining().entries < count) {
@@ -959,6 +995,28 @@ function createEvidenceReaderView(roots, state) {
       path: resolvedDirectory,
       snapshot
     });
+  }
+
+  function rememberFileObservation(root, filePath, expectedEntry) {
+    if (!collectRequestObservations) return;
+    const resolvedRoot = path.resolve(root);
+    const resolvedFile = path.resolve(filePath);
+    const key = `${resolvedRoot}\0${resolvedFile}`;
+    const retained = observedFiles.get(key);
+    if (retained) {
+      const unchanged = (retained.expectedEntry === null && expectedEntry === null)
+        || (
+          retained.expectedEntry?.type === expectedEntry?.type
+          && sameContainedFileMetadataSnapshot(retained.expectedEntry, expectedEntry)
+        );
+      if (!unchanged) throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
+      return;
+    }
+    observedFiles.set(key, Object.freeze({
+      root: resolvedRoot,
+      filePath: resolvedFile,
+      expectedEntry
+    }));
   }
 
   async function rememberReadParent(root, filePath) {
@@ -1052,7 +1110,53 @@ function allocateScopeDemands(prepared, capacity, reportedCapacity = capacity) {
       reportedCapacity
     ));
   }
-  return Object.freeze({ admitted, omissions: freezeOmissions(omissions) });
+  return Object.freeze({ admitted, omissions: Object.freeze(omissions) });
+}
+
+function createFairPhaseBudgets(capacity, requestedCount) {
+  if (requestedCount === 0) {
+    return Object.freeze({
+      next() {
+        throw new RangeError("No evidence phases remain.");
+      }
+    });
+  }
+  const protectedShare = {
+    bytes: Math.floor(Math.floor(capacity.bytes / 2) / requestedCount),
+    files: Math.floor(Math.floor(capacity.files / 2) / requestedCount),
+    entries: Math.floor(Math.floor(capacity.entries / 2) / requestedCount)
+  };
+  let pool = subtractDemand(capacity, multiplyDemand(protectedShare, requestedCount));
+  let remainingScopes = requestedCount;
+  return Object.freeze({
+    next() {
+      if (remainingScopes === 0) throw new RangeError("No evidence phases remain.");
+      remainingScopes -= 1;
+      const phaseBudget = createContainedReadBudget({
+        maxBytes: protectedShare.bytes + pool.bytes,
+        maxFiles: protectedShare.files + pool.files,
+        maxEntries: protectedShare.entries + pool.entries,
+        dimensionCodes: true
+      });
+      let settled = false;
+      return Object.freeze({
+        budget: phaseBudget,
+        settle() {
+          if (settled) return;
+          settled = true;
+          const used = phaseBudget.snapshot();
+          pool = {
+            bytes: pool.bytes - Math.max(0, used.bytes - protectedShare.bytes)
+              + Math.max(0, protectedShare.bytes - used.bytes),
+            files: pool.files - Math.max(0, used.files - protectedShare.files)
+              + Math.max(0, protectedShare.files - used.files),
+            entries: pool.entries - Math.max(0, used.entries - protectedShare.entries)
+              + Math.max(0, protectedShare.entries - used.entries)
+          };
+        }
+      });
+    }
+  });
 }
 
 function omissionReasonForError(code) {
@@ -1157,6 +1261,14 @@ function addDemand(left, right) {
   };
 }
 
+function multiplyDemand(demand, multiplier) {
+  return {
+    bytes: demand.bytes * multiplier,
+    files: demand.files * multiplier,
+    entries: demand.entries * multiplier
+  };
+}
+
 function subtractDemand(left, right) {
   return {
     bytes: Math.max(0, left.bytes - right.bytes),
@@ -1165,24 +1277,22 @@ function subtractDemand(left, right) {
   };
 }
 
-function combineContainedReadBudgets(physicalBudget, demandBudget) {
+function combineContainedReadBudgets(...budgets) {
   return Object.freeze({
     reserveFile(size) {
-      const remaining = minDemand(physicalBudget.remaining(), demandBudget.remaining());
+      const remaining = minDemands(budgets.map((budget) => budget.remaining()));
       if (remaining.files < 1) throw new ContainedReadError("DOTAIOS_PROJECTION_FILE_COUNT_EXCEEDED");
       if (remaining.bytes < size) throw new ContainedReadError("DOTAIOS_PROJECTION_BYTE_BUDGET_EXCEEDED");
-      physicalBudget.reserveFile(size);
-      demandBudget.reserveFile(size);
+      for (const budget of budgets) budget.reserveFile(size);
     },
     reserveEntries(count = 1) {
-      if (minDemand(physicalBudget.remaining(), demandBudget.remaining()).entries < count) {
+      if (minDemands(budgets.map((budget) => budget.remaining())).entries < count) {
         throw new ContainedReadError("DOTAIOS_PROJECTION_ENTRY_COUNT_EXCEEDED");
       }
-      physicalBudget.reserveEntries(count);
-      demandBudget.reserveEntries(count);
+      for (const budget of budgets) budget.reserveEntries(count);
     },
     reserveDemand(demand = {}) {
-      const remaining = minDemand(physicalBudget.remaining(), demandBudget.remaining());
+      const remaining = minDemands(budgets.map((budget) => budget.remaining()));
       if (remaining.files < Number(demand.files || 0)) {
         throw new ContainedReadError("DOTAIOS_PROJECTION_FILE_COUNT_EXCEEDED");
       }
@@ -1192,16 +1302,19 @@ function combineContainedReadBudgets(physicalBudget, demandBudget) {
       if (remaining.entries < Number(demand.entries || 0)) {
         throw new ContainedReadError("DOTAIOS_PROJECTION_ENTRY_COUNT_EXCEEDED");
       }
-      physicalBudget.reserveDemand(demand);
-      demandBudget.reserveDemand(demand);
+      for (const budget of budgets) budget.reserveDemand(demand);
     },
     remaining() {
-      return minDemand(physicalBudget.remaining(), demandBudget.remaining());
+      return minDemands(budgets.map((budget) => budget.remaining()));
     },
     snapshot() {
-      return demandBudget.snapshot();
+      return budgets.at(-1).snapshot();
     }
   });
+}
+
+function minDemands(demands) {
+  return demands.reduce((minimum, demand) => minDemand(minimum, demand));
 }
 
 function fitsDemand(demand, capacity) {

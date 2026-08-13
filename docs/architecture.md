@@ -141,20 +141,21 @@ secret-like entries remain ineligible. Linked, non-regular, changed, invalid
 UTF-8, unauthorized, misconfigured, or unexpectedly unreadable observed
 evidence rejects the whole request.
 
-Resource ceilings are different. One request-owned discovery transaction first
-records safe directory and file metadata while charging directory observations
-to a shared, non-releasable ledger. A deterministic fair preliminary allocation
-selects which catalog-bearing scopes
-may spend that ledger on the bounded raw reads needed for exact JSONL entry
-counts or session membership. Ordinary corpus files contribute contained
-metadata only at this stage; retained catalog/raw bytes are never reread. After
-exact discovery, half of each remaining request-wide byte, file, and entry
-ceiling is reserved as equal protected shares before unused capacity is
-redistributed in declared order. Only scopes whose remaining work fits have
-their ordinary content read and are tokenized and ranked. Otherwise the whole
-scope is omitted so partial-corpus IDF and ranking are never presented as
-complete. Prepared file, directory, ancestor, and root observations remain
-transaction-owned and are revalidated before results resolve.
+Resource ceilings are different. One request-owned discovery transaction uses
+phase-local fair ledgers before metadata inspection or catalog reads can spend
+the shared, non-releasable physical ledger. Half of each currently available
+byte, file, and entry ceiling is reserved as equal protected shares; unused
+capacity is redistributed in declared order. The same rule is applied to the
+bounded catalog discovery needed for exact JSONL entry counts or session
+membership. Session discovery replays the public reverse-order filters, query,
+and limit, so it retains each body at most once and never charges a body that a
+title, agent, or project hit makes unnecessary. Retained catalog/body bytes are
+never reread. Only scopes whose remaining work fits have their ordinary content
+read and are tokenized and ranked. Otherwise the whole scope is omitted so
+partial-corpus IDF and ranking are never presented as complete. Every inspected
+file plus each directory, ancestor, and root observation remains
+transaction-owned and is revalidated before results resolve; all phase readers
+and prepared capabilities close on success or failure.
 
 Successful search arrays retain their iterable group shape and expose frozen,
 non-enumerable `scope` and `omissions` metadata. Omissions use the closed reason
@@ -190,11 +191,23 @@ One valid record above 2 MiB but no larger than the 4 MiB evidence-file ceiling
 occupies a shard by itself. A larger record stops maintenance before the live
 event generation is replaced or a stale signal source is removed. The pending
 batch remains recovery authority until shard and active-file publication have
-been fsynced. Each shard is created exclusively at mode 0600 and is never
-overwritten; active and pending files must be owned, regular, single-link files.
-Maintenance narrowly secures an eligible legacy 0644 active archive to 0600,
-but rejects links, wrong ownership, broader modes, and unsafe pre-existing
-shard targets.
+been fsynced. A durable `*.rotation-format` witness separates new
+marker-protocol generations from ambiguous overlap left by the older
+markerless rotator. If the witness is absent and the newest shard is an exact
+prefix of the active archive, maintenance fails before mutation with
+`DOTAIOS_ARCHIVE_LEGACY_RECOVERY_REQUIRED`; an operator can inspect both
+authoritative copies instead of DotAIOS guessing whether equal records are a
+retry or legitimate duplicates. Each shard is created exclusively at mode 0600
+and is never overwritten; active and pending files must be owned, regular,
+single-link files. Maintenance narrowly secures an eligible legacy 0644 active
+archive to 0600, but rejects links, wrong ownership, broader modes, and unsafe
+pre-existing shard targets.
+
+Exclusive publication links an owned UUID temporary into its final name. If a
+real process death leaves those two names on the same inode, restart recovery
+removes only the single proven temporary, fsyncs the directory, and revalidates
+the final file as the same owned, mode-0600, single-link object. Any different
+hard-link state remains fatal.
 
 Search observes the memory directory before reading the numbered generation
 and revalidates it before results resolve. A concurrent rotation therefore

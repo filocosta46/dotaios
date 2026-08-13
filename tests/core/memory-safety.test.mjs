@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -294,6 +295,163 @@ test("legacy active normalization recovers marker, shard, and active transitions
       assert.equal(fs.existsSync(`${archivePath}.pending`), false, "recovery consumes the staged batch");
     });
   }
+});
+
+test("rotation recovers real process death inside exclusive archive publication", async (t) => {
+  if (process.platform === "win32") return;
+  for (const scenario of [
+    { name: "rotation marker", suffix: ".rotation" },
+    { name: "immutable shard", suffix: ".000001.jsonl" }
+  ]) {
+    await t.test(scenario.name, async () => {
+      const dir = tmpDir();
+      const eventsPath = path.join(dir, "events.jsonl");
+      const archivePath = path.join(dir, "events-archive.jsonl");
+      const targetPath = scenario.suffix === ".rotation"
+        ? `${archivePath}.rotation`
+        : archivePath.replace(/\.jsonl$/, scenario.suffix);
+      const markerPath = `${archivePath}.rotation`;
+      const original = Array.from({ length: 4 }, (_, index) => JSON.stringify({
+        ts: `2026-01-01T00:00:0${index}.000Z`,
+        type: "hard-kill-rotation",
+        id: `event-${index}`,
+        summary: index < 3 ? "x".repeat(720_000) : "kept"
+      }));
+      fs.writeFileSync(eventsPath, `${original.join("\n")}\n`, { mode: 0o600 });
+      const memoryModule = new URL("../../packages/core/src/memory.mjs", import.meta.url).href;
+      const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+        import fs from "node:fs/promises";
+        import { compactEvents } from ${JSON.stringify(memoryModule)};
+        const filesystem = {
+          ...fs,
+          async link(source, destination) {
+            await fs.link(source, destination);
+            if (destination.endsWith(process.env.DOTAIOS_TEST_KILL_SUFFIX)) {
+              process.kill(process.pid, "SIGKILL");
+            }
+          }
+        };
+        await compactEvents(process.env.DOTAIOS_TEST_EVENTS_PATH, 1, { filesystem });
+      `], {
+        env: {
+          ...process.env,
+          DOTAIOS_TEST_EVENTS_PATH: eventsPath,
+          DOTAIOS_TEST_KILL_SUFFIX: scenario.suffix
+        },
+        encoding: "utf8"
+      });
+
+      assert.equal(child.signal, "SIGKILL", child.stderr || child.stdout);
+      const targetStats = fs.lstatSync(targetPath);
+      assert.equal(targetStats.nlink, 2, "the killed publisher must leave the linked temporary behind");
+      const temporaryPrefix = `.${path.basename(targetPath)}.`;
+      assert.equal(
+        fs.readdirSync(dir).filter((name) => name.startsWith(temporaryPrefix) && name.endsWith(".tmp")).length,
+        1,
+        "the fixture must exercise the real link-before-unlink crash window"
+      );
+
+      await compactEvents(eventsPath, 1);
+
+      assert.deepEqual(
+        readEventsArchiveLines(dir).map((line) => JSON.parse(line).id),
+        ["event-0", "event-1", "event-2"]
+      );
+      assert.deepEqual(readLines(eventsPath).map((line) => JSON.parse(line).id), ["event-3"]);
+      assert.equal(fs.existsSync(markerPath), false);
+      assert.equal(
+        fs.readdirSync(dir).some((name) => name.startsWith(temporaryPrefix) && name.endsWith(".tmp")),
+        false
+      );
+    });
+  }
+});
+
+test("markerless ordinary rotation overlap fails closed for explicit legacy recovery", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const shardPath = path.join(dir, "events-archive.000001.jsonl");
+  const pendingPath = `${archivePath}.pending`;
+  const overlapped = [
+    JSON.stringify({ ts: "2026-01-01T00:00:00.000Z", type: "legacy-overlap", id: "old-0" }),
+    JSON.stringify({ ts: "2026-01-01T00:00:01.000Z", type: "legacy-overlap", id: "old-1" })
+  ];
+  const pending = JSON.stringify({
+    ts: "2026-01-01T00:00:02.000Z",
+    type: "legacy-overlap",
+    id: "pending"
+  });
+  const live = JSON.stringify({ ts: "2026-01-01T00:00:03.000Z", type: "live", id: "live" });
+  const overlapContent = `${overlapped.join("\n")}\n`;
+  fs.writeFileSync(archivePath, overlapContent, { mode: 0o600 });
+  fs.writeFileSync(shardPath, overlapContent, { mode: 0o600 });
+  fs.writeFileSync(pendingPath, `${pending}\n`, { mode: 0o600 });
+  fs.writeFileSync(eventsPath, `${live}\n`, { mode: 0o600 });
+  const before = Object.fromEntries(
+    [archivePath, shardPath, pendingPath, eventsPath]
+      .map((filePath) => [filePath, fs.readFileSync(filePath)])
+  );
+
+  await assert.rejects(
+    () => compactEvents(eventsPath, 1),
+    (error) => {
+      assert.equal(error?.code, "DOTAIOS_ARCHIVE_LEGACY_RECOVERY_REQUIRED");
+      assert.match(error.message, /legacy rotation recovery/i);
+      assert.deepEqual(error.diagnostic, {
+        kind: "markerless-rotation-overlap",
+        archive: "events-archive.jsonl",
+        shard: "events-archive.000001.jsonl",
+        action: "preserve-and-inspect"
+      });
+      return true;
+    }
+  );
+
+  for (const [filePath, content] of Object.entries(before)) {
+    assert.deepEqual(fs.readFileSync(filePath), content, `${path.basename(filePath)} must remain authoritative`);
+  }
+  assert.equal(fs.existsSync(path.join(dir, "events-archive.000002.jsonl")), false);
+  assert.equal(fs.existsSync(`${archivePath}.rotation`), false);
+  assert.equal(fs.existsSync(`${archivePath}.rotation-format`), false);
+});
+
+test("markerless oversized normalization overlap fails before publishing another shard", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const shardPath = path.join(dir, "events-archive.000001.jsonl");
+  const pendingPath = `${archivePath}.pending`;
+  const legacy = Array.from({ length: 3 }, (_, index) => JSON.stringify({
+    ts: `2026-01-01T00:00:0${index}.000Z`,
+    type: "legacy-overlap",
+    id: `old-${index}`,
+    summary: "x".repeat(720_000)
+  }));
+  const pending = JSON.stringify({
+    ts: "2026-01-01T00:00:03.000Z",
+    type: "legacy-overlap",
+    id: "pending"
+  });
+  const live = JSON.stringify({ ts: "2026-01-01T00:00:04.000Z", type: "live", id: "live" });
+  const activeContent = `${legacy.join("\n")}\n`;
+  const shardContent = `${legacy.slice(0, 2).join("\n")}\n`;
+  fs.writeFileSync(archivePath, activeContent, { mode: 0o600 });
+  fs.writeFileSync(shardPath, shardContent, { mode: 0o600 });
+  fs.writeFileSync(pendingPath, `${pending}\n`, { mode: 0o600 });
+  fs.writeFileSync(eventsPath, `${live}\n`, { mode: 0o600 });
+
+  await assert.rejects(
+    () => compactEvents(eventsPath, 1),
+    (error) => error?.code === "DOTAIOS_ARCHIVE_LEGACY_RECOVERY_REQUIRED"
+  );
+
+  assert.equal(fs.readFileSync(archivePath, "utf8"), activeContent);
+  assert.equal(fs.readFileSync(shardPath, "utf8"), shardContent);
+  assert.equal(fs.readFileSync(pendingPath, "utf8"), `${pending}\n`);
+  assert.equal(fs.readFileSync(eventsPath, "utf8"), `${live}\n`);
+  assert.equal(fs.existsSync(path.join(dir, "events-archive.000002.jsonl")), false);
+  assert.equal(fs.existsSync(`${archivePath}.rotation-format`), false);
 });
 
 test("compaction re-run on an already-compacted file is a no-op", async () => {

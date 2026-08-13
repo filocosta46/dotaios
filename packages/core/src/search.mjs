@@ -250,11 +250,7 @@ async function executeDiscoveredScope(_scope, prepared, {
   reader
 }) {
   if (prepared?.kind === "sessions") {
-    return searchDiscoveredSessions(aiosPath, query, prepared, {
-      limit,
-      reader,
-      ...sessionFilters
-    });
+    return prepared.results;
   }
   if (prepared?.kind === "memory") {
     return searchDiscoveredMemory(prepared, query, { limit, reader });
@@ -430,21 +426,9 @@ async function memorySourceDescriptors(memoryDir, { reader, root }) {
       family: "signals",
       generation: "live"
     }));
-  const liveSourcesByFamily = new Map([
-    ["events", [eventSource.source]],
-    ["signals", signalSources.map(({ source }) => source)]
-  ]);
   return [
     eventSource,
-    ...archives.map((source) => source.generation === "archive-active"
-      ? {
-        ...source,
-        retryAgainst: [
-          ...source.retryAgainst,
-          ...liveSourcesByFamily.get(source.family)
-        ]
-      }
-      : source),
+    ...archives,
     ...signalSources
   ];
 }
@@ -454,14 +438,13 @@ function rankMemorySources(sources, entriesBySource, query, limit) {
   // common a term actually is in this folder, not just among the hits.
   const docs = [];
   const candidates = [];
-  for (const { source, retryAgainst = [] } of sources) {
-    const retryOverlap = serializedEntryCounts(
-      retryAgainst.flatMap((counterpart) => entriesBySource.get(counterpart) || [])
-    );
+  const retrySuppression = buildMemoryRetrySuppression(sources, entriesBySource);
+  for (const { source } of sources) {
+    const suppressed = retrySuppression.get(source) || new Map();
     const entries = entriesBySource.get(source) || [];
     for (const entry of entries) {
       const text = JSON.stringify(entry);
-      if (consumeSerializedEntry(retryOverlap, text)) continue;
+      if (consumeSerializedEntry(suppressed, text)) continue;
       docs.push(text);
       const match = matchJsonEntry(entry, query);
       if (!match) continue;
@@ -493,6 +476,56 @@ function rankMemorySources(sources, entriesBySource, query, limit) {
     .map(({ result }) => result);
 }
 
+function buildMemoryRetrySuppression(sources, entriesBySource) {
+  const suppression = new Map(sources.map(({ source }) => [source, new Map()]));
+  for (const family of new Set(sources.map(({ family }) => family).filter(Boolean))) {
+    const familySources = sources.filter((source) => source.family === family);
+    const newestShard = familySources.filter(({ generation }) => generation === "archive-shard").at(-1);
+    const active = familySources.find(({ generation }) => generation === "archive-active");
+    const live = familySources.filter(({ generation }) => generation === "live");
+    // Later groups win equal multiplicities: live is the current canonical
+    // source, then the newest immutable shard, then the transitional active
+    // archive. Losing retry generations are removed as whole multisets.
+    const groups = [
+      { sources: active ? [active] : [] },
+      { sources: newestShard ? [newestShard] : [] },
+      { sources: live }
+    ].map((group) => {
+      const sourceCounts = new Map(group.sources.map(({ source }) => [
+        source,
+        serializedEntryCounts(entriesBySource.get(source) || [])
+      ]));
+      const counts = new Map();
+      for (const entryCounts of sourceCounts.values()) {
+        for (const [serialized, count] of entryCounts) {
+          counts.set(serialized, (counts.get(serialized) || 0) + count);
+        }
+      }
+      return { ...group, sourceCounts, counts };
+    });
+    const serializedEntries = new Set(groups.flatMap(({ counts }) => [...counts.keys()]));
+    for (const serialized of serializedEntries) {
+      let winner = null;
+      let winnerCount = 0;
+      for (const group of groups) {
+        const count = group.counts.get(serialized) || 0;
+        if (count >= winnerCount && count > 0) {
+          winner = group;
+          winnerCount = count;
+        }
+      }
+      for (const group of groups) {
+        if (group === winner) continue;
+        for (const { source } of group.sources) {
+          const count = group.sourceCounts.get(source).get(serialized) || 0;
+          if (count > 0) suppression.get(source).set(serialized, count);
+        }
+      }
+    }
+  }
+  return suppression;
+}
+
 async function listMemoryArchiveSources(memoryDir, { reader, root }) {
   const entries = await reader.listDirectory(root, memoryDir);
   const families = ["events-archive", "signals-archive"];
@@ -503,7 +536,6 @@ async function listMemoryArchiveSources(memoryDir, { reader, root }) {
       .map((entry) => ({ entry, match: entry.name.match(matcher) }))
       .filter(({ match }) => match)
       .sort((left, right) => Number(left.match[1]) - Number(right.match[1]));
-    let newestShardSource = null;
     for (const { entry } of shards) {
       const source = `memory/${entry.name}`;
       sources.push({
@@ -512,15 +544,13 @@ async function listMemoryArchiveSources(memoryDir, { reader, root }) {
         family: family === "events-archive" ? "events" : "signals",
         generation: "archive-shard"
       });
-      newestShardSource = source;
     }
     const source = `memory/${family}.jsonl`;
     sources.push({
       filePath: path.join(memoryDir, `${family}.jsonl`),
       source,
       family: family === "events-archive" ? "events" : "signals",
-      generation: "archive-active",
-      retryAgainst: newestShardSource ? [newestShardSource] : []
+      generation: "archive-active"
     });
   }
   return sources;
@@ -939,57 +969,33 @@ async function inspectSessionsScope(aiosPath, { reader }) {
   });
 }
 
-async function discoverSessionsScope(aiosPath, _query, inspected, {
+async function discoverSessionsScope(aiosPath, query, inspected, {
+  limit,
   agent,
   project,
   since,
   reader
 } = {}) {
-  const sessionsRoot = path.resolve(aiosPath, "memory", "sessions");
   const index = await reader.materializePreparedJsonl(inspected.index);
-  const { filterSessions } = await import("./sessions.mjs");
-  const entries = await filterSessions(aiosPath, {
+  const bodies = new Map();
+  const replayReader = {
+    readJsonl: async () => reader.readPreparedJsonl(index),
+    readText: async (_root, filePath) => {
+      const resolved = path.resolve(filePath);
+      if (!bodies.has(resolved)) {
+        bodies.set(resolved, reader.prepareTextContent(aiosPath, resolved));
+      }
+      return reader.readPreparedText(await bodies.get(resolved));
+    }
+  };
+  const results = await searchSessionsScope(aiosPath, query, {
     agent,
     project,
     since,
-    readOnly: true,
-    root: aiosPath,
-    reader: {
-      readJsonl: async () => reader.readPreparedJsonl(index)
-    }
+    limit,
+    reader: replayReader
   });
-  const bodies = new Map();
-  for (const entry of entries) {
-    if (typeof entry.path !== "string" || entry.path.length === 0 || path.isAbsolute(entry.path)) {
-      throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
-    }
-    const filePath = path.resolve(aiosPath, entry.path);
-    if (
-      !isPathWithinLexically(path.resolve(aiosPath), filePath)
-      || !isPathWithinLexically(sessionsRoot, filePath)
-    ) {
-      throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
-    }
-    bodies.set(filePath, await reader.prepareTextMetadata(aiosPath, filePath));
-  }
-  return Object.freeze({ kind: "sessions", index, bodies });
-}
-
-async function searchDiscoveredSessions(aiosPath, query, prepared, options) {
-  const bodyContents = new Map();
-  const replayReader = {
-    readJsonl: async () => options.reader.readPreparedJsonl(prepared.index),
-    readText: async (_root, filePath) => {
-      const resolved = path.resolve(filePath);
-      const body = prepared.bodies.get(resolved);
-      if (!body) return null;
-      if (!bodyContents.has(resolved)) {
-        bodyContents.set(resolved, options.reader.materializePreparedText(body));
-      }
-      return options.reader.readPreparedText(await bodyContents.get(resolved));
-    }
-  };
-  return searchSessionsScope(aiosPath, query, { ...options, reader: replayReader });
+  return Object.freeze({ kind: "sessions", results });
 }
 
 function compareTimestampsDesc(a, b) {

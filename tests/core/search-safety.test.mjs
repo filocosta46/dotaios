@@ -451,6 +451,72 @@ test("session discovery retains catalog and body bytes without rereading before 
   assert.equal(opens.get(path.resolve(bodyPath)), 1);
 });
 
+test("session body planning mirrors reverse query limit behavior and charges unique paths", async (t) => {
+  await t.test("a title hit does not plan an unnecessary body", async () => {
+    const root = tmpDir();
+    const sessionsDir = path.join(root, "memory", "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionsDir, "body.md"), "body does not match\n");
+    fs.writeFileSync(path.join(sessionsDir, "index.jsonl"), `${JSON.stringify({
+      session_id: "title-hit",
+      agent: "codex",
+      captured_at: "2026-08-13T10:00:00.000Z",
+      title: "EXACT_TITLE_CANARY",
+      path: "memory/sessions/body.md"
+    })}\n`);
+
+    const [group] = await searchAios({
+      aiosPath: root,
+      query: "EXACT_TITLE_CANARY",
+      scope: "sessions",
+      evidenceReader: createEvidenceReader({
+        roots: [root],
+        limits: { maxBytes: 4096, maxFiles: 1, maxEntries: 10, maxFileBytes: 4096, maxDirectoryEntries: 10 }
+      })
+    });
+
+    assert.equal(group.results[0].session_id, "title-hit");
+  });
+
+  await t.test("duplicate index rows plan and read their shared body once", async () => {
+    const root = tmpDir();
+    const sessionsDir = path.join(root, "memory", "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const bodyPath = path.join(sessionsDir, "body.md");
+    fs.writeFileSync(bodyPath, "UNIQUE_BODY_CANARY\n");
+    const rows = ["older", "newer"].map((sessionId, index) => JSON.stringify({
+      session_id: sessionId,
+      agent: "codex",
+      captured_at: `2026-08-13T1${index}:00:00.000Z`,
+      title: "unrelated",
+      path: "memory/sessions/body.md"
+    }));
+    fs.writeFileSync(path.join(sessionsDir, "index.jsonl"), `${rows.join("\n")}\n`);
+    const opens = new Map();
+    const filesystem = Object.create(fsp);
+    filesystem.open = async (filePath, ...args) => {
+      const resolved = path.resolve(String(filePath));
+      opens.set(resolved, (opens.get(resolved) || 0) + 1);
+      return fsp.open(filePath, ...args);
+    };
+
+    const [group] = await searchAios({
+      aiosPath: root,
+      query: "UNIQUE_BODY_CANARY",
+      scope: "sessions",
+      limit: 1,
+      evidenceReader: createEvidenceReader({
+        roots: [root],
+        filesystem,
+        limits: { maxBytes: 4096, maxFiles: 2, maxEntries: 10, maxFileBytes: 4096, maxDirectoryEntries: 10 }
+      })
+    });
+
+    assert.equal(group.results[0].session_id, "newer");
+    assert.equal(opens.get(path.resolve(bodyPath)), 1);
+  });
+});
+
 test("scope search distinguishes every skippable ceiling without catching integrity failures", async (t) => {
   const cases = [
     {

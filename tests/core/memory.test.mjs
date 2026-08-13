@@ -431,6 +431,27 @@ test("searchMemory discovers numbered shards in numeric order and deduplicates r
   assert.match(results.find(({ summary }) => summary.endsWith("older")).source, /000001/);
 });
 
+test("searchMemory deduplicates newest shard, active archive, and live retry provenance as a multiset", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  const signalsDir = path.join(memoryDir, "signals");
+  fs.mkdirSync(signalsDir, { recursive: true });
+  const overlap = {
+    ts: "2026-05-07T12:00:00.000Z",
+    type: "signal",
+    summary: "three generation retry needle"
+  };
+  const serialized = formatJsonlEntry(overlap);
+  fs.writeFileSync(path.join(memoryDir, "signals-archive.000001.jsonl"), `${serialized}${serialized}`, { mode: 0o600 });
+  fs.writeFileSync(path.join(memoryDir, "signals-archive.jsonl"), serialized, { mode: 0o600 });
+  fs.writeFileSync(path.join(signalsDir, "2026-05-07.jsonl"), `${serialized}${serialized}`);
+
+  const results = await searchMemory(memoryDir, "three generation retry needle", { limit: 10 });
+
+  assert.equal(results.length, 2, "retry copies collapse to the largest provenance multiplicity");
+  assert.ok(results.every(({ source }) => source === "memory/signals/2026-05-07.jsonl"));
+});
+
 test("searchMemory preserves legitimate identical records outside retry overlap", async () => {
   const dir = tmpDir();
   const memoryDir = path.join(dir, "memory");

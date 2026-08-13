@@ -8,6 +8,7 @@ import { refreshLiveOkf, writeProjectLog } from "./okf-live.mjs";
 import {
   assertOwnedFileStats,
   publishOwnedFileExclusive,
+  recoverOwnedFileExclusivePublication,
   syncOwnedDirectory
 } from "./owned-state.mjs";
 import { searchMarkdownDir, searchMemoryDir } from "./search.mjs";
@@ -242,6 +243,9 @@ const LOCK_MAX_ATTEMPTS = 8;
 const ARCHIVE_TAIL_BYTES = 262_144;
 const ARCHIVE_ROTATE_BYTES = 2 * 1024 * 1024;
 const ARCHIVE_LINE_MAX_BYTES = 4 * 1024 * 1024;
+// Distinguishes marker-protocol generations from ambiguous overlap left by the
+// previous markerless rotator. It is durable before any new rotation begins.
+const ARCHIVE_ROTATION_FORMAT = '{"version":1,"protocol":"durable-marker"}\n';
 
 function archivePathFor(eventsPath) {
   return eventsPath.replace(/\.jsonl$/, "-archive.jsonl");
@@ -475,13 +479,21 @@ async function removeObservedArchiveFile(filePath, expectedStats, fileSystem) {
 async function appendArchiveLines(archivePath, active, existingShards, lines, fileSystem) {
   let activeContent = active.content;
   let activeStats = active.stats;
-  ({ activeContent, activeStats, existingShards } = await recoverArchiveRotation(
+  let rotationMarkerRecovered;
+  ({ activeContent, activeStats, existingShards, rotationMarkerRecovered } = await recoverArchiveRotation(
     archivePath,
     activeContent,
     activeStats,
     existingShards,
     fileSystem
   ));
+  await ensureArchiveRotationFormat(
+    archivePath,
+    activeContent,
+    existingShards,
+    fileSystem,
+    rotationMarkerRecovered
+  );
   let nextShard = existingShards.length === 0
     ? 1
     : existingShards.at(-1).number + 1;
@@ -568,7 +580,9 @@ async function recoverArchiveRotation(
   try {
     ({ content: markerContent, stats: markerStats } = await readOwnedArchiveFile(markerPath, fileSystem));
   } catch (error) {
-    if (error.code === "ENOENT") return { activeContent, activeStats, existingShards };
+    if (error.code === "ENOENT") {
+      return { activeContent, activeStats, existingShards, rotationMarkerRecovered: false };
+    }
     throw error;
   }
 
@@ -606,12 +620,55 @@ async function recoverArchiveRotation(
     throw archiveStateError();
   }
 
+  await ensureArchiveRotationFormat(
+    archivePath,
+    activeContent,
+    existingShards,
+    fileSystem,
+    true
+  );
   await removeObservedArchiveFile(markerPath, markerStats, fileSystem);
   return {
     activeContent,
     activeStats,
-    existingShards: await inspectArchiveShards(archivePath, fileSystem)
+    existingShards: await inspectArchiveShards(archivePath, fileSystem),
+    rotationMarkerRecovered: true
   };
+}
+
+async function ensureArchiveRotationFormat(
+  archivePath,
+  activeContent,
+  existingShards,
+  fileSystem,
+  rotationMarkerRecovered
+) {
+  const formatPath = rotationFormatPathFor(archivePath);
+  try {
+    const { content } = await readOwnedArchiveFile(formatPath, fileSystem);
+    if (content !== ARCHIVE_ROTATION_FORMAT) throw archiveStateError();
+    return;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+
+  if (!rotationMarkerRecovered) {
+    await assertNoMarkerlessArchiveOverlap(archivePath, activeContent, existingShards, fileSystem);
+  }
+  await publishOwnedFileExclusive(formatPath, ARCHIVE_ROTATION_FORMAT, { filesystem: fileSystem });
+}
+
+async function assertNoMarkerlessArchiveOverlap(
+  archivePath,
+  activeContent,
+  existingShards,
+  fileSystem
+) {
+  const newest = existingShards.at(-1);
+  if (!newest || !activeContent) return;
+  const newestContent = (await readOwnedArchiveFile(newest.path, fileSystem)).content;
+  if (!newestContent || !activeContent.startsWith(newestContent)) return;
+  throw archiveLegacyRecoveryRequiredError(archivePath, newest.path);
 }
 
 async function rotateArchiveActive(
@@ -669,6 +726,10 @@ function archiveContentHash(content) {
 
 function rotationMarkerPathFor(archivePath) {
   return `${archivePath}.rotation`;
+}
+
+function rotationFormatPathFor(archivePath) {
+  return `${archivePath}.rotation-format`;
 }
 
 function takeArchiveChunk(content) {
@@ -736,7 +797,12 @@ async function inspectArchiveShards(archivePath, fileSystem) {
 }
 
 async function inspectOwnedArchiveFile(filePath, fileSystem) {
-  const stats = await fileSystem.lstat(filePath, { bigint: true });
+  let stats = await fileSystem.lstat(filePath, { bigint: true });
+  if (Number(stats.nlink) === 2 && await recoverOwnedFileExclusivePublication(filePath, {
+    filesystem: fileSystem
+  })) {
+    stats = await fileSystem.lstat(filePath, { bigint: true });
+  }
   assertOwnedArchiveFileStats(stats);
   return stats;
 }
@@ -770,6 +836,11 @@ async function readArchiveActive(archivePath, fileSystem) {
 
 async function readOwnedArchiveFile(filePath, fileSystem, { allowLegacyMode = false } = {}) {
   let pathStats = await fileSystem.lstat(filePath, { bigint: true });
+  if (Number(pathStats.nlink) === 2 && await recoverOwnedFileExclusivePublication(filePath, {
+    filesystem: fileSystem
+  })) {
+    pathStats = await fileSystem.lstat(filePath, { bigint: true });
+  }
   const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0);
   const handle = await fileSystem.open(filePath, flags);
   try {
@@ -924,6 +995,20 @@ function archiveLineTooLargeError() {
 function archiveStateError() {
   const error = new Error("Memory archive state changed or is not safely owned.");
   error.code = "DOTAIOS_ARCHIVE_STATE_INVALID";
+  return error;
+}
+
+function archiveLegacyRecoveryRequiredError(archivePath, shardPath) {
+  const error = new Error(
+    "Memory archive needs explicit legacy rotation recovery; authoritative archive bytes were left unchanged."
+  );
+  error.code = "DOTAIOS_ARCHIVE_LEGACY_RECOVERY_REQUIRED";
+  error.diagnostic = Object.freeze({
+    kind: "markerless-rotation-overlap",
+    archive: path.basename(archivePath),
+    shard: path.basename(shardPath),
+    action: "preserve-and-inspect"
+  });
   return error;
 }
 
