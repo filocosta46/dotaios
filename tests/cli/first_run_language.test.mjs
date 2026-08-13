@@ -208,6 +208,49 @@ test("default doctor blocking output states the outcome and one safe next action
   }
 });
 
+test("default doctor preserves bridge and projection words inside folder paths", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-doctor-path-"));
+  const homePath = path.join(tempRoot, "home");
+  const missingAios = path.join(homePath, "my-bridge-folder", "projection-data", "aios");
+  fs.mkdirSync(homePath, { recursive: true });
+
+  try {
+    const result = run(["doctor", "--path", missingAios, "--home", homePath]);
+    assert.equal(result.status, 1);
+    assert.match(result.stdout, /~\/my-bridge-folder\/projection-data\/aios/);
+    assert.doesNotMatch(result.stdout, /my-connection-folder|connection-data/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("default doctor explains a wrong-folder connection without operator jargon", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-doctor-connection-"));
+  const homePath = path.join(tempRoot, "home");
+  const aiosPath = path.join(homePath, "aios");
+  const otherAios = path.join(tempRoot, "other-aios");
+  const claudeBridge = path.join(homePath, ".claude", "CLAUDE.md");
+
+  try {
+    const initialized = run(["init", "--yes", "--path", aiosPath]);
+    assert.equal(initialized.status, 0, initialized.stderr);
+    fs.mkdirSync(path.dirname(claudeBridge), { recursive: true });
+    fs.writeFileSync(claudeBridge, [
+      "<!-- dotaios-managed:start -->",
+      `Read ${path.join(otherAios, "AGENTS.md")} first.`,
+      "<!-- dotaios-managed:end -->"
+    ].join("\n"));
+
+    const result = run(["doctor", "--path", aiosPath, "--home", homePath]);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /connected to a different AIOS folder/i);
+    assert.match(result.stdout, /installed but is not connected to this AIOS folder/i);
+    assert.doesNotMatch(result.stdout, /\bbridge\b|managed bridge|projection/i);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 function run(args) {
   return spawnSync(process.execPath, [cli, ...args], {
     cwd: repoRoot,

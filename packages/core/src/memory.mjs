@@ -243,6 +243,7 @@ const LOCK_MAX_ATTEMPTS = 8;
 const ARCHIVE_TAIL_BYTES = 262_144;
 const ARCHIVE_ROTATE_BYTES = 2 * 1024 * 1024;
 const ARCHIVE_LINE_MAX_BYTES = 4 * 1024 * 1024;
+const EVENT_COMPACTION_PENDING_CONTRACT = "dotaios-event-compaction/v1";
 // Distinguishes marker-protocol generations from ambiguous overlap left by the
 // previous markerless rotator. It is durable before any new rotation begins.
 const ARCHIVE_ROTATION_FORMAT = '{"version":1,"protocol":"durable-marker"}\n';
@@ -387,6 +388,11 @@ async function stagePendingArchive(fileSystem, filePath, content) {
   await fsyncFile(fileSystem, filePath);
 }
 
+async function stageEventPendingArchive(fileSystem, filePath, content) {
+  assertArchiveLineBounds(content);
+  await publishOwnedFileExclusive(filePath, content, { filesystem: fileSystem });
+}
+
 async function fileExists(fileSystem, filePath) {
   try {
     await fileSystem.stat(filePath);
@@ -396,9 +402,11 @@ async function fileExists(fileSystem, filePath) {
   }
 }
 
-// A crash can leave a staged archive batch behind. Decide whether the batch
-// committed (rename happened → events no longer holds it → finish the flush)
-// or not (events still holds it → the staging file is stale, drop it).
+// A crash can leave one self-describing pending artifact behind. `prepared`
+// evidence exists before archive inspection and can never authorize a live
+// rename. `ready` binds the exact ordered archive pre-state and can recover
+// publication after the live-file commit point. Raw legacy batches retain the
+// conservative compatibility path below.
 async function recoverPendingArchive(eventsPath, fileSystem) {
   const archivePath = archivePathFor(eventsPath);
   const pendingPath = pendingPathFor(archivePath);
@@ -412,17 +420,41 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
     if (error.code === "ENOENT") return;
     throw error;
   }
-  const pendingLines = pendingContent.split("\n").filter((line) => line.trim());
+  const artifact = parsePendingArchiveArtifact(pendingContent);
+  const pendingLines = artifact.pendingLines;
   if (pendingLines.length === 0) {
     await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
     return;
   }
-  let eventsContent = "";
-  try {
-    eventsContent = await fileSystem.readFile(eventsPath, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+  const eventsContent = await readEventsContent(eventsPath, fileSystem);
+  if (artifact.kind === "transaction") {
+    const transaction = artifact.transaction;
+    const eventsHash = archiveContentHash(eventsContent);
+    if (transaction.phase === "prepared") {
+      if (eventsHash !== transaction.beforeHash) throw archiveStateError();
+      await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
+      return;
+    }
+    if (eventsHash === transaction.beforeHash) {
+      const archiveState = await inspectArchiveRecordState(archivePath, fileSystem);
+      if (
+        archiveState.records !== transaction.archiveRecordsBefore
+        || archiveState.chain !== transaction.archiveChainBefore
+      ) throw archiveStateError();
+      await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
+      return;
+    }
+    if (eventsHash !== transaction.afterHash) throw archiveStateError();
+    await flushPendingArchive(archivePath, fileSystem, {
+      archiveRecordsBefore: transaction.archiveRecordsBefore,
+      archiveChainBefore: transaction.archiveChainBefore
+    });
+    return;
   }
+
+  // Legacy raw pending batches predate the self-describing envelope. Preserve
+  // their old conservative recovery rule; every newly staged event batch is
+  // governed by the phase and exact-chain evidence above.
   const eventLines = new Set(eventsContent.split("\n").filter((line) => line.trim()));
   const first = pendingLines[0];
   const last = pendingLines[pendingLines.length - 1];
@@ -433,11 +465,11 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
   await flushPendingArchive(archivePath, fileSystem);
 }
 
-// Publish the staged batch line-idempotently into the active archive and, when
-// needed, immutable numbered shards. Returns only after every accepted line is
-// fsynced, so callers may treat it as the point after which source removal is
-// safe.
-async function flushPendingArchive(archivePath, fileSystem) {
+// Publish the staged batch into the active archive and, when needed, immutable
+// numbered shards. Event envelopes prove exact ordered progress; legacy signal
+// batches retain their bounded compatibility behavior. Returns only after every
+// accepted line is fsynced, so callers may safely remove its source.
+async function flushPendingArchive(archivePath, fileSystem, options = {}) {
   const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
   let pendingStats;
@@ -449,23 +481,160 @@ async function flushPendingArchive(archivePath, fileSystem) {
     if (error.code === "ENOENT") return;
     throw error;
   }
-  const pendingLines = pendingContent.split("\n").filter((line) => line.trim());
-  assertArchiveLineBounds(pendingContent);
+  const artifact = parsePendingArchiveArtifact(pendingContent);
+  const pendingLines = artifact.pendingLines;
+  assertArchiveLineBounds(artifact.payload);
+  if (artifact.kind === "transaction" && (
+    artifact.transaction.phase !== "ready"
+    || artifact.transaction.archiveRecordsBefore !== options.archiveRecordsBefore
+    || artifact.transaction.archiveChainBefore !== options.archiveChainBefore
+  )) throw archiveStateError();
 
-  const shards = await inspectArchiveShards(archivePath, fileSystem);
-  const active = await readArchiveActive(archivePath, fileSystem);
+  let shards = await inspectArchiveShards(archivePath, fileSystem);
+  let active = await readArchiveActive(archivePath, fileSystem);
   assertArchiveLineBounds(active.content);
-  const tailLines = await collectArchiveTailLines(
-    archivePath,
-    active,
-    shards,
-    Math.max(ARCHIVE_TAIL_BYTES, Buffer.byteLength(pendingContent) + 1024),
-    fileSystem
-  );
-  const missing = pendingLines.filter((line) => !tailLines.has(line));
+  let missing;
+  if (
+    Number.isSafeInteger(options.archiveRecordsBefore)
+    && typeof options.archiveChainBefore === "string"
+  ) {
+    // Finish any marker-governed rotation first. During the shard-before-active
+    // publication window the same logical records temporarily exist in both
+    // generations, so counting before recovery would mistake overlap for new
+    // records from this batch.
+    await appendArchiveLines(archivePath, active, shards, [], fileSystem);
+    shards = await inspectArchiveShards(archivePath, fileSystem);
+    active = await readArchiveActive(archivePath, fileSystem);
+    // A transaction records the archive's logical record count before this
+    // exact batch. The count delta tells us how much of the ordered batch was
+    // published before a crash without confusing equal bytes for one record.
+    const archiveState = await inspectArchiveRecordState(archivePath, fileSystem, { active, shards });
+    const published = archiveState.records - options.archiveRecordsBefore;
+    if (published < 0 || published > pendingLines.length) throw archiveStateError();
+    let expectedChain = options.archiveChainBefore;
+    for (const line of pendingLines.slice(0, published)) {
+      expectedChain = extendArchiveRecordChain(expectedChain, line);
+    }
+    if (archiveState.chain !== expectedChain) throw archiveStateError();
+    missing = pendingLines.slice(published);
+  } else {
+    const tailLines = await collectArchiveTailLines(
+      archivePath,
+      active,
+      shards,
+      Math.max(ARCHIVE_TAIL_BYTES, Buffer.byteLength(pendingContent) + 1024),
+      fileSystem
+    );
+    missing = pendingLines.filter((line) => !tailLines.has(line));
+  }
   await appendArchiveLines(archivePath, active, shards, missing, fileSystem);
 
+  if (artifact.kind === "transaction") {
+    const settled = await inspectArchiveRecordState(archivePath, fileSystem);
+    if (
+      settled.records !== artifact.transaction.archiveRecordsBefore + artifact.transaction.pendingRecords
+      || settled.chain !== artifact.transaction.archiveChainAfter
+    ) throw archiveStateError();
+  }
+
   await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
+}
+
+async function readEventsContent(eventsPath, fileSystem) {
+  try {
+    return await fileSystem.readFile(eventsPath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+async function inspectArchiveRecordState(archivePath, fileSystem, observed = {}) {
+  const shards = observed.shards || await inspectArchiveShards(archivePath, fileSystem);
+  const active = observed.active || await readArchiveActive(archivePath, fileSystem);
+  let records = 0;
+  let chain = "0".repeat(64);
+  for (const shard of shards) {
+    const content = (await readOwnedArchiveFile(shard.path, fileSystem)).content;
+    for (const line of content.split("\n").filter((item) => item.trim())) {
+      chain = extendArchiveRecordChain(chain, line);
+      records += 1;
+    }
+  }
+  for (const line of active.content.split("\n").filter((item) => item.trim())) {
+    chain = extendArchiveRecordChain(chain, line);
+    records += 1;
+  }
+  return { records, chain };
+}
+
+function extendArchiveRecordChain(chain, line) {
+  const bytes = Buffer.from(line);
+  const length = Buffer.allocUnsafe(4);
+  length.writeUInt32BE(bytes.length);
+  return crypto.createHash("sha256")
+    .update(Buffer.from(chain, "hex"))
+    .update(length)
+    .update(bytes)
+    .digest("hex");
+}
+
+function parsePendingArchiveArtifact(content) {
+  const newline = content.indexOf("\n");
+  if (newline < 0) {
+    if (content.includes(EVENT_COMPACTION_PENDING_CONTRACT)) throw archiveStateError();
+    return { kind: "legacy", payload: content, pendingLines: content.trim() ? [content] : [] };
+  }
+  const headerLine = content.slice(0, newline);
+  let transaction;
+  try {
+    transaction = JSON.parse(headerLine);
+  } catch {
+    if (headerLine.includes(EVENT_COMPACTION_PENDING_CONTRACT)) throw archiveStateError();
+    return {
+      kind: "legacy",
+      payload: content,
+      pendingLines: content.split("\n").filter((line) => line.trim())
+    };
+  }
+  if (transaction?.artifact_contract !== EVENT_COMPACTION_PENDING_CONTRACT) {
+    return {
+      kind: "legacy",
+      payload: content,
+      pendingLines: content.split("\n").filter((line) => line.trim())
+    };
+  }
+  const payload = content.slice(newline + 1);
+  const pendingLines = payload.split("\n").filter((line) => line.trim());
+  if (
+    !["prepared", "ready"].includes(transaction.phase)
+    || ![
+      transaction.beforeHash,
+      transaction.afterHash,
+      transaction.pendingHash
+    ]
+      .every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+    || !Number.isSafeInteger(transaction.pendingRecords)
+    || transaction.pendingRecords < 1
+    || archiveContentHash(payload) !== transaction.pendingHash
+    || pendingLines.length !== transaction.pendingRecords
+  ) throw archiveStateError();
+  if (transaction.phase === "ready" && (
+    ![transaction.archiveChainBefore, transaction.archiveChainAfter]
+      .every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+    || !Number.isSafeInteger(transaction.archiveRecordsBefore)
+    || transaction.archiveRecordsBefore < 0
+  )) throw archiveStateError();
+  if (transaction.phase === "prepared" && [
+    transaction.archiveRecordsBefore,
+    transaction.archiveChainBefore,
+    transaction.archiveChainAfter
+  ].some((value) => value !== undefined)) throw archiveStateError();
+  return { kind: "transaction", transaction, payload, pendingLines };
+}
+
+function renderPendingArchiveArtifact(transaction, payload) {
+  return `${JSON.stringify(transaction)}\n${payload}`;
 }
 
 async function removeObservedArchiveFile(filePath, expectedStats, fileSystem) {
@@ -1020,11 +1189,12 @@ function escapeRegExp(value) {
  * Compact events.jsonl: keep only the most recent N entries in the main file,
  * archive older entries to the bounded events-archive generation.
  *
- * Crash-safe transaction: kept-tail and archive batch are staged and fsynced,
- * the rename over events.jsonl is the single commit point, and the archive
- * archive publication happens only after it (idempotently, so an interrupted
- * run can be re-run without losing or duplicating an event). Guarded by an
- * advisory lockfile next to events.jsonl.
+ * Crash-safe transaction: a self-describing prepared artifact is published
+ * before archive inspection, then ownership-safely advanced to ready with the
+ * exact ordered archive pre-state. Only ready may precede the rename over
+ * events.jsonl, the single live-file commit point. Archive publication happens
+ * afterward and verifies the expected ordered post-state before removing the
+ * artifact. Guarded by an advisory lockfile next to events.jsonl.
  *
  * Returns { archived, kept } — or { archived: 0, kept: 0, skipped: "locked" }
  * when another live process holds the lock.
@@ -1047,14 +1217,52 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
         `.${path.basename(eventsPath)}.${crypto.randomUUID()}.tmp`
       );
       const archiveBatch = toArchive.map((entry) => formatJsonlEntry(entry)).join("");
+      const keptBatch = toKeep.map((entry) => formatJsonlEntry(entry)).join("");
       assertArchiveLineBounds(archiveBatch);
 
       try {
-        await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
-        await stagePendingArchive(fileSystem, pendingPathFor(archivePathFor(eventsPath)), archiveBatch);
+        const archivePath = archivePathFor(eventsPath);
+        const pendingPath = pendingPathFor(archivePath);
+        const eventsContent = await readEventsContent(eventsPath, fileSystem);
+        const prepared = {
+          artifact_contract: EVENT_COMPACTION_PENDING_CONTRACT,
+          phase: "prepared",
+          beforeHash: archiveContentHash(eventsContent),
+          afterHash: archiveContentHash(keptBatch),
+          pendingHash: archiveContentHash(archiveBatch),
+          pendingRecords: toArchive.length
+        };
+        await writeFileDurable(fileSystem, tmpPath, keptBatch);
+        await stageEventPendingArchive(
+          fileSystem,
+          pendingPath,
+          renderPendingArchiveArtifact(prepared, archiveBatch)
+        );
+        const preparedStats = await inspectOwnedArchiveFile(pendingPath, fileSystem);
+        const archiveState = await inspectArchiveRecordState(archivePath, fileSystem);
+        let archiveChainAfter = archiveState.chain;
+        for (const line of archiveBatch.split("\n").filter((item) => item.trim())) {
+          archiveChainAfter = extendArchiveRecordChain(archiveChainAfter, line);
+        }
+        const ready = {
+          ...prepared,
+          phase: "ready",
+          archiveRecordsBefore: archiveState.records,
+          archiveChainBefore: archiveState.chain,
+          archiveChainAfter
+        };
+        await replaceArchiveActive(
+          pendingPath,
+          renderPendingArchiveArtifact(ready, archiveBatch),
+          preparedStats,
+          fileSystem
+        );
         await fileSystem.rename(tmpPath, eventsPath);
         await syncOwnedDirectory(path.dirname(eventsPath), { filesystem: fileSystem });
-        await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
+        await flushPendingArchive(archivePath, fileSystem, {
+          archiveRecordsBefore: ready.archiveRecordsBefore,
+          archiveChainBefore: ready.archiveChainBefore
+        });
       } finally {
         await fileSystem.rm(tmpPath, { force: true }).catch(() => {});
       }

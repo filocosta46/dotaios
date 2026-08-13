@@ -439,7 +439,7 @@ function rankMemorySources(sources, entriesBySource, query, limit) {
   const docs = [];
   const candidates = [];
   const retrySuppression = buildMemoryRetrySuppression(sources, entriesBySource);
-  for (const { source } of sources) {
+  for (const { source, family } of sources) {
     const suppressed = retrySuppression.get(source) || new Map();
     const entries = entriesBySource.get(source) || [];
     for (const entry of entries) {
@@ -450,6 +450,8 @@ function rankMemorySources(sources, entriesBySource, query, limit) {
       if (!match) continue;
       candidates.push({
         text,
+        family,
+        recordId: typeof entry?.record_id === "string" ? entry.record_id : "",
         result: {
           source,
           match,
@@ -464,14 +466,27 @@ function rankMemorySources(sources, entriesBySource, query, limit) {
   const corpus = buildCorpusStats(docs);
   const now = Date.now();
   const terms = queryTerms(query);
-  return candidates
-    .map(({ text, result }) => {
+  const ranked = candidates
+    .map(({ text, family, recordId, result }) => {
       const haystack = text.toLowerCase();
       const matchedTerms = terms.filter((term) => haystack.includes(term));
       const ageMs = result.ts ? now - Date.parse(result.ts) : null;
-      return { result, rank: rankSearchHit({ kind: result.match.kind, matchedTerms, corpus, ageMs }) };
+      return { family, recordId, result, rank: rankSearchHit({ kind: result.match.kind, matchedTerms, corpus, ageMs }) };
     })
-    .sort((a, b) => (b.rank - a.rank) || compareTimestampsDesc(a.result.ts, b.result.ts))
+    .sort((a, b) => (b.rank - a.rank) || compareTimestampsDesc(a.result.ts, b.result.ts));
+  const representedFamilies = new Map();
+  return ranked
+    .filter(({ family, recordId }) => {
+      if (!recordId) return true;
+      const priorFamily = representedFamilies.get(recordId);
+      if (!priorFamily) {
+        representedFamilies.set(recordId, family);
+        return true;
+      }
+      // Same-family multiplicity remains observable. Only the opposite-family
+      // mirror of one operation is the same conceptual result.
+      return priorFamily === family;
+    })
     .slice(0, limit)
     .map(({ result }) => result);
 }

@@ -306,7 +306,7 @@ describe("doctorCommand", () => {
     const origLog = console.log.bind(console);
     console.log = (...args) => lines.push(args.join(" "));
     try {
-      await doctorCommand(["--path", aiosPath, "--home", tmpHome]);
+      await doctorCommand(["--verbose", "--path", aiosPath, "--home", tmpHome]);
     } finally {
       console.log = origLog;
       await fs.rm(tmpHome, { recursive: true, force: true });

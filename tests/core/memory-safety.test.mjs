@@ -86,10 +86,12 @@ function readEventsArchiveLines(dir) {
 // delegates to the real promises fs. Simulates a crash at an exact step.
 function faultFs(failures) {
   const counts = {};
+  const fired = new Set();
   const wrap = (name) => async (...args) => {
     counts[name] = (counts[name] || 0) + 1;
     counts.total = (counts.total || 0) + 1;
     if (failures[name] && counts[name] === failures[name]) {
+      fired.add(name);
       throw new Error(`injected-crash:${name}:${counts[name]}`);
     }
     return fsp[name](...args);
@@ -101,7 +103,7 @@ function faultFs(failures) {
   ]) {
     filesystem[name] = wrap(name);
   }
-  return { filesystem, counts };
+  return { filesystem, counts, fired };
 }
 
 // --- Defect 1: crash-safe compaction ---
@@ -110,8 +112,8 @@ test("compaction survives a crash at any single step: no event lost, none duplic
   const scenarios = [
     { writeFile: 1 },
     { writeFile: 2 },
-    { appendFile: 1 },
     { rename: 1 },
+    { rename: 2 },
     { unlink: 1 }
   ];
   for (const failure of scenarios) {
@@ -128,6 +130,12 @@ test("compaction survives a crash at any single step: no event lost, none duplic
       assert.match(String(error.message), /injected-crash/, `unexpected error for ${JSON.stringify(failure)}: ${error.message}`);
     }
     assert.ok((fault.counts.total || 0) > 0, "compactEvents must honor the injectable filesystem so crashes are testable");
+    for (const method of Object.keys(failure)) {
+      assert.ok(
+        fault.fired.has(method),
+        `configured fault never fired for ${JSON.stringify(failure)}`
+      );
+    }
 
     // Mid-crash, every event must survive in SOME durable file: the events
     // log, the archive, or the staged pending batch.
@@ -189,7 +197,7 @@ test("compaction syncs the parent directory before flushing the pending archive"
   await compactEvents(eventsPath, 1, { filesystem });
 
   const renameIndex = calls.indexOf("live-rename");
-  const syncIndex = calls.indexOf("directory-sync");
+  const syncIndex = calls.indexOf("directory-sync", renameIndex + 1);
   const pendingReadIndex = calls.indexOf("pending-read");
   assert.ok(renameIndex >= 0, `missing live rename in ${JSON.stringify(calls)}`);
   assert.ok(syncIndex > renameIndex, `directory sync must follow live rename: ${JSON.stringify(calls)}`);
@@ -243,6 +251,158 @@ test("rotating compaction recovers every shard publication boundary without loss
     const settled = settledPaths.flatMap(readLines);
     assert.deepEqual([...settled].sort(), [...original].sort());
   }
+});
+
+test("compaction recovery preserves byte-identical events as separate records", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const event = JSON.stringify({
+    ts: "2026-01-01T00:00:00.000Z",
+    type: "intentional-repeat",
+    summary: "same bytes, three separate saves"
+  });
+  fs.writeFileSync(eventsPath, `${event}\n${event}\n${event}\n`, { mode: 0o600 });
+
+  const fault = faultFs({ link: 2 });
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem: fault.filesystem }),
+    /injected-crash:link:2/
+  );
+
+  await compactEvents(eventsPath, 1);
+
+  const settled = [
+    ...readEventsArchiveLines(dir),
+    ...readLines(eventsPath)
+  ];
+  assert.equal(settled.length, 3, "three intentional saves must survive recovery as three records");
+  assert.deepEqual(settled, [event, event, event]);
+});
+
+test("compaction recovery rejects a truncated transaction batch", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  seedEvents(eventsPath, 3);
+
+  const fault = faultFs({ link: 2 });
+  await assert.rejects(compactEvents(eventsPath, 1, { filesystem: fault.filesystem }));
+  const staged = readLines(`${archivePath}.pending`);
+  fs.writeFileSync(`${archivePath}.pending`, `${staged.slice(0, 2).join("\n")}\n`, { mode: 0o600 });
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1),
+    (error) => error?.code === "DOTAIOS_ARCHIVE_STATE_INVALID"
+  );
+  assert.equal(fs.existsSync(`${archivePath}.pending`), true);
+});
+
+test("a crash after pending publication cannot route a new batch through legacy recovery", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const records = [1, 2, 3].map((n) =>
+    `{ "ts": "2026-01-01T00:00:0${n}.000Z", "type": "manual", "n": ${n} }`
+  );
+  fs.writeFileSync(eventsPath, `${records.join("\n")}\n`, { mode: 0o600 });
+  let interrupted = false;
+  const filesystem = {
+    ...fsp,
+    async link(source, destination) {
+      const result = await fsp.link(source, destination);
+      if (!interrupted && destination === `${archivePath}.pending`) {
+        interrupted = true;
+        throw new Error("injected-crash:pending-published");
+      }
+      return result;
+    }
+  };
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem }),
+    /injected-crash:pending-published/
+  );
+  assert.equal(interrupted, true);
+  assert.equal(fs.existsSync(`${archivePath}.pending`), true);
+  const preparedHeader = JSON.parse(readLines(`${archivePath}.pending`)[0]);
+  assert.equal(preparedHeader.artifact_contract, "dotaios-event-compaction/v1");
+  assert.equal(preparedHeader.phase, "prepared",
+    "every new pending batch must atomically carry prepared transaction authority");
+  assert.equal(readLines(eventsPath).length, 3, "prepared evidence never authorizes the live rename");
+
+  await compactEvents(eventsPath, 1);
+
+  const settled = [...readEventsArchiveLines(dir), ...readLines(eventsPath)];
+  assert.equal(settled.length, 3, "the retry must settle the original three records exactly once");
+  assert.deepEqual(settled.map((line) => JSON.parse(line).n), [1, 2, 3]);
+});
+
+test("compaction recovery never mistakes an unrelated archive append for pending progress", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const original = seedEvents(eventsPath, 3);
+  const unrelated = JSON.stringify({
+    ts: "2026-01-01T00:00:09.000Z",
+    type: "unrelated",
+    summary: "separate archive writer"
+  });
+
+  const fault = faultFs({ link: 2 });
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem: fault.filesystem }),
+    /injected-crash:link:2/
+  );
+  fs.appendFileSync(archivePath, `${unrelated}\n`, { mode: 0o600 });
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1),
+    (error) => error?.code === "DOTAIOS_ARCHIVE_STATE_INVALID"
+  );
+
+  const durable = [
+    ...readEventsArchiveLines(dir),
+    ...readLines(eventsPath),
+    ...readLines(`${archivePath}.pending`)
+  ];
+  for (const line of original) {
+    assert.ok(durable.includes(line), `unrelated mutation must not erase pending original: ${line}`);
+  }
+  assert.ok(durable.includes(unrelated));
+  assert.equal(fs.existsSync(`${archivePath}.pending`), true,
+    "unrecognized archive mutation preserves recovery evidence for inspection");
+});
+
+test("a crash after ready publication still cannot replace live memory until retry", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const original = seedEvents(eventsPath, 3);
+  let interrupted = false;
+  const filesystem = {
+    ...fsp,
+    async rename(source, destination) {
+      const result = await fsp.rename(source, destination);
+      if (!interrupted && destination === `${archivePath}.pending`) {
+        interrupted = true;
+        throw new Error("injected-crash:ready-published");
+      }
+      return result;
+    }
+  };
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem }),
+    /injected-crash:ready-published/
+  );
+  assert.equal(interrupted, true);
+  assert.deepEqual(readLines(eventsPath), original, "ready evidence still precedes the live commit point");
+  assert.equal(JSON.parse(readLines(`${archivePath}.pending`)[0]).phase, "ready");
+
+  await compactEvents(eventsPath, 1);
+
+  const settled = [...readEventsArchiveLines(dir), ...readLines(eventsPath)];
+  assert.deepEqual(settled, original);
 });
 
 test("legacy active normalization recovers marker, shard, and active transitions exactly once", async (t) => {

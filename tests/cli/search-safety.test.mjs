@@ -72,7 +72,7 @@ test("CLI search refuses a linked aios.json before authorizing an external vault
   assert.deepEqual(snapshotTree(tempRoot), before);
 });
 
-test("CLI search keeps valid results on stdout and reports path-free partial status on stderr", () => {
+test("CLI search qualifies result counts and no-results on stdout when a scope is omitted", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-cli-search-partial-"));
   const aiosPath = path.join(tempRoot, "aios");
   const vaultPath = path.join(tempRoot, "external-vault");
@@ -95,12 +95,73 @@ test("CLI search keeps valid results on stdout and reports path-free partial sta
       "--path",
       aiosPath
     ], { cwd: repoRoot, encoding: "utf8" });
+    const empty = spawnSync(process.execPath, [
+      cli,
+      "search",
+      "CLI_PARTIAL_NO_MATCH",
+      "--scope",
+      "all",
+      "--path",
+      aiosPath
+    ], { cwd: repoRoot, encoding: "utf8" });
 
     assert.equal(result.status, 2);
+    assert.equal(empty.status, 2);
     assert.match(result.stdout, /CLI_PARTIAL_SEARCH_CANARY/);
+    assert.match(result.stdout, /(?:partial|incomplete).*vault|vault.*(?:partial|incomplete)/i);
+    assert.match(empty.stdout, /no results.*(?:partial|incomplete).*vault|(?:partial|incomplete).*vault.*no results/is);
     assert.doesNotMatch(result.stderr, /CLI_PARTIAL_SEARCH_CANARY/);
     assert.match(result.stderr, /incomplete.*vault.*oversized file/is);
-    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(tempRoot));
+    assert.match(empty.stderr, /incomplete.*vault.*oversized file/is);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}\n${empty.stdout}\n${empty.stderr}`, escaped(tempRoot));
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("CLI update appears once in search while two intentional saves remain two", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-cli-update-search-"));
+  const aiosPath = path.join(tempRoot, "aios");
+  const note = "CLI_UPDATE_IDENTITY_CANARY";
+  try {
+    run(["init", "--path", aiosPath, "--yes"]);
+
+    run(["update", note, "--path", aiosPath]);
+    const once = run(["search", note, "--scope", "memory", "--path", aiosPath]);
+    assert.match(once.stdout, /1 result\(s\) found\./);
+
+    run(["update", note, "--path", aiosPath]);
+    const twice = run(["search", note, "--scope", "memory", "--path", aiosPath]);
+    assert.match(twice.stdout, /2 result\(s\) found\./);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("CLI search matches either representation before collapsing an update pair", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-cli-update-pair-fields-"));
+  const aiosPath = path.join(tempRoot, "aios");
+  const note = "IDENTITY_QUERY_CANARY";
+  try {
+    run(["init", "--path", aiosPath, "--yes"]);
+    run(["update", note, "--path", aiosPath]);
+
+    const signalPath = path.join(
+      aiosPath,
+      "memory",
+      "signals",
+      fs.readdirSync(path.join(aiosPath, "memory", "signals")).find((name) => name.endsWith(".jsonl"))
+    );
+    const signal = JSON.parse(fs.readFileSync(signalPath, "utf8").trim());
+    const event = JSON.parse(fs.readFileSync(path.join(aiosPath, "memory", "events.jsonl"), "utf8").trim());
+    assert.equal(signal.record_id, event.record_id, "the fixture must be one paired update operation");
+    signal.ts = "2040-01-02T03:04:05.678Z";
+    assert.notEqual(signal.ts, event.ts);
+    fs.writeFileSync(signalPath, `${JSON.stringify(signal)}\n`);
+
+    const result = run(["search", signal.ts, "--scope", "memory", "--path", aiosPath]);
+    assert.match(result.stdout, /1 result\(s\) found\./);
+    assert.match(result.stdout, /2040-01-02T03:04:05\.678Z/);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   }

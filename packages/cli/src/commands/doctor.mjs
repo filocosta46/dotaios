@@ -624,18 +624,45 @@ function conciseDoctorCheck(check) {
   const name = check.name
     .replace(/ bridge$/, "")
     .replace(/ native skills$/, "");
-  const replaceOperatorTerms = (value) => String(value || "")
-    .replace(/managed bridge/gi, "connection")
-    .replace(/\bbridge\b/gi, "connection")
-    .replace(/native skill configuration/gi, "app configuration")
-    .replace(/native skills/gi, "app connection")
-    .replace(/projection/gi, "connection");
   return {
     ...check,
-    name: replaceOperatorTerms(name),
-    detail: check.detail ? replaceOperatorTerms(check.detail) : check.detail,
-    fix: check.fix ? replaceOperatorTerms(check.fix) : check.fix
+    name,
+    detail: conciseDoctorDetail(check)
   };
+}
+
+function conciseDoctorDetail(check) {
+  const detail = check.detail;
+  if (!detail) return detail;
+  const exact = new Map([
+    ["Bridge points to a different AIOS folder.", "This app is connected to a different AIOS folder."],
+    ["An AI tool is installed but no managed bridge points at this AIOS folder yet.",
+      "A local AI app is installed but is not connected to this AIOS folder yet."],
+    ["Managed bridge predates v1.23 and still calls the retired read_session_digest surface.",
+      "This app connection is from an older DotAIOS version."],
+    ["Bridge is from an older version and still loads your whole AIOS folder into every session.",
+      "This app connection is from an older version and still loads your whole AIOS folder into every session."],
+    ["Bridge is from an older version and does not match what this release writes.",
+      "This app connection is from an older DotAIOS version."],
+    ["Managed bridge markers are malformed; DotAIOS preserved the file.",
+      "The DotAIOS connection markers are damaged; your file was preserved."],
+    ["Could not read this AIOS folder, so its native skill configuration is unverified.",
+      "Could not read this AIOS folder, so the app connection is unverified."]
+  ]);
+  if (exact.has(detail)) return exact.get(detail);
+  if (check.name.endsWith(" bridge")) {
+    const missingPrefix = `${check.name.slice(0, -" bridge".length)} is installed but not connected yet (no bridge at `;
+    if (detail.startsWith(missingPrefix) && detail.endsWith(").")) {
+      const opaquePath = detail.slice(missingPrefix.length, -2);
+      return `${check.name.slice(0, -" bridge".length)} is installed but not connected yet (no connection at ${opaquePath}).`;
+    }
+    const entrypointPrefix = "Bridge points at this AIOS folder, but its entrypoint is missing (";
+    if (detail.startsWith(entrypointPrefix) && detail.endsWith(").")) {
+      const opaquePath = detail.slice(entrypointPrefix.length, -2);
+      return `This app is connected to this AIOS folder, but its entrypoint is missing (${opaquePath}).`;
+    }
+  }
+  return detail;
 }
 
 function humanizeDoctorPath(value, target, homePath) {

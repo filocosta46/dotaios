@@ -65,10 +65,14 @@ export async function searchCommand(args) {
     totalResults += group.results.length;
   }
 
+  const omittedScopes = [...new Set(groups.omissions.map((omission) => omission.scope))];
+  const incompleteSuffix = omittedScopes.length > 0
+    ? ` Search incomplete; omitted scope(s): ${omittedScopes.join(", ")}.`
+    : "";
   if (totalResults === 0) {
-    console.log(groups.omissions.length > 0 ? "No results found in inspected sources." : "No results found.");
+    console.log(`${groups.omissions.length > 0 ? "No results found in inspected sources." : "No results found."}${incompleteSuffix}`);
   } else {
-    console.log(`${totalResults} result(s) found.`);
+    console.log(`${totalResults} result(s) found.${incompleteSuffix}`);
   }
   if (groups.omissions.length > 0) {
     for (const omission of groups.omissions) {
