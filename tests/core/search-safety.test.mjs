@@ -103,6 +103,26 @@ test("search rejects invalid UTF-8 without replacing bytes", async () => {
   assert.deepEqual(fs.readFileSync(filePath), bytes);
 });
 
+test("search keeps the generic contained-read path until bulk integration is owned by U6", async () => {
+  const root = tmpDir();
+  fs.writeFileSync(path.join(root, "note.md"), "# Existing search\n\nUNCHANGED_SEARCH_CANARY\n");
+  const baseReader = createEvidenceReader({ roots: [root] });
+  let transactionCalls = 0;
+  const reader = {
+    ...baseReader,
+    async withTextCorpus() {
+      transactionCalls += 1;
+      throw new Error("U5 must not integrate production search.");
+    }
+  };
+
+  const results = await searchMarkdownDir(root, "UNCHANGED_SEARCH_CANARY", { reader, root });
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].file, "note.md");
+  assert.equal(transactionCalls, 0);
+});
+
 // This asserted the budget by its number — "the 513th file" — so it passed only
 // while the default was the bounded projection's 512, which made every search on
 // a real folder fail closed. The property worth keeping is that an exhausted

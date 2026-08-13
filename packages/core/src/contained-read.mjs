@@ -379,9 +379,294 @@ export async function inspectContainedDirectory(root, directoryPath, options = {
   return snapshot?.stats || null;
 }
 
+/** Snapshot the closest existing directory that bounds a missing contained tail. */
+export async function inspectNearestContainedDirectory(root, candidate, options = {}) {
+  const filesystem = options.filesystem || localFilesystem;
+  const resolvedRoot = path.resolve(root);
+  let current = path.resolve(candidate);
+  if (!isPathWithinLexically(resolvedRoot, current)) throw new ContainedReadError();
+  await assertMissingTailContained(resolvedRoot, current, filesystem);
+
+  while (isPathWithinLexically(resolvedRoot, current)) {
+    try {
+      const snapshot = await inspectContainedDirectorySnapshot(resolvedRoot, current, { filesystem });
+      if (snapshot) return Object.freeze({ path: current, snapshot });
+    } catch (error) {
+      if (error instanceof ContainedReadError) throw error;
+      if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error;
+    }
+    if (current === resolvedRoot) break;
+    current = path.dirname(current);
+  }
+  throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+}
+
 /** Compare two contained directory observations from the same path. */
 export function sameContainedDirectorySnapshot(left, right) {
   return sameDirectorySnapshot(left, right);
+}
+
+/**
+ * Read one file that was accepted by a separately validated directory walk.
+ *
+ * This is intentionally narrower than readContainedFile: callers must supply
+ * the canonical authorized root and the exact parent-directory observation
+ * that admitted the path. It lets a request-scoped corpus transaction reuse
+ * traversal invariants while retaining a no-follow handle, handle/path
+ * identity, canonical containment, bounded bytes, UTF-8, and mutation checks
+ * for every file.
+ */
+export async function readContainedSnapshotFile(root, filePath, options = {}) {
+  const filesystem = options.filesystem || localFilesystem;
+  const resolvedRoot = path.resolve(root);
+  const resolvedFile = path.resolve(filePath);
+  const resolvedParent = path.resolve(options.parentPath || path.dirname(resolvedFile));
+  const canonicalRoot = path.resolve(options.canonicalRoot || root);
+  if (
+    !isPathWithinLexically(resolvedRoot, resolvedFile)
+    || resolvedParent !== path.dirname(resolvedFile)
+    || !options.parentSnapshot?.stats
+  ) {
+    throw new ContainedReadError();
+  }
+  if (typeof filesystem.open !== "function") {
+    throw new ContainedReadError("DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE");
+  }
+
+  let handle;
+  try {
+    handle = await filesystem.open(
+      resolvedFile,
+      fsConstants.O_RDONLY
+        | (fsConstants.O_NOFOLLOW || 0)
+        | (fsConstants.O_NONBLOCK || 0)
+    );
+    const opened = await handle.stat();
+    const current = await lstatAfterObservation(filesystem, resolvedFile);
+    const currentParent = await lstatAfterObservation(filesystem, resolvedParent, { bigint: true });
+    let canonicalFile;
+    try {
+      canonicalFile = await filesystem.realpath(resolvedFile);
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
+      throw error;
+    }
+    if (
+      !opened.isFile()
+      || current.isSymbolicLink()
+      || !sameFile(opened, current)
+      || !sameBigIntFile(options.parentSnapshot.stats, currentParent)
+      || !currentParent.isDirectory()
+      || currentParent.isSymbolicLink()
+      || !isPathWithinLexically(canonicalRoot, canonicalFile)
+    ) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    if (Number.isFinite(options.maxBytes) && opened.size > options.maxBytes) {
+      throw new ContainedReadError(options.tooLargeCode || "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE");
+    }
+
+    options.budget?.reserveFile(opened.size);
+    const bytes = Number.isFinite(options.maxBytes)
+      ? await readBoundedHandle(
+        handle,
+        options.maxBytes,
+        options.tooLargeCode || "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE",
+        opened.size
+      )
+      : await handle.readFile();
+    const completed = await handle.stat();
+    if (!sameFile(opened, completed)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    return Object.freeze({
+      content: decodeContainedBytes(bytes, options.encoding),
+      stats: completed
+    });
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    throw error;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+  }
+}
+
+/**
+ * Enumerate one directory already admitted by a corpus transaction. Parent
+ * identity and canonical-root binding replace repeated full ancestor walks;
+ * before/open/after path observations still surround the portable opendir
+ * handle, whose identity Node does not expose directly.
+ */
+export async function readContainedSnapshotDirectory(root, directoryPath, options = {}) {
+  const filesystem = options.filesystem || localFilesystem;
+  const resolvedRoot = path.resolve(root);
+  const resolvedDirectory = path.resolve(directoryPath);
+  const canonicalRoot = path.resolve(options.canonicalRoot || root);
+  if (!isPathWithinLexically(resolvedRoot, resolvedDirectory)) {
+    throw new ContainedReadError();
+  }
+  if (typeof filesystem.opendir !== "function") {
+    throw new ContainedReadError("DOTAIOS_BOUNDED_DIRECTORY_READ_UNAVAILABLE");
+  }
+
+  let directory;
+  try {
+    const before = await lstatAfterObservation(filesystem, resolvedDirectory, { bigint: true });
+    if (
+      !before.isDirectory()
+      || before.isSymbolicLink()
+      || (options.expectedSnapshot && !sameBigIntFile(options.expectedSnapshot.stats, before))
+    ) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    directory = await filesystem.opendir(resolvedDirectory, {
+      encoding: options.nameEncoding || "utf8"
+    });
+    const opened = await lstatAfterObservation(filesystem, resolvedDirectory, { bigint: true });
+    if (!sameBigIntFile(before, opened)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+
+    if (resolvedDirectory !== resolvedRoot) {
+      const resolvedParent = path.resolve(options.parentPath || path.dirname(resolvedDirectory));
+      if (resolvedParent !== path.dirname(resolvedDirectory) || !options.parentSnapshot?.stats) {
+        throw new ContainedReadError();
+      }
+      const currentParent = await lstatAfterObservation(filesystem, resolvedParent, { bigint: true });
+      if (
+        !currentParent.isDirectory()
+        || currentParent.isSymbolicLink()
+        || !sameBigIntFile(options.parentSnapshot.stats, currentParent)
+      ) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
+    }
+
+    let canonicalDirectory;
+    try {
+      canonicalDirectory = await filesystem.realpath(resolvedDirectory);
+    } catch (error) {
+      if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
+      throw error;
+    }
+    if (!isPathWithinLexically(canonicalRoot, canonicalDirectory)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+
+    const entries = [];
+    while (true) {
+      const entry = await directory.read();
+      if (!entry) break;
+      options.budget?.reserveEntries(1);
+      entries.push(options.readdirOptions?.withFileTypes ? entry : entry.name);
+      if (Number.isFinite(options.maxEntries) && entries.length > options.maxEntries) {
+        throw new ContainedReadError(options.tooManyCode || "DOTAIOS_DIRECTORY_LIMIT_EXCEEDED");
+      }
+    }
+    const after = await lstatAfterObservation(filesystem, resolvedDirectory, { bigint: true });
+    if (!sameBigIntFile(opened, after)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    return {
+      entries,
+      snapshot: {
+        stats: after,
+        ancestors: options.expectedSnapshot?.ancestors || []
+      }
+    };
+  } catch (error) {
+    if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    throw error;
+  } finally {
+    if (directory) {
+      await directory.close().catch((error) => {
+        if (error?.code !== "ERR_DIR_CLOSED") throw error;
+      });
+    }
+  }
+}
+
+/**
+ * Revalidate one request's complete observed directory/ancestor generation.
+ * Paths shared by many files or directories are checked once, so this work is
+ * proportional to the observed directory set rather than to files multiplied
+ * by their ancestor depth.
+ */
+export async function assertContainedDirectorySnapshotsUnchanged(root, observations, options = {}) {
+  const filesystem = options.filesystem || localFilesystem;
+  const resolvedRoot = path.resolve(root);
+  const expectedPaths = new Map();
+
+  for (const observation of observations || []) {
+    const observedPath = path.resolve(observation.path);
+    if (!isPathWithinLexically(resolvedRoot, observedPath) || !observation.snapshot) {
+      throw new ContainedReadError();
+    }
+    rememberExpectedDirectory(expectedPaths, observedPath, {
+      stats: observation.snapshot.stats,
+      resolvedPath: observedPath,
+      resolvedStats: observation.snapshot.stats
+    });
+    for (const ancestor of observation.snapshot.ancestors || []) {
+      rememberExpectedDirectory(expectedPaths, ancestor.path, ancestor);
+    }
+  }
+
+  for (const [expectedPath, expected] of expectedPaths) {
+    const actual = await lstatAfterObservation(filesystem, expectedPath, { bigint: true });
+    if (!sameBigIntFile(expected.stats, actual)) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    if (expectedPath === resolvedRoot && actual.isSymbolicLink()) {
+      let actualResolvedPath;
+      try {
+        actualResolvedPath = await filesystem.realpath(expectedPath);
+      } catch (error) {
+        if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) {
+          throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+        }
+        throw error;
+      }
+      const actualResolvedStats = await lstatAfterObservation(
+        filesystem,
+        actualResolvedPath,
+        { bigint: true }
+      );
+      if (
+        path.resolve(actualResolvedPath) !== path.resolve(expected.resolvedPath)
+        || !sameBigIntFile(expected.resolvedStats, actualResolvedStats)
+        || !actualResolvedStats.isDirectory()
+        || actualResolvedStats.isSymbolicLink()
+      ) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
+      continue;
+    }
+    if (!actual.isDirectory() || actual.isSymbolicLink()) {
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+  }
+}
+
+function rememberExpectedDirectory(expectedPaths, expectedPath, expected) {
+  const resolvedPath = path.resolve(expectedPath);
+  const current = expectedPaths.get(resolvedPath);
+  if (current && (
+    path.resolve(current.resolvedPath) !== path.resolve(expected.resolvedPath)
+    || !sameBigIntFile(current.stats, expected.stats)
+    || !sameBigIntFile(current.resolvedStats, expected.resolvedStats)
+  )) {
+    throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+  }
+  if (!current) expectedPaths.set(resolvedPath, expected);
 }
 
 async function inspectContainedDirectorySnapshot(root, directoryPath, options = {}) {

@@ -2,12 +2,16 @@ import localFilesystem from "node:fs/promises";
 import path from "node:path";
 
 import {
+  assertContainedDirectorySnapshotsUnchanged,
   ContainedReadError,
   createContainedReadBudget,
   inspectContainedDirectory,
+  inspectNearestContainedDirectory,
   inspectContainedPathEntry,
   readContainedDirectory,
-  readContainedFile
+  readContainedFile,
+  readContainedSnapshotDirectory,
+  readContainedSnapshotFile
 } from "./contained-read.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 
@@ -263,6 +267,208 @@ function createEvidenceReaderView(roots, state) {
     }
   }
 
+  /**
+   * Enumerate and read one text corpus inside an evidence-reader-owned
+   * transaction. The callback may derive any request result it needs, but the
+   * outer promise cannot resolve successfully until the complete observed
+   * root/directory/ancestor generation has been revalidated.
+   */
+  async function withTextCorpus(root, directoryPath, options, callback) {
+    const authorizedRoot = assertAuthorizedRoot(root);
+    if (!isPathWithinLexically(authorizedRoot, directoryPath)) {
+      throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
+    }
+    if (!options || typeof options !== "object" || Array.isArray(options)) {
+      throw new TypeError("Evidence corpus options must be an object.");
+    }
+    if (typeof callback !== "function") {
+      throw new TypeError("Evidence corpus transactions require a callback.");
+    }
+
+    let canonicalRoot;
+    let observation;
+    try {
+      const rootSnapshot = await inspectContainedDirectory(authorizedRoot, authorizedRoot, {
+        filesystem,
+        returnSnapshot: true
+      });
+      if (rootSnapshot === null) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
+      canonicalRoot = await filesystem.realpath(authorizedRoot);
+      observation = {
+        directories: [{ path: authorizedRoot, snapshot: rootSnapshot }],
+        files: []
+      };
+      const resolvedDirectory = path.resolve(directoryPath);
+      const startingSnapshot = resolvedDirectory === authorizedRoot
+        ? rootSnapshot
+        : await inspectContainedDirectory(authorizedRoot, resolvedDirectory, {
+          filesystem,
+          returnSnapshot: true
+        });
+      if (startingSnapshot !== null) {
+        await walkTextCorpus(
+          authorizedRoot,
+          resolvedDirectory,
+          options,
+          observation,
+          {
+            canonicalRoot,
+            expectedSnapshot: startingSnapshot,
+            ...containedParentObservation(resolvedDirectory, authorizedRoot, startingSnapshot)
+          }
+        );
+      } else {
+        const nearest = await inspectNearestContainedDirectory(
+          authorizedRoot,
+          resolvedDirectory,
+          { filesystem }
+        );
+        rememberCorpusDirectory(observation, nearest.path, nearest.snapshot);
+      }
+      observation.files.sort((left, right) => left.filePath.localeCompare(right.filePath));
+    } catch (error) {
+      throw normalizeEvidenceReadError(error);
+    }
+
+    let active = true;
+    let consumed = false;
+    let mappingPromise = null;
+    const transaction = Object.freeze({
+      mapFiles(mapper) {
+        if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
+        if (consumed) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CONSUMED");
+        if (typeof mapper !== "function") {
+          throw new TypeError("Evidence corpus mapping requires a callback.");
+        }
+        consumed = true;
+        mappingPromise = mapObservedTextFiles(
+          authorizedRoot,
+          canonicalRoot,
+          observation.files,
+          options,
+          mapper
+        );
+        return mappingPromise;
+      }
+    });
+
+    let result;
+    let callbackError;
+    try {
+      result = await callback(transaction);
+    } catch (error) {
+      callbackError = error;
+    }
+    active = false;
+    if (mappingPromise) {
+      try {
+        await mappingPromise;
+      } catch (error) {
+        if (!callbackError) callbackError = error;
+      }
+    }
+    if (callbackError) throw callbackError;
+    try {
+      await assertContainedDirectorySnapshotsUnchanged(
+        authorizedRoot,
+        observation.directories,
+        { filesystem }
+      );
+      return result;
+    } catch (error) {
+      throw normalizeEvidenceReadError(error);
+    }
+  }
+
+  async function walkTextCorpus(root, directoryPath, options, observation, containment) {
+    const observed = await readContainedSnapshotDirectory(root, directoryPath, {
+      filesystem,
+      canonicalRoot: containment.canonicalRoot,
+      expectedSnapshot: containment.expectedSnapshot,
+      parentPath: containment.parentPath,
+      parentSnapshot: containment.parentSnapshot,
+      budget,
+      maxEntries: options.maxDirectoryEntries ?? effectiveLimits.maxDirectoryEntries,
+      tooManyCode: "DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE",
+      readdirOptions: { withFileTypes: true },
+      returnSnapshot: true
+    });
+    if (observed === null) return;
+    rememberCorpusDirectory(observation, directoryPath, observed.snapshot);
+
+    const entries = [...observed.entries]
+      .sort((left, right) => left.name.localeCompare(right.name));
+    for (const entry of entries) {
+      if (options.skipEntry?.(entry.name)) continue;
+      const filePath = path.join(directoryPath, entry.name);
+      if (entry.isSymbolicLink()) {
+        const acceptedLink = options.includeFile
+          ? options.includeFile(filePath)
+          : !options.extensions || options.extensions.includes(path.extname(entry.name).toLowerCase());
+        if (acceptedLink) throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
+        continue;
+      }
+      if (entry.isDirectory()) {
+        if (options.recursive !== false) {
+          await walkTextCorpus(root, filePath, options, observation, {
+            canonicalRoot: containment.canonicalRoot,
+            parentPath: path.resolve(directoryPath),
+            parentSnapshot: observed.snapshot
+          });
+        }
+        continue;
+      }
+
+      const accepted = options.includeFile
+        ? options.includeFile(filePath)
+        : !options.extensions || options.extensions.includes(path.extname(entry.name).toLowerCase());
+      if (!accepted) continue;
+      if (!entry.isFile()) throw new EvidenceReadError("DOTAIOS_EVIDENCE_NOT_REGULAR_FILE");
+      if (observation.files.length >= effectiveLimits.maxFiles) {
+        throw new EvidenceReadError("DOTAIOS_EVIDENCE_BUDGET_EXCEEDED");
+      }
+      observation.files.push(Object.freeze({
+        filePath,
+        parentPath: path.resolve(directoryPath),
+        parentSnapshot: observed.snapshot
+      }));
+    }
+  }
+
+  async function mapObservedTextFiles(root, canonicalRoot, files, options, mapper) {
+    const concurrency = normalizeCorpusConcurrency(options.concurrency);
+    const mapped = new Array(files.length);
+    for (let index = 0; index < files.length; index += concurrency) {
+      const batch = files.slice(index, index + concurrency);
+      const values = await Promise.all(batch.map(async (file) => {
+        let observed;
+        try {
+          observed = await readContainedSnapshotFile(root, file.filePath, {
+            filesystem,
+            canonicalRoot,
+            parentPath: file.parentPath,
+            parentSnapshot: file.parentSnapshot,
+            encoding: "utf8",
+            budget,
+            maxBytes: options.maxBytes ?? effectiveLimits.maxFileBytes,
+            tooLargeCode: "DOTAIOS_EVIDENCE_FILE_TOO_LARGE"
+          });
+        } catch (error) {
+          throw normalizeEvidenceReadError(error);
+        }
+        return mapper(Object.freeze({
+          filePath: file.filePath,
+          content: observed.content,
+          mtimeMs: observed.stats.mtimeMs
+        }));
+      }));
+      for (const [offset, value] of values.entries()) mapped[index + offset] = value;
+    }
+    return mapped;
+  }
+
   async function walkDirectory(root, directoryPath, files, options) {
     const observed = await readContainedDirectory(root, directoryPath, {
       filesystem,
@@ -319,6 +525,7 @@ function createEvidenceReaderView(roots, state) {
     listFiles,
     listDirectories,
     listDirectory,
+    withTextCorpus,
     snapshot: () => budget.snapshot()
   });
 
@@ -339,6 +546,31 @@ function createEvidenceReaderView(roots, state) {
       .filter((entry) => entry.root === resolvedRoot && isPathWithinLexically(entry.path, resolvedFile))
       .map(({ path: directoryPath, snapshot }) => ({ path: directoryPath, snapshot }));
   }
+}
+
+function rememberCorpusDirectory(observation, directoryPath, snapshot) {
+  const resolvedDirectory = path.resolve(directoryPath);
+  observation.directories.push(Object.freeze({ path: resolvedDirectory, snapshot }));
+}
+
+function containedParentObservation(directoryPath, root, snapshot) {
+  const resolvedDirectory = path.resolve(directoryPath);
+  if (resolvedDirectory === path.resolve(root)) return {};
+  const parentPath = path.dirname(resolvedDirectory);
+  const parent = snapshot.ancestors?.find(
+    (ancestor) => path.resolve(ancestor.path) === parentPath
+  );
+  if (!parent) throw new ContainedReadError();
+  return { parentPath, parentSnapshot: { stats: parent.stats } };
+}
+
+function normalizeCorpusConcurrency(value) {
+  if (value === undefined) return 32;
+  const normalized = Number(value);
+  if (!Number.isSafeInteger(normalized) || normalized < 1 || normalized > 64) {
+    throw new TypeError("Evidence corpus concurrency must be an integer from 1 to 64.");
+  }
+  return normalized;
 }
 
 function findFrontmatterEnd(bytes) {
