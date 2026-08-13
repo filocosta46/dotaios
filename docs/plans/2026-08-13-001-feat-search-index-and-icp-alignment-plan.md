@@ -3,44 +3,82 @@ artifact_contract: ce-unified-plan/v1
 artifact_readiness: implementation-ready
 execution: code
 product_contract_source: ce-plan-bootstrap
-created: 2026-08-13
-plan_type: feat
+title: Search Scale, Resilience, and ICP Alignment - Plan
+type: perf
+date: 2026-08-13
+deepened: 2026-08-13
 ---
 
-# feat: Search index, optional hybrid retrieval, and ICP language alignment
-
-**Target repo:** dotaios
-
----
+# Search Scale, Resilience, and ICP Alignment - Plan
 
 ## Goal Capsule
 
-Make search fast enough to stay honest as a personal corpus grows, and make the
-product's own output speak to the person its brief says it is for.
+Make end-to-end search fast and predictably degradable as a personal corpus
+grows, without weakening the evidence-containment boundary or changing results;
+then remove first-run language that exposes implementation details to the
+non-expert user described by the product brief.
 
-Three tracks, deliberately ordered: the index (performance, and the recurrence
-guard the 2.0.3 fix did not remove), the ICP language pass (cheap, visible), and
-hybrid retrieval held as an explicitly deferred option with a written trigger.
+- **Authority:** repository safety rules and ADRs outrank this plan; this Product
+  Contract outranks implementation convenience; measured output parity outranks
+  latency alone.
+- **Stop conditions:** stop and re-plan if the latency target requires removing
+  a containment, identity, race, UTF-8, or budget guarantee; if optimized safe
+  scanning misses the performance gate; or if result ordering differs from the
+  current implementation.
+- **Execution profile:** four independently reviewable slices: safe search
+  performance, honest ceiling behavior, bounded archive lifecycle, and first-run
+  language. The performance slice does not deliver predictable degradation;
+  that behavior is complete only when U3 lands. U4 and the archive-runway
+  evidence may proceed in parallel while U8/U5/U6 remain the search critical
+  path.
+- **Release boundary:** these slices are supporting hardening, not the
+  Foundation launch proof. Foundation release readiness remains blocked on the
+  task-aware continuity outcome and host receipt owned by
+  `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`; completing this
+  plan cannot by itself authorize a launch claim.
+- **Tail ownership:** `ce-work` owns test-first implementation, review, commits,
+  CI, and PR landing; this plan remains a decision artifact.
 
 ---
 
-## Problem Frame
+## Product Contract
 
-2.0.3 fixed search *failing*. It did not make search *scale*, and it left one
-recurrence path open.
+### Summary
 
-Three separate problems, often conflated:
+The first performance slice should optimize the operation the profiler proved
+expensive: repeated containment validation for every file in one search
+request. A persistent index is not part of this implementation unless a later
+measurement gate proves the optimized safe scan insufficient. Resource ceilings
+must return bounded, honest omissions when the affected source can be skipped,
+while integrity violations continue to fail the whole request.
 
-1. **No index.** `packages/core/src/search.mjs:44` carries `TODO(L1-5)`:
-   `buildCorpusStats` re-tokenizes the scanned candidate set on **every query**.
-   A real folder is ~3,300 markdown files and 39 MB. Cost is linear in corpus
-   size, paid per keystroke-to-answer.
-2. **A guaranteed recurrence.** `memory/events-archive.jsonl` has no rotation.
+### Problem Frame
+
+2.0.3 fixed one search failure. It did not make the safe search path scale, and
+it left both resource-ceiling and archive-growth recurrence paths.
+
+Four separate problems, often conflated:
+
+1. **The measured bottleneck is safe file access, not corpus statistics.** A
+   controlled 10,000-file search takes about 3.9-4.1 seconds and performs about
+   67 `lstat` and 16 `realpath` calls per file. The same traversal, matching,
+   tokenization, and ranking with containment isolated takes about 0.5 seconds
+   and returns identical hits. `buildCorpusStats` is material within that raw
+   logic but only about 7% of current wall time. Scaling from 500 to 10,000 files
+   is approximately linear; the earlier superlinear claim compared unlike
+   corpora.
+2. **Resource ceilings currently erase unrelated results.** A directory over
+   the entry ceiling or one oversized JSONL rejects a shared request and aborts
+   parallel scopes, even when another scope contains a valid hit. The command
+   can also exit successfully after returning an empty result, creating false
+   completeness.
+3. **Archives still grow without a lifecycle.** `memory/events-archive.jsonl`
+   has no rotation.
    `maintainMemory` compacts `events.jsonl` to 50 entries whenever it passes 100,
    moving the rest into that archive forever, and `search.mjs:317` reads it under
-   `maxFileBytes` (now 4 MiB). At ~300 B/event that is ~14,000 archived events.
-   When it is crossed, search fails closed again — same wall, new file.
-3. **ICP drift.** `docs/foundation-program/product-brief.md` states the user is a
+   `maxFileBytes`. Rotation alone postpones the next aggregate byte/entry limit,
+   so lifecycle and explicit omission reporting must be designed together.
+4. **ICP drift.** `docs/foundation-program/product-brief.md` states the user is a
    non-expert who "should not need to understand prompt engineering, context
    windows, skill routing, Git, MCP, or retrieval infrastructure." Measured on a
    clean sandbox, `setup --dry-run` names Antigravity, Kimi Code CLI, Hermes,
@@ -48,344 +86,719 @@ Three separate problems, often conflated:
    first 20 lines. The first `brief` a new user's agent receives leaks raw YAML
    frontmatter (`source: dotaios init`, `created_at:`, `kind: context`).
 
-### What external evidence says about the architecture
+### Actors
+
+- A1. A person using local agents who needs continuity without learning the
+  retrieval and host-projection internals.
+- A2. A CLI caller who needs useful results plus actionable warnings.
+- A3. An MCP host that must retain read-only canonical-data behavior and receive
+  the same result/omission semantics as the CLI.
+
+### Flows
+
+- F1. A caller searches an authorized corpus; DotAIOS safely enumerates and
+  reads eligible files, ranks exact current content, and returns the same order
+  as the existing implementation within the latency budget.
+- F2. A skippable resource ceiling affects one source; DotAIOS returns results
+  from unaffected sources and a bounded omission. An integrity or authorization
+  failure still rejects the whole request.
+- F3. A first-time user previews setup or receives a brief; the default output
+  describes outcomes in product language, while an explicit verbose mode keeps
+  the operator detail.
+
+### Requirements
+
+#### Search performance and parity
+
+- R1. End-to-end safe search over the controlled 10,000-file fixture returns
+  validated results with p95 wall latency under one second on the benchmark
+  machine, after warm-up and across at least 20 measured runs. The PR records
+  hardware, Node version, median, p95, peak RSS, and file-operation counts.
+- R2. Search returns the same ordered results as the pre-optimization path for
+  substring, inflection, phrase, frontmatter, path/title, recency, scope, and tie
+  behavior.
+- R3. The optimization may amortize request-redundant validation but may not
+  weaken authorization, lexical and canonical containment, no-follow file
+  opening, handle/path identity binding, ancestor/directory race detection,
+  UTF-8 validation, or byte/file/entry ceilings.
+- R4. No runtime dependency, build step, vector, embedding, graph, daemon, or
+  database is introduced.
+
+#### Honest degradation and lifecycle
+
+- R5. Skippable resource ceilings return available results plus a bounded,
+  non-path-leaking omission envelope across core, CLI, and MCP. Observed unsafe
+  paths, symlinks, evidence mutation, unauthorized roots, and invalid
+  configuration remain request-fatal. An over-ceiling directory is explicitly
+  **uninspected** beyond its observation boundary; the result may never imply
+  that unvisited children were security-validated. Every omission carries a
+  closed reason code and a path-safe, reason-specific recovery action.
+- R6. Budget allocation and omission order are deterministic and starvation
+  resistant across scopes. A bounded preflight gives every requested logical
+  scope a fair-share reservation before unused capacity is redistributed in
+  declared order; a fast parallel scope cannot consume another scope's safety
+  budget by winning a race.
+- R7. Event and signal archives rotate crash-safely before the per-file ceiling,
+  remain searchable without loss or duplication, and report any later aggregate
+  ceiling rather than claiming complete results.
+
+#### First-run language
+
+- R8. Default setup and doctor output names only detected clients and user
+  actions, uses home-relative paths where a path helps, and hides internal
+  projection terms. The `brief --compact` and MCP `read_working_context`
+  projections strip raw frontmatter from rendered identity context.
+- R9. Verbose/operator output retains the diagnostic information removed from
+  the default view.
+
+### Acceptance Examples
+
+- AE1. On the 10,000-file fixture, the optimized safe path finds the same four
+  controlled needles in the same order and meets R1; a timed failure or empty
+  result never counts as a performance pass.
+- AE2. One scope contains a directory above its entry ceiling while another
+  contains the query. Search returns the valid hit, marks the skipped logical
+  source as uninspected without an absolute path, and gives a reason-specific
+  next action for obtaining a complete result with equivalent meaning through
+  CLI and MCP. Replacing the directory root with an unsafe symlink rejects the
+  request; an unsafe child beyond the ceiling remains part of the uninspected
+  omission and can never be represented as complete.
+- AE3. A fresh default setup preview names the detected client, explains the
+  user-visible outcome, and gives the next action without naming absent hosts or
+  managed projection vocabulary. Doctor does the same for healthy, warning, and
+  blocking states. A fresh compact brief and MCP working-context response retain
+  visible identity content but contain no YAML metadata; setup/doctor verbose
+  output still exposes the supported operator view.
+- AE4. Rotation at a shard boundary followed by interruption and retry leaves
+  every event searchable exactly once. A concurrent search returns either the
+  complete pre-rotation generation or the complete post-rotation generation;
+  an unsafe target or an archive line above the read ceiling fails before source
+  removal.
+
+### Success Criteria
+
+- Safe search meets R1 with exact output parity and a bounded file-operation
+  profile, not merely a faster unsuccessful code path.
+- All interfaces distinguish complete, partially omitted/uninspected, and
+  rejected search.
+- The first-run copy assertions pass without making verbose diagnostics poorer.
+
+### Scope Boundaries
+
+**In scope:** request-scoped containment amortization; search integration and
+benchmarking; typed resource-ceiling omissions across core/CLI/MCP; archive
+rotation and discovery; the first-run language pass.
+
+**Separate release-critical dependency:** the Foundation continuity plan owns
+the end-to-end proof that a fresh agent receives the smallest relevant project
+evidence with provenance and can continue without retelling. It may execute in
+parallel, but it must be approved, implemented, and evidenced before Foundation
+launch readiness can be claimed.
+
+**Deferred to follow-up work:**
+
+- A persistent index. Reconsider only if the optimized safe scan misses R1 on
+  representative prose, or a materially larger real corpus demonstrates a
+  repeated-query win that justifies persistent derived state. The candidate must
+  prove exact candidate-superset behavior, logical-corpus isolation, safe
+  invalidation, CLI/MCP write posture, parse p95 at most 150 ms, peak heap delta
+  at most 64 MiB, and serialized size at most 1.5x indexed source bytes with an
+  explicit hard ceiling. Object-per-token frequency-map JSON is rejected by the
+  current measurement: 17.79 MiB and about 1.38 seconds to parse on the fixture.
+- Hybrid, vector, embedding, or graph retrieval. Revisit only after a repeated
+  representative lexical miss, not from generic retrieval benchmarks.
+- Default inclusion of every project in unscoped search; that is a product
+  decision, not a performance correction.
+- PR #62 CI diagnosis, the loose bridge-certification check, and the high-entropy
+  V8 `Map` ceiling.
+- Managed-skill CLI hardening discovered in the Sonnet session. The reported
+  `npx` defect was a wrapper dropping the required `sha256:` prefix and ignoring
+  exit status; a clean exact-fingerprint `npx` flow succeeds. A separate small
+  change may validate the prefix earlier, improve the error/help text, and add a
+  packaged-`npx` acceptance test.
+
+**Not in scope:** derived state inside the canonical AIOS folder; weakening any
+evidence-reader security guarantee; hosted storage or model-written fact
+extraction.
+
+### External Architecture and Product Evidence
 
 Researched 2026-08-13. This is the part that changes the plan's confidence.
 
-**Claude Code's own auto memory is the same architecture.** Per the official
-docs, it stores `~/.claude/projects/<project>/memory/` with a `MEMORY.md` index
-loaded every session, capped at **200 lines or 25 KB**, plus topic files loaded
-**on demand**, in plain markdown the user can edit. Claude Code reminds the model
-to shorten the index near the limit and errors when over.
+Claude Code validates bounded, on-demand plain-text context: auto memory is
+repository-scoped and machine-local, and only the first 200 lines or 25 KB of
+`MEMORY.md` load at startup; excess is silently omitted. Claude and Codex both
+recommend moving procedures out of always-on instruction files into skills.
+Skill bodies load progressively, but metadata still consumes bounded recurring
+context, so “skills are free” is not a defensible claim.
 
-That is a bounded index plus on-demand detail plus a hard budget in plain
-markdown — DotAIOS's design, shipped by Anthropic. It is the strongest available
-evidence that the plain-markdown-plus-derived-view bet is right, and it narrows
-the defensible claim at the same time: auto memory is **per-repository,
-machine-local, Claude Code only, and model-written**. DotAIOS is
-**person-scoped, cross-agent, user-authored, and portable**. That difference is
-the product; "we store memory in markdown" no longer is.
+OpenAI's current Codex guidance similarly bounds the combined `AGENTS.md` chain
+at 32 KiB by default and exposes only a bounded initial skills catalog. Codex
+also now has generated local memory, so DotAIOS should differentiate on
+canonical user-owned knowledge, deterministic routing, inspectability, and
+cross-host portability rather than claiming other agents have no memory.
 
-**Bloat is the recognized problem, and skills are the documented cure, not the
-cause.** The docs are explicit: "target under 200 lines per CLAUDE.md file.
-Longer files consume more context and reduce adherence", and for task-specific
-instructions "use skills instead, which only load when you invoke them or when
-Claude determines they're relevant." `.claude/rules/` with `paths:` frontmatter
-loads only when matching files are touched. `/doctor` now proposes trims for an
-oversized CLAUDE.md. Adding skills does not bloat a session; adding always-on
-instruction text does. This plan does not add always-on text.
+The current RAG paper supports lexical-first evaluation, not this index design:
+at 601M tokens its enterprise exact-fact workload reports BM25 50.5, raw
+file-system agent 30.7, and dense retrieval 29.9. It does not contain the old
+plan's hybrid recall claim, and its roughly 10M-token crossover compares BM25
+with iterative raw-file exploration, not BM25 with dense retrieval.
 
-**Lexical is defensible at this corpus size, hybrid is the general standard.**
-arxiv 2607.26497 finds BM25 overtakes dense retrieval at ~10M corpus tokens with
-a margin approaching 20 points at full scale; a 39 MB markdown corpus is roughly
-that size. The same body of work reports hybrid at ~91% recall@10 against ~65%
-sparse-only. Both facts are true; they answer different questions. Hybrid stays
-deferred with a written trigger rather than being pre-emptively built.
+Basic Memory and GBrain already combine canonical Markdown, rebuildable local
+indexes, MCP, and cross-agent use; GBrain also makes Git part of the explicit
+workflow. OpenMemory and Supermemory market one memory across tools. The
+defensible product wedge is therefore the lighter contract: no account, daemon,
+database, mandatory model, or opaque extracted-fact store.
 
 ---
 
-## Requirements
+## Planning Contract
 
-- **R1.** Search on a corpus of at least 10,000 markdown files returns results in
-  well under one second on a warm index, without changing what it returns today.
-- **R2.** The index is a derived view: deleting it degrades performance only, and
-  never loses, hides, or authorizes deleting a canonical file. (ADR 0003.)
-- **R3.** The index rebuilds incrementally — only files whose mtime or size
-  changed are re-tokenized.
-- **R4.** No new runtime dependency, no build step, no vector or embedding
-  component. (CLAUDE.md hard rules 3, 4, 5.)
-- **R5.** A corpus that grows past a read ceiling degrades with an actionable
-  message rather than failing closed, and `events-archive.jsonl` no longer
-  guarantees that outcome.
-- **R6.** First-run output a non-expert reads — `setup --dry-run`, `doctor`, the
-  first `brief` — contains no host codenames they do not use, no internal
-  vocabulary, and no raw frontmatter.
-- **R7.** Ranking behavior is unchanged by indexing: the same query returns the
-  same ordered results with and without an index present.
+### Key Technical Decisions
 
----
+- KTD1. Optimize containment at an evidence-reader-owned transaction seam, not
+  inside the generic single-file primitive. The caller performs matching inside
+  the transaction; it cannot obtain a successful result until final root,
+  ancestor, and directory-generation validation completes. Each file retains
+  lexical checking, no-follow handle binding, identity validation, canonical
+  containment, and a comparison with the enumerated parent identity at handle
+  validation. This localizes the performance change without weakening unrelated
+  consumers or relying on the caller to remember a commit check.
+- KTD2. Measure before indexing. The prior index proposal cached work after
+  every canonical file had already been opened and scanned, and its literal
+  JSON shape misses R1 on parse time alone. If U5/U6 miss R1 while satisfying
+  R2/R3, execution stops for a new candidate-retrieval design; it does not add a
+  cache opportunistically.
+- KTD3. Classify failures by meaning. Resource exhaustion that can be isolated
+  becomes a typed bounded omission; integrity, authorization, configuration,
+  and observed-mutation failures remain request-fatal. This prevents false
+  completeness without turning security failures into warnings.
+- KTD4. Use a two-phase fair-share reservation. A bounded metadata preflight
+  captures each requested logical scope's demand and generation independently.
+  Half of each request-wide file, byte, and entry ceiling is divided equally as
+  a protected minimum tranche across requested scopes; the other half and any
+  unused protected capacity are allocated in declared order. Scopes that still
+  cannot be completed release their capacity for one deterministic second pass.
+  A scope is searched only when its full preflight demand fits its final
+  reservation; otherwise it becomes one omission. Bounded concurrency remains
+  within an admitted scope. This prevents timing races and protects later scopes
+  from one large early scope without pretending partial-corpus ranking is
+  equivalent to complete ranking.
+- KTD5. Keep the unsuffixed archive as the active append target and rotate full
+  content into immutable, zero-padded numbered shards under the existing memory
+  lock. Search reads numbered shards in ascending order followed by the active
+  archive. The transition supports legacy unsuffixed archives in place, uses the
+  existing pending batch as recovery authority, and never overwrites a preexisting
+  shard. Rotation prevents a single-file recurrence; R5/R7 handle eventual
+  aggregate limits honestly.
+- KTD6. Keep the ICP change as a default-copy pass. No command loses operator
+  information; verbose output retains it.
+- KTD7. Keep lexical retrieval and canonical Markdown. External evidence
+  validates progressive disclosure and lexical-first testing but does not prove
+  DotAIOS needs persistent indexing at this corpus size. Competitive positioning
+  rests on a database-free, daemon-free, model-optional ownership contract.
+- KTD8. Preserve the core search return shape by adding frozen `omissions`
+  metadata beside the existing `scope` metadata on the iterable result. CLI
+  keeps results on stdout, sends the omission/recovery warning to stderr, and
+  sets exit code 2 for every partial/uninspected result; exit 0 means a complete
+  search even when no hits exist, and exit 1 remains fatal. MCP returns valid
+  results plus structured `complete: false` and the same logical omissions
+  without marking the tool call failed. The closed omission schema contains
+  logical scope, reason code, bounded observed counts, inspection state, and a
+  path-safe recovery code/message. It exposes at most 32 entries plus one
+  aggregate remainder and never a machine path. Search currently has no JSON CLI
+  mode; adding one is outside this plan, and any future machine-readable surface
+  must reuse this schema rather than infer completeness from exit text.
+- KTD9. Make the operator surface explicit. `setup --verbose` and
+  `doctor --verbose` augment the concise default with the diagnostic detail
+  those commands currently expose and are documented in help. Compact working
+  context has no raw-metadata mode: `brief --compact` and MCP
+  `read_working_context` both suppress frontmatter, while `brief --json` changes
+  only the transport envelope. Unknown options continue to fail.
 
-## Key Technical Decisions
+### High-Level Technical Design
 
-**KTD1 — A plain JSON inverted index under `~/.dotaios`, not SQLite.**
-`node:sqlite` requires Node 22.5; the engine floor is `>=20`. `better-sqlite3` is
-a native compile, which breaks the no-build-step rule and can fail at install
-time on the exact non-technical machine the onboarding work just protected.
-The index is machine-local derived state, so it belongs beside `projects.json` in
-`~/.dotaios`, never inside `~/aios` where it would enter the sync mirror.
+The existing request flow remains authoritative for matching and ranking:
 
-**KTD2 — Index the corpus statistics, not the ranking.**
-`rankSearchHit` stays untouched. Only `buildCorpusStats` gains a cached path.
-This keeps R7 provable by differential test rather than by inspection, and keeps
-the blast radius inside one function.
+1. Search resolves the same authorized logical scopes and inclusion predicates.
+2. The evidence reader opens a transaction-owned corpus snapshot from safe
+   traversal, recording the authorized root, eligible regular files, and the
+   observed directory/ancestor generation.
+3. Bulk reads reuse invariant validation while keeping per-file no-follow open,
+   handle/path identity, byte, UTF-8, and mutation checks.
+4. Search performs the existing canonical-content match, snippet, corpus-stat,
+   and ranking logic unchanged.
+5. After matching/ranking and before the transaction resolves, the evidence
+   reader revalidates root identity and the observed ancestor/directory
+   generation. Any mismatch rejects the whole request.
+6. Skippable resource failures enter the bounded omission collector; fatal
+   failures bypass it. CLI and MCP render the same logical fields and recovery
+   meaning on their native transports.
 
-**KTD3 — Rotate `events-archive.jsonl` by size, and skip-and-continue on an
-oversized memory JSONL.** Two independent guards. Rotation stops the archive
-growing without bound; skip-and-continue means one oversized file degrades that
-one source instead of killing the whole search. Either alone leaves a path back
-to a fail-closed search.
+No persistent derived search state or MCP write path is added. U3 adds only
+canonical archive shards through the existing memory-maintenance write boundary.
 
-**KTD4 — Hybrid retrieval is deferred with a written trigger, not designed now.**
-Trigger: a representative fixture where the lexical reader misses a decision that
-a semantic reader finds, reproduced twice on real user material. Until that
-exists, the evidence points the other way at this corpus size, and building it
-would breach hard rule 5.
+### System-Wide Impact
 
-**KTD5 — ICP language is a copy pass over output strings, not a redesign.**
-No command loses information; internal names stop appearing where a first-time
-reader sees them. `--verbose` keeps the developer view.
+- **Core boundary:** `evidence-reader.mjs` gains the bulk request abstraction;
+  `contained-read.mjs` supplies reusable snapshot checks without relaxing its
+  generic contract; `search.mjs` adopts the bulk path and omission envelope.
+- **Interface parity:** CLI and MCP must both expose complete/partial/rejected
+  outcomes. Machine paths stay out of omissions; logical scope and reason are
+  sufficient.
+- **Concurrency:** scope scheduling follows KTD4. Search does not acquire the
+  writer lock; atomic archive publication plus the evidence-reader generation
+  transaction means it observes a stable generation or fails with source-changed
+  and can be retried, never a partly published shard.
+- **Canonical data:** search remains read-only. Archive rotation is an existing
+  memory-maintenance write concern, not a side effect of search.
+- **Security:** performance is proven with adversarial ancestor, directory,
+  enumerated-parent, file-replacement, symlink, hard-link, and evidence-change
+  tests, not inferred from a happy-path benchmark. This preserves the repo's
+  observation-boundary threat model; portable Node does not claim immunity to an
+  unobserved same-user swap-and-restore entirely between validation barriers.
+
+### Assumptions
+
+- The controlled 10,000-file fixture and the current machine are the reproducible
+  performance reference; the PR records their characteristics so later runs are
+  comparable.
+- The handle-bound prototype's roughly 0.55-0.65 second result demonstrates that
+  R1 is plausible, not that its abbreviated checks are production-ready.
+- R1 is an engineering responsiveness gate, not evidence of user retention or
+  reduced abandonment; the separate continuity proof owns the product-outcome
+  measurement.
+- Default output is concise for the product user; verbose output is the supported
+  operator surface.
+
+### Risks and Mitigations
+
+- **Security regression disguised as speed:** require per-barrier race tests and
+  end-of-request generation validation before accepting any latency result.
+- **Benchmark-only optimization:** cover shallow/nested, prose/high-entropy, and
+  no/low/high-hit fixtures; validate real returned evidence before timing.
+- **Partial results mistaken for complete:** make omissions structured and
+  bounded in core, cap explicit entries at 32 plus one aggregate remainder, keep
+  CLI results/warnings on stable channels, and assert equivalent rendering,
+  recovery meaning, and completion state in CLI and MCP.
+- **Archive rotation creates loss or reordering:** publish under the memory lock,
+  preserve stable chronology, and test interruption/concurrency with exact event
+  sets rather than counts alone.
+- **Scope creep back into indexing:** KTD2 and the Goal Capsule stop condition
+  require a plan revision with new measurements before persistent state work.
+
+### Sequencing and Landing
+
+1. U4 may begin immediately and land first as the independent first-run polish
+   PR; its positive plain-language assertions must pass alongside the absence
+   checks.
+2. U8 freezes the benchmark authority and pre-change receipt before production
+   performance code begins. U5 and U6 then form the performance PR. U5 must pass
+   its safety and preliminary 10,000-file gates before U6 integration. Do not
+   begin persistent-index work if the full gate fails; stop and revise this plan
+   with the new measurements.
+3. U3 follows the stabilized traversal seam and forms the ceiling-resilience PR.
+   Until it lands, search remains fail-closed on resource ceilings; release notes
+   must not claim predictable degradation after the performance PR alone.
+4. U7 is independent of U5/U6 and has its own archive-lifecycle PR. Record the
+   archive runway before scheduling it. The 2026-08-13 user-corpus snapshot
+   measured events at 199,021 bytes (725 lines, 4.7% of 4 MiB) and signals at
+   66,177 bytes (203 lines, 1.6%). Git-visible growth since the 2026-07-27 archive
+   creation was about 30 event lines/day and 10 signal lines/day; at the current
+   average line sizes, the coarse per-file runways are about 480 and 1,240 days.
+   Re-measure at execution time, but this evidence does not justify placing U7
+   ahead of U3 or the release-critical continuity proof.
 
 ---
 
 ## Implementation Units
 
-### U1. Index store: read, write, invalidate
+### U8. Freeze benchmark authority and pre-change receipt
 
-**Goal:** A machine-local inverted index with an explicit staleness contract.
+**Goal:** Make the performance decision reproducible and falsifiable before the
+optimization changes the target.
 
-**Requirements:** R2, R3, R4
+**Requirements:** R1, R2, R4; F1; AE1
 
 **Dependencies:** none
 
 **Files:**
-- `packages/core/src/search-index.mjs` (new)
-- `packages/core/src/paths.mjs` (add `searchIndexPath()`)
-- `tests/core/search-index.test.mjs` (new)
+- `benchmarks/search/manifest.json`
+- `scripts/bench-search.mjs`
+- `docs/benchmarks/2026-08-13-search-baseline.md`
+- `tests/core/search_benchmark_manifest.test.mjs`
 
 **Approach:**
-1. One JSON document per AIOS root, at `~/.dotaios/search-index/<hash>.json`,
-   keyed by the resolved root path.
-2. Record per file: relative path, mtime ms, size, and its token-frequency map.
-   Record a format version and the corpus-wide document count.
-3. Staleness is per file, not global: a file whose mtime and size both match is
-   reused; anything else is re-tokenized.
-4. A missing, unreadable, or version-mismatched index is not an error — it is a
-   cold start that rebuilds.
-5. Write through `writeFileSafe` with `~/.dotaios` as `boundaryRoot`, same as
-   every other durable write.
-
-**Execution note:** Test-first. The staleness contract is the whole unit; write
-the reuse-and-invalidate cases before the store.
-
-**Patterns to follow:** `packages/core/src/sessions.mjs` for lock-and-write
-shape; `packages/core/src/files.mjs` `writeFileSafe` for the boundary contract.
+1. Check in a manifest that fixes the reference machine identifier and power
+   profile, Node version, fixture-generator version and seed, file counts,
+   shallow/nested layouts, file-size/token/frontmatter distributions, query and
+   expected-hit sets, warm-up/sample protocol, and raw-read control.
+2. Generate fixtures outside the repository from that manifest; do not commit a
+   10,000-file corpus. Hash the generated corpus inventory so a changed fixture
+   invalidates comparison with the recorded baseline.
+3. Record the pre-change contained path, raw control, cold/warm median and p95,
+   peak RSS, exact ordered results, and `lstat`/`realpath`/`open` counts before U5
+   production changes begin.
 
 **Test scenarios:**
-- A cold start with no index file returns empty stats and does not throw.
-- A file unchanged in mtime and size is reused without re-tokenizing.
-- A file whose size changed but mtime did not is re-tokenized.
-- A file whose mtime changed but size did not is re-tokenized.
-- A deleted file is dropped from the index on the next build.
-- A corrupt or truncated index JSON is discarded and rebuilt, not surfaced.
-- An index written by a future format version is discarded and rebuilt.
-- The index never writes inside the AIOS root.
-- Two concurrent builds do not produce a torn index file.
+- The same seed produces the same inventory hash, needles, and expected order on
+  Node 20 and 22.
+- Changing any corpus/query/protocol field changes the manifest receipt and
+  cannot reuse the old baseline.
+- The harness validates output before accepting a timing sample and exits nonzero
+  on an error, empty controlled result, or order mismatch.
 
-**Verification:** The store reports which files it reused and which it
-re-tokenized, and that report is assertable.
+**Verification:** The checked-in manifest, deterministic-generator test, and
+pre-change receipt exist and agree; U5 may not start until this gate is green.
 
----
+### U5. Request-scoped safe corpus snapshot
 
-### U2. Wire the index into `buildCorpusStats`
+**Goal:** Amortize redundant containment work across one corpus scan while
+preserving every security property in R3.
 
-**Goal:** Search consults the index and produces byte-identical results.
+**Requirements:** R3, R4; F1; AE1
 
-**Requirements:** R1, R7
-
-**Dependencies:** U1
+**Dependencies:** U8
 
 **Files:**
-- `packages/core/src/search.mjs` (`buildCorpusStats` call sites; remove `TODO(L1-5)`)
-- `tests/core/search-index-parity.test.mjs` (new)
+- `packages/core/src/evidence-reader.mjs`
+- `packages/core/src/contained-read.mjs`
+- `tests/core/evidence-reader.test.mjs`
+- `tests/core/search-safety.test.mjs`
 
 **Approach:**
-1. `buildCorpusStats` accepts an optional index. Absent, behavior is exactly
-   today's.
-2. On a hit, reuse the stored token map; on a miss, tokenize and record it.
-3. Persist once per search invocation, after ranking, so a failed write costs
-   the next query time and never the current answer.
-4. An index write failure is swallowed and logged, never surfaced — a derived
-   view may not break a read (R2).
-
-**Execution note:** The parity test is the point of this unit. Write it first
-and run it against the unindexed path to establish the expected values
-independently.
+1. Add an opaque transaction-owned snapshot/bulk-read capability at the evidence
+   reader boundary. Matching/ranking executes within its callback/lifetime, and
+   successful results cannot escape until final validation completes. Keep the
+   existing single-file contained read unchanged for other consumers.
+2. Safely enumerate eligible regular files once, bind the snapshot to the
+   authorized root and observed directory/ancestor generation, and bound every
+   collection before expansion.
+3. Retain per-file lexical containment, no-follow open, handle/path identity,
+   canonical containment, byte, UTF-8, and before/after mutation checks. At
+   handle validation, bind each file to the identity of the parent directory
+   recorded during enumeration; if portable Node 20 primitives cannot establish
+   that binding within R1, stop rather than weaken R3.
+4. After the callback finishes matching/ranking, revalidate root identity and
+   every observed directory/ancestor generation before resolving the
+   transaction. A changed generation fails closed and returns no partial result.
 
 **Test scenarios:**
-- The same query over the same corpus returns identical ordered results with an
-  index present and absent.
-- A file edited between two searches changes its results on the second.
-- A file added between two searches is findable on the second.
-- A file deleted between two searches disappears from the second.
-- An unwritable `~/.dotaios` degrades to the unindexed path and still returns
-  results.
-- The second identical query re-tokenizes zero files.
-- Index writes never occur for a zero-result query on an unchanged corpus.
+- Static shallow, nested, external-vault, and selector-scoped corpora return the
+  same bytes and paths as ordinary contained reads.
+- Root, ancestor, enumerated parent, directory, or file replacement at every
+  observation barrier rejects the batch; synchronized swap/restore attempts
+  spanning a barrier fail, and symlinks/non-regular files remain ineligible.
+- Invalid UTF-8 and each configured resource ceiling retain their current safe
+  classification until U3 deliberately adds skippable handling.
+- Operation counters show at most four `lstat`, two `realpath`, and one `open`
+  per accepted file, plus request-level traversal/final validation proportional
+  to observed directories and root depth—never files multiplied by observed
+  directories.
+- On the U8 fixture, bulk read plus final validation p95 is no more than raw-read
+  control p95 plus 150 ms, and that p95 plus the recorded unchanged
+  match/tokenize/rank p95 is below 900 ms. A miss stops U6 integration.
 
-**Verification:** A 10,000-file fixture answers a warm query in well under a
-second, and the parity test passes.
+**Verification:** The bulk reader passes the existing safety suite plus the new
+race matrix, canonical output equality against individual reads, and the
+preliminary performance gate.
 
----
+### U6. Integrate safe bulk search and enforce the performance gate
 
-### U3. Stop the archive guaranteeing a fail-closed search
+**Goal:** Meet R1 without changing search semantics or persisting derived state.
 
-**Goal:** Remove the recurrence path 2.0.3 left open.
+**Requirements:** R1-R4; F1; AE1
 
-**Requirements:** R5
-
-**Dependencies:** none (independent of U1/U2)
+**Dependencies:** U5
 
 **Files:**
-- `packages/core/src/memory.mjs` (archive rotation)
-- `packages/core/src/search.mjs` (skip-and-continue on an oversized memory source)
-- `tests/core/memory-archive-rotation.test.mjs` (new)
-- `tests/core/search-oversized-source.test.mjs` (new)
+- `packages/core/src/search.mjs`
+- `docs/architecture.md`
+- `tests/core/search-ranking.test.mjs`
+- `tests/core/search_corpus_scale.test.mjs`
+- `tests/core/search-safety.test.mjs`
 
 **Approach:**
-1. Rotate `events-archive.jsonl` to `events-archive-<n>.jsonl` past a size
-   threshold well under `maxFileBytes`. Same for signals.
-2. Search enumerates rotated shards alongside the live archive.
-3. When any single memory JSONL still exceeds the per-file ceiling, skip that
-   source, continue the search, and report the omission in the result envelope —
-   the same omission-accounting shape `working-context.mjs` already uses.
-
-**Execution note:** Reproduce first — grow an archive past the ceiling and watch
-the whole search die — before changing either file.
+1. Route `searchMarkdownDir` through U5 while preserving source predicates,
+   canonical-content matching, snippets, corpus-stat boundaries, ranking, and
+   stable merge order. Ranking runs inside the transaction and its result becomes
+   observable only after U5's final generation validation.
+2. Establish a differential oracle for substring and inflection matches, phrases
+   across punctuation/lines, frontmatter descriptions, path/title boosts,
+   recency/ties, memory sub-corpora, plugins, projects, and external vaults.
+3. Benchmark 500, 2,500, and 10,000 files across shallow/nested and representative
+   prose/high-entropy corpora, including no-hit, low-hit, and high-hit queries.
+   Validate results before recording duration.
+4. Record cold and warm latency, median/p95, peak RSS, and file operations. Keep
+   latency out of brittle general CI while enforcing deterministic operation
+   counts and output parity in CI.
+5. Document the request-scoped safety/performance seam and the deliberate absence
+   of persistent derived search state.
 
 **Test scenarios:**
-- An archive grown past the threshold rotates, and no event is lost or
-  duplicated across the rotation.
-- Search returns results from both the live archive and rotated shards.
-- A single oversized memory JSONL degrades that source only; other scopes still
-  return results.
-- The omission is reported, not silent.
-- Rotation is crash-safe: an interrupted rotation loses no events.
+- Every parity fixture produces exactly the existing ordered results and snippets.
+- A timed empty/error path is rejected as a benchmark sample.
+- The 10,000-file warm benchmark meets R1 and remains within 1.5x of the raw-read
+  control while retaining R3.
+- The 500-file fixture p95 regresses by no more than the larger of 20% or 50 ms
+  from the U8 contained baseline.
+- At fixed directory topology, operation totals scale no worse than 2.1x when
+  file count doubles, per-file operation counts at 2,500 and 10,000 files stay
+  within 10%, and no observed-directory scan occurs inside the per-file loop.
+- Added, deleted, and modified files are visible on the next request because the
+  optimization is request-scoped, not a stale cross-request cache.
 
-**Verification:** A corpus with a deliberately oversized archive still answers
-queries, and says what it skipped.
+**Verification:** R1's measurement record and the differential suite pass. If
+R1 fails, stop at the Goal Capsule condition and revise the plan before adding
+any index.
 
----
+### U3. Honest resource ceilings
+
+**Goal:** Make skippable corpus ceilings partial-but-explicit rather than
+request-wide false failures.
+
+**Requirements:** R5, R6; F2; AE2
+
+**Dependencies:** U5, U6
+
+**Files:**
+- `packages/core/src/evidence-reader.mjs`
+- `packages/core/src/search.mjs`
+- `packages/cli/src/commands/search.mjs`
+- `packages/mcp/src/server.mjs`
+- `docs/architecture.md`
+- `docs/mcp.md`
+- `tests/core/evidence-reader.test.mjs`
+- `tests/core/search-safety.test.mjs`
+- `tests/cli/search-safety.test.mjs`
+- `tests/mcp/server.test.mjs`
+
+**Approach:**
+1. Define the closed omission contract in KTD8, including reason-specific,
+   path-safe recovery for per-file size, directory entries, aggregate bytes,
+   file count, and entry count. Freeze the envelope before exposing it.
+2. Preflight requested logical scopes and reserve budget according to KTD4. Omit
+   an unadmitted scope as a whole so its IDF/ranking never masquerades as a
+   complete corpus. Pin each omitted directory's observed identity at the skip
+   decision and include it in final transaction revalidation.
+3. Serialize the same logical fields through core, CLI, and MCP. CLI leaves
+   valid results on stdout, writes the warning/recovery guidance to stderr, and
+   exits 2; MCP returns the results with `complete: false`. Both still fail on
+   unsafe observed evidence.
+4. Document completion states, reason/recovery codes, CLI channels/exit status,
+   and MCP representation.
+
+**Test scenarios:**
+- Oversized JSONL, directory-entry, per-file, aggregate-byte, file-count, and
+  entry-count limits produce the intended bounded omission while unaffected
+  scopes still return controlled hits.
+- Unsafe symlink/path, changed evidence, unauthorized root, and invalid config
+  remain request-fatal through core, CLI, and MCP.
+- Concurrent scope timing does not change which source is searched or omitted.
+- Omissions never contain an absolute home path and never allow a partial result
+  to be represented as complete; each reason gives one safe route to a complete
+  retry, and more than 32 omissions collapse into one counted remainder.
+
+**Verification:** Cross-interface golden fixtures prove identical result and
+omission semantics, while the adversarial safety suite proves fatal boundaries
+did not become warnings.
+
+### U7. Bounded archive lifecycle
+
+**Goal:** Prevent event and signal archives from crossing the per-file search
+ceiling without coupling canonical-write safety to the search-performance gate.
+
+**Requirements:** R7; F2; AE4
+
+**Dependencies:** none; schedule after the runway receipt in Sequencing and
+Landing, and integrate with U3 omission semantics when both are present
+
+**Files:**
+- `packages/core/src/memory.mjs`
+- `packages/core/src/search.mjs`
+- `packages/core/src/owned-state.mjs`
+- `docs/architecture.md`
+- `docs/advanced-memory.md`
+- `tests/core/memory.test.mjs`
+- `tests/core/search-safety.test.mjs`
+
+**Approach:**
+1. Keep the unsuffixed archive as the active append target and rotate at 2 MiB
+   on JSONL line boundaries into immutable zero-padded numbered shards. A single
+   valid line above 2 MiB but within the 4 MiB read ceiling occupies its own
+   shard; a line above 4 MiB fails maintenance before committing source removal.
+2. Under the existing memory lock, verify the active archive and next shard are
+   owned regular files with safe link counts; create with exclusive 0600 mode,
+   fsync file and directory, and atomically publish without overwriting an
+   existing shard. Reuse owned-state publication patterns rather than raw
+   pathname writes.
+3. Preserve the pending batch as recovery authority across interruption. Support
+   legacy unsuffixed archives, discover numbered shards in numeric order followed
+   by the active file, and deduplicate exact events across retry boundaries.
+4. Search takes one archive-generation snapshot and revalidates it before result
+   commit. Concurrent rotation yields the old complete generation, the new
+   complete generation, or a fatal source-changed retry—never a mixture. Once U3
+   exists, later aggregate exhaustion becomes its bounded omission.
+
+**Test scenarios:**
+- Normal, boundary-size, concurrent, and every injected interruption point lose
+  and duplicate zero events; re-running recovery is idempotent.
+- Preexisting targets, symlinks, hard links, ownership/mode violations, and
+  active-file replacement fail before publication or source deletion.
+- Live plus rotated archives remain searchable in stable chronology, including a
+  legacy archive upgraded in place and a search racing rotation.
+
+**Verification:** Lifecycle fixtures compare exact event identities and order,
+not counts alone; security tests prove link-safe publication and the generation
+contract, and the recorded archive runway accompanies the PR.
 
 ### U4. ICP language pass
 
-**Goal:** First-run output reads as intended for the person the brief describes.
+**Goal:** Make first-run output read as intended for the person the brief
+describes, with the full operator view still available.
 
-**Requirements:** R6
+**Requirements:** R8, R9; F3; AE3
 
 **Dependencies:** none
 
 **Files:**
-- `packages/cli/src/commands/setup.mjs` (`printClientPreview` and the preview banner)
-- `packages/core/src/working-context.mjs` (strip frontmatter from rendered identity)
-- `tests/cli/first_run_language.test.mjs` (new)
+- `packages/cli/src/commands/setup.mjs`
+- `packages/cli/src/commands/doctor.mjs`
+- `packages/cli/src/commands/brief.mjs`
+- `packages/core/src/working-context.mjs`
+- `tests/cli/first_run_language.test.mjs`
+- `tests/core/working-context.test.mjs`
+- `tests/mcp/server.test.mjs`
 
 **Approach:**
-1. The default preview names only detected clients by their product names, says
-   what will change in one line each, and shows paths relative to home
-   (`~/aios`, not the absolute path). Undetected hosts collapse to one line.
-2. `--verbose` restores the current full output verbatim. No information is
-   destroyed, only defaulted away.
-3. The rendered brief strips YAML frontmatter from context files before
-   including them.
-
-**Execution note:** This is a copy pass. Assert on the *absence* of internal
-vocabulary rather than on exact new wording, so the test does not become a
-copy-editing tripwire.
+1. Default setup and doctor output name only detected clients by product name,
+   state the user outcome, give one safe next action for healthy/warning/blocking
+   states, and use home-relative paths where useful. Preserve non-color status
+   markers so meaning does not depend on color.
+2. Add and document `--verbose` for setup and doctor; it augments the concise
+   default with the current diagnostic detail. Reject unknown options. Do not add
+   a raw-metadata mode to compact brief or MCP working context.
+3. Strip YAML frontmatter from context files before rendering identity into a
+   brief; source files remain byte-unchanged, and CLI/MCP use the same core
+   rendered content.
 
 **Test scenarios:**
-- Default `setup --dry-run` on a sandbox with no agents installed names no host
-  the user does not have.
-- Default preview contains no absolute path outside a code block.
-- Default preview contains none of: "managed bridge", "managed skill links",
-  "symlink targets".
-- `--verbose` still contains all of the above.
-- A fresh `brief --compact` contains no `source:`, `created_at:`, or `kind:` line.
-- A context file with no frontmatter renders unchanged.
+- A clean sandbox names no absent host and contains none of the internal managed
+  projection vocabulary enumerated by AE3. Detected-client, no-client, warning,
+  and blocking fixtures each state status, outcome, and one safe next action
+  without asserting exact prose.
+- Default paths are home-relative where exposed; verbose output retains the full
+  setup/doctor diagnostic view, help names the option, and unknown options fail.
+- A fresh compact brief contains no frontmatter keys, while a context file with
+  no frontmatter renders unchanged. The MCP `read_working_context` fixture
+  preserves the same visible identity/priorities content without YAML, and source
+  hashes remain unchanged.
 
-**Verification:** A first run reads as instructions to a person, and `--verbose`
-is unchanged from today.
-
----
-
-## Scope Boundaries
-
-**In scope:** the four units above.
-
-### Deferred to Follow-Up Work
-
-- **Hybrid retrieval.** Gated on KTD4's trigger.
-- **The retrieval slice (Slice 3, TaskAwareContext).** Its dependency on
-  SessionStore looks over-drawn — the falsified recall claim concerns a decision
-  in `projects/<slug>/README.md`, and sessions are a separate source. Confirm
-  before scheduling; the cheap half may not need PR #62.
-- **PR #62's flaky CI.** Node 20 and 22 each reported both success and failure on
-  the same SHA. Diagnose before landing 11k lines.
-- **`status.mjs:233`** certifies a stale bridge via a loose substring check.
-- **Default search omits `projects/`** — the largest part of the folder. Product
-  decision, not a bug, and undecided.
-- **The V8 Map ceiling.** A high-entropy corpus can exceed V8's Map size cap in
-  `buildCorpusStats` and throw a raw `RangeError` that bypasses all messaging.
-  Reachable only above ~64 MB of base64-like text. Cap `docFrequency` and fall
-  back to a flat IDF when the trigger becomes real.
-
-### Not in scope
-
-- Vector or embedding retrieval (hard rule 5).
-- Any new runtime dependency (hard rule 4).
-- Anything inside `~/aios` gaining derived state (ADR 0003).
-
----
-
-## Assumptions
-
-Recorded rather than asked, because this plan was written while the maintainer
-was asleep.
-
-- **A1.** Warm search should target well under one second at 10,000 files. No
-  latency budget is written down anywhere; this is inferred from the product
-  being interactive.
-- **A2.** `~/.dotaios` is the right home for the index — machine-local, already
-  holds `projects.json`, already outside the sync mirror.
-- **A3.** The ICP pass defaults to concise and keeps the full view behind
-  `--verbose`, rather than removing information.
-- **A4.** U3 ships with U1/U2 rather than separately. It is independent, but it
-  closes a hole the same subsystem owns.
+**Verification:** Positive semantic and absence-focused assertions protect the
+user outcome and vocabulary without turning exact copy into a brittle API; CLI
+and MCP frontmatter fixtures prove shared rendering.
 
 ---
 
 ## Verification Contract
 
-- `pnpm test` green. `pnpm run smoke` green. Baseline at plan time: 1813 pass,
-  0 fail, 9 skipped.
-- Every new test confirmed red against unfixed code before the fix lands.
-- The parity test (U2) is the release gate for the index: no index may change
-  what search returns.
-- Measured warm and cold latency on a ≥10,000-file fixture, recorded in the PR.
-- A real-folder check against `~/aios` before and after, inspecting output rather
-  than timing a command whose result was never read.
+- **Repository gates:** `npm run syntax-check`, `npm test`, `npm run smoke`, and
+  `npm run check` pass locally; CI passes on Node 20 and 22. Packaging-affecting
+  changes additionally pass `npm run pack:check`.
+- **Test-first gate:** each behavioral or safety regression is observed failing
+  against the pre-change code before its implementation passes.
+- **Parity gate:** U6's differential matrix proves exact ordered result/snippet
+  equality; U3's core/CLI/MCP fixtures prove identical complete/partial/rejected
+  semantics and recovery meaning on stable CLI channels.
+- **Safety gate:** the existing containment suite plus the U5/U3 race and
+  ceiling matrices remain green. No resource omission can suppress an integrity
+  failure.
+- **Performance gate:** after warm-up, at least 20 validated samples on the
+  10,000-file fixture meet R1. The PR records cold and warm results for 500,
+  2,500, and 10,000 files, representative prose and adversarial high-entropy
+  content, no/low/high-hit queries, median, p95, peak RSS, and operation counts.
+  The 500-file regression bound and U5 preliminary budget also pass. At fixed
+  topology, operation scaling meets U6's 2.1x/10% invariants and never performs
+  per-file multiplication by observed directories.
+- **Real-folder gate:** compare current and optimized searches against the actual
+  AIOS folder, inspect returned evidence before accepting timing, record median
+  and p95 as informational evidence, and record the fact that unscoped search
+  does not include projects without a selector. The `ce-work` implementer owns
+  producing and attaching this receipt to the performance PR.
+- **Lifecycle gate:** U7 records current size, observed growth window, and
+  estimated per-file runway, then proves exact event identity/order across
+  rotation, recovery, concurrency, and link-safety fixtures.
+- **Documentation gate:** the implementation unit that changes a contract owns
+  the matching documentation edit and testable examples; documentation cannot
+  be deferred to an unowned tail task.
+- **Behavioral skill gate:** no additional skill evaluation is required; this
+  work changes product code, not skill triggering or instructions.
 
 ## Definition of Done
 
-R1–R7 hold, the four units are merged through PRs with CI green on Node 20 and
-22, and `docs/architecture.md` documents the index as a derived view that may be
-deleted at any time.
+- R1-R9 and AE1-AE4 hold with CI green on Node 20 and 22. Foundation launch
+  readiness is still prohibited until the separate continuity plan's approved
+  end-to-end outcome and host receipt are complete.
+- U8 is done when the immutable benchmark manifest, deterministic fixture
+  receipt, and pre-change baseline are checked in before U5 production edits.
+- U5 is done when the bulk evidence path is output-equivalent to individual safe
+  reads, passes every static/adversarial snapshot test, and meets its preliminary
+  U8-relative budget.
+- U6 is done when exact search parity, R1, the 500-file regression bound, and the
+  explicit operation-scaling invariants pass without persistent state; a miss
+  invokes the stop condition instead of silently expanding scope.
+- U3 is done when all three interfaces distinguish complete, partial, and fatal
+  outcomes, expose the bounded reason/recovery contract, preserve stable CLI
+  channels and exit status, and do not starve later scopes behind timing or one
+  large early scope.
+- U7 is done when archive rollover/search proves zero loss and duplication across
+  interrupted and concurrent maintenance, link-safe publication, and the
+  old/new-generation search contract.
+- U4 is done when default output meets positive outcome/next-action and absence
+  assertions, setup/doctor verbose mode preserves operator diagnostics, and CLI
+  plus MCP working context omit raw YAML without changing source bytes.
+- `docs/architecture.md`, `docs/advanced-memory.md`, and user-facing search/MCP
+  documentation describe the request-scoped performance seam, omission
+  semantics, archive lifecycle, and supported operator-output boundary.
+- No abandoned index experiment, compatibility branch, temporary benchmark
+  fixture, debug instrumentation, or dead-end code remains in the final diffs.
+- The four implementation slices are independently reviewable and land through
+  green PRs with their measurement/safety evidence attached.
 
 ---
 
-## Sources & Research
+## Appendix
 
-- Claude Code memory documentation — <https://code.claude.com/docs/en/memory>
-  (auto memory layout, the 200-line / 25 KB index budget, on-demand topic files,
-  the under-200-line CLAUDE.md guidance, skills-load-on-demand, `.claude/rules/`
-  path scoping, `/doctor` trim proposals, `AGENTS.md` handling)
-- "Which RAG Paradigm Wins at Scale?" — arxiv 2607.26497, via
-  <https://aiweekly.co/alerts/bm25-beats-dense-retrieval-and-agents-by-20-points-at-scale>
-- Hybrid retrieval reference —
-  <https://www.digitalapplied.com/blog/hybrid-search-bm25-vector-reranking-reference-2026>
-- Context rot — <https://www.mindstudio.ai/blog/what-is-context-rot-ai-agents>
-- AGENTS.md bloat — <https://codex.danielvaughan.com/2026/03/27/agents-md-bloat-problem/>
-- `jrcruciani/obsidian-memory-for-ai` — plain-markdown competitor that already
-  generates deterministic lexical indexes
-- In-repo: `search.mjs:44` (`TODO(L1-5)`), `search.mjs:317` (archive reads),
-  `memory.mjs` compaction, ADR 0003, `product-brief.md`,
-  `docs/foundation-program/evidence-ledger.md`
+### Sources & Research
+
+**Primary vendor and standards sources**
+
+- Claude Code memory — <https://code.claude.com/docs/en/memory>
+- Claude Code skills — <https://code.claude.com/docs/en/skills>
+- Codex `AGENTS.md` — <https://developers.openai.com/codex/guides/agents-md>
+- Codex skills — <https://developers.openai.com/codex/skills>
+- Codex generated memories —
+  <https://learn.chatgpt.com/codex/customization/memories>
+- OpenAI harness engineering — <https://openai.com/index/harness-engineering/>
+- Node filesystem API — <https://nodejs.org/api/fs.html>
+- Node SQLite API and version floor — <https://nodejs.org/api/sqlite.html>
+
+**Research and prior art**
+
+- *BM25 Wins at Scale* — <https://arxiv.org/abs/2607.26497>
+- Basic Memory — <https://github.com/basicmachines-co/basic-memory>
+- GBrain — <https://github.com/garrytan/gbrain>
+- OpenMemory — <https://mem0.ai/blog/introducing-openmemory-mcp>
+- Supermemory — <https://github.com/supermemoryai/supermemory>
+- Letta context hierarchy —
+  <https://docs.letta.com/guides/core-concepts/memory/context-hierarchy>
+
+**Repository evidence**
+
+- `packages/core/src/search.mjs`
+- `packages/core/src/evidence-reader.mjs`
+- `packages/core/src/contained-read.mjs`
+- `packages/core/src/memory.mjs`
+- `docs/adr/0003-keep-canonical-memory-separate-from-derived-views.md`
+- `docs/foundation-program/product-brief.md`
+- `docs/foundation-program/evidence-ledger.md`
