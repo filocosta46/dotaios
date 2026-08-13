@@ -44,7 +44,7 @@ export const DEFAULT_EVIDENCE_READ_LIMITS = Object.freeze({
 const EVIDENCE_READ_FAILURES = {
   DOTAIOS_EVIDENCE_BUDGET_EXCEEDED:
     "DotAIOS stopped reading: this folder is past the safe read budget for one request. "
-    + "Ask for less at once — a single scope, or one project — or move older material out of the folder.",
+    + "Ask for a narrower part of it, or move older material out of the folder.",
   DOTAIOS_EVIDENCE_FILE_TOO_LARGE:
     "DotAIOS stopped reading: one file is past the safe per-file size limit. "
     + "Split that file, or move it out of the folder.",

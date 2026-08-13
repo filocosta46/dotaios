@@ -147,6 +147,6 @@ test("exhausting the read budget explains the limit and what to do", async (t) =
   assert.ok(error, "an exhausted budget still fails rather than silently returning a partial corpus");
   assert.match(error.message, /budget|limit/i, "the message must name the limit it hit");
   assert.match(error.message, /\b(move|split|less|fewer)\b/i, "the message must name something the person can do");
-  assert.doesNotMatch(error.message, /--scope|--project/, "no command-specific flags: this error also reaches skills and activate");
+  assert.doesNotMatch(error.message, /scope|project/i, "no command-specific concepts: this error also reaches skills, activate, and MCP, which have neither");
   assert.doesNotMatch(error.message, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "errors stay path-free");
 });
