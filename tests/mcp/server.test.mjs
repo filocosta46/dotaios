@@ -5,6 +5,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { DEFAULT_EVIDENCE_READ_LIMITS } from "../../packages/core/src/evidence-reader.mjs";
+
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 const server = path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
@@ -551,7 +553,9 @@ test("search_aios fails closed on linked evidence without exposing a path", () =
 test("search_aios enforces its per-file source-work bound on JSONL", () => {
   const { aiosPath } = setupAios();
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
-  fs.writeFileSync(eventsPath, Buffer.alloc(1024 * 1024 + 1, 0x61));
+  // Sized from the shipped limit, not a copy of it. Hardcoding 1 MiB meant this
+  // stopped testing anything the moment the per-file bound moved.
+  fs.writeFileSync(eventsPath, Buffer.alloc(DEFAULT_EVIDENCE_READ_LIMITS.maxFileBytes + 1, 0x61));
   const before = snapshotTree(aiosPath);
 
   const result = runMcpResult(aiosPath, [{

@@ -11,17 +11,44 @@ import {
 } from "./contained-read.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 
+// These bound an explicit, user-invoked read of the person's own folder —
+// search, skill resolution, project-source retrieval. That is a different job
+// from the bounded startup projection, which must stay small on every launch
+// and keeps its own much tighter budget in working-context.mjs.
+//
+// They were the projection's numbers: 512 files, 4,096 entries, 16 MiB. A
+// lived-in AIOS passes all three long before it feels large — one real folder
+// measured ~3,300 markdown files, ~53,000 traversed entries, and 39 MB of
+// markdown — so every query on it failed closed, including queries that should
+// have matched nothing. Sized here for a corpus someone has actually
+// accumulated, with the ceilings kept as a runaway guard rather than a working
+// limit. Raising one alone only moves the failure to the next.
 export const DEFAULT_EVIDENCE_READ_LIMITS = Object.freeze({
-  maxBytes: 16 * 1024 * 1024,
-  maxFiles: 512,
-  maxEntries: 4096,
-  maxFileBytes: 1024 * 1024,
-  maxDirectoryEntries: 1024
+  maxBytes: 256 * 1024 * 1024,
+  maxFiles: 50_000,
+  maxEntries: 500_000,
+  maxFileBytes: 4 * 1024 * 1024,
+  maxDirectoryEntries: 8192
 });
+
+// A refusal the person cannot act on is barely better than a crash. Name what
+// stopped the read and what they can do about it — without naming a path, which
+// would leak the shape of their disk to an agent.
+const EVIDENCE_READ_FAILURES = {
+  DOTAIOS_EVIDENCE_BUDGET_EXCEEDED:
+    "DotAIOS stopped reading: this AIOS folder is larger than the safe search budget. "
+    + "Narrow the search with --scope or --project, or run `dotaios cleanup` to archive old memory.",
+  DOTAIOS_EVIDENCE_FILE_TOO_LARGE:
+    "DotAIOS stopped reading: one file is past the safe per-file size limit. "
+    + "Narrow the search with --scope or --project, or move that file out of the AIOS folder.",
+  DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE:
+    "DotAIOS stopped reading: one directory holds more entries than the safe limit. "
+    + "Narrow the search with --scope or --project, or split that directory up."
+};
 
 export class EvidenceReadError extends Error {
   constructor(code = "DOTAIOS_EVIDENCE_READ_FAILED") {
-    super("DotAIOS could not read the evidence corpus safely.");
+    super(EVIDENCE_READ_FAILURES[code] || "DotAIOS could not read the evidence corpus safely.");
     this.name = "EvidenceReadError";
     this.code = code;
   }
