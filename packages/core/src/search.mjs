@@ -385,64 +385,57 @@ export async function searchMarkdownDir(dir, query, {
   root = dir
 } = {}) {
   const activeReader = reader || createEvidenceReader({ roots: [path.resolve(root)] });
-  const files = await activeReader.listFiles(root, dir, { extensions, includeFile, skipEntry: shouldSkipEntry });
-  const docs = [];
-  const candidates = [];
-
-  // Read files concurrently in bounded batches — I/O is the bottleneck, and a
-  // cap keeps us well under the open-file limit on large vaults. Every read
-  // file feeds the IDF corpus; only files with snippets become candidates.
   const CONCURRENCY = 32;
-  for (let i = 0; i < files.length; i += CONCURRENCY) {
-    const batch = await Promise.all(
-      files.slice(i, i + CONCURRENCY).map((filePath) =>
-        collectSearchFile(filePath, dir, query, sourcePrefix, { reader: activeReader, root })
-      )
-    );
-    for (const item of batch) {
-      if (!item) continue;
-      docs.push(item.content);
-      if (item.candidate) candidates.push(item.candidate);
+  return activeReader.withTextCorpus(
+    root,
+    dir,
+    { extensions, includeFile, skipEntry: shouldSkipEntry, concurrency: CONCURRENCY },
+    async (transaction) => {
+      // Every accepted file is observed once by the transaction. Matching,
+      // snippet construction, corpus statistics, and ranking all stay inside
+      // its callback, so no derived result can escape before the transaction's
+      // final directory-generation validation succeeds.
+      const observedFiles = await transaction.mapFiles((observed) =>
+        collectSearchFile(observed, dir, query, sourcePrefix)
+      );
+      const docs = [];
+      const candidates = [];
+      for (const item of observedFiles) {
+        if (!item) continue;
+        docs.push(item.content);
+        if (item.candidate) candidates.push(item.candidate);
+      }
+
+      const corpus = buildCorpusStats(docs);
+      const now = Date.now();
+      const terms = queryTerms(query);
+      const ranked = [];
+      for (let i = 0; i < candidates.length; i += CONCURRENCY) {
+        const batch = candidates.slice(i, i + CONCURRENCY).map((candidate) => {
+          const ageMs = candidate.mtimeMs === null ? null : now - candidate.mtimeMs;
+          const haystack = candidate.content.toLowerCase();
+          const matchedTerms = terms.filter((term) => haystack.includes(term));
+          const rank = rankSearchHit({
+            kind: candidate.kind,
+            matchedTerms,
+            corpus,
+            ageMs,
+            structuralBoost: candidate.structuralBoost
+          });
+          return { result: candidate.result, rank };
+        });
+        ranked.push(...batch);
+      }
+
+      return ranked
+        .sort((a, b) => (b.rank - a.rank) || a.result.file.localeCompare(b.result.file))
+        .slice(0, limit)
+        .map(({ result }) => result);
     }
-  }
-
-  const corpus = buildCorpusStats(docs);
-  const now = Date.now();
-  const terms = queryTerms(query);
-  const ranked = [];
-  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-    const batch = candidates.slice(i, i + CONCURRENCY).map((candidate) => {
-      let ageMs = candidate.mtimeMs === null ? null : now - candidate.mtimeMs;
-      const haystack = candidate.content.toLowerCase();
-      const matchedTerms = terms.filter((term) => haystack.includes(term));
-      const rank = rankSearchHit({
-        kind: candidate.kind,
-        matchedTerms,
-        corpus,
-        ageMs,
-        structuralBoost: candidate.structuralBoost
-      });
-      return { result: candidate.result, rank };
-    });
-    ranked.push(...batch);
-  }
-
-  return ranked
-    .sort((a, b) => (b.rank - a.rank) || a.result.file.localeCompare(b.result.file))
-    .slice(0, limit)
-    .map(({ result }) => result);
+  );
 }
 
-async function collectSearchFile(filePath, dir, query, sourcePrefix, { reader, root = dir } = {}) {
-  const observed = await reader.readText(root, filePath, { returnSnapshot: true });
-  if (observed === null) {
-    const error = new Error("Search evidence changed while it was being read.");
-    error.code = "DOTAIOS_EVIDENCE_CHANGED";
-    throw error;
-  }
-  const { content } = observed;
-  const mtimeMs = observed.stats.mtimeMs;
-
+function collectSearchFile({ filePath, content, mtimeMs }, dir, query, sourcePrefix) {
   const snippets = buildMarkdownSnippets(content, query);
   if (snippets.length === 0) return { content, candidate: null };
 

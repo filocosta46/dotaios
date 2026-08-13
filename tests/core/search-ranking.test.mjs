@@ -3,7 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { searchMemoryDir, searchMarkdownDir } from "../../packages/core/src/search.mjs";
+import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
+import { searchAios, searchMemoryDir, searchMarkdownDir } from "../../packages/core/src/search.mjs";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-rank-test-"));
@@ -19,6 +20,28 @@ function writeEvents(memoryDir, entries) {
     path.join(memoryDir, "events.jsonl"),
     entries.map((e) => JSON.stringify(e)).join("\n") + "\n"
   );
+}
+
+function genericContainedCorpusReader(roots) {
+  const baseReader = createEvidenceReader({ roots: Array.isArray(roots) ? roots : [roots] });
+  return {
+    ...baseReader,
+    async withTextCorpus(transactionRoot, directoryPath, options, callback) {
+      const files = await baseReader.listFiles(transactionRoot, directoryPath, options);
+      return callback(Object.freeze({
+        async mapFiles(mapper) {
+          return Promise.all(files.map(async (filePath) => {
+            const observed = await baseReader.readText(transactionRoot, filePath, { returnSnapshot: true });
+            return mapper(Object.freeze({
+              filePath,
+              content: observed.content,
+              mtimeMs: observed.stats.mtimeMs
+            }));
+          }));
+        }
+      }));
+    }
+  };
 }
 
 // (a) Recency decay: a fresh hit must beat a stale hit of comparable lexical
@@ -139,4 +162,88 @@ test("ranking is deterministic and leaks no internal fields", async () => {
     assert.ok(result.match && typeof result.match.kind === "string", "result shape must keep match.kind");
     assert.ok(!("__rank" in result), "internal rank must not leak into consumer shape");
   }
+});
+
+test("bulk search is exactly equal to the generic contained-read oracle across canonical scopes", async () => {
+  const root = tmpDir();
+  const externalVault = tmpDir();
+  const write = (relativePath, content) => {
+    const filePath = path.join(root, relativePath);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content);
+    return filePath;
+  };
+
+  const old = new Date(Date.now() - 90 * 86_400_000);
+  const stale = write("context/a-stale.md", "# Launch plan\n\nExact launch plan body.\n");
+  fs.utimesSync(stale, old, old);
+  write("context/b-punctuation.md", "# Notes\n\nThe launch, plan uses punctuation.\n");
+  write("context/c-lines.md", "# Notes\n\nlaunch\nplan on the next line\n");
+  write("context/d-description.md", "---\ndescription: Launch plan in frontmatter\n---\n# Other\n");
+  write("context/launch-plan/e-path.md", "# Other\n\nlaunch plan in a boosted path\n");
+  write("context/f-inflection.md", "# Delivery\n\nThe team launched plans yesterday.\n");
+  write("context/g-substring.md", "# Substring\n\nA prelaunch planner keeps the substring behavior.\n");
+  write("context/z-tie.md", "# Notes\n\nExact launch plan body.\n");
+  write("context/.env.md", "launch plan secret\n");
+
+  write("memory/events.jsonl", `${JSON.stringify({ ts: isoAgo(1), type: "note", summary: "launch plan stream" })}\n`);
+  write("memory/daily/2026-08-13.md", "# Daily\n\nlaunch plan daily note\n");
+  write("memory/inbox/capture.md", "# Inbox\n\nlaunch plan inbox note\n");
+  write("plugins/demo/manifest.json", "{\n  \"description\": \"launch plan plugin\"\n}\n");
+  write("plugins/demo/package.json", "{\n  \"description\": \"launch plan must stay omitted\"\n}\n");
+  write("projects/acme/README.md", "---\nid: project-acme-001\nproject: acme\n---\n# Acme\n\nlaunch plan selected project\n");
+  write("projects/other/README.md", "---\nid: project-other-002\nproject: other\n---\n# Other\n\nlaunch plan unselected project\n");
+  fs.writeFileSync(path.join(externalVault, "external.md"), "# External\n\nlaunch plan external vault\n");
+
+  const safeReader = createEvidenceReader({ roots: [root, externalVault] });
+  const genericReader = genericContainedCorpusReader([root, externalVault]);
+  const requests = [
+    { aiosPath: root, vaultPath: externalVault, query: "launch plan", scope: "all", projectSelector: "acme" },
+    { aiosPath: root, vaultPath: externalVault, query: "launch plan", scope: "context" },
+    { aiosPath: root, vaultPath: externalVault, query: "launch plan", scope: "memory" },
+    { aiosPath: root, vaultPath: externalVault, query: "launch plan", scope: "plugins" },
+    { aiosPath: root, vaultPath: externalVault, query: "launch plan", scope: "projects", projectSelector: "project-acme-001" },
+    { aiosPath: root, vaultPath: externalVault, query: "launch plan", scope: "vault" }
+  ];
+
+  for (const request of requests) {
+    const safe = await searchAios({ ...request, evidenceReader: safeReader });
+    const generic = await searchAios({ ...request, evidenceReader: genericReader });
+    assert.deepEqual(safe, generic, `safe transaction changed ${request.scope} output`);
+  }
+
+  const context = await searchMarkdownDir(path.join(root, "context"), "launch plan", {
+    sourcePrefix: "context",
+    reader: createEvidenceReader({ roots: [root] }),
+    root
+  });
+  assert.deepEqual(context.map(({ file }) => file), [
+    "d-description.md",
+    "launch-plan/e-path.md",
+    "g-substring.md",
+    "z-tie.md",
+    "a-stale.md",
+    "b-punctuation.md",
+    "c-lines.md",
+    "f-inflection.md"
+  ]);
+  assert.deepEqual(context.find(({ file }) => file === "c-lines.md").matches, [
+    { line: 2, lineEnd: 4, content: "launch / plan on the next line", match: "partial", area: "body" },
+    { line: 3, lineEnd: 5, content: "launch / plan on the next line", match: "partial", area: "body" }
+  ]);
+
+  const all = await searchAios({
+    aiosPath: root,
+    vaultPath: externalVault,
+    query: "launch plan",
+    projectSelector: "acme",
+    evidenceReader: createEvidenceReader({ roots: [root, externalVault] })
+  });
+  const serialized = JSON.stringify(all);
+  assert.match(serialized, /memory\/daily\/2026-08-13\.md/);
+  assert.match(serialized, /memory\/inbox\/capture\.md/);
+  assert.match(serialized, /plugins\/demo\/manifest\.json/);
+  assert.match(serialized, /projects\/acme\/README\.md/);
+  assert.match(serialized, /vault\/external\.md/);
+  assert.doesNotMatch(serialized, /package\.json|projects\/other|\.env\.md/);
 });

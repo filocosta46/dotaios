@@ -122,6 +122,30 @@ a bounded `operational.migration` sibling;
 selection, and `resolve_skill` routes
 workflow intent. There are no compatibility aliases.
 
+### On-demand search
+
+Markdown search is a request-scoped safe corpus transaction. The evidence
+reader enumerates eligible regular files and returns transaction-owned
+`filePath`, UTF-8 `content`, and `mtimeMs` observations to one callback.
+Canonical matching, snippet construction, whole-corpus IDF statistics, recency
+ranking, stable ordering, and the result limit all run inside that callback.
+The search promise cannot resolve until the evidence reader has performed its
+final root, ancestor, and observed-directory generation validation; a changed
+generation rejects the request without publishing a partial result.
+
+The transaction preserves each logical corpus boundary and its source policy:
+daily and inbox notes remain separate from memory streams, plugin search accepts
+Markdown plus `manifest.json`, project search reads only the resolved selector,
+and an external vault remains its own explicitly authorized root. Hidden,
+secret-like, linked, non-regular, changed, oversized, or invalid UTF-8 evidence
+retains the contained-reader refusal behavior.
+
+Search writes no index, cache, manifest, or other derived state. Each request
+enumerates the current canonical files, so additions, edits, and deletions are
+visible on the next request. The optimization amortizes repeated containment
+checks only for the lifetime of that request; the AIOS folder remains the sole
+search authority.
+
 ## Vault
 
 `vault/` is long-term knowledge, loaded on demand. Users may keep it inside `~/aios/vault` or configure an external `vault_path` in `aios.json`, such as an Obsidian vault.

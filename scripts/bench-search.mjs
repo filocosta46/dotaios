@@ -117,6 +117,11 @@ export async function runBenchmark({ manifest, fixtureRoot, fixtureReceipt }) {
     manifest,
     operation: () => runRawReadControl({ manifest, fixtureRoot, fixtureReceipt })
   });
+  const safeCorpusReadControl = await measureOperation({
+    id: "safe-corpus-read-control",
+    manifest,
+    operation: () => runSafeCorpusReadControl({ manifest, fixtureRoot, fixtureReceipt })
+  });
   await verifyFixtureInventory(fixtureRoot, fixtureReceipt);
 
   return {
@@ -134,7 +139,8 @@ export async function runBenchmark({ manifest, fixtureRoot, fixtureReceipt }) {
     protocol: { ...manifest.protocol },
     searches,
     rawSearchControl,
-    rawReadControl
+    rawReadControl,
+    safeCorpusReadControl
   };
 }
 
@@ -208,7 +214,7 @@ export async function verifyFixtureInventory(fixtureRoot, fixtureReceipt) {
 }
 
 async function runContainedSearch({ manifest, fixtureRoot, fixtureReceipt, query }) {
-  const { filesystem, counts } = countingFilesystem();
+  const { filesystem, counts, acceptedFilePathCounts, containmentPathCounts } = countingFilesystem({ fixtureRoot, fixtureReceipt });
   const reader = createEvidenceReader({ roots: [fixtureRoot], filesystem });
   const rss = monitorRss(manifest.protocol.rssPollIntervalMs);
   const started = process.hrtime.bigint();
@@ -225,6 +231,10 @@ async function runContainedSearch({ manifest, fixtureRoot, fixtureReceipt, query
       durationMs: elapsedMs(started),
       peakRssBytes: rss.stop(),
       operations: { ...counts },
+      operationBreakdown: {
+        acceptedFilePaths: { ...acceptedFilePathCounts },
+        containmentPaths: { ...containmentPathCounts }
+      },
       readBudget: reader.snapshot(),
       exactResults: sources,
       outputSha256: sha256(canonicalJson(results))
@@ -310,6 +320,40 @@ function createUnsafeBenchmarkOnlyRawSearchReader({ fixtureRoot, fixtureReceipt 
     }
   }
 
+  async function readObservedFile(filePath) {
+    const absolutePath = path.resolve(filePath);
+    const inventoryEntry = inventoryByPath.get(absolutePath);
+    if (!inventoryEntry) throw new Error("Unsafe raw-search control refused a path outside its receipt inventory.");
+    const handle = await fs.open(absolutePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    openedFiles += 1;
+    try {
+      const before = await handle.stat();
+      if (!before.isFile() || before.size !== inventoryEntry.bytes) {
+        throw new Error(`Raw-search fixture entry changed before read: ${inventoryEntry.path}.`);
+      }
+      const bytes = await handle.readFile();
+      const after = await handle.stat();
+      if (
+        after.dev !== before.dev
+        || after.ino !== before.ino
+        || after.size !== before.size
+        || after.mtimeMs !== before.mtimeMs
+        || bytes.byteLength !== inventoryEntry.bytes
+      ) {
+        throw new Error(`Raw-search fixture entry changed during read: ${inventoryEntry.path}.`);
+      }
+      openedBytes += bytes.byteLength;
+      return Object.freeze({
+        filePath: absolutePath,
+        content: decodeBenchmarkUtf8(bytes, inventoryEntry.path),
+        mtimeMs: after.mtimeMs,
+        stats: after
+      });
+    } finally {
+      await handle.close();
+    }
+  }
+
   return Object.freeze({
     async listFiles(root, directoryPath) {
       assertFixtureRequest(root, directoryPath);
@@ -319,33 +363,27 @@ function createUnsafeBenchmarkOnlyRawSearchReader({ fixtureRoot, fixtureReceipt 
       if (path.resolve(root) !== resolvedRoot) {
         throw new Error("Unsafe raw-search control may read only its immutable fixture root.");
       }
-      const absolutePath = path.resolve(filePath);
-      const inventoryEntry = inventoryByPath.get(absolutePath);
-      if (!inventoryEntry) throw new Error("Unsafe raw-search control refused a path outside its receipt inventory.");
-      const handle = await fs.open(absolutePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-      openedFiles += 1;
-      try {
-        const before = await handle.stat();
-        if (!before.isFile() || before.size !== inventoryEntry.bytes) {
-          throw new Error(`Raw-search fixture entry changed before read: ${inventoryEntry.path}.`);
+      const observed = await readObservedFile(filePath);
+      return options.returnSnapshot === true
+        ? { content: observed.content, stats: observed.stats }
+        : observed.content;
+    },
+    async withTextCorpus(root, directoryPath, options, callback) {
+      assertFixtureRequest(root, directoryPath);
+      const concurrency = options.concurrency ?? 32;
+      const transaction = Object.freeze({
+        async mapFiles(mapper) {
+          const mapped = new Array(files.length);
+          for (let start = 0; start < files.length; start += concurrency) {
+            const batch = await Promise.all(
+              files.slice(start, start + concurrency).map(async (filePath) => mapper(await readObservedFile(filePath)))
+            );
+            for (const [offset, value] of batch.entries()) mapped[start + offset] = value;
+          }
+          return mapped;
         }
-        const bytes = await handle.readFile();
-        const after = await handle.stat();
-        if (
-          after.dev !== before.dev
-          || after.ino !== before.ino
-          || after.size !== before.size
-          || after.mtimeMs !== before.mtimeMs
-          || bytes.byteLength !== inventoryEntry.bytes
-        ) {
-          throw new Error(`Raw-search fixture entry changed during read: ${inventoryEntry.path}.`);
-        }
-        openedBytes += bytes.byteLength;
-        const content = decodeBenchmarkUtf8(bytes, inventoryEntry.path);
-        return options.returnSnapshot === true ? { content, stats: after } : content;
-      } finally {
-        await handle.close();
-      }
+      });
+      return callback(transaction);
     },
     snapshot() {
       return Object.freeze({ files: openedFiles, bytes: openedBytes, entries: 0 });
@@ -406,6 +444,48 @@ async function runRawReadControl({ manifest, fixtureRoot, fixtureReceipt }) {
   }
 }
 
+async function runSafeCorpusReadControl({ manifest, fixtureRoot, fixtureReceipt }) {
+  const { filesystem, counts, acceptedFilePathCounts, containmentPathCounts } = countingFilesystem({ fixtureRoot, fixtureReceipt });
+  const reader = createEvidenceReader({ roots: [fixtureRoot], filesystem });
+  const rss = monitorRss(manifest.protocol.rssPollIntervalMs);
+  const started = process.hrtime.bigint();
+  try {
+    const exactResults = await reader.withTextCorpus(
+      fixtureRoot,
+      fixtureRoot,
+      { extensions: [".md"], concurrency: manifest.protocol.concurrency },
+      async (transaction) => {
+        const byteLengths = await transaction.mapFiles(({ content }) => Buffer.byteLength(content));
+        return {
+          fileCount: byteLengths.length,
+          totalBytes: byteLengths.reduce((sum, bytes) => sum + bytes, 0)
+        };
+      }
+    );
+    if (exactResults.fileCount !== fixtureReceipt.fileCount || exactResults.totalBytes !== fixtureReceipt.totalBytes) {
+      throw new Error(
+        `Safe corpus-read control mismatch: expected ${fixtureReceipt.fileCount} files/${fixtureReceipt.totalBytes} bytes, `
+        + `got ${exactResults.fileCount} files/${exactResults.totalBytes} bytes.`
+      );
+    }
+    return {
+      durationMs: elapsedMs(started),
+      peakRssBytes: rss.stop(),
+      operations: { ...counts },
+      operationBreakdown: {
+        acceptedFilePaths: { ...acceptedFilePathCounts },
+        containmentPaths: { ...containmentPathCounts }
+      },
+      readBudget: reader.snapshot(),
+      exactResults,
+      outputSha256: sha256(`${exactResults.fileCount}\0${exactResults.totalBytes}`)
+    };
+  } catch (error) {
+    rss.stop();
+    throw error;
+  }
+}
+
 async function measureOperation({ id, manifest, operation }) {
   const cold = [];
   for (let index = 0; index < manifest.protocol.coldSamples; index += 1) cold.push(await operation());
@@ -429,7 +509,7 @@ async function measureOperation({ id, manifest, operation }) {
 
 function summarizeSamples(samples) {
   const durations = samples.map(({ durationMs }) => durationMs).sort((left, right) => left - right);
-  return {
+  const summary = {
     samples: samples.length,
     medianMs: percentile(durations, 0.5),
     p95Ms: percentile(durations, 0.95),
@@ -437,6 +517,15 @@ function summarizeSamples(samples) {
     operations: summarizeOperationCounts(samples.map(({ operations }) => operations)),
     readBudget: samples[0].readBudget
   };
+  if (samples.every(({ operationBreakdown }) => operationBreakdown)) {
+    summary.operationBreakdown = Object.fromEntries(
+      ["acceptedFilePaths", "containmentPaths"].map((scope) => [
+        scope,
+        summarizeOperationCounts(samples.map(({ operationBreakdown }) => operationBreakdown[scope]))
+      ])
+    );
+  }
+  return summary;
 }
 
 function summarizeOperationCounts(counts) {
@@ -531,8 +620,15 @@ function fileIndex(relativePath) {
   return Number(match[1]);
 }
 
-function countingFilesystem() {
+function countingFilesystem({ fixtureRoot = null, fixtureReceipt = null } = {}) {
   const counts = { lstat: 0, realpath: 0, open: 0 };
+  const acceptedFilePathCounts = { lstat: 0, realpath: 0, open: 0 };
+  const containmentPathCounts = { lstat: 0, realpath: 0, open: 0 };
+  const acceptedFiles = fixtureRoot && fixtureReceipt
+    ? new Set(fixtureReceipt.inventory.map(({ path: relativePath }) =>
+      path.join(path.resolve(fixtureRoot), ...relativePath.split("/"))
+    ))
+    : new Set();
   const filesystem = new Proxy(fs, {
     get(target, property, receiver) {
       const value = Reflect.get(target, property, receiver);
@@ -540,13 +636,15 @@ function countingFilesystem() {
       if (Object.hasOwn(counts, property)) {
         return (...args) => {
           counts[property] += 1;
+          const requestedPath = typeof args[0] === "string" ? path.resolve(args[0]) : null;
+          (requestedPath && acceptedFiles.has(requestedPath) ? acceptedFilePathCounts : containmentPathCounts)[property] += 1;
           return value(...args);
         };
       }
       return value.bind(target);
     }
   });
-  return { filesystem, counts };
+  return { filesystem, counts, acceptedFilePathCounts, containmentPathCounts };
 }
 
 function monitorRss(intervalMs) {

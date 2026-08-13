@@ -103,24 +103,94 @@ test("search rejects invalid UTF-8 without replacing bytes", async () => {
   assert.deepEqual(fs.readFileSync(filePath), bytes);
 });
 
-test("search keeps the generic contained-read path until bulk integration is owned by U6", async () => {
+test("search ranks inside the corpus transaction and publishes only after final validation", async () => {
   const root = tmpDir();
-  fs.writeFileSync(path.join(root, "note.md"), "# Existing search\n\nUNCHANGED_SEARCH_CANARY\n");
+  fs.writeFileSync(path.join(root, "b-body.md"), "# Body\n\nTRANSACTION_SEARCH_CANARY\n");
+  fs.writeFileSync(path.join(root, "a-heading.md"), "# TRANSACTION_SEARCH_CANARY\n\nPlain body.\n");
   const baseReader = createEvidenceReader({ roots: [root] });
   let transactionCalls = 0;
+  let callbackResult;
+  let releaseFinalValidation;
+  const finalValidationGate = new Promise((resolve) => {
+    releaseFinalValidation = resolve;
+  });
+  let reportCallbackComplete;
+  const callbackComplete = new Promise((resolve) => {
+    reportCallbackComplete = resolve;
+  });
   const reader = {
     ...baseReader,
-    async withTextCorpus() {
+    async withTextCorpus(transactionRoot, directoryPath, options, callback) {
       transactionCalls += 1;
-      throw new Error("U5 must not integrate production search.");
+      return baseReader.withTextCorpus(transactionRoot, directoryPath, options, async (transaction) => {
+        callbackResult = await callback(transaction);
+        reportCallbackComplete();
+        await finalValidationGate;
+        return callbackResult;
+      });
     }
   };
 
-  const results = await searchMarkdownDir(root, "UNCHANGED_SEARCH_CANARY", { reader, root });
+  const pending = searchMarkdownDir(root, "TRANSACTION_SEARCH_CANARY", { reader, root });
+  const firstCompleted = await Promise.race([
+    callbackComplete.then(() => "callback"),
+    pending.then(() => "search")
+  ]);
 
-  assert.equal(results.length, 1);
-  assert.equal(results[0].file, "note.md");
-  assert.equal(transactionCalls, 0);
+  assert.equal(firstCompleted, "callback", "ranking must complete inside the transaction callback");
+  assert.deepEqual(callbackResult.map(({ file }) => file), ["a-heading.md", "b-body.md"]);
+  let published = false;
+  pending.then(() => {
+    published = true;
+  });
+  await Promise.resolve();
+  assert.equal(published, false, "callback results must remain private until final validation completes");
+
+  releaseFinalValidation();
+  const results = await pending;
+
+  assert.deepEqual(results, callbackResult);
+  assert.equal(transactionCalls, 1);
+});
+
+test("search rejects ranked results when final corpus validation observes a changed generation", async () => {
+  const root = tmpDir();
+  fs.writeFileSync(path.join(root, "note.md"), "# Existing\n\nFINAL_VALIDATION_CANARY\n");
+  const baseReader = createEvidenceReader({ roots: [root] });
+  let rankedInsideCallback = null;
+  const reader = {
+    ...baseReader,
+    withTextCorpus(transactionRoot, directoryPath, options, callback) {
+      return baseReader.withTextCorpus(transactionRoot, directoryPath, options, async (transaction) => {
+        rankedInsideCallback = await callback(transaction);
+        fs.writeFileSync(path.join(root, "late.md"), "# Late generation\n");
+        return rankedInsideCallback;
+      });
+    }
+  };
+
+  await assert.rejects(
+    () => searchMarkdownDir(root, "FINAL_VALIDATION_CANARY", { reader, root }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+  assert.deepEqual(rankedInsideCallback.map(({ file }) => file), ["note.md"]);
+});
+
+test("request-scoped search observes added, modified, and deleted files on the next request", async () => {
+  const root = tmpDir();
+  const firstPath = path.join(root, "first.md");
+  const secondPath = path.join(root, "second.md");
+  fs.writeFileSync(firstPath, "# First\n\nNEXT_REQUEST_CANARY\n");
+  const reader = createEvidenceReader({ roots: [root] });
+  const search = () => searchMarkdownDir(root, "NEXT_REQUEST_CANARY", { reader, root });
+
+  assert.deepEqual((await search()).map(({ file }) => file), ["first.md"]);
+  fs.writeFileSync(secondPath, "# Second\n\nNEXT_REQUEST_CANARY\n");
+  assert.deepEqual((await search()).map(({ file }) => file), ["first.md", "second.md"]);
+  fs.writeFileSync(firstPath, "# First\n\nChanged content.\n");
+  assert.deepEqual((await search()).map(({ file }) => file), ["second.md"]);
+  fs.unlinkSync(secondPath);
+  assert.deepEqual(await search(), []);
 });
 
 // This asserted the budget by its number — "the 513th file" — so it passed only
