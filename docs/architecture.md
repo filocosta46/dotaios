@@ -167,6 +167,34 @@ visible on the next request. The optimization amortizes repeated containment
 checks only for the lifetime of that request; the AIOS folder remains the sole
 search authority.
 
+### Bounded memory archives
+
+Event compaction and stale-signal trimming keep the unsuffixed
+`events-archive.jsonl` and `signals-archive.jsonl` files as active append
+targets. Before an append would cross 2 MiB, maintenance publishes complete
+JSONL records into immutable, zero-padded shards such as
+`events-archive.000001.jsonl`. Numbered shards are searched in numeric order,
+then the active archive. Exact retry overlap is deduplicated before corpus
+statistics and ranking, so an interruption cannot turn one event into two
+search results.
+
+One valid record above 2 MiB but no larger than the 4 MiB evidence-file ceiling
+occupies a shard by itself. A larger record stops maintenance before the live
+event generation is replaced or a stale signal source is removed. The pending
+batch remains recovery authority until shard and active-file publication have
+been fsynced. Each shard is created exclusively at mode 0600 and is never
+overwritten; active and pending files must be owned, regular, single-link files.
+Maintenance narrowly secures an eligible legacy 0644 active archive to 0600,
+but rejects links, wrong ownership, broader modes, and unsafe pre-existing
+shard targets.
+
+Search observes the memory directory before reading the numbered generation
+and revalidates it before results resolve. A concurrent rotation therefore
+returns the complete old generation, the complete new generation, or a fatal
+source-changed retry—never an accepted mixture. Eventually, many valid shards
+can exhaust the request-wide search ceiling; the resource-ceiling contract
+above then reports the whole memory scope as an explicit omission.
+
 ## Vault
 
 `vault/` is long-term knowledge, loaded on demand. Users may keep it inside `~/aios/vault` or configure an external `vault_path` in `aios.json`, such as an Obsidian vault.

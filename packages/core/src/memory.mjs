@@ -1,9 +1,16 @@
 import crypto from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatJsonlEntry, parseJsonlLine, readJsonl } from "./jsonl.mjs";
 import { ContainedReadError, readContainedDirectory, readContainedFile } from "./contained-read.mjs";
 import { refreshLiveOkf, writeProjectLog } from "./okf-live.mjs";
+import {
+  assertOwnedFileStats,
+  publishOwnedFileExclusive,
+  sameFileIdentity,
+  syncOwnedDirectory
+} from "./owned-state.mjs";
 import { searchMarkdownDir, searchMemoryDir } from "./search.mjs";
 
 export { formatJsonlEntry, parseJsonlLine, readJsonl };
@@ -234,6 +241,8 @@ const LOCK_STALE_MS = 5 * 60_000;
 const LOCK_RETRY_DELAYS_MS = [50, 150, 300];
 const LOCK_MAX_ATTEMPTS = 8;
 const ARCHIVE_TAIL_BYTES = 262_144;
+const ARCHIVE_ROTATE_BYTES = 2 * 1024 * 1024;
+const ARCHIVE_LINE_MAX_BYTES = 4 * 1024 * 1024;
 
 function archivePathFor(eventsPath) {
   return eventsPath.replace(/\.jsonl$/, "-archive.jsonl");
@@ -356,20 +365,22 @@ async function malformedLockIsStale(lockPath, fileSystem, staleMs, now) {
 
 async function fsyncFile(fileSystem, filePath) {
   if (typeof fileSystem.open !== "function") return;
+  const handle = await fileSystem.open(filePath, "r+");
   try {
-    const handle = await fileSystem.open(filePath, "r+");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    // fsync is best-effort; the commit point below is the atomicity boundary.
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
 async function writeFileDurable(fileSystem, filePath, content) {
-  await fileSystem.writeFile(filePath, content);
+  await fileSystem.writeFile(filePath, content, { flag: "wx", mode: 0o600 });
+  await fsyncFile(fileSystem, filePath);
+}
+
+async function stagePendingArchive(fileSystem, filePath, content) {
+  assertArchiveLineBounds(content);
+  await fileSystem.writeFile(filePath, content, { flag: "wx", mode: 0o600 });
   await fsyncFile(fileSystem, filePath);
 }
 
@@ -389,15 +400,18 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
   const archivePath = archivePathFor(eventsPath);
   const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
+  let pendingStats;
   try {
-    pendingContent = await fileSystem.readFile(pendingPath, "utf8");
+    ({ content: pendingContent, stats: pendingStats } = await readOwnedArchiveFile(pendingPath, fileSystem, {
+      allowLegacyMode: true
+    }));
   } catch (error) {
     if (error.code === "ENOENT") return;
     throw error;
   }
   const pendingLines = pendingContent.split("\n").filter((line) => line.trim());
   if (pendingLines.length === 0) {
-    await fileSystem.unlink(pendingPath);
+    await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
     return;
   }
   let eventsContent = "";
@@ -410,57 +424,319 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
   const first = pendingLines[0];
   const last = pendingLines[pendingLines.length - 1];
   if (eventLines.has(first) && eventLines.has(last)) {
-    await fileSystem.unlink(pendingPath);
+    await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
     return;
   }
   await flushPendingArchive(archivePath, fileSystem);
 }
 
-// Append the staged batch to the archive, line-idempotently: a crashed earlier
-// flush may already have written part or all of it. Returns only after the
-// append is on disk and fsynced, so callers may treat it as the point after
-// which deleting the source is safe.
+// Publish the staged batch line-idempotently into the active archive and, when
+// needed, immutable numbered shards. Returns only after every accepted line is
+// fsynced, so callers may treat it as the point after which source removal is
+// safe.
 async function flushPendingArchive(archivePath, fileSystem) {
   const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
+  let pendingStats;
   try {
-    pendingContent = await fileSystem.readFile(pendingPath, "utf8");
+    ({ content: pendingContent, stats: pendingStats } = await readOwnedArchiveFile(pendingPath, fileSystem, {
+      allowLegacyMode: true
+    }));
   } catch (error) {
     if (error.code === "ENOENT") return;
     throw error;
   }
   const pendingLines = pendingContent.split("\n").filter((line) => line.trim());
-  let archiveContent = "";
-  try {
-    archiveContent = await fileSystem.readFile(archivePath, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  // The dedupe window must be at least as long as the batch it checks. A batch
-  // bigger than a fixed window would fail to find its own already-written early
-  // lines on a retry and append them a second time.
-  const windowBytes = Math.max(ARCHIVE_TAIL_BYTES, pendingContent.length + 1024);
-  const tailLines = new Set(archiveContent.slice(-windowBytes).split("\n").filter((line) => line.trim()));
+  assertArchiveLineBounds(pendingContent);
+
+  const shards = await inspectArchiveShards(archivePath, fileSystem);
+  const active = await readArchiveActive(archivePath, fileSystem);
+  assertArchiveLineBounds(active.content);
+  const tailLines = await collectArchiveTailLines(
+    archivePath,
+    active,
+    shards,
+    Math.max(ARCHIVE_TAIL_BYTES, Buffer.byteLength(pendingContent) + 1024),
+    fileSystem
+  );
   const missing = pendingLines.filter((line) => !tailLines.has(line));
-  if (missing.length > 0) {
-    // A torn earlier append can leave the archive without a final newline;
-    // start on a fresh line so the fragment stays its own (visible) bad line.
-    const prefix = archiveContent.length > 0 && !archiveContent.endsWith("\n") ? "\n" : "";
-    await fileSystem.appendFile(archivePath, prefix + missing.map((line) => `${line}\n`).join(""));
-    await fsyncFile(fileSystem, archivePath);
+  await appendArchiveLines(archivePath, active, shards, missing, fileSystem);
+
+  await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
+}
+
+async function removeObservedArchiveFile(filePath, expectedStats, fileSystem) {
+  const current = await fileSystem.lstat(filePath);
+  assertOwnedFileStats(current);
+  if (!sameFileIdentity(expectedStats, current)) throw archiveStateError();
+  await fileSystem.unlink(filePath);
+  await syncOwnedDirectory(path.dirname(filePath), { filesystem: fileSystem });
+}
+
+async function appendArchiveLines(archivePath, active, existingShards, lines, fileSystem) {
+  let activeContent = active.content;
+  let activeStats = active.stats;
+  let nextShard = existingShards.length === 0
+    ? 1
+    : existingShards.at(-1).number + 1;
+
+  // A crash after immutable shard publication but before resetting the active
+  // file leaves an exact prefix in both places. Repair that state before doing
+  // new work; the shard is already the durable authority for those bytes.
+  const newest = existingShards.at(-1);
+  if (newest && activeContent) {
+    const newestContent = (await readOwnedArchiveFile(newest.path, fileSystem)).content;
+    if (activeContent.startsWith(newestContent)) {
+      activeContent = activeContent.slice(newestContent.length);
+      activeStats = await replaceArchiveActive(archivePath, activeContent, activeStats, fileSystem);
+    }
   }
-  await fileSystem.unlink(pendingPath);
+
+  // Normalize a legacy over-target active file one complete JSONL record at a
+  // time. Each published prefix is removed immediately, so every interruption
+  // is recoverable by the prefix rule above.
+  while (Buffer.byteLength(activeContent) > ARCHIVE_ROTATE_BYTES) {
+    const { chunk, remainder } = takeArchiveChunk(activeContent);
+    await publishArchiveShard(archivePath, nextShard, chunk, fileSystem);
+    nextShard += 1;
+    activeStats = await replaceArchiveActive(archivePath, remainder, activeStats, fileSystem);
+    activeContent = remainder;
+  }
+
+  let changed = false;
+  for (const line of lines) {
+    const record = `${line}\n`;
+    const recordBytes = Buffer.byteLength(record);
+    if (recordBytes > ARCHIVE_LINE_MAX_BYTES) throw archiveLineTooLargeError();
+    const separator = activeContent && !activeContent.endsWith("\n") ? "\n" : "";
+    if (activeContent && Buffer.byteLength(activeContent) + Buffer.byteLength(separator) + recordBytes > ARCHIVE_ROTATE_BYTES) {
+      activeStats = await replaceArchiveActive(archivePath, activeContent, activeStats, fileSystem);
+      await publishArchiveShard(archivePath, nextShard, activeContent, fileSystem);
+      nextShard += 1;
+      activeStats = await replaceArchiveActive(archivePath, "", activeStats, fileSystem);
+      activeContent = "";
+      changed = false;
+    }
+    if (recordBytes > ARCHIVE_ROTATE_BYTES) {
+      await publishArchiveShard(archivePath, nextShard, record, fileSystem);
+      nextShard += 1;
+      continue;
+    }
+    activeContent += `${separator}${record}`;
+    changed = true;
+  }
+
+  if (changed || !activeStats) {
+    await replaceArchiveActive(archivePath, activeContent, activeStats, fileSystem);
+  }
+}
+
+function takeArchiveChunk(content) {
+  const records = splitArchiveRecords(content);
+  let chunk = "";
+  let index = 0;
+  while (index < records.length) {
+    const candidate = chunk + records[index];
+    if (chunk && Buffer.byteLength(candidate) > ARCHIVE_ROTATE_BYTES) break;
+    chunk = candidate;
+    index += 1;
+    if (Buffer.byteLength(chunk) > ARCHIVE_ROTATE_BYTES) break;
+  }
+  if (!chunk) throw archiveStateError();
+  return { chunk, remainder: records.slice(index).join("") };
+}
+
+function splitArchiveRecords(content) {
+  if (!content) return [];
+  const records = [];
+  let start = 0;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] !== "\n") continue;
+    records.push(content.slice(start, index + 1));
+    start = index + 1;
+  }
+  if (start < content.length) records.push(content.slice(start));
+  return records;
+}
+
+function assertArchiveLineBounds(content) {
+  for (const record of splitArchiveRecords(content)) {
+    if (Buffer.byteLength(record) > ARCHIVE_LINE_MAX_BYTES) throw archiveLineTooLargeError();
+  }
+}
+
+async function inspectArchiveShards(archivePath, fileSystem) {
+  const directory = path.dirname(archivePath);
+  const stem = path.basename(archivePath, ".jsonl");
+  const matcher = new RegExp(`^${escapeRegExp(stem)}\\.(\\d{6})\\.jsonl$`);
+  let entries;
+  try {
+    entries = await fileSystem.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  const shards = [];
+  for (const entry of entries) {
+    const match = entry.name.match(matcher);
+    if (!match) continue;
+    const filePath = path.join(directory, entry.name);
+    const stats = await inspectOwnedArchiveFile(filePath, fileSystem);
+    shards.push({ number: Number(match[1]), path: filePath, stats });
+  }
+  shards.sort((left, right) => left.number - right.number);
+  for (let index = 1; index < shards.length; index += 1) {
+    if (shards[index - 1].number === shards[index].number) throw archiveStateError();
+  }
+  return shards;
+}
+
+async function inspectOwnedArchiveFile(filePath, fileSystem) {
+  const stats = await fileSystem.lstat(filePath);
+  assertOwnedFileStats(stats);
+  return stats;
+}
+
+async function collectArchiveTailLines(archivePath, active, shards, minimumBytes, fileSystem) {
+  const lines = new Set();
+  let observedBytes = 0;
+  const sources = [
+    { path: archivePath, content: active.content },
+    ...[...shards].reverse().map(({ path: filePath }) => ({ path: filePath, content: null }))
+  ];
+  for (const source of sources) {
+    const content = source.content === null
+      ? (await readOwnedArchiveFile(source.path, fileSystem)).content
+      : source.content;
+    observedBytes += Buffer.byteLength(content);
+    for (const line of content.split("\n")) if (line.trim()) lines.add(line);
+    if (observedBytes >= minimumBytes) break;
+  }
+  return lines;
+}
+
+async function readArchiveActive(archivePath, fileSystem) {
+  try {
+    return await readOwnedArchiveFile(archivePath, fileSystem, { allowLegacyMode: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return { content: "", stats: null };
+    throw error;
+  }
+}
+
+async function readOwnedArchiveFile(filePath, fileSystem, { allowLegacyMode = false } = {}) {
+  let pathStats = await fileSystem.lstat(filePath);
+  pathStats = await validateArchiveFileMode(filePath, pathStats, fileSystem, allowLegacyMode);
+  const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0);
+  const handle = await fileSystem.open(filePath, flags);
+  try {
+    const before = await handle.stat();
+    assertOwnedFileStats(before);
+    if (!sameFileIdentity(pathStats, before)) throw archiveStateError();
+    const content = await handle.readFile("utf8");
+    const after = await handle.stat();
+    if (!sameFileIdentity(before, after)) throw archiveStateError();
+    const current = await fileSystem.lstat(filePath);
+    if (!sameFileIdentity(after, current)) throw archiveStateError();
+    return { content, stats: current };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function validateArchiveFileMode(filePath, stats, fileSystem, allowLegacyMode) {
+  try {
+    assertOwnedFileStats(stats);
+    return stats;
+  } catch (error) {
+    if (!allowLegacyMode || process.platform === "win32") throw error;
+    assertOwnedFileStats(stats, 0o644);
+    await fileSystem.chmod(filePath, 0o600);
+    const secured = await fileSystem.lstat(filePath);
+    assertOwnedFileStats(secured);
+    if (!sameArchiveObject(stats, secured)) throw archiveStateError();
+    return secured;
+  }
+}
+
+function sameArchiveObject(left, right) {
+  return Boolean(left && right
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.nlink === right.nlink
+    && left.uid === right.uid);
+}
+
+async function publishArchiveShard(archivePath, number, content, fileSystem) {
+  assertArchiveLineBounds(content);
+  const shardPath = archiveShardPath(archivePath, number);
+  await publishOwnedFileExclusive(shardPath, content, { filesystem: fileSystem });
+  return shardPath;
+}
+
+async function replaceArchiveActive(archivePath, content, expectedStats, fileSystem) {
+  assertArchiveLineBounds(content);
+  if (!expectedStats) {
+    return publishOwnedFileExclusive(archivePath, content, { filesystem: fileSystem });
+  }
+  const current = await fileSystem.lstat(archivePath);
+  if (!sameFileIdentity(expectedStats, current)) throw archiveStateError();
+  const temporary = path.join(
+    path.dirname(archivePath),
+    `.${path.basename(archivePath)}.${crypto.randomUUID()}.tmp`
+  );
+  let handle;
+  try {
+    handle = await fileSystem.open(temporary, "wx", 0o600);
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    const temporaryStats = await fileSystem.lstat(temporary);
+    assertOwnedFileStats(temporaryStats);
+    const stillCurrent = await fileSystem.lstat(archivePath);
+    if (!sameFileIdentity(expectedStats, stillCurrent)) throw archiveStateError();
+    await fileSystem.rename(temporary, archivePath);
+    const published = await fileSystem.lstat(archivePath);
+    assertOwnedFileStats(published);
+    if (!sameFileIdentity(temporaryStats, published)) throw archiveStateError();
+    await syncOwnedDirectory(path.dirname(archivePath), { filesystem: fileSystem });
+    return published;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await fileSystem.rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+function archiveShardPath(archivePath, number) {
+  return archivePath.replace(/\.jsonl$/, `.${String(number).padStart(6, "0")}.jsonl`);
+}
+
+function archiveLineTooLargeError() {
+  const error = new Error("One archive record exceeds the safe 4 MiB read ceiling.");
+  error.code = "DOTAIOS_ARCHIVE_LINE_TOO_LARGE";
+  return error;
+}
+
+function archiveStateError() {
+  const error = new Error("Memory archive state changed or is not safely owned.");
+  error.code = "DOTAIOS_ARCHIVE_STATE_INVALID";
+  return error;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
  * Compact events.jsonl: keep only the most recent N entries in the main file,
- * archive older entries to events-archive.jsonl.
+ * archive older entries to the bounded events-archive generation.
  *
  * Crash-safe transaction: kept-tail and archive batch are staged and fsynced,
  * the rename over events.jsonl is the single commit point, and the archive
- * append happens only after it (idempotently, so an interrupted run can be
- * re-run without losing or duplicating an event). Guarded by an advisory
- * lockfile next to events.jsonl.
+ * archive publication happens only after it (idempotently, so an interrupted
+ * run can be re-run without losing or duplicating an event). Guarded by an
+ * advisory lockfile next to events.jsonl.
  *
  * Returns { archived, kept } — or { archived: 0, kept: 0, skipped: "locked" }
  * when another live process holds the lock.
@@ -478,12 +754,21 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
 
       const toArchive = all.slice(0, -limit);
       const toKeep = all.slice(-limit);
-      const tmpPath = `${eventsPath}.tmp`;
+      const tmpPath = path.join(
+        path.dirname(eventsPath),
+        `.${path.basename(eventsPath)}.${crypto.randomUUID()}.tmp`
+      );
+      const archiveBatch = toArchive.map((entry) => formatJsonlEntry(entry)).join("");
+      assertArchiveLineBounds(archiveBatch);
 
-      await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
-      await writeFileDurable(fileSystem, pendingPathFor(archivePathFor(eventsPath)), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
-      await fileSystem.rename(tmpPath, eventsPath);
-      await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
+      try {
+        await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
+        await stagePendingArchive(fileSystem, pendingPathFor(archivePathFor(eventsPath)), archiveBatch);
+        await fileSystem.rename(tmpPath, eventsPath);
+        await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
+      } finally {
+        await fileSystem.rm(tmpPath, { force: true }).catch(() => {});
+      }
 
       return { archived: toArchive.length, kept: toKeep.length };
     }, options);
@@ -497,11 +782,12 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
 
 /**
  * Move signal files older than retentionDays out of memory/signals/ and into
- * memory/signals-archive.jsonl. Retention controls what stays in the routed
- * daily window — it is not a licence to destroy what the user wrote.
+ * the bounded memory/signals-archive generation. Retention controls what stays
+ * in the routed daily window — it is not a licence to destroy what the user
+ * wrote.
  *
  * Crash-safe transaction: the batch is staged and fsynced, appended to the
- * archive line-idempotently, and only then are the source files unlinked.
+ * archive generation line-idempotently, and only then are the source files unlinked.
  * The unlink is the commit point, so every crash point leaves a line in both
  * places (transient duplication the next run collapses) and never in neither.
  * Staging order is unlink order, so a crash mid-delete leaves a suffix of the
@@ -576,7 +862,9 @@ export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_D
     if (sources.length === 0) return nothingToDo;
 
     if (staged.length > 0) {
-      await writeFileDurable(fileSystem, pendingPath, staged.map((line) => `${line}\n`).join(""));
+      const archiveBatch = staged.map((line) => `${line}\n`).join("");
+      assertArchiveLineBounds(archiveBatch);
+      await stagePendingArchive(fileSystem, pendingPath, archiveBatch);
       await flushPendingArchive(archivePath, fileSystem);
     }
 

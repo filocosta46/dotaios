@@ -44,16 +44,13 @@ function faultFs(failures) {
     }
     return fsp[name](...args);
   };
-  const filesystem = {
-    readFile: wrap("readFile"),
-    writeFile: wrap("writeFile"),
-    appendFile: wrap("appendFile"),
-    rename: wrap("rename"),
-    unlink: wrap("unlink"),
-    readdir: wrap("readdir"),
-    stat: wrap("stat"),
-    mkdir: wrap("mkdir")
-  };
+  const filesystem = { ...fsp };
+  for (const name of [
+    "appendFile", "chmod", "link", "lstat", "mkdir", "open", "readFile",
+    "readdir", "rename", "rm", "stat", "unlink", "writeFile"
+  ]) {
+    filesystem[name] = wrap(name);
+  }
   return { filesystem, counts };
 }
 
@@ -108,6 +105,55 @@ test("compaction survives a crash at any single step: no event lost, none duplic
   }
 });
 
+test("rotating compaction recovers every shard publication boundary without loss or duplication", async () => {
+  const scenarios = [
+    { link: 2 },
+    { rename: 2 },
+    { rename: 3 },
+    { unlink: 2 },
+    { unlink: 3 }
+  ];
+  for (const failure of scenarios) {
+    const dir = tmpDir();
+    const eventsPath = path.join(dir, "events.jsonl");
+    const archivePath = path.join(dir, "events-archive.jsonl");
+    const original = Array.from({ length: 4 }, (_, index) => JSON.stringify({
+      ts: `2026-01-01T00:00:0${index}.000Z`,
+      type: "rotation-crash",
+      id: `event-${index}`,
+      summary: index < 3 ? "x".repeat(720_000) : "kept"
+    }));
+    fs.writeFileSync(eventsPath, `${original.join("\n")}\n`, { mode: 0o600 });
+
+    const fault = faultFs(failure);
+    await assert.rejects(
+      compactEvents(eventsPath, 1, { filesystem: fault.filesystem }),
+      /injected-crash/
+    );
+
+    const durablePaths = fs.readdirSync(dir)
+      .filter((name) => name === "events.jsonl"
+        || name === "events-archive.jsonl"
+        || /^events-archive\.\d{6}\.jsonl$/.test(name)
+        || name === "events-archive.jsonl.pending")
+      .map((name) => path.join(dir, name));
+    const midState = durablePaths.flatMap(readLines);
+    for (const line of original) {
+      assert.ok(midState.includes(line), `event lost after shard crash ${JSON.stringify(failure)}`);
+    }
+
+    await compactEvents(eventsPath, 1);
+    const settledPaths = fs.readdirSync(dir)
+      .filter((name) => name === "events.jsonl"
+        || name === "events-archive.jsonl"
+        || /^events-archive\.\d{6}\.jsonl$/.test(name))
+      .sort()
+      .map((name) => path.join(dir, name));
+    const settled = settledPaths.flatMap(readLines);
+    assert.deepEqual([...settled].sort(), [...original].sort());
+  }
+});
+
 test("compaction re-run on an already-compacted file is a no-op", async () => {
   const dir = tmpDir();
   const eventsPath = path.join(dir, "events.jsonl");
@@ -158,7 +204,10 @@ test("event append waits for compaction and the appended record survives replace
   const filesystem = {
     ...fsp,
     async rename(source, destination) {
-      if (source === `${eventsPath}.tmp` && destination === eventsPath) {
+      const isReplacement = path.dirname(source) === path.dirname(eventsPath)
+        && path.basename(source).startsWith(`.${path.basename(eventsPath)}.`)
+        && path.basename(source).endsWith(".tmp");
+      if (isReplacement && destination === eventsPath) {
         renameStarted();
         await allowRename;
       }
@@ -446,10 +495,10 @@ test("a crash while deleting a trimmed signal file loses no line and duplicates 
   assert.deepEqual(fs.readdirSync(signalsDir), [], "the retry finishes the removal");
 });
 
-test("a crash while appending to the signals archive keeps the source file", async () => {
+test("a crash while publishing the signals archive keeps the source file", async () => {
   const { signalsDir, archivePath } = signalsFixture({ staleFiles: 2, linesPerFile: 2 });
 
-  const { filesystem } = faultFs({ appendFile: 1 });
+  const { filesystem } = faultFs({ link: 1 });
   await assert.rejects(() => trimSignals(signalsDir, 30, { filesystem }));
 
   assert.equal(fs.readdirSync(signalsDir).length, 2, "nothing may be deleted before the archive holds it");

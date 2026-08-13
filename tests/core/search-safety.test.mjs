@@ -103,6 +103,56 @@ test("search rejects invalid UTF-8 without replacing bytes", async () => {
   assert.deepEqual(fs.readFileSync(filePath), bytes);
 });
 
+test("memory search rejects a rotation that changes the observed archive generation", async () => {
+  const root = tmpDir();
+  const memoryDir = path.join(root, "memory");
+  fs.mkdirSync(memoryDir);
+  fs.writeFileSync(
+    path.join(memoryDir, "events-archive.000001.jsonl"),
+    `${JSON.stringify({ ts: "2026-05-01T12:00:00.000Z", type: "note", summary: "ARCHIVE_RACE_CANARY" })}\n`,
+    { mode: 0o600 }
+  );
+  fs.writeFileSync(path.join(memoryDir, "events-archive.jsonl"), "", { mode: 0o600 });
+  const baseReader = createEvidenceReader({ roots: [root] });
+  let oldGenerationResult = null;
+  const reader = {
+    ...baseReader,
+    withScopePreflight(scopes, prepare, callback) {
+      return baseReader.withScopePreflight(scopes, prepare, async (transaction) => {
+        const result = await callback(transaction);
+        oldGenerationResult = result;
+        fs.writeFileSync(
+          path.join(memoryDir, "events-archive.000002.jsonl"),
+          `${JSON.stringify({ ts: "2026-05-02T12:00:00.000Z", type: "note", summary: "late shard" })}\n`,
+          { mode: 0o600 }
+        );
+        return result;
+      });
+    }
+  };
+
+  await assert.rejects(
+    () => searchAios({ aiosPath: root, query: "ARCHIVE_RACE_CANARY", scope: "memory", evidenceReader: reader }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+  assert.match(JSON.stringify(oldGenerationResult), /ARCHIVE_RACE_CANARY/);
+});
+
+test("memory search fails closed on a linked numbered archive shard", async () => {
+  const parent = tmpDir();
+  const root = path.join(parent, "aios");
+  const memoryDir = path.join(root, "memory");
+  const outside = path.join(parent, "outside.jsonl");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(outside, '{"summary":"LINKED_ARCHIVE_CANARY"}\n');
+  fs.symlinkSync(outside, path.join(memoryDir, "events-archive.000001.jsonl"));
+
+  await assert.rejects(
+    () => searchAios({ aiosPath: root, query: "LINKED_ARCHIVE_CANARY", scope: "memory" }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_PATH_UNSAFE"
+  );
+});
+
 test("search ranks inside the corpus transaction and publishes only after final validation", async () => {
   const root = tmpDir();
   fs.writeFileSync(path.join(root, "b-body.md"), "# Body\n\nTRANSACTION_SEARCH_CANARY\n");

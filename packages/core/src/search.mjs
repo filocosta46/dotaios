@@ -324,10 +324,10 @@ export async function searchMemoryDir(memoryDir, query, {
   root = memoryDir
 } = {}) {
   const activeReader = reader || createEvidenceReader({ roots: [path.resolve(root)] });
+  const archives = await listMemoryArchiveSources(memoryDir, { reader: activeReader, root });
   const sources = [
     { filePath: path.join(memoryDir, "events.jsonl"), source: "memory/events.jsonl" },
-    { filePath: path.join(memoryDir, "events-archive.jsonl"), source: "memory/events-archive.jsonl" },
-    { filePath: path.join(memoryDir, "signals-archive.jsonl"), source: "memory/signals-archive.jsonl" },
+    ...archives,
     ...await listSignalSources(path.join(memoryDir, "signals"), { reader: activeReader, root })
   ];
 
@@ -335,10 +335,13 @@ export async function searchMemoryDir(memoryDir, query, {
   // common a term actually is in this folder, not just among the hits.
   const docs = [];
   const candidates = [];
+  const seenEntries = new Set();
   for (const { filePath, source } of sources) {
     const entries = await activeReader.readJsonl(root, filePath);
     for (const entry of entries) {
       const text = JSON.stringify(entry);
+      if (seenEntries.has(text)) continue;
+      seenEntries.add(text);
       docs.push(text);
       const match = matchJsonEntry(entry, query);
       if (!match) continue;
@@ -368,6 +371,30 @@ export async function searchMemoryDir(memoryDir, query, {
     .sort((a, b) => (b.rank - a.rank) || compareTimestampsDesc(a.result.ts, b.result.ts))
     .slice(0, limit)
     .map(({ result }) => result);
+}
+
+async function listMemoryArchiveSources(memoryDir, { reader, root }) {
+  const entries = await reader.listDirectory(root, memoryDir);
+  const families = ["events-archive", "signals-archive"];
+  const sources = [];
+  for (const family of families) {
+    const matcher = new RegExp(`^${family}\\.(\\d{6})\\.jsonl$`);
+    const shards = entries
+      .map((entry) => ({ entry, match: entry.name.match(matcher) }))
+      .filter(({ match }) => match)
+      .sort((left, right) => Number(left.match[1]) - Number(right.match[1]));
+    for (const { entry } of shards) {
+      sources.push({
+        filePath: path.join(memoryDir, entry.name),
+        source: `memory/${entry.name}`
+      });
+    }
+    sources.push({
+      filePath: path.join(memoryDir, `${family}.jsonl`),
+      source: `memory/${family}.jsonl`
+    });
+  }
+  return sources;
 }
 
 export async function searchJsonlEntries(filePath, query, { source, reader = null, root = path.dirname(filePath) }) {
