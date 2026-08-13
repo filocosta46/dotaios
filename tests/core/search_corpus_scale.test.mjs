@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { searchAios } from "../../packages/core/src/search.mjs";
-import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
+import { createEvidenceReader, DEFAULT_EVIDENCE_READ_LIMITS } from "../../packages/core/src/evidence-reader.mjs";
 
 // Search read through the same budget the bounded startup projection uses —
 // 512 files, 4096 entries, 16 MiB — and its error code still says so
@@ -82,6 +82,54 @@ test("a corpus larger than the old 16 MiB byte budget still returns results", as
   assert.ok(found.length > 0, "~20 MiB of corpus must not exhaust the search budget");
 });
 
+// The first two fixtures only cross the file and byte ceilings. Entries and
+// per-directory entries are separate dimensions, and the real folder that
+// triggered this traversed ~53,000 entries — so without a fixture past those,
+// both could silently regress to the projection's 4,096 / 1,024 and the suite
+// would stay green.
+test("a corpus past the old entry and per-directory ceilings still returns results", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-corpus-entries-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, "context"), { recursive: true });
+  const bulk = path.join(root, "vault", "raw");
+  await fs.mkdir(bulk, { recursive: true });
+  await fs.writeFile(
+    path.join(root, "context", "work.md"),
+    "# Work\n\nWe chose the peregrine routing strategy for the billing rewrite.\n"
+  );
+  // >1024 files in ONE directory, and >4096 entries traversed overall.
+  await Promise.all(
+    Array.from({ length: 1200 }, (_, i) =>
+      fs.writeFile(path.join(bulk, `flat-${i}.md`), `# Flat ${i}\n\nunrelated filler body\n`)
+    )
+  );
+  for (let d = 0; d < 40; d += 1) {
+    const dir = path.join(root, "vault", `shelf-${d}`);
+    await fs.mkdir(dir, { recursive: true });
+    await Promise.all(
+      Array.from({ length: 80 }, (_, i) =>
+        fs.writeFile(path.join(dir, `n-${i}.md`), `# N ${d}-${i}\n\nunrelated filler body\n`)
+      )
+    );
+  }
+
+  const found = hits(await searchAios({ aiosPath: root, query: "peregrine routing" }));
+
+  assert.ok(found.length > 0, "entry and per-directory ceilings must clear a real corpus too");
+});
+
+// Raising the ceilings must not become removing them. Setting any of these to
+// Infinity or MAX_SAFE_INTEGER would make every test above pass while deleting
+// the runaway guard entirely.
+test("the shipped budget is a real ceiling, not an unbounded read", () => {
+  for (const [name, value] of Object.entries(DEFAULT_EVIDENCE_READ_LIMITS)) {
+    assert.ok(Number.isSafeInteger(value) && value > 0, `${name} must be a finite positive ceiling`);
+  }
+  assert.ok(DEFAULT_EVIDENCE_READ_LIMITS.maxBytes <= 1024 * 1024 * 1024, "maxBytes must stay under 1 GiB");
+  assert.ok(DEFAULT_EVIDENCE_READ_LIMITS.maxFiles <= 1_000_000, "maxFiles must stay bounded");
+  assert.ok(DEFAULT_EVIDENCE_READ_LIMITS.maxEntries <= 5_000_000, "maxEntries must stay bounded");
+});
+
 // The budget still exists, and hitting it is still an error. What changed is
 // that the error has to be actionable: the old text named no limit, no cause,
 // and no next step, so a person had no way to tell a real containment refusal
@@ -98,6 +146,7 @@ test("exhausting the read budget explains the limit and what to do", async (t) =
 
   assert.ok(error, "an exhausted budget still fails rather than silently returning a partial corpus");
   assert.match(error.message, /budget|limit/i, "the message must name the limit it hit");
-  assert.match(error.message, /--scope|--project|cleanup/, "the message must name something the person can do");
+  assert.match(error.message, /\b(move|split|less|fewer)\b/i, "the message must name something the person can do");
+  assert.doesNotMatch(error.message, /--scope|--project/, "no command-specific flags: this error also reaches skills and activate");
   assert.doesNotMatch(error.message, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "errors stay path-free");
 });

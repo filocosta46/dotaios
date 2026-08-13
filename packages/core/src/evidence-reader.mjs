@@ -34,16 +34,23 @@ export const DEFAULT_EVIDENCE_READ_LIMITS = Object.freeze({
 // A refusal the person cannot act on is barely better than a crash. Name what
 // stopped the read and what they can do about it — without naming a path, which
 // would leak the shape of their disk to an agent.
+//
+// This error reaches `search`, `skills`, `activate`, and MCP alike, so the
+// remedy has to be true for all of them: no command-specific flags, and nothing
+// that names a command which would not actually help. `dotaios cleanup` in
+// particular does not shrink a byte budget — it moves entries into
+// events-archive.jsonl and signals-archive.jsonl, which search.mjs:317-318 then
+// reads as well.
 const EVIDENCE_READ_FAILURES = {
   DOTAIOS_EVIDENCE_BUDGET_EXCEEDED:
-    "DotAIOS stopped reading: this AIOS folder is larger than the safe search budget. "
-    + "Narrow the search with --scope or --project, or run `dotaios cleanup` to archive old memory.",
+    "DotAIOS stopped reading: this folder is past the safe read budget for one request. "
+    + "Ask for less at once — a single scope, or one project — or move older material out of the folder.",
   DOTAIOS_EVIDENCE_FILE_TOO_LARGE:
     "DotAIOS stopped reading: one file is past the safe per-file size limit. "
-    + "Narrow the search with --scope or --project, or move that file out of the AIOS folder.",
+    + "Split that file, or move it out of the folder.",
   DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE:
     "DotAIOS stopped reading: one directory holds more entries than the safe limit. "
-    + "Narrow the search with --scope or --project, or split that directory up."
+    + "Move some of its entries elsewhere."
 };
 
 export class EvidenceReadError extends Error {
