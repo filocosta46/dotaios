@@ -17,6 +17,16 @@ const PUBLIC_SEARCH_DIRECTORY_OPERATION_ALLOWANCE = Object.freeze({
   realpath: 256,
   open: 16
 });
+const PUBLIC_SEARCH_OPERATION_PER_FILE_CEILING = Object.freeze({
+  lstat: 4,
+  realpath: 0,
+  open: 1
+});
+const PUBLIC_SEARCH_OPERATION_DIRECTORY_MARGIN = Object.freeze({
+  lstat: 1,
+  realpath: 3,
+  open: 0
+});
 const PROSE_WORDS = [
   "account", "action", "agent", "archive", "brief", "campaign", "client", "context",
   "decision", "delivery", "evidence", "experiment", "feedback", "handoff", "identity", "insight",
@@ -166,6 +176,21 @@ export function createBenchmarkReport({
     rawReadControl,
     safeCorpusReadControl
   });
+}
+
+export function publicSearchOperationCeiling({ fileCount, directoryCount }) {
+  for (const [name, value] of Object.entries({ fileCount, directoryCount })) {
+    if (!Number.isSafeInteger(value) || value < 0) {
+      throw new Error(`Public search operation ceiling requires ${name} to be a non-negative safe integer.`);
+    }
+  }
+  return Object.freeze(Object.fromEntries(
+    ["lstat", "realpath", "open"].map((name) => [
+      name,
+      fileCount * PUBLIC_SEARCH_OPERATION_PER_FILE_CEILING[name]
+        + directoryCount * PUBLIC_SEARCH_OPERATION_DIRECTORY_MARGIN[name]
+    ])
+  ));
 }
 
 /**
@@ -555,10 +580,17 @@ export function assertPublicSearchOperationGate(
 ) {
   const control = safeCorpusReadControl?.warm?.operations;
   if (!control) throw new Error("Public search operation gate requires the safe corpus-read control.");
+  const operationNames = ["lstat", "realpath", "open"];
+  assertOperationCounters("safe corpus-read control", control, operationNames);
+  assertOperationCounters("directory allowance", allowance, operationNames);
   for (const search of searches || []) {
     const operations = search?.warm?.operations;
     if (!operations) throw new Error(`Public search operation gate lacks operations for ${search?.id || "unknown"}.`);
-    for (const name of ["lstat", "realpath", "open"]) {
+    assertOperationCounters(`measured search ${search?.id || "unknown"}`, operations, operationNames);
+  }
+  for (const search of searches || []) {
+    const operations = search.warm.operations;
+    for (const name of operationNames) {
       const maximum = control[name] + allowance[name];
       if (operations[name] > maximum) {
         throw new Error(
@@ -573,6 +605,16 @@ export function assertPublicSearchOperationGate(
     allowance: Object.freeze({ ...allowance }),
     passed: true
   });
+}
+
+function assertOperationCounters(label, operations, names) {
+  for (const name of names) {
+    if (!Number.isSafeInteger(operations?.[name]) || operations[name] < 0) {
+      throw new Error(
+        `Public search operation gate requires ${label}.${name} to be a non-negative safe integer.`
+      );
+    }
+  }
 }
 
 function summarizeSamples(samples) {

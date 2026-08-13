@@ -44,6 +44,29 @@ function declaredManifestReceipt(receiptPath, receipt) {
   return receiptHash;
 }
 
+function expectedReportResults(query, selection, manifest) {
+  let indices = [];
+  if (query.expectation.kind === "fixed-indices") indices = query.expectation.fileIndices;
+  if (query.expectation.kind === "modulo") {
+    for (
+      let index = query.expectation.remainder;
+      index < selection.fileCount;
+      index += query.expectation.modulo
+    ) indices.push(index);
+  }
+  const paths = indices.map((index) => {
+    const file = `note-${String(index).padStart(5, "0")}.md`;
+    if (selection.layout === "shallow") {
+      return `vault/bucket-${String(index % manifest.corpus.layouts.shallow.bucketCount).padStart(2, "0")}/${file}`;
+    }
+    const branching = manifest.corpus.layouts.nested.branchingFactor;
+    return `vault/branch-${String(Math.floor(index / (branching ** 2)) % branching).padStart(2, "0")}`
+      + `/branch-${String(Math.floor(index / branching) % branching).padStart(2, "0")}`
+      + `/branch-${String(index % branching).padStart(2, "0")}/${file}`;
+  }).sort();
+  return paths.slice(0, query.expectation.resultLimit ?? paths.length);
+}
+
 test("the same manifest and seed produce the same fixture inventory and controlled order", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-search-benchmark-test-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -147,6 +170,52 @@ test("the public operation gate rejects per-file containment multiplication", ()
   );
 });
 
+test("the public operation gate rejects malformed counters before arithmetic", () => {
+  const validSearches = [{
+    id: "controlled",
+    warm: { operations: { lstat: 120, realpath: 30, open: 10 } }
+  }];
+  const validControl = { warm: { operations: { lstat: 100, realpath: 20, open: 10 } } };
+  const validAllowance = { lstat: 32, realpath: 16, open: 2 };
+  const invalidValues = [undefined, Number.NaN, Number.POSITIVE_INFINITY, -1, 0.5, "1"];
+
+  for (const counter of ["lstat", "realpath", "open"]) {
+    for (const location of ["search", "control", "allowance"]) {
+      for (const invalid of invalidValues) {
+        const searches = structuredClone(validSearches);
+        const control = structuredClone(validControl);
+        const allowance = structuredClone(validAllowance);
+        const target = location === "search"
+          ? searches[0].warm.operations
+          : location === "control"
+            ? control.warm.operations
+            : allowance;
+        target[counter] = invalid;
+        assert.throws(
+          () => assertPublicSearchOperationGate(searches, control, allowance),
+          /non-negative safe integer/i,
+          `${location}.${counter} must reject ${String(invalid)}`
+        );
+      }
+
+      const searches = structuredClone(validSearches);
+      const control = structuredClone(validControl);
+      const allowance = structuredClone(validAllowance);
+      const target = location === "search"
+        ? searches[0].warm.operations
+        : location === "control"
+          ? control.warm.operations
+          : allowance;
+      delete target[counter];
+      assert.throws(
+        () => assertPublicSearchOperationGate(searches, control, allowance),
+        /non-negative safe integer/i,
+        `${location}.${counter} must reject a missing value`
+      );
+    }
+  }
+});
+
 test("any manifest corpus, query, or protocol change invalidates the receipt", async () => {
   const manifest = await loadManifest(manifestPath);
   const changedQuery = structuredClone(manifest);
@@ -207,6 +276,63 @@ test("final benchmark reports cover the frozen matrix and retain exact authority
   }
 
   assert.deepEqual(selections.sort(), expectedSelections.sort());
+});
+
+test("public v2 benchmark reports prove the exact six-cell product-search matrix", async () => {
+  const manifest = await loadManifest(manifestPath);
+  const expectedSelections = manifest.corpus.fileCounts.flatMap((fileCount) =>
+    manifest.corpus.scenarioMatrix.map(({ layout, distribution }) =>
+      `${fileCount}:${layout}:${distribution}`
+    )
+  ).sort();
+  const reportNames = (await fs.readdir(finalReportsDirectory))
+    .filter((name) => name.startsWith("2026-08-14-public-") && name.endsWith(".report.json"))
+    .sort();
+  assert.equal(reportNames.length, 6);
+
+  const selections = [];
+  for (const reportName of reportNames) {
+    const report = JSON.parse(await fs.readFile(path.join(finalReportsDirectory, reportName), "utf8"));
+    assert.equal(report.schemaVersion, "dotaios-search-benchmark-result/v2");
+    assert.equal(report.benchmarkId, manifest.benchmarkId);
+    assert.equal(report.manifestSha256, manifestReceipt(manifest));
+    assert.deepEqual(report.protocol, manifest.protocol);
+    assert.deepEqual(report.searchSurface, {
+      entryPoint: "searchAios",
+      requestedScope: "all",
+      completeness: "complete"
+    });
+    assert.deepEqual(report.searches.map(({ id }) => id), manifest.queries.map(({ id }) => id));
+    assert.deepEqual(report.rawSearchControl.map(({ id }) => id), manifest.queries.map(({ id }) => id));
+    for (const [index, query] of manifest.queries.entries()) {
+      const search = report.searches[index];
+      const rawControl = report.rawSearchControl[index];
+      const expected = expectedReportResults(query, report.selection, manifest);
+      assert.deepEqual(search.surface, {
+        entryPoint: "searchAios",
+        requestedScope: "all",
+        completeness: "complete",
+        omissions: [],
+        returnedScopes: ["sessions", "context", "memory", "vault", "decisions", "skills", "references", "plugins"]
+      });
+      assert.deepEqual(search.exactResults, expected, `${reportName}:${query.id} controlled order`);
+      assert.deepEqual(rawControl.exactResults, expected, `${reportName}:${query.id} raw controlled order`);
+      assert.match(search.outputSha256, /^[a-f0-9]{64}$/);
+      assert.equal(rawControl.outputSha256, search.outputSha256, `${reportName}:${query.id} output hash`);
+    }
+    assert.equal(report.operationGate.passed, true);
+    const validatedGate = assertPublicSearchOperationGate(
+      report.searches,
+      report.safeCorpusReadControl,
+      report.operationGate.allowance
+    );
+    assert.equal(report.operationGate.comparison, validatedGate.comparison);
+    selections.push(
+      `${report.selection.fileCount}:${report.selection.layout}:${report.selection.distribution}`
+    );
+  }
+
+  assert.deepEqual(selections.sort(), expectedSelections);
 });
 
 test("manifest validation rejects malformed harness sampling and scenario fields", async () => {

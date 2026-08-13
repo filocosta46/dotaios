@@ -33,10 +33,14 @@ export async function validateOwnedDirectoryIfPresent(directory, {
   return true;
 }
 
-export function assertOwnedFileStats(stats, mode = 0o600) {
+export function assertOwnedFileStats(stats, mode = 0o600, {
+  platform = process.platform
+} = {}) {
   if (!stats || !stats.isFile() || stats.isSymbolicLink()) throw ownedStateError();
-  if (process.platform === "win32") return;
-  if (stats.nlink !== 1 || stats.uid !== currentUid() || (stats.mode & 0o777) !== mode) {
+  const nlink = typeof stats.nlink === "bigint" ? Number(stats.nlink) : stats.nlink;
+  if (nlink !== 1) throw ownedStateError();
+  if (platform === "win32") return;
+  if (stats.uid !== currentUid() || (stats.mode & 0o777) !== mode) {
     throw ownedStateError();
   }
 }
@@ -96,7 +100,8 @@ export async function publishOwnedFileExclusive(filePath, bytes, {
 // remove only that narrowly proven temporary, then restore strict nlink=1.
 export async function recoverOwnedFileExclusivePublication(filePath, {
   filesystem = fs,
-  mode = 0o600
+  mode = 0o600,
+  platform = process.platform
 } = {}) {
   let targetStats;
   try {
@@ -105,7 +110,7 @@ export async function recoverOwnedFileExclusivePublication(filePath, {
     if (error?.code === "ENOENT") return false;
     throw error;
   }
-  if (!isOwnedPublicationFile(targetStats, mode, 2)) return false;
+  if (!isOwnedPublicationFile(targetStats, mode, 2, platform)) return false;
 
   const directory = path.dirname(filePath);
   const basename = path.basename(filePath);
@@ -124,7 +129,7 @@ export async function recoverOwnedFileExclusivePublication(filePath, {
       throw error;
     }
     if (
-      isOwnedPublicationFile(candidateStats, mode, 2)
+      isOwnedPublicationFile(candidateStats, mode, 2, platform)
       && sameOwnedPublicationSnapshot(targetStats, candidateStats)
     ) candidates.push({ path: candidatePath, stats: candidateStats });
   }
@@ -143,7 +148,7 @@ export async function recoverOwnedFileExclusivePublication(filePath, {
   await filesystem.unlink(candidates[0].path);
   await syncOwnedDirectory(directory, { filesystem });
   const recovered = await filesystem.lstat(filePath, { bigint: true });
-  assertOwnedPublicationFile(recovered, mode, 1);
+  assertOwnedPublicationFile(recovered, mode, 1, platform);
   if (!sameOwnedPublicationObject(targetStats, recovered)) throw ownedStateError();
   return true;
 }
@@ -163,24 +168,25 @@ export function ownedStateError() {
   return error;
 }
 
-function isOwnedPublicationFile(stats, mode, links) {
+function isOwnedPublicationFile(stats, mode, links, platform = process.platform) {
   try {
-    assertOwnedPublicationFile(stats, mode, links);
+    assertOwnedPublicationFile(stats, mode, links, platform);
     return true;
   } catch {
     return false;
   }
 }
 
-function assertOwnedPublicationFile(stats, mode, links) {
+function assertOwnedPublicationFile(stats, mode, links, platform = process.platform) {
   if (!stats || !stats.isFile() || stats.isSymbolicLink()) throw ownedStateError();
-  if (process.platform === "win32") return;
+  const nlink = typeof stats.nlink === "bigint" ? Number(stats.nlink) : stats.nlink;
+  if (nlink !== links) throw ownedStateError();
+  if (platform === "win32") return;
   const permissions = typeof stats.mode === "bigint"
     ? Number(stats.mode & 0o777n)
     : stats.mode & 0o777;
-  const nlink = typeof stats.nlink === "bigint" ? Number(stats.nlink) : stats.nlink;
   const uid = typeof stats.uid === "bigint" ? Number(stats.uid) : stats.uid;
-  if (nlink !== links || uid !== currentUid() || permissions !== mode) throw ownedStateError();
+  if (uid !== currentUid() || permissions !== mode) throw ownedStateError();
 }
 
 function sameOwnedPublicationObject(left, right) {

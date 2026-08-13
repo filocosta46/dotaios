@@ -297,6 +297,83 @@ test("compaction recovery rejects a truncated transaction batch", async () => {
   assert.equal(fs.existsSync(`${archivePath}.pending`), true);
 });
 
+test("transaction-shaped pending artifacts with corrupt, missing, or unknown contracts fail closed", async (t) => {
+  const cases = [
+    {
+      name: "corrupt envelope",
+      header: '{"artifact_contract":"dotaios-event-compaction/v999","phase":"ready"'
+    },
+    {
+      name: "missing contract",
+      header: JSON.stringify({
+        phase: "ready",
+        beforeHash: "0".repeat(64),
+        afterHash: "1".repeat(64),
+        pendingHash: "2".repeat(64),
+        pendingRecords: 1,
+        archiveRecordsBefore: 1,
+        archiveChainBefore: "3".repeat(64),
+        archiveChainAfter: "4".repeat(64)
+      })
+    },
+    {
+      name: "unknown contract",
+      header: JSON.stringify({
+        artifact_contract: "dotaios-event-compaction/v999",
+        phase: "ready"
+      })
+    }
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, async () => {
+      const dir = tmpDir();
+      const eventsPath = path.join(dir, "events.jsonl");
+      const archivePath = path.join(dir, "events-archive.jsonl");
+      const pendingPath = `${archivePath}.pending`;
+      const archiveBefore = '{"type":"existing-archive"}\n';
+      const pendingBefore = `${fixture.header}\n{"type":"staged-payload"}\n`;
+      seedEvents(eventsPath, 2);
+      fs.writeFileSync(archivePath, archiveBefore, { mode: 0o600 });
+      fs.writeFileSync(pendingPath, pendingBefore, { mode: 0o600 });
+
+      await assert.rejects(
+        compactEvents(eventsPath, 1),
+        (error) => error?.code === "DOTAIOS_ARCHIVE_STATE_INVALID"
+      );
+
+      assert.equal(fs.readFileSync(archivePath, "utf8"), archiveBefore,
+        "invalid authority cannot mutate the archive");
+      assert.equal(fs.readFileSync(pendingPath, "utf8"), pendingBefore,
+        "invalid authority remains available for inspection");
+      assert.equal(readLines(eventsPath).length, 2,
+        "invalid authority cannot replace live memory");
+    });
+  }
+});
+
+test("a raw legacy pending JSONL batch remains recoverable", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const legacy = JSON.stringify({
+    ts: "2025-12-31T23:59:59.000Z",
+    type: "legacy-pending"
+  });
+  const live = JSON.stringify({
+    ts: "2026-01-01T00:00:00.000Z",
+    type: "live"
+  });
+  fs.writeFileSync(eventsPath, `${live}\n`, { mode: 0o600 });
+  fs.writeFileSync(`${archivePath}.pending`, `${legacy}\n`, { mode: 0o600 });
+
+  await compactEvents(eventsPath, 10);
+
+  assert.deepEqual(readEventsArchiveLines(dir), [legacy]);
+  assert.deepEqual(readLines(eventsPath), [live]);
+  assert.equal(fs.existsSync(`${archivePath}.pending`), false);
+});
+
 test("a crash after pending publication cannot route a new batch through legacy recovery", async () => {
   const dir = tmpDir();
   const eventsPath = path.join(dir, "events.jsonl");
@@ -335,6 +412,115 @@ test("a crash after pending publication cannot route a new batch through legacy 
   const settled = [...readEventsArchiveLines(dir), ...readLines(eventsPath)];
   assert.equal(settled.length, 3, "the retry must settle the original three records exactly once");
   assert.deepEqual(settled.map((line) => JSON.parse(line).n), [1, 2, 3]);
+});
+
+test("event append recovers a prepared compaction before writing the new record", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const original = seedEvents(eventsPath, 3);
+  const appended = {
+    ts: "2026-01-01T00:00:09.000Z",
+    type: "post-crash-append",
+    summary: "saved after prepared publication"
+  };
+  let interrupted = false;
+  const filesystem = {
+    ...fsp,
+    async link(source, destination) {
+      const result = await fsp.link(source, destination);
+      if (!interrupted && destination === `${archivePath}.pending`) {
+        interrupted = true;
+        throw new Error("injected-crash:prepared-published");
+      }
+      return result;
+    }
+  };
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem }),
+    /injected-crash:prepared-published/
+  );
+
+  await appendEventRecord(eventsPath, appended);
+  assert.equal(fs.existsSync(`${archivePath}.pending`), false,
+    "the writer lock recovers prepared evidence before appending");
+  await compactEvents(eventsPath, 1);
+
+  assert.deepEqual(
+    [...readEventsArchiveLines(dir), ...readLines(eventsPath)],
+    [...original, JSON.stringify(appended)]
+  );
+});
+
+test("prepared recovery preserves complete records appended by an older writer", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const original = seedEvents(eventsPath, 3);
+  const suffix = JSON.stringify({
+    ts: "2026-01-01T00:00:09.000Z",
+    type: "older-writer-suffix",
+    summary: "identical complete append"
+  });
+  let interrupted = false;
+  const filesystem = {
+    ...fsp,
+    async link(source, destination) {
+      const result = await fsp.link(source, destination);
+      if (!interrupted && destination === `${archivePath}.pending`) {
+        interrupted = true;
+        throw new Error("injected-crash:prepared-published");
+      }
+      return result;
+    }
+  };
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem }),
+    /injected-crash:prepared-published/
+  );
+  fs.appendFileSync(eventsPath, `${suffix}\n${suffix}\n`);
+
+  await compactEvents(eventsPath, 1);
+
+  assert.deepEqual(
+    [...readEventsArchiveLines(dir), ...readLines(eventsPath)],
+    [...original, suffix, suffix],
+    "suffix recovery preserves byte-identical complete appends as distinct records"
+  );
+});
+
+test("prepared recovery rejects an incomplete appended suffix without consuming authority", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  seedEvents(eventsPath, 3);
+  let interrupted = false;
+  const filesystem = {
+    ...fsp,
+    async link(source, destination) {
+      const result = await fsp.link(source, destination);
+      if (!interrupted && destination === `${archivePath}.pending`) {
+        interrupted = true;
+        throw new Error("injected-crash:prepared-published");
+      }
+      return result;
+    }
+  };
+
+  await assert.rejects(compactEvents(eventsPath, 1, { filesystem }));
+  fs.appendFileSync(eventsPath, '{"type":"partial"');
+  const liveBefore = fs.readFileSync(eventsPath, "utf8");
+  const pendingBefore = fs.readFileSync(`${archivePath}.pending`, "utf8");
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1),
+    (error) => error?.code === "DOTAIOS_ARCHIVE_STATE_INVALID"
+  );
+  assert.equal(fs.readFileSync(eventsPath, "utf8"), liveBefore);
+  assert.equal(fs.readFileSync(`${archivePath}.pending`, "utf8"), pendingBefore);
+  assert.equal(fs.existsSync(archivePath), false);
 });
 
 test("compaction recovery never mistakes an unrelated archive append for pending progress", async () => {
@@ -403,6 +589,74 @@ test("a crash after ready publication still cannot replace live memory until ret
 
   const settled = [...readEventsArchiveLines(dir), ...readLines(eventsPath)];
   assert.deepEqual(settled, original);
+});
+
+test("event append recovers a ready compaction before writing the new record", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const original = seedEvents(eventsPath, 3);
+  const appended = {
+    ts: "2026-01-01T00:00:09.000Z",
+    type: "post-crash-append",
+    summary: "saved after ready publication"
+  };
+  let interrupted = false;
+  const filesystem = {
+    ...fsp,
+    async rename(source, destination) {
+      const result = await fsp.rename(source, destination);
+      if (!interrupted && destination === `${archivePath}.pending`) {
+        interrupted = true;
+        throw new Error("injected-crash:ready-published");
+      }
+      return result;
+    }
+  };
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem }),
+    /injected-crash:ready-published/
+  );
+
+  await appendEventRecord(eventsPath, appended);
+  assert.equal(fs.existsSync(`${archivePath}.pending`), false,
+    "the writer lock recovers ready evidence before appending");
+  await compactEvents(eventsPath, 1);
+
+  assert.deepEqual(
+    [...readEventsArchiveLines(dir), ...readLines(eventsPath)],
+    [...original, JSON.stringify(appended)]
+  );
+});
+
+test("ready recovery preserves complete records appended after the live commit", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const original = seedEvents(eventsPath, 3);
+  const suffix = JSON.stringify({
+    ts: "2026-01-01T00:00:09.000Z",
+    type: "older-writer-suffix",
+    summary: "identical complete append after live commit"
+  });
+  const fault = faultFs({ link: 2 });
+
+  await assert.rejects(
+    compactEvents(eventsPath, 1, { filesystem: fault.filesystem }),
+    /injected-crash:link:2/
+  );
+  assert.equal(JSON.parse(readLines(`${archivePath}.pending`)[0]).phase, "ready");
+  assert.equal(readLines(eventsPath).length, 1, "the live replacement committed before this crash");
+  fs.appendFileSync(eventsPath, `${suffix}\n${suffix}\n`);
+
+  await compactEvents(eventsPath, 1);
+
+  assert.deepEqual(
+    [...readEventsArchiveLines(dir), ...readLines(eventsPath)],
+    [...original, suffix, suffix],
+    "ready recovery archives the pending prefix and keeps both appended records"
+  );
 });
 
 test("legacy active normalization recovers marker, shard, and active transitions exactly once", async (t) => {

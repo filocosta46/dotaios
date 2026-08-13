@@ -159,6 +159,7 @@ export class EventStoreLockError extends Error {
 export async function appendEventRecord(eventsPath, entry, options = {}) {
   const fileSystem = options.filesystem || fs;
   await withEventStoreLock(eventsPath, async () => {
+    await recoverPendingArchive(eventsPath, fileSystem);
     await fileSystem.appendFile(eventsPath, formatJsonlEntry(entry));
   }, options);
   return entry;
@@ -244,6 +245,16 @@ const ARCHIVE_TAIL_BYTES = 262_144;
 const ARCHIVE_ROTATE_BYTES = 2 * 1024 * 1024;
 const ARCHIVE_LINE_MAX_BYTES = 4 * 1024 * 1024;
 const EVENT_COMPACTION_PENDING_CONTRACT = "dotaios-event-compaction/v1";
+const EVENT_COMPACTION_AUTHORITY_KEYS = [
+  "phase",
+  "beforeHash",
+  "afterHash",
+  "pendingHash",
+  "pendingRecords",
+  "archiveRecordsBefore",
+  "archiveChainBefore",
+  "archiveChainAfter"
+];
 // Distinguishes marker-protocol generations from ambiguous overlap left by the
 // previous markerless rotator. It is durable before any new rotation begins.
 const ARCHIVE_ROTATION_FORMAT = '{"version":1,"protocol":"durable-marker"}\n';
@@ -429,13 +440,13 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
   const eventsContent = await readEventsContent(eventsPath, fileSystem);
   if (artifact.kind === "transaction") {
     const transaction = artifact.transaction;
-    const eventsHash = archiveContentHash(eventsContent);
+    const liveState = identifyTransactionLiveState(eventsContent, transaction);
     if (transaction.phase === "prepared") {
-      if (eventsHash !== transaction.beforeHash) throw archiveStateError();
+      if (liveState !== "before") throw archiveStateError();
       await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
       return;
     }
-    if (eventsHash === transaction.beforeHash) {
+    if (liveState === "before") {
       const archiveState = await inspectArchiveRecordState(archivePath, fileSystem);
       if (
         archiveState.records !== transaction.archiveRecordsBefore
@@ -444,7 +455,7 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
       await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
       return;
     }
-    if (eventsHash !== transaction.afterHash) throw archiveStateError();
+    if (liveState !== "after") throw archiveStateError();
     await flushPendingArchive(archivePath, fileSystem, {
       archiveRecordsBefore: transaction.archiveRecordsBefore,
       archiveChainBefore: transaction.archiveChainBefore
@@ -463,6 +474,36 @@ async function recoverPendingArchive(eventsPath, fileSystem) {
     return;
   }
   await flushPendingArchive(archivePath, fileSystem);
+}
+
+function identifyTransactionLiveState(eventsContent, transaction) {
+  const eventsHash = archiveContentHash(eventsContent);
+  if (eventsHash === transaction.beforeHash) return "before";
+  if (eventsHash === transaction.afterHash) return "after";
+
+  for (let index = 0; index < eventsContent.length; index += 1) {
+    if (eventsContent[index] !== "\n") continue;
+    const suffix = eventsContent.slice(index + 1);
+    if (!isCompleteJsonlSuffix(suffix)) continue;
+    const prefixHash = archiveContentHash(eventsContent.slice(0, index + 1));
+    if (prefixHash === transaction.beforeHash) return "before";
+    if (prefixHash === transaction.afterHash) return "after";
+  }
+  return null;
+}
+
+function isCompleteJsonlSuffix(content) {
+  if (!content || !content.endsWith("\n")) return false;
+  const lines = content.slice(0, -1).split("\n");
+  if (lines.some((line) => !line.trim())) return false;
+  try {
+    return lines.every((line) => {
+      const entry = JSON.parse(line);
+      return entry !== null && typeof entry === "object" && !Array.isArray(entry);
+    });
+  } catch {
+    return false;
+  }
 }
 
 // Publish the staged batch into the active archive and, when needed, immutable
@@ -582,7 +623,7 @@ function extendArchiveRecordChain(chain, line) {
 function parsePendingArchiveArtifact(content) {
   const newline = content.indexOf("\n");
   if (newline < 0) {
-    if (content.includes(EVENT_COMPACTION_PENDING_CONTRACT)) throw archiveStateError();
+    if (isTransactionShapedPendingHeader(content)) throw archiveStateError();
     return { kind: "legacy", payload: content, pendingLines: content.trim() ? [content] : [] };
   }
   const headerLine = content.slice(0, newline);
@@ -590,7 +631,7 @@ function parsePendingArchiveArtifact(content) {
   try {
     transaction = JSON.parse(headerLine);
   } catch {
-    if (headerLine.includes(EVENT_COMPACTION_PENDING_CONTRACT)) throw archiveStateError();
+    if (isTransactionShapedPendingHeader(headerLine)) throw archiveStateError();
     return {
       kind: "legacy",
       payload: content,
@@ -598,6 +639,7 @@ function parsePendingArchiveArtifact(content) {
     };
   }
   if (transaction?.artifact_contract !== EVENT_COMPACTION_PENDING_CONTRACT) {
+    if (isTransactionShapedPendingHeader(headerLine, transaction)) throw archiveStateError();
     return {
       kind: "legacy",
       payload: content,
@@ -631,6 +673,19 @@ function parsePendingArchiveArtifact(content) {
     transaction.archiveChainAfter
   ].some((value) => value !== undefined)) throw archiveStateError();
   return { kind: "transaction", transaction, payload, pendingLines };
+}
+
+function isTransactionShapedPendingHeader(headerLine, parsedHeader) {
+  if (parsedHeader && typeof parsedHeader === "object" && !Array.isArray(parsedHeader)) {
+    if (Object.hasOwn(parsedHeader, "artifact_contract")) return true;
+    return EVENT_COMPACTION_AUTHORITY_KEYS
+      .filter((key) => Object.hasOwn(parsedHeader, key))
+      .length >= 2;
+  }
+  if (/"artifact_contract"\s*:/.test(headerLine)) return true;
+  return EVENT_COMPACTION_AUTHORITY_KEYS
+    .filter((key) => new RegExp(`"${key}"\\s*:`).test(headerLine))
+    .length >= 2;
 }
 
 function renderPendingArchiveArtifact(transaction, payload) {

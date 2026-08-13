@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { searchAios } from "../../packages/core/src/search.mjs";
 import { createEvidenceReader, DEFAULT_EVIDENCE_READ_LIMITS } from "../../packages/core/src/evidence-reader.mjs";
+import { publicSearchOperationCeiling } from "../../scripts/bench-search.mjs";
 
 // Search read through the same budget the bounded startup projection uses —
 // 512 files, 4096 entries, 16 MiB — and its error code still says so
@@ -192,12 +193,29 @@ test("public search preflight amortizes containment work across a deep corpus", 
 
   assert.equal(groups[0].results.length, 20, "the operation receipt must cover real ranked hits");
   assert.equal(operations.open, fileCount, "every accepted file remains handle-bound");
+  const directoryCount = 5; // AIOS root plus vault/deep/nested/notes.
+  const ceiling = publicSearchOperationCeiling({ fileCount, directoryCount });
   assert.ok(
-    operations.lstat <= fileCount * 10 + 120,
+    operations.lstat <= ceiling.lstat,
     `public preflight repeated containment work per ancestor: ${JSON.stringify(operations)}`
   );
   assert.ok(
-    operations.realpath <= fileCount + 120,
+    operations.realpath <= ceiling.realpath,
     `public preflight repeated canonicalization work per phase: ${JSON.stringify(operations)}`
   );
+});
+
+test("the public operation ceiling cannot hide ancestor work multiplied per file", () => {
+  const fileCount = 64;
+  const directoryCount = 5;
+  const ceiling = publicSearchOperationCeiling({ fileCount, directoryCount });
+  const perFileAncestorWalk = {
+    lstat: fileCount * directoryCount,
+    realpath: fileCount * directoryCount,
+    open: fileCount
+  };
+
+  assert.ok(perFileAncestorWalk.lstat > ceiling.lstat);
+  assert.ok(perFileAncestorWalk.realpath > ceiling.realpath);
+  assert.equal(ceiling.open, fileCount);
 });
