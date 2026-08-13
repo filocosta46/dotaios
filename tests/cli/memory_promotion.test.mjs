@@ -323,7 +323,10 @@ test("promotion and compaction share one writer lock without losing the receipt"
   const compactionFilesystem = {
     ...fsp,
     async rename(source, destination) {
-      if (source === `${eventsPath}.tmp` && destination === eventsPath) {
+      const isReplacement = path.dirname(source) === path.dirname(eventsPath)
+        && path.basename(source).startsWith(`.${path.basename(eventsPath)}.`)
+        && path.basename(source).endsWith(".tmp");
+      if (isReplacement && destination === eventsPath) {
         renameStarted();
         await allowRename;
       }

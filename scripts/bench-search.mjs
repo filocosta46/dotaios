@@ -130,12 +130,7 @@ export async function runBenchmark({ manifest, fixtureRoot, fixtureReceipt }) {
     manifestSha256: manifestReceipt(manifest),
     inventorySha256: fixtureReceipt.inventorySha256,
     selection: fixtureReceipt.selection,
-    runtime: {
-      node: process.versions.node,
-      platform: process.platform,
-      architecture: process.arch,
-      hostname: os.hostname()
-    },
+    runtime: runtimeReceipt(),
     protocol: { ...manifest.protocol },
     searches,
     rawSearchControl,
@@ -355,19 +350,6 @@ function createUnsafeBenchmarkOnlyRawSearchReader({ fixtureRoot, fixtureReceipt 
   }
 
   return Object.freeze({
-    async listFiles(root, directoryPath) {
-      assertFixtureRequest(root, directoryPath);
-      return [...files];
-    },
-    async readText(root, filePath, options = {}) {
-      if (path.resolve(root) !== resolvedRoot) {
-        throw new Error("Unsafe raw-search control may read only its immutable fixture root.");
-      }
-      const observed = await readObservedFile(filePath);
-      return options.returnSnapshot === true
-        ? { content: observed.content, stats: observed.stats }
-        : observed.content;
-    },
     async withTextCorpus(root, directoryPath, options, callback) {
       assertFixtureRequest(root, directoryPath);
       const concurrency = options.concurrency ?? 32;

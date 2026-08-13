@@ -105,9 +105,9 @@ for (const [label, bridgeContent] of Object.entries(malformedBridgeCases)) {
   test(`doctor warns instead of reporting a healthy Claude bridge with ${label} managed markers`, (t) => {
     const output = runDoctor(t, `doctor-${label}`, bridgeContent);
 
-    assert.match(output, /\[warn\] Claude Code bridge/);
-    assert.match(output, /managed bridge markers are malformed/i);
-    assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+    assert.match(output, /\[warn\] Claude Code\n/);
+    assert.match(output, /connection markers are malformed/i);
+    assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
   });
 }
 
@@ -120,9 +120,9 @@ test("doctor ignores a correct target outside a valid managed block for another 
     ""
   ].join("\n"));
 
-  assert.match(output, /\[warn\] Claude Code bridge/);
-  assert.match(output, /bridge points to a different AIOS folder/i);
-  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+  assert.match(output, /\[warn\] Claude Code\n/);
+  assert.match(output, /connection points to a different AIOS folder/i);
+  assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
 });
 
 test("doctor ignores an expected-path comment inside a valid block with the wrong pointer", (t) => {
@@ -134,9 +134,9 @@ test("doctor ignores an expected-path comment inside a valid block with the wron
     ""
   ].join("\n"));
 
-  assert.match(output, /\[warn\] Claude Code bridge/);
-  assert.match(output, /bridge points to a different AIOS folder/i);
-  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+  assert.match(output, /\[warn\] Claude Code\n/);
+  assert.match(output, /connection points to a different AIOS folder/i);
+  assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
 });
 
 // A bridge was validated by comparing the pointer line against a path doctor
@@ -157,11 +157,11 @@ const managedPointerBridge = (target) => [
 test("doctor warns when the bridge points at this AIOS folder but its entrypoint is gone", (t) => {
   const output = runDoctor(t, "doctor-missing-entrypoint", managedPointerBridge);
 
-  assert.match(output, /\[warn\] Claude Code bridge/);
+  assert.match(output, /\[warn\] Claude Code\n/);
   assert.match(output, /AGENTS\.md/);
-  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+  assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
   // The pointer is correct — repointing is not the remedy and cannot help.
-  assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
+  assert.doesNotMatch(output, /connection points to a different AIOS folder/i);
 });
 
 // The bridge an older release wrote is still ours and still names this folder,
@@ -196,14 +196,14 @@ for (const [index, retiredPointer] of bridgePointer("/placeholder").retired.entr
       { entrypoint: true }
     );
 
-    assert.match(output, /\[warn\] Claude Code bridge/);
-    assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+    assert.match(output, /\[warn\] Claude Code\n/);
+    assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
     // The remedy has to name the command that rewrites the block. It is the only
     // one that does, and the user has no other signal that anything is stale.
     assert.match(output, /dotaios activate/);
     // Not "points to a different AIOS folder": the folder is right, the spelling
     // is old. Saying it is wrong sends the user to --overwrite for no reason.
-    assert.doesNotMatch(output, /bridge points to a different AIOS folder/i);
+    assert.doesNotMatch(output, /connection points to a different AIOS folder/i);
   });
 }
 
@@ -220,7 +220,7 @@ test("only the @ import is described as loading the whole folder", (t) => {
     olderBridgeWith((target) => `DotAIOS entrypoint (read this file first): ${path.join(target, "AGENTS.md")}`),
     { entrypoint: true }
   );
-  assert.match(prose, /\[warn\] Claude Code bridge/);
+  assert.match(prose, /\[warn\] Claude Code\n/);
   assert.doesNotMatch(prose, /loads your whole AIOS folder/);
 });
 
@@ -239,8 +239,8 @@ test("doctor warns about the bridge when the whole AIOS folder was removed", (t)
     expectStatus: 1
   });
 
-  assert.match(output, /\[warn\] Claude Code bridge/);
-  assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+  assert.match(output, /\[warn\] Claude Code\n/);
+  assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
 });
 
 // Nothing else in the suite asserts a GREEN bridge; every other bridge
@@ -249,8 +249,8 @@ test("doctor warns about the bridge when the whole AIOS folder was removed", (t)
 test("doctor reports a healthy Claude bridge when the entrypoint really is there", (t) => {
   const output = runDoctor(t, "doctor-healthy-bridge", managedPointerBridge, { entrypoint: true });
 
-  assert.match(output, /\[ok\] Claude Code bridge/);
-  assert.doesNotMatch(output, /\[warn\] Claude Code bridge/);
+  assert.match(output, /\[ok\] Claude Code\n/);
+  assert.doesNotMatch(output, /\[warn\] Claude Code\n/);
 });
 
 // A marker on disk means init never finished, so the scaffold is still partial.
@@ -274,7 +274,7 @@ test("doctor names the non-destructive remedy for an unmanaged bridge file", (t)
     entrypoint: true
   });
 
-  assert.match(output, /\[warn\] Claude Code bridge/);
+  assert.match(output, /\[warn\] Claude Code\n/);
   assert.match(output, /activate --merge/);
   assert.doesNotMatch(output, /activate --overwrite/);
 });

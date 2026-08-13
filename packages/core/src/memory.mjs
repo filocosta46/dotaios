@@ -503,18 +503,31 @@ async function appendArchiveLines(archivePath, active, existingShards, lines, fi
     activeContent = remainder;
   }
 
+  let activeParts = activeContent ? [activeContent] : [];
+  let activeBytes = Buffer.byteLength(activeContent);
+  let activeEndsWithNewline = activeContent.endsWith("\n");
+  const materializeActive = () => {
+    activeContent = activeParts.join("");
+    activeParts = activeContent ? [activeContent] : [];
+    return activeContent;
+  };
   let changed = false;
   for (const line of lines) {
     const record = `${line}\n`;
     const recordBytes = Buffer.byteLength(record);
     if (recordBytes > ARCHIVE_LINE_MAX_BYTES) throw archiveLineTooLargeError();
-    const separator = activeContent && !activeContent.endsWith("\n") ? "\n" : "";
-    if (activeContent && Buffer.byteLength(activeContent) + Buffer.byteLength(separator) + recordBytes > ARCHIVE_ROTATE_BYTES) {
-      activeStats = await replaceArchiveActive(archivePath, activeContent, activeStats, fileSystem);
-      await publishArchiveShard(archivePath, nextShard, activeContent, fileSystem);
+    const separator = activeBytes > 0 && !activeEndsWithNewline ? "\n" : "";
+    const separatorBytes = separator ? 1 : 0;
+    if (activeBytes > 0 && activeBytes + separatorBytes + recordBytes > ARCHIVE_ROTATE_BYTES) {
+      const completedActive = materializeActive();
+      activeStats = await replaceArchiveActive(archivePath, completedActive, activeStats, fileSystem);
+      await publishArchiveShard(archivePath, nextShard, completedActive, fileSystem);
       nextShard += 1;
       activeStats = await replaceArchiveActive(archivePath, "", activeStats, fileSystem);
       activeContent = "";
+      activeParts = [];
+      activeBytes = 0;
+      activeEndsWithNewline = false;
       changed = false;
     }
     if (recordBytes > ARCHIVE_ROTATE_BYTES) {
@@ -522,28 +535,35 @@ async function appendArchiveLines(archivePath, active, existingShards, lines, fi
       nextShard += 1;
       continue;
     }
-    activeContent += `${separator}${record}`;
+    if (separator) activeParts.push(separator);
+    activeParts.push(record);
+    activeBytes += separatorBytes + recordBytes;
+    activeEndsWithNewline = true;
     changed = true;
   }
 
   if (changed || !activeStats) {
-    await replaceArchiveActive(archivePath, activeContent, activeStats, fileSystem);
+    await replaceArchiveActive(archivePath, materializeActive(), activeStats, fileSystem);
   }
 }
 
 function takeArchiveChunk(content) {
-  const records = splitArchiveRecords(content);
-  let chunk = "";
-  let index = 0;
-  while (index < records.length) {
-    const candidate = chunk + records[index];
-    if (chunk && Buffer.byteLength(candidate) > ARCHIVE_ROTATE_BYTES) break;
-    chunk = candidate;
-    index += 1;
-    if (Buffer.byteLength(chunk) > ARCHIVE_ROTATE_BYTES) break;
+  let chunkEnd = 0;
+  let chunkBytes = 0;
+  let recordStart = 0;
+  for (let index = 0; index <= content.length; index += 1) {
+    if (index < content.length && content[index] !== "\n") continue;
+    if (index === content.length && recordStart === content.length) break;
+    const recordEnd = index < content.length ? index + 1 : index;
+    const recordBytes = Buffer.byteLength(content.slice(recordStart, recordEnd));
+    if (chunkEnd > 0 && chunkBytes + recordBytes > ARCHIVE_ROTATE_BYTES) break;
+    chunkBytes += recordBytes;
+    chunkEnd = recordEnd;
+    recordStart = recordEnd;
+    if (chunkBytes > ARCHIVE_ROTATE_BYTES) break;
   }
-  if (!chunk) throw archiveStateError();
-  return { chunk, remainder: records.slice(index).join("") };
+  if (chunkEnd === 0) throw archiveStateError();
+  return { chunk: content.slice(0, chunkEnd), remainder: content.slice(chunkEnd) };
 }
 
 function splitArchiveRecords(content) {

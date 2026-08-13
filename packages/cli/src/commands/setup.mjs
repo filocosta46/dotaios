@@ -28,7 +28,11 @@ import {
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
-import { activateCommand, plannedActivationConfigPatch } from "./activate.mjs";
+import {
+  activateCommand,
+  BRIDGE_COLLISION_REMEDY,
+  plannedActivationConfigPatch
+} from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
 import {
   emitReliabilityMetric,
@@ -145,6 +149,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   let detectedClientCount = 0;
   let blockedContextCount = 0;
   let blockedCatalogCount = 0;
+  let blockedContextNeedsMerge = false;
   let detectedClientNames = [];
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
@@ -163,6 +168,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     configuredContextCount = activation.configuredContextCount;
     blockedContextCount = activation.blockedContextCount;
     blockedCatalogCount = activation.blockedCatalogCount;
+    blockedContextNeedsMerge = activation.results?.some((entry) => entry.action === "kept") || false;
     if (blockedContextCount > 0 || blockedCatalogCount > 0) {
       activateOk = false;
       process.exitCode = 1;
@@ -179,18 +185,13 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   if (!activateOk) {
     console.log("");
     console.log("Folder created. Tool connection needs attention; setup stopped before optional features.");
-    // Never send them back to `dotaios setup`: the folder now exists, so setup
-    // has nothing left to do and will only report that. `activate` is the one
-    // command that can still finish the job, and for a preserved collision the
-    // non-destructive form is the one activate already named above.
-    // activate has already named what is blocked and how to fix each one.
-    // Restating it here is how setup came to call a permission error a
-    // "collision" the user could not find anywhere on screen.
+    // The folder now exists; activation is the recovery command for this phase.
     if (blockedCatalogCount > 0) {
       console.log(verbose
         ? `Preserved ${blockedCatalogCount} skill catalog collision(s).`
         : `Preserved ${blockedCatalogCount} existing app configuration conflict(s).`);
     }
+    if (blockedContextNeedsMerge) console.log(BRIDGE_COLLISION_REMEDY);
     if (blockedContextCount === 0 && blockedCatalogCount === 0) {
       console.log("Fix the problem reported above, then run `dotaios activate`.");
     }
@@ -289,11 +290,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log('  3. Ask: "Read my context and tell me what I am working on."');
   console.log("  4. Update context any time: dotaios interview --review");
 
-  // Opening Finder pulls the foreground away from this terminal, so it has to be
-  // the very last thing that happens. It used to run before four optional y/N
-  // prompts, which meant the window appeared while the terminal was still
-  // waiting behind it — people reasonably concluded setup had finished and never
-  // saw the instructions above.
+  // Reveal last so optional prompts retain terminal focus.
   // Step 3: reveal (best-effort, never blocks)
   await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "reveal", run_id: runId });
   if (!skipReveal) {

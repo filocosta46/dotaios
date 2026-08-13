@@ -448,23 +448,19 @@ export async function searchMarkdownDir(dir, query, {
       const corpus = buildCorpusStats(docs);
       const now = Date.now();
       const terms = queryTerms(query);
-      const ranked = [];
-      for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-        const batch = candidates.slice(i, i + CONCURRENCY).map((candidate) => {
-          const ageMs = candidate.mtimeMs === null ? null : now - candidate.mtimeMs;
-          const haystack = candidate.content.toLowerCase();
-          const matchedTerms = terms.filter((term) => haystack.includes(term));
-          const rank = rankSearchHit({
-            kind: candidate.kind,
-            matchedTerms,
-            corpus,
-            ageMs,
-            structuralBoost: candidate.structuralBoost
-          });
-          return { result: candidate.result, rank };
+      const ranked = candidates.map((candidate) => {
+        const ageMs = candidate.mtimeMs === null ? null : now - candidate.mtimeMs;
+        const haystack = candidate.content.toLowerCase();
+        const matchedTerms = terms.filter((term) => haystack.includes(term));
+        const rank = rankSearchHit({
+          kind: candidate.kind,
+          matchedTerms,
+          corpus,
+          ageMs,
+          structuralBoost: candidate.structuralBoost
         });
-        ranked.push(...batch);
-      }
+        return { result: candidate.result, rank };
+      });
 
       return ranked
         .sort((a, b) => (b.rank - a.rank) || a.result.file.localeCompare(b.result.file))
