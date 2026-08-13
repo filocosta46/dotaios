@@ -781,6 +781,17 @@ function assertOutsideRepository(destination) {
   }
 }
 
+async function preflightFixtureDestination(destination) {
+  const fixtureRoot = path.resolve(destination);
+  assertOutsideRepository(fixtureRoot);
+  try {
+    const entries = await fs.readdir(fixtureRoot);
+    if (entries.length > 0) throw new Error(`Fixture destination must be empty: ${fixtureRoot}`);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
+}
+
 async function ensureEmptyDirectory(destination) {
   await fs.mkdir(destination, { recursive: true });
   const entries = await fs.readdir(destination);
@@ -836,6 +847,7 @@ async function main(args) {
   if (command === "generate") {
     const destination = readOption(args, "--output");
     if (!destination) throw new Error("generate requires --output outside the repository.");
+    await preflightFixtureDestination(destination);
     const receiptPath = path.resolve(readOption(args, "--receipt", `${destination}.receipt.json`));
     const receiptOutput = await fs.open(receiptPath, "wx");
     try {

@@ -159,6 +159,28 @@ test("benchmark commands reserve exclusive output before reading or timing fixtu
   }
 });
 
+test("fixture generation rejects a repository destination without reserving its receipt", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-search-benchmark-preflight-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const destination = path.join(repoRoot, `.benchmark-invalid-${process.pid}`);
+  const receiptPath = path.join(root, "invalid.receipt.json");
+
+  const result = spawnSync(process.execPath, [
+    path.join(repoRoot, "scripts", "bench-search.mjs"),
+    "generate",
+    "--output", destination,
+    "--receipt", receiptPath,
+    "--count", "500",
+    "--layout", "shallow",
+    "--distribution", "prose"
+  ], { cwd: repoRoot, encoding: "utf8" });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /outside the repository/i);
+  await assert.rejects(() => fs.lstat(receiptPath), { code: "ENOENT" });
+  await assert.rejects(() => fs.lstat(destination), { code: "ENOENT" });
+});
+
 test("fixture generation rejects an outside path that resolves back into the repository", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-search-benchmark-link-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

@@ -319,6 +319,8 @@ test("search_aios stabilizes budget metadata across the pretty-to-compact bounda
   assert.equal(payload.budget.limit, boundaryBudget);
   assert.equal(payload.budget.used, text.length);
   assert.equal(payload.budget.truncated, false);
+  assert.equal(text, JSON.stringify(payload));
+  assert.notEqual(text, JSON.stringify(payload, null, 2));
 });
 
 test("mcp skill budgets bound every returned field at minimum, default, and maximum", () => {
