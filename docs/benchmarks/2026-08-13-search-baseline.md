@@ -38,8 +38,9 @@ exact controlled results.
   a later control-only pass on the same machine, Node, battery power source, and
   disabled Low Power Mode (battery 56% at the start). No safe contained sample
   or bytes-only raw-read sample was rerun.
-- Fixture and full JSON reports were generated in an external temporary
-  directory, outside the repository. They are not Git artifacts.
+- The fixture and raw baseline reports used for this document were generated
+  in an external temporary directory outside the repository. The committed
+  reports under `docs/benchmarks/reports/` are separate repository artifacts.
 
 The nested topology is a bounded, shared three-level tree with branching factor
 8 (at most 512 leaf directory chains), rather than a unique ancestor chain per
