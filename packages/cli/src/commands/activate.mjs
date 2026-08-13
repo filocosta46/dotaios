@@ -157,6 +157,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false } = 
     return {
       detectedClientCount: 0,
       configuredContextCount: 0,
+      configuredClientNames: [],
       blockedContextCount: 0,
       blockedCatalogCount: skillsIndex.conflicts.length,
       results
@@ -253,6 +254,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false } = 
     blockedHermesCount,
     blockedCatalogCount: 0,
     detectedClientNames: global.installedAgentNames,
+    configuredClientNames: global.configuredAgentNames,
     results
   };
 }
@@ -408,6 +410,7 @@ async function createGlobalBridges(
   let configuredContextCount = 0;
   const blockedBridges = [];
   const installedAgentNames = [];
+  const configuredAgentNames = [];
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
@@ -452,6 +455,7 @@ async function createGlobalBridges(
     results.push(result);
     if (isConfiguredBridgeAction(result.action)) {
       configuredContextCount += 1;
+      configuredAgentNames.push(agent.name);
     } else {
       blockedBridges.push(result);
     }
@@ -468,6 +472,7 @@ async function createGlobalBridges(
     results: [...results, ...skills],
     installedCount,
     installedAgentNames: Object.freeze(installedAgentNames),
+    configuredAgentNames: Object.freeze(configuredAgentNames),
     configuredContextCount,
     blockedBridges
   };

@@ -168,6 +168,45 @@ test("compactEvents rotates complete JSONL lines into immutable numbered shards"
   assert.deepEqual(archived.map(({ summary }) => summary.slice(0, 9)), ["archive-0", "archive-1", "archive-2"]);
 });
 
+test("normal rotations preserve legitimate byte-identical event records", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const repeated = {
+    ts: "2026-05-01T12:00:00.000Z",
+    type: "repeated-event",
+    summary: "x".repeat(1_100_000)
+  };
+  const firstTail = { ts: "2026-05-02T12:00:00.000Z", type: "tail", id: 1 };
+  const secondTail = { ts: "2026-05-03T12:00:00.000Z", type: "tail", id: 2 };
+  fs.writeFileSync(
+    eventsPath,
+    `${formatJsonlEntry(repeated).repeat(3)}${formatJsonlEntry(firstTail)}`,
+    { mode: 0o600 }
+  );
+
+  await compactEvents(eventsPath, 1);
+  fs.appendFileSync(eventsPath, formatJsonlEntry(secondTail));
+  await compactEvents(eventsPath, 1);
+
+  const stored = fs.readdirSync(dir)
+    .filter((name) => /^events-archive(?:\.\d{6})?\.jsonl$/.test(name))
+    .sort((left, right) => {
+      if (left === "events-archive.jsonl") return 1;
+      if (right === "events-archive.jsonl") return -1;
+      return left.localeCompare(right);
+    })
+    .flatMap((name) => fs.readFileSync(path.join(dir, name), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line)));
+  stored.push(...await readJsonl(eventsPath));
+
+  assert.deepEqual(
+    stored.map((entry) => entry.type === "repeated-event" ? "repeated" : `tail-${entry.id}`),
+    ["repeated", "repeated", "repeated", "tail-1", "tail-2"]
+  );
+});
+
 test("one valid line above the rotation target occupies its own shard", async () => {
   const dir = tmpDir();
   const eventsPath = path.join(dir, "events.jsonl");

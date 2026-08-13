@@ -104,7 +104,9 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   try {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
-    setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle);
+    setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle, {
+      quiet: !verbose
+    });
     await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
     if (setupTransactionActive) {
       await assertCompletedSetupTransactionTree(aiosPath, setupTransactionActive.transaction, passthrough);
@@ -150,7 +152,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   let blockedContextCount = 0;
   let blockedCatalogCount = 0;
   let blockedContextNeedsMerge = false;
-  let detectedClientNames = [];
+  let configuredClientNames = [];
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
   console.log("");
@@ -164,7 +166,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
       }
     });
     detectedClientCount = activation.detectedClientCount;
-    detectedClientNames = activation.detectedClientNames || [];
+    configuredClientNames = activation.configuredClientNames || [];
     configuredContextCount = activation.configuredContextCount;
     blockedContextCount = activation.blockedContextCount;
     blockedCatalogCount = activation.blockedCatalogCount;
@@ -281,7 +283,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     }
     console.log("To explore the folder now:");
   } else {
-    const clients = formatClientNames(detectedClientNames);
+    const clients = formatClientNames(configuredClientNames);
     console.log(`Folder ready. ${clients || `${configuredContextCount} local AI app${configuredContextCount === 1 ? "" : "s"}`} can now use your context.`);
     console.log("To get started:");
   }
@@ -455,13 +457,17 @@ async function printClientPreview(aiosPath, homePath, { verbose = false } = {}) 
     }
     detectedClientCount += 1;
 
-    if (!verbose) {
-      console.log(`[detected] ${agent.name} — setup will connect it to your context.`);
+    if (!agent.bridge) {
+      if (verbose) {
+        console.log(`[detected] ${destination} (${agent.name} uses native or project-specific configuration; external config is outside this preview)`);
+      } else {
+        console.log(`[detected] ${agent.name} — needs native or project-specific setup before it can use your context.`);
+      }
       continue;
     }
 
-    if (!agent.bridge) {
-      console.log(`[detected] ${destination} (${agent.name} uses native or project-specific configuration; external config is outside this preview)`);
+    if (!verbose) {
+      console.log(`[detected] ${agent.name} — setup will connect it to your context.`);
       continue;
     }
 
@@ -561,7 +567,7 @@ async function lstatIfPresent(target) {
 // recorded the complete expected tree before createBaseTree, and every path
 // left behind still matches that record. Only that narrow case gets an internal
 // --force retry. The metrics-only recognizer below remains for 1.27.1 upgrades.
-async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
+async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quiet = false } = {}) {
   if (await hasSetupTransaction(aiosPath)) {
     if (passthrough.includes("--force") || passthrough.includes("--overwrite")) {
       throw new Error(
@@ -572,6 +578,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
   let transactionStarted = null;
   try {
     await initCommand(passthrough, {
+      quiet,
       beforeScaffold: async (plan) => {
         transactionStarted = await beginSetupTransaction(aiosPath, passthrough, plan, lifecycle);
       },
@@ -588,6 +595,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
     const transaction = await readRecoverableSetupTransaction(aiosPath, passthrough);
     if (transaction) {
       await initCommand([...passthrough, "--force"], {
+        quiet,
         plan: transaction.transaction.plan,
         allowSetupTransactionRecovery: true
       });
@@ -596,7 +604,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
       return { markerStats: transaction.markerStats, transaction: transaction.transaction };
     }
     if (!(await isFailedSetupResidue(aiosPath))) throw error;
-    await initCommand([...passthrough, "--force"]);
+    await initCommand([...passthrough, "--force"], { quiet });
     console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
     return false;
   }

@@ -105,6 +105,47 @@ test("compaction survives a crash at any single step: no event lost, none duplic
   }
 });
 
+test("compaction syncs the parent directory before flushing the pending archive", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const pendingPath = path.join(dir, "events-archive.jsonl.pending");
+  seedEvents(eventsPath, 3);
+  const calls = [];
+  const filesystem = {
+    ...fsp,
+    async rename(source, destination) {
+      await fsp.rename(source, destination);
+      if (destination === eventsPath) calls.push("live-rename");
+    },
+    async open(filePath, flags, ...rest) {
+      const handle = await fsp.open(filePath, flags, ...rest);
+      if (filePath === pendingPath && typeof flags === "number") calls.push("pending-read");
+      if (filePath !== dir || flags !== "r") return handle;
+      return new Proxy(handle, {
+        get(target, name) {
+          if (name === "sync") {
+            return async (...args) => {
+              calls.push("directory-sync");
+              return target.sync(...args);
+            };
+          }
+          const value = Reflect.get(target, name, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      });
+    }
+  };
+
+  await compactEvents(eventsPath, 1, { filesystem });
+
+  const renameIndex = calls.indexOf("live-rename");
+  const syncIndex = calls.indexOf("directory-sync");
+  const pendingReadIndex = calls.indexOf("pending-read");
+  assert.ok(renameIndex >= 0, `missing live rename in ${JSON.stringify(calls)}`);
+  assert.ok(syncIndex > renameIndex, `directory sync must follow live rename: ${JSON.stringify(calls)}`);
+  assert.ok(pendingReadIndex > syncIndex, `pending flush must follow the durability barrier: ${JSON.stringify(calls)}`);
+});
+
 test("rotating compaction recovers every shard publication boundary without loss or duplication", async () => {
   const scenarios = [
     { link: 2 },
@@ -520,6 +561,96 @@ test("a staged signals batch left behind by a crash is recovered, not lost", asy
   assert.equal(retry.removed, 1);
   assert.equal(fs.existsSync(`${archivePath}.pending`), false, "recovery clears the staging file");
   assert.equal(readLines(archivePath).length, 2, "recovery must not duplicate the batch");
+});
+
+test("archive maintenance rejects an in-place pending mutation without deleting authority", async () => {
+  const { signalsDir, archivePath, names } = signalsFixture({ staleFiles: 1, linesPerFile: 2 });
+  const pendingPath = `${archivePath}.pending`;
+  const sourcePath = path.join(signalsDir, names[0]);
+  let mutated = false;
+  const filesystem = {
+    ...fsp,
+    async open(filePath, flags, ...rest) {
+      const handle = await fsp.open(filePath, flags, ...rest);
+      if (filePath !== pendingPath || typeof flags !== "number") return handle;
+      return new Proxy(handle, {
+        get(target, name) {
+          if (name === "readFile") {
+            return async (...args) => {
+              const content = await target.readFile(...args);
+              if (!mutated) {
+                await fsp.appendFile(filePath, '{"type":"same-inode-mutation"}\n');
+                mutated = true;
+              }
+              return content;
+            };
+          }
+          const value = Reflect.get(target, name, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      });
+    }
+  };
+
+  await assert.rejects(
+    () => trimSignals(signalsDir, 30, { filesystem }),
+    (error) => error?.code === "DOTAIOS_ARCHIVE_STATE_INVALID"
+  );
+
+  assert.equal(mutated, true, "the test must mutate the already-open pending inode");
+  assert.equal(fs.existsSync(pendingPath), true, "the pending batch remains recovery authority");
+  assert.equal(fs.existsSync(sourcePath), true, "the source remains authoritative until publication succeeds");
+  assert.equal(fs.existsSync(archivePath), false, "no torn archive generation is published");
+});
+
+test("legacy archive mode repair never follows a substituted pathname", async () => {
+  if (process.platform === "win32") return;
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const displacedPath = path.join(dir, "events-archive.displaced.jsonl");
+  const outsidePath = path.join(dir, "outside.jsonl");
+  fs.writeFileSync(archivePath, '{"type":"legacy"}\n', { mode: 0o644 });
+  fs.chmodSync(archivePath, 0o644);
+  fs.writeFileSync(outsidePath, '{"type":"outside"}\n', { mode: 0o644 });
+  fs.chmodSync(outsidePath, 0o644);
+  seedEvents(eventsPath, 2);
+  let substituted = false;
+  const substitutePath = () => {
+    if (substituted) return;
+    fs.renameSync(archivePath, displacedPath);
+    fs.symlinkSync(outsidePath, archivePath);
+    substituted = true;
+  };
+  const filesystem = {
+    ...fsp,
+    async chmod(filePath, mode) {
+      if (filePath === archivePath) substitutePath();
+      return fsp.chmod(filePath, mode);
+    },
+    async open(filePath, flags, ...rest) {
+      const handle = await fsp.open(filePath, flags, ...rest);
+      if (filePath !== archivePath || typeof flags !== "number") return handle;
+      return new Proxy(handle, {
+        get(target, name) {
+          if (name === "chmod") {
+            return async (...args) => {
+              substitutePath();
+              return target.chmod(...args);
+            };
+          }
+          const value = Reflect.get(target, name, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      });
+    }
+  };
+
+  await assert.rejects(() => compactEvents(eventsPath, 1, { filesystem }), /invalid|state/i);
+
+  assert.equal(substituted, true, "the pathname must be swapped at the repair boundary");
+  assert.equal(fs.statSync(outsidePath).mode & 0o777, 0o644, "repair must not chmod the symlink target");
+  assert.equal(fs.existsSync(`${archivePath}.pending`), true, "the pending batch remains authoritative");
 });
 
 test("trimSignals skips when another process holds the archive lock", async () => {

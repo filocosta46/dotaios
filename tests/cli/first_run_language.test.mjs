@@ -51,6 +51,98 @@ test("default setup preview gives a clear next step when no supported app is det
   }
 });
 
+test("real setup keeps init detail concise by default and restores it with --verbose", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-real-"));
+  const conciseHome = path.join(tempRoot, "concise-home");
+  const conciseAios = path.join(conciseHome, "aios");
+  const verboseHome = path.join(tempRoot, "verbose-home");
+  const verboseAios = path.join(verboseHome, "aios");
+  fs.mkdirSync(path.join(conciseHome, ".claude"), { recursive: true });
+  fs.mkdirSync(path.join(verboseHome, ".claude"), { recursive: true });
+
+  try {
+    const concise = run([
+      "setup", "--yes", "--skip-reveal",
+      "--path", conciseAios, "--home", conciseHome
+    ]);
+    assert.equal(concise.status, 0, `${concise.stdout}\n${concise.stderr}`);
+    const conciseOutput = `${concise.stdout}\n${concise.stderr}`;
+    assert.match(conciseOutput, /Folder ready\. Claude Code can now use your context\./);
+    assert.doesNotMatch(conciseOutput, new RegExp(escapeRegExp(tempRoot)));
+    assert.doesNotMatch(conciseOutput, /AIOS path:|Vault path:|Files: \d+ created|\nNext steps:\n/);
+    assert.doesNotMatch(conciseOutput, /not detected on this machine/);
+
+    const verbose = run([
+      "setup", "--yes", "--skip-reveal", "--verbose",
+      "--path", verboseAios, "--home", verboseHome
+    ]);
+    assert.equal(verbose.status, 0, `${verbose.stdout}\n${verbose.stderr}`);
+    assert.match(verbose.stdout, new RegExp(`AIOS path: ${escapeRegExp(verboseAios)}`));
+    assert.match(verbose.stdout, new RegExp(`Vault path: ${escapeRegExp(path.join(verboseAios, "vault"))}`));
+    assert.match(verbose.stdout, /Files: \d+ created, \d+ updated, \d+ kept/);
+    assert.match(verbose.stdout, /\nNext steps:\n/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("direct init retains its detailed completion output", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-init-"));
+  const aiosPath = path.join(tempRoot, "aios");
+
+  try {
+    const result = run(["init", "--yes", "--path", aiosPath]);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, new RegExp(`AIOS path: ${escapeRegExp(aiosPath)}`));
+    assert.match(result.stdout, new RegExp(`Vault path: ${escapeRegExp(path.join(aiosPath, "vault"))}`));
+    assert.match(result.stdout, /Files: \d+ created, \d+ updated, \d+ kept/);
+    assert.match(result.stdout, /\nNext steps:\n/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("real setup names only clients whose context bridge was configured", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-mixed-clients-"));
+  const homePath = path.join(tempRoot, "home");
+  const aiosPath = path.join(homePath, "aios");
+  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
+  fs.mkdirSync(path.join(homePath, ".cursor"), { recursive: true });
+
+  try {
+    const result = run([
+      "setup", "--yes", "--skip-reveal",
+      "--path", aiosPath, "--home", homePath
+    ]);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /Folder ready\. Claude Code can now use your context\./);
+    assert.doesNotMatch(result.stdout, /Folder ready\.[^\n]*Cursor[^\n]*can now use your context/);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("setup preview distinguishes bridge clients from bridge-less detected apps", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-mixed-preview-"));
+  const homePath = path.join(tempRoot, "home");
+  const aiosPath = path.join(homePath, "aios");
+  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
+  fs.mkdirSync(path.join(homePath, ".cursor"), { recursive: true });
+
+  try {
+    const result = run(["setup", "--dry-run", "--path", aiosPath, "--home", homePath]);
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.match(result.stdout, /\[detected\] Claude Code — setup will connect it to your context\./);
+    assert.match(
+      result.stdout,
+      /\[detected\] Cursor — needs native or project-specific setup before it can use your context\./
+    );
+    assert.doesNotMatch(result.stdout, /\[detected\] Cursor — setup will connect it to your context\./);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test("default doctor reports the user outcome without listing absent clients", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-doctor-"));
   const homePath = path.join(tempRoot, "home");

@@ -33,9 +33,9 @@ The adapter exposes exactly these three read-only tool names:
 
 - `read_working_context`: return the same bounded, project-filtered projection as `dotaios brief --compact`; accepts optional `project`, session `limit`, and character `budget`
 - `search_aios`: search bounded local results by `query`, with optional `scope`,
-  canonical project `project`, result `limit`, and character `budget`; project-only
-  scope requires the selector, while all-scope search without it omits projects
-  as selection metadata
+  canonical project `project`, result `limit`, and a complete-response character
+  `budget` from 3,530 to 32,000 (default 6,000); project-only scope requires the
+  selector, while all-scope search without it omits projects as selection metadata
 - `resolve_skill`: match an `intent` to installed workflows, with an optional
   result `limit` and character `budget` from 256 to 32,000 (default 6,000);
   the complete serialized response, including budget metadata, stays within it
@@ -44,6 +44,23 @@ There are no compatibility aliases or additional MCP tools.
 External project-source retrieval and finite consent remain CLI-only because
 they publish machine-local receipts and require the same user's explicit shell
 apply. Task text and MCP calls cannot approve a grant.
+
+`search_aios` has a higher budget floor than the other two tools because its
+smallest honest incomplete response must retain the full omission objects. The
+3,530-character floor is mechanically derived from the closed field bounds,
+the maximum 200-code-point project selector metadata, and all nine logical
+scopes the current tool can select at once; a public MCP fixture exercises that
+maximum set at the exact floor. A budget from 256 through 3,529 is therefore a
+specific input error for `search_aios`, while `read_working_context` and
+`resolve_skill` continue to accept 256. Callers that do not need a custom limit
+should omit `budget` and use the 6,000-character default.
+
+This is an explicit compatibility correction: the full named omission schema
+is retained instead of adding a second compact encoding whose recovery meaning
+would depend on an out-of-band decoder. Clients that previously sent a
+`search_aios` budget below 3,530 must raise it or omit it. A future incompatible
+omission encoding requires a separately versioned contract rather than a silent
+shape switch.
 
 `search_aios` returns `complete: true` only when every selected logical scope
 was inspected. A skippable resource ceiling returns valid results from admitted
@@ -54,7 +71,9 @@ contains only `scope`, a closed `reason`, bounded `observed` counts,
 `recovery` code/message. The five ceiling reasons are `file_too_large`,
 `directory_entries_exceeded`, `aggregate_bytes_exceeded`,
 `file_count_exceeded`, and `entry_count_exceeded`. At most 32 omissions plus one
-defensive `omissions_truncated` remainder are returned. Linked or non-regular
+defensive `omissions_truncated` remainder are returned by the shared collector;
+the current MCP scope allowlist can produce at most nine omissions in one call.
+Linked or non-regular
 evidence, unsafe paths, unauthorized roots, invalid UTF-8 or configuration,
 observed mutation, and unexpected I/O remain failed tool calls.
 

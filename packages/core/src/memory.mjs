@@ -8,7 +8,6 @@ import { refreshLiveOkf, writeProjectLog } from "./okf-live.mjs";
 import {
   assertOwnedFileStats,
   publishOwnedFileExclusive,
-  sameFileIdentity,
   syncOwnedDirectory
 } from "./owned-state.mjs";
 import { searchMarkdownDir, searchMemoryDir } from "./search.mjs";
@@ -466,9 +465,9 @@ async function flushPendingArchive(archivePath, fileSystem) {
 }
 
 async function removeObservedArchiveFile(filePath, expectedStats, fileSystem) {
-  const current = await fileSystem.lstat(filePath);
-  assertOwnedFileStats(current);
-  if (!sameFileIdentity(expectedStats, current)) throw archiveStateError();
+  const current = await fileSystem.lstat(filePath, { bigint: true });
+  assertOwnedArchiveFileStats(current);
+  if (!sameArchiveSnapshot(expectedStats, current)) throw archiveStateError();
   await fileSystem.unlink(filePath);
   await syncOwnedDirectory(path.dirname(filePath), { filesystem: fileSystem });
 }
@@ -476,30 +475,32 @@ async function removeObservedArchiveFile(filePath, expectedStats, fileSystem) {
 async function appendArchiveLines(archivePath, active, existingShards, lines, fileSystem) {
   let activeContent = active.content;
   let activeStats = active.stats;
+  ({ activeContent, activeStats, existingShards } = await recoverArchiveRotation(
+    archivePath,
+    activeContent,
+    activeStats,
+    existingShards,
+    fileSystem
+  ));
   let nextShard = existingShards.length === 0
     ? 1
     : existingShards.at(-1).number + 1;
 
-  // A crash after immutable shard publication but before resetting the active
-  // file leaves an exact prefix in both places. Repair that state before doing
-  // new work; the shard is already the durable authority for those bytes.
-  const newest = existingShards.at(-1);
-  if (newest && activeContent) {
-    const newestContent = (await readOwnedArchiveFile(newest.path, fileSystem)).content;
-    if (activeContent.startsWith(newestContent)) {
-      activeContent = activeContent.slice(newestContent.length);
-      activeStats = await replaceArchiveActive(archivePath, activeContent, activeStats, fileSystem);
-    }
-  }
-
   // Normalize a legacy over-target active file one complete JSONL record at a
-  // time. Each published prefix is removed immediately, so every interruption
-  // is recoverable by the prefix rule above.
+  // time. The durable transition marker is the only authority allowed to
+  // interpret matching bytes in a shard and the active generation as overlap.
   while (Buffer.byteLength(activeContent) > ARCHIVE_ROTATE_BYTES) {
     const { chunk, remainder } = takeArchiveChunk(activeContent);
-    await publishArchiveShard(archivePath, nextShard, chunk, fileSystem);
+    activeStats = await rotateArchiveActive(
+      archivePath,
+      nextShard,
+      activeContent,
+      chunk,
+      remainder,
+      activeStats,
+      fileSystem
+    );
     nextShard += 1;
-    activeStats = await replaceArchiveActive(archivePath, remainder, activeStats, fileSystem);
     activeContent = remainder;
   }
 
@@ -521,9 +522,16 @@ async function appendArchiveLines(archivePath, active, existingShards, lines, fi
     if (activeBytes > 0 && activeBytes + separatorBytes + recordBytes > ARCHIVE_ROTATE_BYTES) {
       const completedActive = materializeActive();
       activeStats = await replaceArchiveActive(archivePath, completedActive, activeStats, fileSystem);
-      await publishArchiveShard(archivePath, nextShard, completedActive, fileSystem);
+      activeStats = await rotateArchiveActive(
+        archivePath,
+        nextShard,
+        completedActive,
+        completedActive,
+        "",
+        activeStats,
+        fileSystem
+      );
       nextShard += 1;
-      activeStats = await replaceArchiveActive(archivePath, "", activeStats, fileSystem);
       activeContent = "";
       activeParts = [];
       activeBytes = 0;
@@ -545,6 +553,122 @@ async function appendArchiveLines(archivePath, active, existingShards, lines, fi
   if (changed || !activeStats) {
     await replaceArchiveActive(archivePath, materializeActive(), activeStats, fileSystem);
   }
+}
+
+async function recoverArchiveRotation(
+  archivePath,
+  activeContent,
+  activeStats,
+  existingShards,
+  fileSystem
+) {
+  const markerPath = rotationMarkerPathFor(archivePath);
+  let markerContent;
+  let markerStats;
+  try {
+    ({ content: markerContent, stats: markerStats } = await readOwnedArchiveFile(markerPath, fileSystem));
+  } catch (error) {
+    if (error.code === "ENOENT") return { activeContent, activeStats, existingShards };
+    throw error;
+  }
+
+  const marker = parseArchiveRotationMarker(markerContent);
+  const shard = existingShards.find(({ number }) => number === marker.shardNumber);
+  if (existingShards.some(({ number }) => number > marker.shardNumber)) throw archiveStateError();
+
+  const activeHash = archiveContentHash(activeContent);
+  if (activeHash === marker.beforeHash) {
+    const bytes = Buffer.from(activeContent);
+    const chunkBytes = bytes.subarray(0, marker.chunkBytes);
+    const remainderBytes = bytes.subarray(marker.chunkBytes);
+    const chunk = chunkBytes.toString("utf8");
+    const remainder = remainderBytes.toString("utf8");
+    if (
+      chunkBytes.length !== marker.chunkBytes
+      || Buffer.byteLength(chunk) !== marker.chunkBytes
+      || archiveContentHash(chunk) !== marker.chunkHash
+      || archiveContentHash(remainder) !== marker.afterHash
+    ) throw archiveStateError();
+
+    if (shard) {
+      const shardContent = (await readOwnedArchiveFile(shard.path, fileSystem)).content;
+      if (archiveContentHash(shardContent) !== marker.chunkHash) throw archiveStateError();
+    } else {
+      await publishArchiveShard(archivePath, marker.shardNumber, chunk, fileSystem);
+    }
+    activeStats = await replaceArchiveActive(archivePath, remainder, activeStats, fileSystem);
+    activeContent = remainder;
+  } else if (activeHash === marker.afterHash) {
+    if (!shard) throw archiveStateError();
+    const shardContent = (await readOwnedArchiveFile(shard.path, fileSystem)).content;
+    if (archiveContentHash(shardContent) !== marker.chunkHash) throw archiveStateError();
+  } else {
+    throw archiveStateError();
+  }
+
+  await removeObservedArchiveFile(markerPath, markerStats, fileSystem);
+  return {
+    activeContent,
+    activeStats,
+    existingShards: await inspectArchiveShards(archivePath, fileSystem)
+  };
+}
+
+async function rotateArchiveActive(
+  archivePath,
+  shardNumber,
+  activeContent,
+  chunk,
+  remainder,
+  activeStats,
+  fileSystem
+) {
+  const markerPath = rotationMarkerPathFor(archivePath);
+  const marker = {
+    version: 1,
+    shardNumber,
+    chunkBytes: Buffer.byteLength(chunk),
+    chunkHash: archiveContentHash(chunk),
+    beforeHash: archiveContentHash(activeContent),
+    afterHash: archiveContentHash(remainder)
+  };
+  await publishOwnedFileExclusive(
+    markerPath,
+    `${JSON.stringify(marker)}\n`,
+    { filesystem: fileSystem }
+  );
+  const markerStats = await inspectOwnedArchiveFile(markerPath, fileSystem);
+  await publishArchiveShard(archivePath, shardNumber, chunk, fileSystem);
+  const publishedStats = await replaceArchiveActive(archivePath, remainder, activeStats, fileSystem);
+  await removeObservedArchiveFile(markerPath, markerStats, fileSystem);
+  return publishedStats;
+}
+
+function parseArchiveRotationMarker(content) {
+  let marker;
+  try {
+    marker = JSON.parse(content);
+  } catch {
+    throw archiveStateError();
+  }
+  if (
+    marker?.version !== 1
+    || !Number.isSafeInteger(marker.shardNumber)
+    || marker.shardNumber < 1
+    || !Number.isSafeInteger(marker.chunkBytes)
+    || marker.chunkBytes < 1
+    || ![marker.chunkHash, marker.beforeHash, marker.afterHash]
+      .every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+  ) throw archiveStateError();
+  return marker;
+}
+
+function archiveContentHash(content) {
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+function rotationMarkerPathFor(archivePath) {
+  return `${archivePath}.rotation`;
 }
 
 function takeArchiveChunk(content) {
@@ -612,8 +736,8 @@ async function inspectArchiveShards(archivePath, fileSystem) {
 }
 
 async function inspectOwnedArchiveFile(filePath, fileSystem) {
-  const stats = await fileSystem.lstat(filePath);
-  assertOwnedFileStats(stats);
+  const stats = await fileSystem.lstat(filePath, { bigint: true });
+  assertOwnedArchiveFileStats(stats);
   return stats;
 }
 
@@ -645,37 +769,60 @@ async function readArchiveActive(archivePath, fileSystem) {
 }
 
 async function readOwnedArchiveFile(filePath, fileSystem, { allowLegacyMode = false } = {}) {
-  let pathStats = await fileSystem.lstat(filePath);
-  pathStats = await validateArchiveFileMode(filePath, pathStats, fileSystem, allowLegacyMode);
+  let pathStats = await fileSystem.lstat(filePath, { bigint: true });
   const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0);
   const handle = await fileSystem.open(filePath, flags);
   try {
-    const before = await handle.stat();
-    assertOwnedFileStats(before);
-    if (!sameFileIdentity(pathStats, before)) throw archiveStateError();
+    let before = await handle.stat({ bigint: true });
+    ({ pathStats, handleStats: before } = await validateArchiveFileMode(
+      filePath,
+      pathStats,
+      before,
+      handle,
+      fileSystem,
+      allowLegacyMode
+    ));
     const content = await handle.readFile("utf8");
-    const after = await handle.stat();
-    if (!sameFileIdentity(before, after)) throw archiveStateError();
-    const current = await fileSystem.lstat(filePath);
-    if (!sameFileIdentity(after, current)) throw archiveStateError();
+    const after = await handle.stat({ bigint: true });
+    assertOwnedArchiveFileStats(after);
+    if (!sameArchiveSnapshot(before, after)) throw archiveStateError();
+    const current = await fileSystem.lstat(filePath, { bigint: true });
+    assertOwnedArchiveFileStats(current);
+    if (!sameArchiveSnapshot(after, current)) throw archiveStateError();
     return { content, stats: current };
   } finally {
     await handle.close();
   }
 }
 
-async function validateArchiveFileMode(filePath, stats, fileSystem, allowLegacyMode) {
+async function validateArchiveFileMode(
+  filePath,
+  pathStats,
+  handleStats,
+  handle,
+  fileSystem,
+  allowLegacyMode
+) {
   try {
-    assertOwnedFileStats(stats);
-    return stats;
+    assertOwnedArchiveFileStats(pathStats);
+    assertOwnedArchiveFileStats(handleStats);
+    if (!sameArchiveSnapshot(pathStats, handleStats)) throw archiveStateError();
+    return { pathStats, handleStats };
   } catch (error) {
     if (!allowLegacyMode || process.platform === "win32") throw error;
-    assertOwnedFileStats(stats, 0o644);
-    await fileSystem.chmod(filePath, 0o600);
-    const secured = await fileSystem.lstat(filePath);
-    assertOwnedFileStats(secured);
-    if (!sameArchiveObject(stats, secured)) throw archiveStateError();
-    return secured;
+    assertOwnedArchiveFileStats(pathStats, 0o644);
+    assertOwnedArchiveFileStats(handleStats, 0o644);
+    if (!sameArchiveSnapshot(pathStats, handleStats)) throw archiveStateError();
+    await handle.chmod(0o600);
+    const securedHandle = await handle.stat({ bigint: true });
+    const securedPath = await fileSystem.lstat(filePath, { bigint: true });
+    assertOwnedArchiveFileStats(securedHandle);
+    assertOwnedArchiveFileStats(securedPath);
+    if (
+      !sameArchiveObject(handleStats, securedHandle)
+      || !sameArchiveSnapshot(securedHandle, securedPath)
+    ) throw archiveStateError();
+    return { pathStats: securedPath, handleStats: securedHandle };
   }
 }
 
@@ -685,6 +832,39 @@ function sameArchiveObject(left, right) {
     && left.ino === right.ino
     && left.nlink === right.nlink
     && left.uid === right.uid);
+}
+
+function sameArchiveIdentity(left, right) {
+  return Boolean(sameArchiveObject(left, right)
+    && left.mode === right.mode
+    && left.size === right.size);
+}
+
+function sameArchiveSnapshot(left, right) {
+  return Boolean(left && right && [
+    "dev",
+    "ino",
+    "mode",
+    "nlink",
+    "uid",
+    "size",
+    "mtimeNs",
+    "ctimeNs"
+  ].every((field) => left[field] === right[field]));
+}
+
+function assertOwnedArchiveFileStats(stats, mode = 0o600) {
+  if (typeof stats?.mode !== "bigint") {
+    assertOwnedFileStats(stats, mode);
+    return;
+  }
+  assertOwnedFileStats({
+    isFile: () => stats.isFile(),
+    isSymbolicLink: () => stats.isSymbolicLink(),
+    mode: Number(stats.mode),
+    nlink: Number(stats.nlink),
+    uid: Number(stats.uid)
+  }, mode);
 }
 
 async function publishArchiveShard(archivePath, number, content, fileSystem) {
@@ -697,10 +877,12 @@ async function publishArchiveShard(archivePath, number, content, fileSystem) {
 async function replaceArchiveActive(archivePath, content, expectedStats, fileSystem) {
   assertArchiveLineBounds(content);
   if (!expectedStats) {
-    return publishOwnedFileExclusive(archivePath, content, { filesystem: fileSystem });
+    await publishOwnedFileExclusive(archivePath, content, { filesystem: fileSystem });
+    return inspectOwnedArchiveFile(archivePath, fileSystem);
   }
-  const current = await fileSystem.lstat(archivePath);
-  if (!sameFileIdentity(expectedStats, current)) throw archiveStateError();
+  const current = await fileSystem.lstat(archivePath, { bigint: true });
+  assertOwnedArchiveFileStats(current);
+  if (!sameArchiveSnapshot(expectedStats, current)) throw archiveStateError();
   const temporary = path.join(
     path.dirname(archivePath),
     `.${path.basename(archivePath)}.${crypto.randomUUID()}.tmp`
@@ -712,14 +894,15 @@ async function replaceArchiveActive(archivePath, content, expectedStats, fileSys
     await handle.sync();
     await handle.close();
     handle = null;
-    const temporaryStats = await fileSystem.lstat(temporary);
-    assertOwnedFileStats(temporaryStats);
-    const stillCurrent = await fileSystem.lstat(archivePath);
-    if (!sameFileIdentity(expectedStats, stillCurrent)) throw archiveStateError();
+    const temporaryStats = await fileSystem.lstat(temporary, { bigint: true });
+    assertOwnedArchiveFileStats(temporaryStats);
+    const stillCurrent = await fileSystem.lstat(archivePath, { bigint: true });
+    assertOwnedArchiveFileStats(stillCurrent);
+    if (!sameArchiveSnapshot(expectedStats, stillCurrent)) throw archiveStateError();
     await fileSystem.rename(temporary, archivePath);
-    const published = await fileSystem.lstat(archivePath);
-    assertOwnedFileStats(published);
-    if (!sameFileIdentity(temporaryStats, published)) throw archiveStateError();
+    const published = await fileSystem.lstat(archivePath, { bigint: true });
+    assertOwnedArchiveFileStats(published);
+    if (!sameArchiveIdentity(temporaryStats, published)) throw archiveStateError();
     await syncOwnedDirectory(path.dirname(archivePath), { filesystem: fileSystem });
     return published;
   } finally {
@@ -785,6 +968,7 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
         await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
         await stagePendingArchive(fileSystem, pendingPathFor(archivePathFor(eventsPath)), archiveBatch);
         await fileSystem.rename(tmpPath, eventsPath);
+        await syncOwnedDirectory(path.dirname(eventsPath), { filesystem: fileSystem });
         await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
       } finally {
         await fileSystem.rm(tmpPath, { force: true }).catch(() => {});
