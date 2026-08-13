@@ -35,7 +35,7 @@ The adapter exposes exactly these three read-only tool names:
 - `search_aios`: search bounded local results by `query`, with optional `scope`,
   canonical project `project`, result `limit`, and character `budget`; project-only
   scope requires the selector, while all-scope search without it omits projects
-  and reports that omission
+  as selection metadata
 - `resolve_skill`: match an `intent` to installed workflows, with an optional
   result `limit` and character `budget` from 256 to 32,000 (default 6,000);
   the complete serialized response, including budget metadata, stays within it
@@ -44,6 +44,23 @@ There are no compatibility aliases or additional MCP tools.
 External project-source retrieval and finite consent remain CLI-only because
 they publish machine-local receipts and require the same user's explicit shell
 apply. Task text and MCP calls cannot approve a grant.
+
+`search_aios` returns `complete: true` only when every selected logical scope
+was inspected. A skippable resource ceiling returns valid results from admitted
+scopes, `complete: false`, and the same logical omission records used by core and
+the CLI; it remains a successful tool call with `isError: false`. Each omission
+contains only `scope`, a closed `reason`, bounded `observed` counts,
+`inspection` (`not_searched` or `partially_enumerated`), and a path-free
+`recovery` code/message. The five ceiling reasons are `file_too_large`,
+`directory_entries_exceeded`, `aggregate_bytes_exceeded`,
+`file_count_exceeded`, and `entry_count_exceeded`. At most 32 omissions plus one
+defensive `omissions_truncated` remainder are returned. Linked or non-regular
+evidence, unsafe paths, unauthorized roots, invalid UTF-8 or configuration,
+observed mutation, and unexpected I/O remain failed tool calls.
+
+The response `budget.truncated` flag describes only result transport truncation;
+it never changes corpus `complete` or removes omission metadata. A complete
+zero-hit search is `complete: true` with an empty `results` array.
 
 For `read_working_context`, `budget` describes the canonical Markdown
 working-context projection, not operational compatibility metadata. The

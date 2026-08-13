@@ -66,9 +66,18 @@ export async function searchCommand(args) {
   }
 
   if (totalResults === 0) {
-    console.log("No results found.");
+    console.log(groups.omissions.length > 0 ? "No results found in inspected sources." : "No results found.");
   } else {
     console.log(`${totalResults} result(s) found.`);
+  }
+  if (groups.omissions.length > 0) {
+    for (const omission of groups.omissions) {
+      console.error(
+        `Search incomplete for ${omission.scope}: ${omission.recovery.message} `
+        + `(reason: ${omission.reason})`
+      );
+    }
+    process.exitCode = 2;
   }
 }
 

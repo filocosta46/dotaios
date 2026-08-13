@@ -100,6 +100,28 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.equal(fs.readFileSync(eventsPath, "utf8"), eventsBefore);
 });
 
+test("read_working_context preserves visible identity and priorities but omits frontmatter without mutation", () => {
+  const { aiosPath } = setupAios();
+  const identityPath = path.join(aiosPath, "context", "identity.md");
+  const prioritiesPath = path.join(aiosPath, "context", "priorities.md");
+  fs.writeFileSync(identityPath, "---\nsource: private-import\nkind: context\n---\n# Identity\n\nI lead the launch.\n");
+  fs.writeFileSync(prioritiesPath, "---\nupdated_at: 2026-08-13\n---\n# Priorities\n\nShip the trust release.\n");
+  const before = [fs.readFileSync(identityPath), fs.readFileSync(prioritiesPath)];
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 1000 } }
+  }]);
+  const markdown = JSON.parse(toolText(response)).markdown;
+
+  assert.match(markdown, /I lead the launch/);
+  assert.match(markdown, /Ship the trust release/);
+  assert.doesNotMatch(markdown, /private-import|updated_at|kind: context|^---$/m);
+  assert.deepEqual([fs.readFileSync(identityPath), fs.readFileSync(prioritiesPath)], before);
+});
+
 test("search_aios matches CLI project selection by slug and stable id without widening the tool allowlist", () => {
   const { aiosPath } = setupAios();
   for (const [slug, id, canary] of [
@@ -550,7 +572,7 @@ test("search_aios fails closed on linked evidence without exposing a path", () =
   }
 });
 
-test("search_aios enforces its per-file source-work bound on JSONL", () => {
+test("search_aios returns an incomplete successful envelope for a per-file ceiling", () => {
   const { aiosPath } = setupAios();
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
   // Sized from the shipped limit, not a copy of it. Hardcoding 1 MiB meant this
@@ -569,13 +591,45 @@ test("search_aios enforces its per-file source-work bound on JSONL", () => {
   }]);
   const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
 
-  assert.equal(response.error.code, -32603);
-  assert.equal(response.error.message, "DotAIOS request failed safely.");
+  assert.equal(response.error, undefined);
+  assert.equal(response.result.isError, false);
+  const payload = JSON.parse(toolText(response));
+  assert.equal(payload.complete, false);
+  assert.deepEqual(payload.results, []);
+  assert.equal(payload.omissions[0].scope, "memory");
+  assert.equal(payload.omissions[0].reason, "file_too_large");
+  assert.equal(payload.budget.truncated, false);
   assert.deepEqual(snapshotTree(aiosPath), before);
   assert.doesNotMatch(
     `${result.stdout}\n${result.stderr}`,
     new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
   );
+});
+
+test("search_aios keeps completion metadata when result transport truncates", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    Buffer.alloc(DEFAULT_EVIDENCE_READ_LIMITS.maxFileBytes + 1, 0x61)
+  );
+  fs.writeFileSync(path.join(aiosPath, "context", "work.md"), `# Work\n\n${"MCP_PARTIAL_TRANSPORT_CANARY ".repeat(100)}\n`);
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "MCP_PARTIAL_TRANSPORT_CANARY", scope: "all", budget: 512 }
+    }
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.equal(response.result.isError, false);
+  assert.equal(payload.complete, false);
+  assert.equal(payload.budget.truncated, true);
+  assert.equal(payload.omissions[0].scope, "memory");
+  assert.equal(payload.omissions[0].reason, "file_too_large");
 });
 
 test("search_aios rejects a session index path that escapes the AIOS root", () => {

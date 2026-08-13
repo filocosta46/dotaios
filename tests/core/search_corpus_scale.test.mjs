@@ -130,23 +130,30 @@ test("the shipped budget is a real ceiling, not an unbounded read", () => {
   assert.ok(DEFAULT_EVIDENCE_READ_LIMITS.maxEntries <= 5_000_000, "maxEntries must stay bounded");
 });
 
-// The budget still exists, and hitting it is still an error. What changed is
-// that the error has to be actionable: the old text named no limit, no cause,
-// and no next step, so a person had no way to tell a real containment refusal
-// from simply owning too many notes.
-test("exhausting the read budget explains the limit and what to do", async (t) => {
+// The budget still exists, but a search-isolatable ceiling now omits the whole
+// logical corpus instead of returning partial-corpus ranking or failing a
+// request that may have other unaffected scopes.
+test("exhausting the read budget returns one actionable whole-scope omission", async (t) => {
   const root = await makeCorpus(t, { fillerFiles: 20 });
   const reader = createEvidenceReader({
     roots: [root],
     limits: { maxBytes: 512, maxFiles: 2, maxEntries: 2, maxFileBytes: 512 }
   });
 
-  const error = await searchAios({ aiosPath: root, query: "peregrine routing", evidenceReader: reader })
-    .then(() => null, (thrown) => thrown);
+  const groups = await searchAios({ aiosPath: root, query: "peregrine routing", evidenceReader: reader });
 
-  assert.ok(error, "an exhausted budget still fails rather than silently returning a partial corpus");
-  assert.match(error.message, /budget|limit/i, "the message must name the limit it hit");
-  assert.match(error.message, /\b(move|split|less|fewer)\b/i, "the message must name something the person can do");
-  assert.doesNotMatch(error.message, /scope|project/i, "no command-specific concepts: this error also reaches skills, activate, and MCP, which have neither");
-  assert.doesNotMatch(error.message, new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), "errors stay path-free");
+  assert.equal(
+    groups.some((group) => group.scope === groups.omissions[0].scope),
+    false,
+    "the omitted logical scope returns no partial-corpus ranking"
+  );
+  assert.match(JSON.stringify(groups), /peregrine routing/, "unaffected admitted scopes still return valid results");
+  assert.equal(groups.omissions.length, 1);
+  assert.ok(["file_count_exceeded", "entry_count_exceeded"].includes(groups.omissions[0].reason));
+  assert.match(groups.omissions[0].recovery.message, /\b(move|archive|narrow)\b/i);
+  assert.doesNotMatch(
+    JSON.stringify(groups.omissions),
+    new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    "omissions stay path-free"
+  );
 });

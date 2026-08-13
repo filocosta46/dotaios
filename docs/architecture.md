@@ -136,9 +136,30 @@ generation rejects the request without publishing a partial result.
 The transaction preserves each logical corpus boundary and its source policy:
 daily and inbox notes remain separate from memory streams, plugin search accepts
 Markdown plus `manifest.json`, project search reads only the resolved selector,
-and an external vault remains its own explicitly authorized root. Hidden,
-secret-like, linked, non-regular, changed, oversized, or invalid UTF-8 evidence
-retains the contained-reader refusal behavior.
+and an external vault remains its own explicitly authorized root. Hidden and
+secret-like entries remain ineligible. Linked, non-regular, changed, invalid
+UTF-8, unauthorized, misconfigured, or unexpectedly unreadable observed
+evidence rejects the whole request.
+
+Resource ceilings are different. A bounded, query-dependent preflight reads
+each requested logical scope at most once, then reserves half of each remaining
+request-wide byte, file, and entry ceiling as equal protected shares before
+redistributing unused capacity in declared order. A scope is searched only when
+its complete demand fits. Otherwise the whole scope is omitted so partial-corpus
+IDF and ranking are never presented as complete.
+
+Successful search arrays retain their iterable group shape and expose frozen,
+non-enumerable `scope` and `omissions` metadata. Omissions use the closed reason
+codes `file_too_large`, `directory_entries_exceeded`,
+`aggregate_bytes_exceeded`, `file_count_exceeded`, and
+`entry_count_exceeded`; contain bounded counts and path-free recovery text; and
+are capped at 32 records plus one defensive aggregate remainder. A directory
+ceiling is `partially_enumerated`; other ceiling omissions are `not_searched`.
+Every observed directory, including a directory stopped at its ceiling, is
+revalidated after ranking and before results resolve. The CLI prints valid
+results to stdout, warnings to stderr, and exits 2 for incomplete searches.
+Exit 0 is complete, including zero hits, while integrity and configuration
+failures remain exit 1.
 
 Search writes no index, cache, manifest, or other derived state. Each request
 enumerates the current canonical files, so additions, edits, and deletions are

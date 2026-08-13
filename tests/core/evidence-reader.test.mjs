@@ -652,6 +652,137 @@ test("evidence corpus transactions retain every configured collection and byte c
   }
 });
 
+test("scope preflight protects later scopes deterministically before redistributing capacity", async () => {
+  const root = tmpDir();
+  const counts = { large: 5, small: 1, later: 1 };
+  for (const [scope, count] of Object.entries(counts)) {
+    const directory = path.join(root, scope);
+    fs.mkdirSync(directory);
+    for (let index = 0; index < count; index += 1) {
+      fs.writeFileSync(path.join(directory, `${index}.md`), `${scope}-${index}\n`);
+    }
+  }
+  const reader = createEvidenceReader({
+    roots: [root],
+    limits: { maxBytes: 1024, maxFiles: 6, maxEntries: 100, maxFileBytes: 100, maxDirectoryEntries: 100 }
+  });
+
+  const result = await reader.withScopePreflight(
+    ["large", "small", "later"],
+    async (scope, scopeReader) => {
+      const value = await scopeReader.withTextCorpus(
+        root,
+        path.join(root, scope),
+        { extensions: [".md"] },
+        (transaction) => transaction.mapFiles(({ content }) => content)
+      );
+      if (scope === "large") await new Promise((resolve) => setTimeout(resolve, 10));
+      return value;
+    },
+    (transaction) => ({
+      admitted: ["large", "small", "later"].filter((scope) => transaction.has(scope)),
+      omissions: transaction.omissions
+    })
+  );
+
+  assert.deepEqual(result.admitted, ["small", "later"]);
+  assert.equal(result.omissions[0].scope, "large");
+  assert.equal(result.omissions[0].reason, "file_count_exceeded");
+});
+
+test("scope preflight revalidates a partially enumerated omitted directory before publishing results", async () => {
+  const root = tmpDir();
+  const oversized = path.join(root, "oversized");
+  const safe = path.join(root, "safe");
+  fs.mkdirSync(oversized);
+  fs.mkdirSync(safe);
+  fs.writeFileSync(path.join(oversized, "one.md"), "one\n");
+  fs.writeFileSync(path.join(oversized, "two.md"), "two\n");
+  fs.writeFileSync(path.join(safe, "safe.md"), "safe\n");
+  const reader = createEvidenceReader({
+    roots: [root],
+    limits: { maxBytes: 100, maxFiles: 10, maxEntries: 10, maxFileBytes: 100, maxDirectoryEntries: 1 }
+  });
+
+  await assert.rejects(
+    () => reader.withScopePreflight(
+      ["oversized", "safe"],
+      (scope, scopeReader) => scopeReader.withTextCorpus(
+        root,
+        path.join(root, scope),
+        { extensions: [".md"] },
+        (transaction) => transaction.mapFiles(({ content }) => content)
+      ),
+      (transaction) => {
+        assert.equal(transaction.has("safe"), true);
+        assert.equal(transaction.has("oversized"), false);
+        fs.writeFileSync(path.join(oversized, "late.md"), "late\n");
+        return "must not escape";
+      }
+    ),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("scope preflight caps omissions at 32 plus one frozen aggregate remainder", async () => {
+  const root = tmpDir();
+  const scopes = Array.from({ length: 33 }, (_, index) => `scope-${String(index).padStart(2, "0")}`);
+  for (const scope of scopes) {
+    const directory = path.join(root, scope);
+    fs.mkdirSync(directory);
+    fs.writeFileSync(path.join(directory, "oversized.md"), "xx");
+  }
+  const reader = createEvidenceReader({
+    roots: [root],
+    limits: { maxBytes: 100, maxFiles: 100, maxEntries: 100, maxFileBytes: 1, maxDirectoryEntries: 10 }
+  });
+
+  const omissions = await reader.withScopePreflight(
+    scopes,
+    (scope, scopeReader) => scopeReader.withTextCorpus(
+      root,
+      path.join(root, scope),
+      { extensions: [".md"] },
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (transaction) => transaction.omissions
+  );
+
+  assert.equal(omissions.length, 33);
+  assert.equal(omissions[31].scope, "scope-31");
+  assert.deepEqual(omissions[32], {
+    scope: "all",
+    reason: "omissions_truncated",
+    observed: { files: 0, bytes: 0, entries: 1 },
+    inspection: "not_searched",
+    recovery: {
+      code: "narrow_scope",
+      message: "Search one logical scope at a time to inspect every omission."
+    }
+  });
+  assert.equal(Object.isFrozen(omissions), true);
+  assert.equal(Object.isFrozen(omissions[32]), true);
+});
+
+test("scope preflight fails closed when one scope observes conflicting generations of the same directory", async () => {
+  const root = tmpDir();
+  fs.writeFileSync(path.join(root, "events.jsonl"), '{"summary":"safe"}\n');
+  const reader = createEvidenceReader({ roots: [root] });
+
+  await assert.rejects(
+    () => reader.withScopePreflight(
+      ["memory"],
+      async (_scope, scopeReader) => {
+        await scopeReader.readJsonl(root, path.join(root, "events.jsonl"));
+        fs.writeFileSync(path.join(root, "late.md"), "late\n");
+        return scopeReader.readJsonl(root, path.join(root, "events.jsonl"));
+      },
+      () => "must not escape"
+    ),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
 test("evidence corpus file-operation growth stays constant per accepted file at fixed topology", async () => {
   async function measure(fileCount) {
     const root = tmpDir();

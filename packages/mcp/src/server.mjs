@@ -254,6 +254,7 @@ class DotaiosMcpServer {
           ? { projects: "omitted" }
           : null,
       groups,
+      omissions: groups.omissions,
       limit: budget
     });
   }
@@ -330,14 +331,17 @@ function tools() {
   ];
 }
 
-function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, limit }) {
+function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omissions = [], limit }) {
+  const complete = omissions.length === 0;
   const selected = [];
   let truncated = false;
   outer: for (const group of groups) {
     for (const rawResult of group.results || []) {
       const result = sanitizeResultValue(rawResult);
       const candidate = [...selected, { scope: group.scope, ...result }];
-      const candidateText = serializeSearchEnvelope({ query, scope, scopeDetail, results: candidate, limit, truncated: false });
+      const candidateText = serializeSearchEnvelope({
+        query, scope, scopeDetail, results: candidate, complete, omissions, limit, truncated: false
+      });
       if (candidateText.length > limit) {
         truncated = true;
         break outer;
@@ -347,11 +351,15 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, limi
   }
 
   let boundedQuery = query;
-  let serialized = serializeSearchEnvelope({ query: boundedQuery, scope, scopeDetail, results: selected, limit, truncated });
+  let serialized = serializeSearchEnvelope({
+    query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, limit, truncated
+  });
   while (serialized.length > limit && selected.length > 0) {
     selected.pop();
     truncated = true;
-    serialized = serializeSearchEnvelope({ query: boundedQuery, scope, scopeDetail, results: selected, limit, truncated });
+    serialized = serializeSearchEnvelope({
+      query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, limit, truncated
+    });
   }
 
   if (serialized.length > limit) {
@@ -366,6 +374,8 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, limi
         scope,
         scopeDetail,
         results: selected,
+        complete,
+        omissions,
         limit,
         truncated
       })
@@ -443,16 +453,20 @@ function serializeSkillEnvelope({ intent, matches, limit, truncated }) {
   throw new Error("Could not stabilize skill response budget metadata");
 }
 
-function serializeSearchEnvelope({ query, scope, scopeDetail, results, limit, truncated }) {
+function serializeSearchEnvelope({ query, scope, scopeDetail, results, complete, omissions, limit, truncated }) {
   let used = 0;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const serialized = JSON.stringify({
+    const value = {
       query,
       scope,
       ...(scopeDetail ? { scope_selection: scopeDetail } : {}),
       results,
+      complete,
+      omissions,
       budget: { limit, used, truncated },
-    }, null, 2);
+    };
+    const pretty = JSON.stringify(value, null, 2);
+    const serialized = pretty.length <= limit ? pretty : JSON.stringify(value);
     if (serialized.length === used) return serialized;
     used = serialized.length;
   }

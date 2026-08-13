@@ -11,7 +11,8 @@ import {
   readContainedDirectory,
   readContainedFile,
   readContainedSnapshotDirectory,
-  readContainedSnapshotFile
+  readContainedSnapshotFile,
+  sameContainedDirectorySnapshot
 } from "./contained-read.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 
@@ -54,8 +55,24 @@ const EVIDENCE_READ_FAILURES = {
     + "Split that file, or move it out of the folder.",
   DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE:
     "DotAIOS stopped reading: one directory holds more entries than the safe limit. "
-    + "Move some of its entries elsewhere."
+    + "Move some of its entries elsewhere.",
+  DOTAIOS_EVIDENCE_BYTE_BUDGET_EXCEEDED:
+    "DotAIOS stopped reading: this folder is past the safe aggregate byte limit for one request.",
+  DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED:
+    "DotAIOS stopped reading: this folder contains more files than one request can safely inspect.",
+  DOTAIOS_EVIDENCE_ENTRY_COUNT_EXCEEDED:
+    "DotAIOS stopped reading: this folder contains more entries than one request can safely inspect."
 };
+
+const SKIPPABLE_SCOPE_CODES = new Set([
+  "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
+  "DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE",
+  "DOTAIOS_EVIDENCE_BYTE_BUDGET_EXCEEDED",
+  "DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED",
+  "DOTAIOS_EVIDENCE_ENTRY_COUNT_EXCEEDED"
+]);
+
+const OMITTED_SCOPE_LIMIT = 32;
 
 export class EvidenceReadError extends Error {
   constructor(code = "DOTAIOS_EVIDENCE_READ_FAILED") {
@@ -86,7 +103,14 @@ export function createEvidenceReader({ roots, filesystem = localFilesystem, limi
 }
 
 function createEvidenceReaderView(roots, state) {
-  const { filesystem, effectiveLimits, budget, observedDirectories } = state;
+  const {
+    filesystem,
+    effectiveLimits,
+    budget,
+    observedDirectories,
+    collectRequestObservations = false,
+    dimensionCodes = false
+  } = state;
   const authorizedRoots = [...new Set((roots || []).map((root) => path.resolve(root)))];
   if (authorizedRoots.length === 0) throw new TypeError("Evidence readers require an authorized root.");
 
@@ -102,6 +126,7 @@ function createEvidenceReaderView(roots, state) {
       throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
     }
     try {
+      await rememberReadParent(authorizedRoot, filePath);
       return await readContainedFile(authorizedRoot, filePath, {
         filesystem,
         encoding: "utf8",
@@ -250,6 +275,13 @@ function createEvidenceReaderView(roots, state) {
       throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
     }
     try {
+      if (collectRequestObservations) {
+        const before = await inspectContainedDirectory(authorizedRoot, directoryPath, {
+          filesystem,
+          returnSnapshot: true
+        });
+        if (before !== null) rememberDirectory(authorizedRoot, directoryPath, before);
+      }
       const observed = await readContainedDirectory(authorizedRoot, directoryPath, {
         filesystem,
         budget,
@@ -300,6 +332,7 @@ function createEvidenceReaderView(roots, state) {
         directories: [{ path: authorizedRoot, snapshot: rootSnapshot }],
         files: []
       };
+      rememberDirectory(authorizedRoot, authorizedRoot, rootSnapshot);
       const resolvedDirectory = path.resolve(directoryPath);
       const startingSnapshot = resolvedDirectory === authorizedRoot
         ? rootSnapshot
@@ -308,6 +341,7 @@ function createEvidenceReaderView(roots, state) {
           returnSnapshot: true
         });
       if (startingSnapshot !== null) {
+        rememberDirectory(authorizedRoot, resolvedDirectory, startingSnapshot);
         await walkTextCorpus(
           authorizedRoot,
           resolvedDirectory,
@@ -326,6 +360,7 @@ function createEvidenceReaderView(roots, state) {
           { filesystem }
         );
         rememberCorpusDirectory(observation, nearest.path, nearest.snapshot);
+        rememberDirectory(authorizedRoot, nearest.path, nearest.snapshot);
       }
       observation.files.sort((left, right) => left.filePath.localeCompare(right.filePath));
     } catch (error) {
@@ -383,6 +418,9 @@ function createEvidenceReaderView(roots, state) {
   }
 
   async function walkTextCorpus(root, directoryPath, options, observation, containment) {
+    if (containment.expectedSnapshot) {
+      rememberDirectory(root, directoryPath, containment.expectedSnapshot);
+    }
     const observed = await readContainedSnapshotDirectory(root, directoryPath, {
       filesystem,
       canonicalRoot: containment.canonicalRoot,
@@ -412,8 +450,14 @@ function createEvidenceReaderView(roots, state) {
       }
       if (entry.isDirectory()) {
         if (options.recursive !== false) {
+          const childSnapshot = await inspectContainedDirectory(root, filePath, {
+            filesystem,
+            returnSnapshot: true
+          });
+          if (childSnapshot === null) throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
           await walkTextCorpus(root, filePath, options, observation, {
             canonicalRoot: containment.canonicalRoot,
+            expectedSnapshot: childSnapshot,
             parentPath: path.resolve(directoryPath),
             parentSnapshot: observed.snapshot
           });
@@ -427,7 +471,9 @@ function createEvidenceReaderView(roots, state) {
       if (!accepted) continue;
       if (!entry.isFile()) throw new EvidenceReadError("DOTAIOS_EVIDENCE_NOT_REGULAR_FILE");
       if (observation.files.length >= effectiveLimits.maxFiles) {
-        throw new EvidenceReadError("DOTAIOS_EVIDENCE_BUDGET_EXCEEDED");
+        throw new EvidenceReadError(dimensionCodes
+          ? "DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED"
+          : "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED");
       }
       observation.files.push(Object.freeze({
         filePath,
@@ -508,6 +554,126 @@ function createEvidenceReaderView(roots, state) {
     }
   }
 
+  /**
+   * Run query-dependent, bounded scope preparation exactly once per logical
+   * scope, then allocate the request budget deterministically. Prepared values
+   * remain callback-scoped and cannot resolve successfully until every
+   * observed root/directory generation has been revalidated.
+   */
+  async function withScopePreflight(scopes, prepareScope, callback) {
+    if (!Array.isArray(scopes) || scopes.length === 0 || scopes.some((scope) => typeof scope !== "string" || !scope)) {
+      throw new TypeError("Evidence scope preflight requires named logical scopes.");
+    }
+    if (new Set(scopes).size !== scopes.length) {
+      throw new TypeError("Evidence scope preflight requires unique logical scopes.");
+    }
+    if (typeof prepareScope !== "function" || typeof callback !== "function") {
+      throw new TypeError("Evidence scope preflight requires preparation and result callbacks.");
+    }
+
+    const available = budget.remaining();
+    const scopeLimits = Object.freeze({
+      ...effectiveLimits,
+      maxBytes: available.bytes,
+      maxFiles: available.files,
+      maxEntries: available.entries
+    });
+    const prepared = await Promise.all(scopes.map(async (scope) => {
+      const scopeBudget = createContainedReadBudget({
+        maxBytes: scopeLimits.maxBytes,
+        maxFiles: scopeLimits.maxFiles,
+        maxEntries: scopeLimits.maxEntries,
+        dimensionCodes: true
+      });
+      const scopeReader = createEvidenceReaderView(authorizedRoots, {
+        filesystem,
+        effectiveLimits: scopeLimits,
+        budget: scopeBudget,
+        observedDirectories: new Map(),
+        collectRequestObservations: true,
+        dimensionCodes: true
+      });
+      let scopeObservations = new Map();
+      try {
+        let value;
+        try {
+          value = await prepareScope(scope, scopeReader);
+        } finally {
+          scopeObservations = scopeReader.observations();
+        }
+        return Object.freeze({
+          scope,
+          value,
+          demand: scopeBudget.snapshot(),
+          error: null,
+          observations: scopeObservations
+        });
+      } catch (error) {
+        const normalized = normalizeEvidenceReadError(error);
+        return Object.freeze({
+          scope,
+          value: null,
+          demand: scopeBudget.snapshot(),
+          error: normalized,
+          observations: scopeObservations
+        });
+      }
+    }));
+
+    for (const item of prepared) {
+      for (const [key, observation] of item.observations) {
+        const retained = observedDirectories.get(key);
+        if (retained && !sameContainedDirectorySnapshot(retained.snapshot, observation.snapshot)) {
+          throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
+        }
+        if (!retained) observedDirectories.set(key, observation);
+      }
+    }
+
+    const fatal = prepared.find(({ error }) => error && !SKIPPABLE_SCOPE_CODES.has(error.code));
+    if (fatal) throw fatal.error;
+
+    const allocation = allocateScopeDemands(prepared, available);
+    const admitted = new Map();
+    for (const item of prepared) {
+      if (allocation.admitted.has(item.scope)) admitted.set(item.scope, item.value);
+    }
+    const committed = [...prepared]
+      .filter((item) => allocation.admitted.has(item.scope))
+      .reduce((sum, item) => addDemand(sum, item.demand), emptyDemand());
+    try {
+      budget.reserveDemand(committed);
+    } catch (error) {
+      throw normalizeEvidenceReadError(error);
+    }
+
+    let active = true;
+    const transaction = Object.freeze({
+      has(scope) {
+        if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
+        return admitted.has(scope);
+      },
+      get(scope) {
+        if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
+        return admitted.get(scope);
+      },
+      omissions: allocation.omissions
+    });
+
+    let result;
+    try {
+      result = await callback(transaction);
+    } finally {
+      active = false;
+    }
+    try {
+      await revalidateObservedDirectories();
+      return result;
+    } catch (error) {
+      throw normalizeEvidenceReadError(error);
+    }
+  }
+
   return Object.freeze({
     roots: Object.freeze([...authorizedRoots]),
     withAuthorizedRoots(additionalRoots) {
@@ -526,17 +692,55 @@ function createEvidenceReaderView(roots, state) {
     listDirectories,
     listDirectory,
     withTextCorpus,
+    withScopePreflight,
+    observations: () => new Map(observedDirectories),
     snapshot: () => budget.snapshot()
   });
 
   function rememberDirectory(root, directoryPath, snapshot) {
     const resolvedRoot = path.resolve(root);
     const resolvedDirectory = path.resolve(directoryPath);
-    observedDirectories.set(`${resolvedRoot}\0${resolvedDirectory}`, {
+    const key = `${resolvedRoot}\0${resolvedDirectory}`;
+    const retained = observedDirectories.get(key);
+    if (retained) {
+      if (collectRequestObservations && !sameContainedDirectorySnapshot(retained.snapshot, snapshot)) {
+        throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
+      }
+      return;
+    }
+    observedDirectories.set(key, {
       root: resolvedRoot,
       path: resolvedDirectory,
       snapshot
     });
+  }
+
+  async function rememberReadParent(root, filePath) {
+    if (!collectRequestObservations) return;
+    const parentPath = path.dirname(path.resolve(filePath));
+    const key = `${path.resolve(root)}\0${parentPath}`;
+    if (observedDirectories.has(key)) return;
+    const snapshot = await inspectContainedDirectory(root, parentPath, {
+      filesystem,
+      returnSnapshot: true
+    });
+    if (snapshot !== null) {
+      rememberDirectory(root, parentPath, snapshot);
+      return;
+    }
+    const nearest = await inspectNearestContainedDirectory(root, parentPath, { filesystem });
+    rememberDirectory(root, nearest.path, nearest.snapshot);
+  }
+
+  async function revalidateObservedDirectories() {
+    for (const root of authorizedRoots) {
+      const directories = [...observedDirectories.values()]
+        .filter((entry) => entry.root === root)
+        .map(({ path: directoryPath, snapshot }) => ({ path: directoryPath, snapshot }));
+      if (directories.length > 0) {
+        await assertContainedDirectorySnapshotsUnchanged(root, directories, { filesystem });
+      }
+    }
   }
 
   function expectedDirectoriesFor(root, filePath) {
@@ -546,6 +750,174 @@ function createEvidenceReaderView(roots, state) {
       .filter((entry) => entry.root === resolvedRoot && isPathWithinLexically(entry.path, resolvedFile))
       .map(({ path: directoryPath, snapshot }) => ({ path: directoryPath, snapshot }));
   }
+}
+
+function allocateScopeDemands(prepared, capacity) {
+  const requestedCount = prepared.length;
+  const protectedShare = {
+    bytes: Math.floor(Math.floor(capacity.bytes / 2) / requestedCount),
+    files: Math.floor(Math.floor(capacity.files / 2) / requestedCount),
+    entries: Math.floor(Math.floor(capacity.entries / 2) / requestedCount)
+  };
+  const reservations = new Map();
+  let pool = { ...capacity };
+
+  for (const item of prepared) {
+    if (item.error) continue;
+    const protectedDemand = minDemand(item.demand, protectedShare);
+    reservations.set(item.scope, protectedDemand);
+    pool = subtractDemand(pool, protectedDemand);
+  }
+
+  const admitted = new Set();
+  for (const item of prepared) {
+    if (item.error) continue;
+    const reserved = reservations.get(item.scope) || emptyDemand();
+    const remainder = subtractDemand(item.demand, reserved);
+    if (!fitsDemand(remainder, pool)) continue;
+    reservations.set(item.scope, item.demand);
+    pool = subtractDemand(pool, remainder);
+    admitted.add(item.scope);
+  }
+
+  for (const item of prepared) {
+    if (item.error || admitted.has(item.scope)) continue;
+    pool = addDemand(pool, reservations.get(item.scope) || emptyDemand());
+    reservations.delete(item.scope);
+  }
+
+  for (const item of prepared) {
+    if (item.error || admitted.has(item.scope) || !fitsDemand(item.demand, pool)) continue;
+    pool = subtractDemand(pool, item.demand);
+    reservations.set(item.scope, item.demand);
+    admitted.add(item.scope);
+  }
+
+  const omissions = [];
+  for (const item of prepared) {
+    if (admitted.has(item.scope)) continue;
+    const reason = item.error
+      ? omissionReasonForError(item.error.code)
+      : firstExceededDimension(item.demand, pool);
+    omissions.push(createScopeOmission(item.scope, reason, item.demand, capacity));
+  }
+  return Object.freeze({ admitted, omissions: freezeOmissions(omissions) });
+}
+
+function omissionReasonForError(code) {
+  const reasons = {
+    DOTAIOS_EVIDENCE_FILE_TOO_LARGE: "file_too_large",
+    DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE: "directory_entries_exceeded",
+    DOTAIOS_EVIDENCE_BYTE_BUDGET_EXCEEDED: "aggregate_bytes_exceeded",
+    DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED: "file_count_exceeded",
+    DOTAIOS_EVIDENCE_ENTRY_COUNT_EXCEEDED: "entry_count_exceeded"
+  };
+  return reasons[code];
+}
+
+function firstExceededDimension(demand, available) {
+  if (demand.bytes > available.bytes) return "aggregate_bytes_exceeded";
+  if (demand.files > available.files) return "file_count_exceeded";
+  return "entry_count_exceeded";
+}
+
+function createScopeOmission(scope, reason, demand, limits) {
+  const recovery = {
+    file_too_large: {
+      code: "split_or_move_file",
+      message: "Split the oversized file, or move it outside this search scope."
+    },
+    directory_entries_exceeded: {
+      code: "reduce_directory_entries",
+      message: "Move some directory entries elsewhere, then retry the same search."
+    },
+    aggregate_bytes_exceeded: {
+      code: "narrow_or_reduce_scope",
+      message: "Search a narrower scope, or move older material outside this scope."
+    },
+    file_count_exceeded: {
+      code: "narrow_or_reduce_scope",
+      message: "Search a narrower scope, or move some files outside this scope."
+    },
+    entry_count_exceeded: {
+      code: "narrow_or_reduce_scope",
+      message: "Search a narrower scope, or archive entries outside this scope."
+    }
+  }[reason];
+  const observed = {
+    files: Math.min(demand.files, limits.files + 1),
+    bytes: Math.min(demand.bytes, limits.bytes + 1),
+    entries: Math.min(demand.entries, limits.entries + 1)
+  };
+  if (reason === "file_count_exceeded") observed.files = limits.files + 1;
+  if (reason === "aggregate_bytes_exceeded") observed.bytes = limits.bytes + 1;
+  if (reason === "entry_count_exceeded") observed.entries = limits.entries + 1;
+  return {
+    scope,
+    reason,
+    observed,
+    inspection: reason === "directory_entries_exceeded" ? "partially_enumerated" : "not_searched",
+    recovery
+  };
+}
+
+function freezeOmissions(omissions) {
+  const selected = omissions.slice(0, OMITTED_SCOPE_LIMIT).map(deepFreezeOmission);
+  if (omissions.length > OMITTED_SCOPE_LIMIT) {
+    selected.push(deepFreezeOmission({
+      scope: "all",
+      reason: "omissions_truncated",
+      observed: { files: 0, bytes: 0, entries: omissions.length - OMITTED_SCOPE_LIMIT },
+      inspection: "not_searched",
+      recovery: {
+        code: "narrow_scope",
+        message: "Search one logical scope at a time to inspect every omission."
+      }
+    }));
+  }
+  return Object.freeze(selected);
+}
+
+function deepFreezeOmission(omission) {
+  return Object.freeze({
+    ...omission,
+    observed: Object.freeze({ ...omission.observed }),
+    recovery: Object.freeze({ ...omission.recovery })
+  });
+}
+
+function emptyDemand() {
+  return { bytes: 0, files: 0, entries: 0 };
+}
+
+function minDemand(left, right) {
+  return {
+    bytes: Math.min(left.bytes, right.bytes),
+    files: Math.min(left.files, right.files),
+    entries: Math.min(left.entries, right.entries)
+  };
+}
+
+function addDemand(left, right) {
+  return {
+    bytes: left.bytes + right.bytes,
+    files: left.files + right.files,
+    entries: left.entries + right.entries
+  };
+}
+
+function subtractDemand(left, right) {
+  return {
+    bytes: left.bytes - right.bytes,
+    files: left.files - right.files,
+    entries: left.entries - right.entries
+  };
+}
+
+function fitsDemand(demand, capacity) {
+  return demand.bytes <= capacity.bytes
+    && demand.files <= capacity.files
+    && demand.entries <= capacity.entries;
 }
 
 function rememberCorpusDirectory(observation, directoryPath, snapshot) {
@@ -616,6 +988,9 @@ function normalizeEvidenceReadError(error) {
     DOTAIOS_CONTEXT_SOURCE_CHANGED: "DOTAIOS_EVIDENCE_CHANGED",
     DOTAIOS_INVALID_UTF8: "DOTAIOS_EVIDENCE_INVALID_UTF8",
     DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED: "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED",
+    DOTAIOS_PROJECTION_BYTE_BUDGET_EXCEEDED: "DOTAIOS_EVIDENCE_BYTE_BUDGET_EXCEEDED",
+    DOTAIOS_PROJECTION_FILE_COUNT_EXCEEDED: "DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED",
+    DOTAIOS_PROJECTION_ENTRY_COUNT_EXCEEDED: "DOTAIOS_EVIDENCE_ENTRY_COUNT_EXCEEDED",
     DOTAIOS_EVIDENCE_FILE_TOO_LARGE: "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
     DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE: "DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE",
     DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE: "DOTAIOS_EVIDENCE_BOUNDED_READ_UNAVAILABLE",

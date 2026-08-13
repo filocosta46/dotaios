@@ -199,7 +199,7 @@ test("request-scoped search observes added, modified, and deleted files on the n
 // budget still refuses rather than quietly returning a partial corpus; the
 // number it happens to be set to is not that property. The default's real size
 // is covered in tests/core/search_corpus_scale.test.mjs.
-test("search fails closed when its read budget is genuinely exhausted", async () => {
+test("scope search reports its whole corpus omitted when its read budget is exhausted", async () => {
   const root = tmpDir();
   const context = path.join(root, "context");
   fs.mkdirSync(context);
@@ -211,10 +211,102 @@ test("search fails closed when its read budget is genuinely exhausted", async ()
     limits: { maxBytes: 4096, maxFiles: 2, maxEntries: 4, maxFileBytes: 4096 }
   });
 
-  await assert.rejects(
-    () => searchAios({ aiosPath: root, query: "needle", scope: "context", evidenceReader: reader }),
-    (error) => error?.code === "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED"
-  );
+  const groups = await searchAios({ aiosPath: root, query: "needle", scope: "context", evidenceReader: reader });
+
+  assert.deepEqual([...groups], []);
+  assert.equal(groups.omissions.length, 1);
+  assert.equal(groups.omissions[0].scope, "context");
+  assert.ok(["file_count_exceeded", "entry_count_exceeded"].includes(groups.omissions[0].reason));
+});
+
+test("all-scope search returns unaffected results with a frozen path-free ceiling omission", async () => {
+  const parent = tmpDir();
+  const root = path.join(parent, "aios");
+  const vault = path.join(parent, "vault");
+  fs.mkdirSync(path.join(root, "context"), { recursive: true });
+  fs.mkdirSync(vault);
+  fs.writeFileSync(path.join(root, "context", "safe.md"), "# Safe\n\nSAFE_PARTIAL_SEARCH_CANARY\n");
+  fs.writeFileSync(path.join(vault, "oversized.md"), "x".repeat(65));
+  const reader = createEvidenceReader({
+    roots: [root, vault],
+    limits: { maxBytes: 1024, maxFiles: 100, maxEntries: 100, maxFileBytes: 64, maxDirectoryEntries: 100 }
+  });
+
+  const groups = await searchAios({
+    aiosPath: root,
+    vaultPath: vault,
+    query: "SAFE_PARTIAL_SEARCH_CANARY",
+    scope: "all",
+    evidenceReader: reader
+  });
+
+  assert.match(JSON.stringify(groups), /SAFE_PARTIAL_SEARCH_CANARY/);
+  assert.deepEqual(groups.omissions, [{
+    scope: "vault",
+    reason: "file_too_large",
+    observed: { files: 0, bytes: 0, entries: 1 },
+    inspection: "not_searched",
+    recovery: {
+      code: "split_or_move_file",
+      message: "Split the oversized file, or move it outside this search scope."
+    }
+  }]);
+  assert.equal(Object.isFrozen(groups.omissions), true);
+  assert.equal(Object.isFrozen(groups.omissions[0]), true);
+  assert.equal(Object.isFrozen(groups.omissions[0].observed), true);
+  assert.equal(Object.isFrozen(groups.omissions[0].recovery), true);
+  assert.doesNotMatch(JSON.stringify(groups.omissions), new RegExp(parent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("scope search distinguishes every skippable ceiling without catching integrity failures", async (t) => {
+  const cases = [
+    {
+      name: "directory entries",
+      reason: "directory_entries_exceeded",
+      limits: { maxBytes: 1024, maxFiles: 10, maxEntries: 10, maxFileBytes: 1024, maxDirectoryEntries: 1 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    },
+    {
+      name: "aggregate bytes",
+      reason: "aggregate_bytes_exceeded",
+      limits: { maxBytes: 7, maxFiles: 10, maxEntries: 10, maxFileBytes: 10, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    },
+    {
+      name: "file count",
+      reason: "file_count_exceeded",
+      limits: { maxBytes: 1024, maxFiles: 1, maxEntries: 10, maxFileBytes: 1024, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    },
+    {
+      name: "entry count",
+      reason: "entry_count_exceeded",
+      limits: { maxBytes: 1024, maxFiles: 10, maxEntries: 1, maxFileBytes: 1024, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    }
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, async () => {
+      const root = tmpDir();
+      const context = path.join(root, "context");
+      fs.mkdirSync(context);
+      for (const [name, content] of fixture.files) fs.writeFileSync(path.join(context, name), content);
+      const groups = await searchAios({
+        aiosPath: root,
+        query: "missing",
+        scope: "context",
+        evidenceReader: createEvidenceReader({ roots: [root], limits: fixture.limits })
+      });
+
+      assert.deepEqual([...groups], []);
+      assert.equal(groups.omissions[0].reason, fixture.reason);
+      assert.equal(
+        groups.omissions[0].inspection,
+        fixture.reason === "directory_entries_exceeded" ? "partially_enumerated" : "not_searched"
+      );
+    });
+  }
 });
 
 test("search rejects a special eligible file before opening it", {

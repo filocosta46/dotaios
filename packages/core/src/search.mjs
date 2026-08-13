@@ -41,10 +41,6 @@ const SECRET_FILE_PATTERNS = [
 //          the file mtime (markdown). Missing age means no penalty. Newer wins
 //          when lexical relevance is otherwise close.
 //
-// TODO(L1-5): buildCorpusStats tokenizes the scanned candidate set per query.
-// The persistent incremental term-frequency cache replaces buildCorpusStats
-// call sites (rebuild on changed files only) without touching rankSearchHit.
-
 export const RECENCY_HALF_LIFE_DAYS = 30;
 const RANK_TIER_WEIGHT = 1_000_000;
 // Tiers are absolute: any phrase hit outranks every terms hit, and so on down.
@@ -130,36 +126,51 @@ export async function searchAios({
       ]
     : [scope];
 
-  // Scopes are independent; run them concurrently. Promise.all preserves input
-  // order, so the returned groups stay in the same order as before.
-  const groups = await Promise.all(
-    scopes.map(async (name) => ({
-      scope: name,
-      results: await searchScope(name, {
-        aiosPath: resolvedAiosPath,
-        vaultPath: resolvedVaultPath,
-        vaultRoot,
-        query,
-        limit,
-        projectIdentity,
-        sessionFilters,
-        reader
-      })
-    }))
+  return reader.withScopePreflight(
+    scopes,
+    (name, scopeReader) => searchScope(name, {
+      aiosPath: resolvedAiosPath,
+      vaultPath: resolvedVaultPath,
+      vaultRoot,
+      query,
+      limit,
+      projectIdentity,
+      sessionFilters,
+      reader: scopeReader
+    }),
+    async (transaction) => {
+      const groups = scopes
+        .filter((name) => transaction.has(name))
+        .map((name) => ({
+          scope: name,
+          results: transaction.get(name)
+        }));
+      return attachSearchMetadata(groups, {
+        requested: scope,
+        project: projectIdentity?.slug || null,
+        project_id: projectIdentity?.id || null,
+        projects_omitted: scope === "all" && projectIdentity === null
+      }, transaction.omissions);
+    }
   );
-  return new Proxy(groups, {
-    get(target, property, receiver) {
-      if (property === "scope") {
-        return Object.freeze({
-          requested: scope,
-          project: projectIdentity?.slug || null,
-          project_id: projectIdentity?.id || null,
-          projects_omitted: scope === "all" && projectIdentity === null
-        });
-      }
-      return Reflect.get(target, property, receiver);
+}
+
+function attachSearchMetadata(groups, scope, omissions) {
+  Object.defineProperties(groups, {
+    scope: {
+      value: Object.freeze({ ...scope }),
+      enumerable: false,
+      configurable: false,
+      writable: false
+    },
+    omissions: {
+      value: omissions,
+      enumerable: false,
+      configurable: false,
+      writable: false
     }
   });
+  return groups;
 }
 
 async function searchScope(scope, {
@@ -177,15 +188,16 @@ async function searchScope(scope, {
   }
   if (scope === "memory") {
     const memoryDir = path.join(aiosPath, "memory");
-    const corpora = await Promise.all([
-      searchMemoryDir(memoryDir, query, { limit, reader, root: aiosPath }),
-      ...MEMORY_NOTE_DIRS.map((relative) => searchMarkdownDir(path.join(memoryDir, relative), query, {
+    const corpora = [];
+    corpora.push(await searchMemoryDir(memoryDir, query, { limit, reader, root: aiosPath }));
+    for (const relative of MEMORY_NOTE_DIRS) {
+      corpora.push(await searchMarkdownDir(path.join(memoryDir, relative), query, {
         limit,
         sourcePrefix: `memory/${relative}`,
         reader,
         root: aiosPath
-      }))
-    ]);
+      }));
+    }
     return interleaveByRank(corpora, limit);
   }
   if (scope === "context") {

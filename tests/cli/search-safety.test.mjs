@@ -72,6 +72,35 @@ test("CLI search refuses a linked aios.json before authorizing an external vault
   assert.deepEqual(snapshotTree(tempRoot), before);
 });
 
+test("CLI search keeps valid results on stdout and reports path-free partial status on stderr", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-cli-search-partial-"));
+  const aiosPath = path.join(tempRoot, "aios");
+  const vaultPath = path.join(tempRoot, "external-vault");
+  run(["init", "--path", aiosPath, "--yes"]);
+  fs.mkdirSync(vaultPath);
+  fs.writeFileSync(path.join(aiosPath, "context", "work.md"), "# Work\n\nCLI_PARTIAL_SEARCH_CANARY\n");
+  fs.writeFileSync(path.join(vaultPath, "oversized.md"), Buffer.alloc((4 * 1024 * 1024) + 1, 0x61));
+  const configPath = path.join(aiosPath, "aios.json");
+  const config = JSON.parse(fs.readFileSync(configPath, "utf8"));
+  fs.writeFileSync(configPath, `${JSON.stringify({ ...config, vault_path: vaultPath }, null, 2)}\n`);
+
+  const result = spawnSync(process.execPath, [
+    cli,
+    "search",
+    "CLI_PARTIAL_SEARCH_CANARY",
+    "--scope",
+    "all",
+    "--path",
+    aiosPath
+  ], { cwd: repoRoot, encoding: "utf8" });
+
+  assert.equal(result.status, 2);
+  assert.match(result.stdout, /CLI_PARTIAL_SEARCH_CANARY/);
+  assert.doesNotMatch(result.stderr, /CLI_PARTIAL_SEARCH_CANARY/);
+  assert.match(result.stderr, /incomplete.*vault.*oversized file/is);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, escaped(tempRoot));
+});
+
 test("CLI project search keeps corpus selection separate from session attribution", () => {
   const fixture = createProjectSourceRetrievalFixture();
   try {

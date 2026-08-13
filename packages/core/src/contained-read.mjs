@@ -53,7 +53,7 @@ export function createContainedReadFilesystem(root, filesystem = localFilesystem
 }
 
 /** Create one synchronous reservation ledger shared by a contained projection. */
-export function createContainedReadBudget({ maxBytes, maxFiles, maxEntries }) {
+export function createContainedReadBudget({ maxBytes, maxFiles, maxEntries, dimensionCodes = false }) {
   const limits = {
     maxBytes: normalizeFiniteLimit(maxBytes),
     maxFiles: normalizeFiniteLimit(maxFiles),
@@ -63,8 +63,15 @@ export function createContainedReadBudget({ maxBytes, maxFiles, maxEntries }) {
   return Object.freeze({
     reserveFile(size) {
       const bytes = normalizeFiniteLimit(size);
-      if (used.files + 1 > limits.maxFiles || used.bytes + bytes > limits.maxBytes) {
-        throw new ContainedReadError("DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
+      if (used.files + 1 > limits.maxFiles) {
+        throw new ContainedReadError(dimensionCodes
+          ? "DOTAIOS_PROJECTION_FILE_COUNT_EXCEEDED"
+          : "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
+      }
+      if (used.bytes + bytes > limits.maxBytes) {
+        throw new ContainedReadError(dimensionCodes
+          ? "DOTAIOS_PROJECTION_BYTE_BUDGET_EXCEEDED"
+          : "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
       }
       used.files += 1;
       used.bytes += bytes;
@@ -72,9 +79,41 @@ export function createContainedReadBudget({ maxBytes, maxFiles, maxEntries }) {
     reserveEntries(count = 1) {
       const entries = normalizeFiniteLimit(count);
       if (used.entries + entries > limits.maxEntries) {
-        throw new ContainedReadError("DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
+        throw new ContainedReadError(dimensionCodes
+          ? "DOTAIOS_PROJECTION_ENTRY_COUNT_EXCEEDED"
+          : "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
       }
       used.entries += entries;
+    },
+    reserveDemand(demand = {}) {
+      const bytes = normalizeFiniteLimit(demand.bytes);
+      const files = normalizeFiniteLimit(demand.files);
+      const entries = normalizeFiniteLimit(demand.entries);
+      if (used.files + files > limits.maxFiles) {
+        throw new ContainedReadError(dimensionCodes
+          ? "DOTAIOS_PROJECTION_FILE_COUNT_EXCEEDED"
+          : "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
+      }
+      if (used.bytes + bytes > limits.maxBytes) {
+        throw new ContainedReadError(dimensionCodes
+          ? "DOTAIOS_PROJECTION_BYTE_BUDGET_EXCEEDED"
+          : "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
+      }
+      if (used.entries + entries > limits.maxEntries) {
+        throw new ContainedReadError(dimensionCodes
+          ? "DOTAIOS_PROJECTION_ENTRY_COUNT_EXCEEDED"
+          : "DOTAIOS_PROJECTION_READ_BUDGET_EXCEEDED");
+      }
+      used.bytes += bytes;
+      used.files += files;
+      used.entries += entries;
+    },
+    remaining() {
+      return Object.freeze({
+        bytes: limits.maxBytes - used.bytes,
+        files: limits.maxFiles - used.files,
+        entries: limits.maxEntries - used.entries
+      });
     },
     snapshot() {
       return Object.freeze({ ...used });
