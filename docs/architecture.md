@@ -141,12 +141,20 @@ secret-like entries remain ineligible. Linked, non-regular, changed, invalid
 UTF-8, unauthorized, misconfigured, or unexpectedly unreadable observed
 evidence rejects the whole request.
 
-Resource ceilings are different. A bounded, query-dependent preflight reads
-each requested logical scope at most once, then reserves half of each remaining
-request-wide byte, file, and entry ceiling as equal protected shares before
-redistributing unused capacity in declared order. A scope is searched only when
-its complete demand fits. Otherwise the whole scope is omitted so partial-corpus
-IDF and ranking are never presented as complete.
+Resource ceilings are different. One request-owned discovery transaction first
+records safe directory and file metadata while charging directory observations
+to a shared, non-releasable ledger. A deterministic fair preliminary allocation
+selects which catalog-bearing scopes
+may spend that ledger on the bounded raw reads needed for exact JSONL entry
+counts or session membership. Ordinary corpus files contribute contained
+metadata only at this stage; retained catalog/raw bytes are never reread. After
+exact discovery, half of each remaining request-wide byte, file, and entry
+ceiling is reserved as equal protected shares before unused capacity is
+redistributed in declared order. Only scopes whose remaining work fits have
+their ordinary content read and are tokenized and ranked. Otherwise the whole
+scope is omitted so partial-corpus IDF and ranking are never presented as
+complete. Prepared file, directory, ancestor, and root observations remain
+transaction-owned and are revalidated before results resolve.
 
 Successful search arrays retain their iterable group shape and expose frozen,
 non-enumerable `scope` and `omissions` metadata. Omissions use the closed reason

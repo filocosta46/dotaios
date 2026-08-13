@@ -441,17 +441,33 @@ test("searchMemory preserves legitimate identical records outside retry overlap"
     type: "note",
     summary: "legitimate duplicate needle"
   };
+  const shardDuplicate = {
+    ts: "2026-05-05T12:00:00.000Z",
+    type: "note",
+    summary: "legitimate duplicate needle across immutable shards"
+  };
   const serialized = formatJsonlEntry(duplicate);
+  const serializedShard = formatJsonlEntry(shardDuplicate);
 
   fs.writeFileSync(path.join(memoryDir, "events.jsonl"), `${serialized}${serialized}`);
   fs.writeFileSync(path.join(memoryDir, "events-archive.jsonl"), serialized, { mode: 0o600 });
+  fs.writeFileSync(path.join(memoryDir, "events-archive.000001.jsonl"), serializedShard, { mode: 0o600 });
+  fs.writeFileSync(path.join(memoryDir, "events-archive.000002.jsonl"), serializedShard, { mode: 0o600 });
+  fs.writeFileSync(path.join(memoryDir, "signals-archive.jsonl"), serialized, { mode: 0o600 });
   fs.writeFileSync(path.join(signalsDir, "laptop-2026-05-06.jsonl"), serialized);
   fs.writeFileSync(path.join(signalsDir, "mini-2026-05-06.jsonl"), serialized);
 
   const results = await searchMemory(memoryDir, "legitimate duplicate needle", { limit: 10 });
 
-  assert.equal(results.length, 4, "one event retry copy is suppressed without collapsing canonical duplicates");
-  assert.equal(results.filter(({ source }) => source === "memory/events.jsonl").length, 1);
+  assert.equal(results.length, 6, "one event retry copy is suppressed without collapsing canonical duplicates");
+  assert.equal(results.filter(({ source }) => source === "memory/events.jsonl").length, 2);
+  assert.deepEqual(
+    results.filter(({ source }) => source.includes("events-archive.00000")).map(({ source }) => source).sort(),
+    [
+      "memory/events-archive.000001.jsonl",
+      "memory/events-archive.000002.jsonl"
+    ]
+  );
   assert.deepEqual(
     results.filter(({ source }) => source.startsWith("memory/signals/")).map(({ source }) => source).sort(),
     [
@@ -459,4 +475,5 @@ test("searchMemory preserves legitimate identical records outside retry overlap"
       "memory/signals/mini-2026-05-06.jsonl"
     ]
   );
+  assert.equal(results.some(({ source }) => source === "memory/signals-archive.jsonl"), false);
 });

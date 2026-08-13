@@ -117,8 +117,8 @@ test("memory search rejects a rotation that changes the observed archive generat
   let oldGenerationResult = null;
   const reader = {
     ...baseReader,
-    withScopePreflight(scopes, prepare, callback) {
-      return baseReader.withScopePreflight(scopes, prepare, async (transaction) => {
+    withScopePreflight(scopes, inspect, discover, execute, callback) {
+      return baseReader.withScopePreflight(scopes, inspect, discover, execute, async (transaction) => {
         const result = await callback(transaction);
         oldGenerationResult = result;
         fs.writeFileSync(
@@ -136,6 +136,35 @@ test("memory search rejects a rotation that changes the observed archive generat
     (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
   );
   assert.match(JSON.stringify(oldGenerationResult), /ARCHIVE_RACE_CANARY/);
+});
+
+test("memory search revalidates retained JSONL after ranking and before publishing", async () => {
+  const root = tmpDir();
+  const memoryDir = path.join(root, "memory");
+  const eventsPath = path.join(memoryDir, "events.jsonl");
+  fs.mkdirSync(memoryDir);
+  fs.writeFileSync(eventsPath, '{"summary":"RETAINED_JSONL_CANARY"}\n');
+  const baseReader = createEvidenceReader({ roots: [root] });
+  const reader = {
+    ...baseReader,
+    withScopePreflight(scopes, inspect, discover, execute, callback) {
+      return baseReader.withScopePreflight(scopes, inspect, discover, execute, async (transaction) => {
+        const result = await callback(transaction);
+        fs.writeFileSync(eventsPath, '{"summary":"RETAINED_JSONL_CHANGED"}\n');
+        return result;
+      });
+    }
+  };
+
+  await assert.rejects(
+    () => searchAios({
+      aiosPath: root,
+      query: "RETAINED_JSONL_CANARY",
+      scope: "memory",
+      evidenceReader: reader
+    }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
 });
 
 test("memory search fails closed on a linked numbered archive shard", async () => {
@@ -306,6 +335,120 @@ test("all-scope search returns unaffected results with a frozen path-free ceilin
   assert.equal(Object.isFrozen(groups.omissions[0].observed), true);
   assert.equal(Object.isFrozen(groups.omissions[0].recovery), true);
   assert.doesNotMatch(JSON.stringify(groups.omissions), new RegExp(parent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("all-scope preflight keeps aggregate physical work inside one request budget", async () => {
+  const root = tmpDir();
+  const context = path.join(root, "context");
+  const vault = path.join(root, "vault");
+  fs.mkdirSync(context);
+  fs.mkdirSync(vault);
+  for (const directory of [context, vault]) {
+    fs.writeFileSync(path.join(directory, "one.md"), "needle!\n");
+    fs.writeFileSync(path.join(directory, "two.md"), "needle!\n");
+  }
+  const measuredDirectories = new Set([path.resolve(context), path.resolve(vault)]);
+  const limits = {
+    maxBytes: 16,
+    maxFiles: 2,
+    maxEntries: 2,
+    maxFileBytes: 8,
+    maxDirectoryEntries: 10
+  };
+
+  for (const delayedDirectory of measuredDirectories) {
+    const physical = { bytes: 0, files: 0, entries: 0 };
+    const filesystem = new Proxy(fsp, {
+      get(target, property) {
+        if (property === "open") {
+          return async (filePath, ...args) => {
+            const resolved = path.resolve(String(filePath));
+            if (path.dirname(resolved) === delayedDirectory) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            const handle = await fsp.open(filePath, ...args);
+            if (!measuredDirectories.has(path.dirname(resolved))) return handle;
+            physical.files += 1;
+            return Object.create(handle, {
+              read: { value: async (...readArgs) => {
+                const result = await handle.read(...readArgs);
+                physical.bytes += result.bytesRead;
+                return result;
+              } }
+            });
+          };
+        }
+        if (property === "opendir") {
+          return async (directoryPath, ...args) => {
+            const directory = await fsp.opendir(directoryPath, ...args);
+            if (!measuredDirectories.has(path.resolve(String(directoryPath)))) return directory;
+            return new Proxy(directory, {
+              get(dirTarget, dirProperty) {
+                if (dirProperty === "read") {
+                  return async (...readArgs) => {
+                    const entry = await directory.read(...readArgs);
+                    if (entry) physical.entries += 1;
+                    return entry;
+                  };
+                }
+                const value = Reflect.get(dirTarget, dirProperty, dirTarget);
+                return typeof value === "function" ? value.bind(dirTarget) : value;
+              }
+            });
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+
+    const groups = await searchAios({
+      aiosPath: root,
+      query: "needle",
+      evidenceReader: createEvidenceReader({ roots: [root], filesystem, limits })
+    });
+
+    assert.ok(groups.some(({ results }) => results.length > 0));
+    assert.ok(physical.files > 0 && physical.bytes > 0, JSON.stringify({ delayedDirectory, physical }));
+    assert.ok(physical.bytes <= limits.maxBytes, JSON.stringify({ delayedDirectory, physical }));
+    assert.ok(physical.files <= limits.maxFiles, JSON.stringify({ delayedDirectory, physical }));
+    assert.ok(physical.entries <= limits.maxEntries, JSON.stringify({ delayedDirectory, physical }));
+  }
+});
+
+test("session discovery retains catalog and body bytes without rereading before ranking", async () => {
+  const root = tmpDir();
+  const sessionsDir = path.join(root, "memory", "sessions");
+  const datedDir = path.join(sessionsDir, "2026-08-13");
+  const bodyPath = path.join(datedDir, "session.md");
+  const indexPath = path.join(sessionsDir, "index.jsonl");
+  fs.mkdirSync(datedDir, { recursive: true });
+  fs.writeFileSync(bodyPath, "---\ntitle: Session\n---\n\nSESSION_DISCOVERY_CANARY\n");
+  fs.writeFileSync(indexPath, `${JSON.stringify({
+    session_id: "session-001",
+    agent: "codex",
+    captured_at: "2026-08-13T10:00:00.000Z",
+    title: "Unrelated title",
+    path: "memory/sessions/2026-08-13/session.md"
+  })}\n`);
+  const opens = new Map();
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (filePath, ...args) => {
+    const resolved = path.resolve(String(filePath));
+    opens.set(resolved, (opens.get(resolved) || 0) + 1);
+    return fsp.open(filePath, ...args);
+  };
+
+  const [group] = await searchAios({
+    aiosPath: root,
+    query: "SESSION_DISCOVERY_CANARY",
+    scope: "sessions",
+    evidenceReader: createEvidenceReader({ roots: [root], filesystem })
+  });
+
+  assert.equal(group.results[0].session_id, "session-001");
+  assert.equal(opens.get(path.resolve(indexPath)), 1);
+  assert.equal(opens.get(path.resolve(bodyPath)), 1);
 });
 
 test("scope search distinguishes every skippable ceiling without catching integrity failures", async (t) => {

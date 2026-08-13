@@ -1,5 +1,5 @@
 import path from "node:path";
-import { createEvidenceReader } from "./evidence-reader.mjs";
+import { createEvidenceReader, EvidenceReadError } from "./evidence-reader.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 import { resolvePortableProjectIdentity, validateProjectSelector } from "./projects.mjs";
 import { haystackHasInflectionOf } from "./search-inflections.mjs";
@@ -128,13 +128,27 @@ export async function searchAios({
 
   return reader.withScopePreflight(
     scopes,
-    (name, scopeReader) => searchScope(name, {
+    (name, scopeReader) => inspectSearchScope(name, {
       aiosPath: resolvedAiosPath,
       vaultPath: resolvedVaultPath,
       vaultRoot,
       query,
       limit,
       projectIdentity,
+      sessionFilters,
+      reader: scopeReader
+    }),
+    (name, scopeReader, prepared) => discoverSearchScope(name, prepared, {
+      aiosPath: resolvedAiosPath,
+      query,
+      limit,
+      sessionFilters,
+      reader: scopeReader
+    }),
+    (name, scopeReader, prepared) => executeDiscoveredScope(name, prepared, {
+      aiosPath: resolvedAiosPath,
+      query,
+      limit,
       sessionFilters,
       reader: scopeReader
     }),
@@ -173,95 +187,119 @@ function attachSearchMetadata(groups, scope, omissions) {
   return groups;
 }
 
-async function searchScope(scope, {
+async function inspectSearchScope(scope, {
   aiosPath,
   vaultPath,
   vaultRoot,
   query,
-  limit = DEFAULT_LIMIT,
-  projectIdentity = null,
-  sessionFilters = {},
+  limit,
+  projectIdentity,
+  sessionFilters,
   reader
 }) {
   if (scope === "sessions") {
-    return searchSessionsScope(aiosPath, query, { limit, reader, ...sessionFilters });
+    return inspectSessionsScope(aiosPath, { reader });
   }
   if (scope === "memory") {
-    const memoryDir = path.join(aiosPath, "memory");
-    const corpora = [];
-    corpora.push(await searchMemoryDir(memoryDir, query, { limit, reader, root: aiosPath }));
-    for (const relative of MEMORY_NOTE_DIRS) {
-      corpora.push(await searchMarkdownDir(path.join(memoryDir, relative), query, {
-        limit,
-        sourcePrefix: `memory/${relative}`,
-        reader,
-        root: aiosPath
-      }));
-    }
-    return interleaveByRank(corpora, limit);
-  }
-  if (scope === "context") {
-    return searchMarkdownDir(path.join(aiosPath, "context"), query, {
-      limit,
-      sourcePrefix: "context",
+    return inspectMemoryScope(path.join(aiosPath, "memory"), {
       reader,
       root: aiosPath
     });
   }
-  if (scope === "vault") {
-    return searchMarkdownDir(vaultPath, query, {
+  const config = markdownScopeConfig(scope, {
+    aiosPath,
+    vaultPath,
+    vaultRoot,
+    projectIdentity
+  });
+  if (!config) return Object.freeze({ kind: "empty" });
+  const prepared = await reader.prepareTextCorpus(
+    config.root,
+    config.dir,
+    {
+      extensions: config.extensions,
+      includeFile: config.includeFile,
+      skipEntry: shouldSkipEntry,
+      concurrency: 32
+    }
+  );
+  return Object.freeze({ kind: "markdown", config, prepared });
+}
+
+async function discoverSearchScope(scope, prepared, {
+  aiosPath,
+  query,
+  limit,
+  sessionFilters,
+  reader
+}) {
+  if (scope === "sessions") {
+    return discoverSessionsScope(aiosPath, query, prepared, { limit, reader, ...sessionFilters });
+  }
+  if (scope === "memory") {
+    return discoverMemoryScope(prepared, { reader });
+  }
+  return prepared;
+}
+
+async function executeDiscoveredScope(_scope, prepared, {
+  aiosPath,
+  query,
+  limit,
+  sessionFilters,
+  reader
+}) {
+  if (prepared?.kind === "sessions") {
+    return searchDiscoveredSessions(aiosPath, query, prepared, {
       limit,
-      sourcePrefix: "vault",
       reader,
-      root: vaultRoot
+      ...sessionFilters
     });
+  }
+  if (prepared?.kind === "memory") {
+    return searchDiscoveredMemory(prepared, query, { limit, reader });
+  }
+  if (prepared?.kind === "markdown") {
+    return searchPreparedMarkdownDir(prepared.prepared, prepared.config, query, { limit, reader });
+  }
+  return [];
+}
+
+function markdownScopeConfig(scope, { aiosPath, vaultPath, vaultRoot, projectIdentity }) {
+  if (scope === "context") {
+    return Object.freeze({ dir: path.join(aiosPath, "context"), root: aiosPath, sourcePrefix: "context", extensions: [".md"] });
+  }
+  if (scope === "vault") {
+    return Object.freeze({ dir: vaultPath, root: vaultRoot, sourcePrefix: "vault", extensions: [".md"] });
   }
   if (scope === "projects") {
     if (!projectIdentity) validateProjectSelector(null);
-    return searchMarkdownDir(path.join(aiosPath, "projects", projectIdentity.slug), query, {
-      limit,
+    return Object.freeze({
+      dir: path.join(aiosPath, "projects", projectIdentity.slug),
+      root: aiosPath,
       sourcePrefix: `projects/${projectIdentity.slug}`,
-      reader,
-      root: aiosPath
+      extensions: [".md"]
     });
   }
   if (scope === "decisions") {
-    return searchMarkdownDir(path.join(aiosPath, "decisions"), query, {
-      limit,
-      sourcePrefix: "decisions",
-      reader,
-      root: aiosPath
-    });
+    return Object.freeze({ dir: path.join(aiosPath, "decisions"), root: aiosPath, sourcePrefix: "decisions", extensions: [".md"] });
   }
   if (scope === "skills") {
-    return searchMarkdownDir(path.join(aiosPath, "skills"), query, {
-      limit,
-      sourcePrefix: "skills",
-      extensions: [".md"],
-      reader,
-      root: aiosPath
-    });
+    return Object.freeze({ dir: path.join(aiosPath, "skills"), root: aiosPath, sourcePrefix: "skills", extensions: [".md"] });
   }
   if (scope === "references") {
-    return searchMarkdownDir(path.join(aiosPath, "references"), query, {
-      limit,
-      sourcePrefix: "references",
-      extensions: [".md"],
-      reader,
-      root: aiosPath
-    });
+    return Object.freeze({ dir: path.join(aiosPath, "references"), root: aiosPath, sourcePrefix: "references", extensions: [".md"] });
   }
   if (scope === "plugins") {
-    return searchMarkdownDir(path.join(aiosPath, "plugins"), query, {
-      limit,
+    return Object.freeze({
+      dir: path.join(aiosPath, "plugins"),
+      root: aiosPath,
       sourcePrefix: "plugins",
       extensions: [".md", ".json"],
-      includeFile: (filePath) => filePath.endsWith(".md") || path.basename(filePath) === "manifest.json",
-      reader,
-      root: aiosPath
+      includeFile: (filePath) => filePath.endsWith(".md") || path.basename(filePath) === "manifest.json"
     });
   }
-  return [];
+  return null;
 }
 
 // Each corpus arrives already ranked and already capped at the limit, but their
@@ -324,24 +362,106 @@ export async function searchMemoryDir(memoryDir, query, {
   root = memoryDir
 } = {}) {
   const activeReader = reader || createEvidenceReader({ roots: [path.resolve(root)] });
-  const archives = await listMemoryArchiveSources(memoryDir, { reader: activeReader, root });
-  const sources = [
-    { filePath: path.join(memoryDir, "events.jsonl"), source: "memory/events.jsonl" },
-    ...archives,
-    ...await listSignalSources(path.join(memoryDir, "signals"), { reader: activeReader, root })
-  ];
+  const sources = await memorySourceDescriptors(memoryDir, { reader: activeReader, root });
+  const entriesBySource = new Map();
+  for (const { filePath, source } of sources) {
+    entriesBySource.set(source, await activeReader.readJsonl(root, filePath));
+  }
+  return rankMemorySources(sources, entriesBySource, query, limit);
+}
 
+async function inspectMemoryScope(memoryDir, { reader, root }) {
+  const sources = await memorySourceDescriptors(memoryDir, { reader, root });
+  const entriesBySource = new Map();
+  for (const { filePath, source } of sources) {
+    entriesBySource.set(source, await reader.prepareJsonlMetadata(root, filePath));
+  }
+  const noteCorpora = [];
+  for (const relative of MEMORY_NOTE_DIRS) {
+    const dir = path.join(memoryDir, relative);
+    noteCorpora.push(Object.freeze({
+      relative,
+      dir,
+      prepared: await reader.prepareTextCorpus(
+        root,
+        dir,
+        { extensions: [".md"], skipEntry: shouldSkipEntry, concurrency: 32 }
+      )
+    }));
+  }
+  return Object.freeze({ kind: "memory", sources, entriesBySource, noteCorpora });
+}
+
+async function discoverMemoryScope(prepared, { reader }) {
+  const entriesBySource = new Map();
+  for (const [source, metadata] of prepared.entriesBySource) {
+    entriesBySource.set(source, await reader.materializePreparedJsonl(metadata));
+  }
+  return Object.freeze({ ...prepared, entriesBySource });
+}
+
+async function searchDiscoveredMemory(prepared, query, { limit, reader }) {
+  const entriesBySource = new Map(
+    [...prepared.entriesBySource].map(([source, entries]) => [source, reader.readPreparedJsonl(entries)])
+  );
+  const corpora = [rankMemorySources(prepared.sources, entriesBySource, query, limit)];
+  for (const note of prepared.noteCorpora) {
+    corpora.push(await searchPreparedMarkdownDir(
+      note.prepared,
+      { dir: note.dir, sourcePrefix: `memory/${note.relative}` },
+      query,
+      { limit, reader }
+    ));
+  }
+  return interleaveByRank(corpora, limit);
+}
+
+async function memorySourceDescriptors(memoryDir, { reader, root }) {
+  const archives = await listMemoryArchiveSources(memoryDir, { reader, root });
+  const eventSource = {
+    filePath: path.join(memoryDir, "events.jsonl"),
+    source: "memory/events.jsonl",
+    family: "events",
+    generation: "live"
+  };
+  const signalSources = (await listSignalSources(path.join(memoryDir, "signals"), { reader, root }))
+    .map((source) => ({
+      ...source,
+      family: "signals",
+      generation: "live"
+    }));
+  const liveSourcesByFamily = new Map([
+    ["events", [eventSource.source]],
+    ["signals", signalSources.map(({ source }) => source)]
+  ]);
+  return [
+    eventSource,
+    ...archives.map((source) => source.generation === "archive-active"
+      ? {
+        ...source,
+        retryAgainst: [
+          ...source.retryAgainst,
+          ...liveSourcesByFamily.get(source.family)
+        ]
+      }
+      : source),
+    ...signalSources
+  ];
+}
+
+function rankMemorySources(sources, entriesBySource, query, limit) {
   // Every scanned entry (matched or not) feeds the corpus so IDF reflects how
   // common a term actually is in this folder, not just among the hits.
   const docs = [];
   const candidates = [];
-  const seenEntries = new Set();
-  for (const { filePath, source } of sources) {
-    const entries = await activeReader.readJsonl(root, filePath);
+  for (const { source, retryAgainst = [] } of sources) {
+    const retryOverlap = serializedEntryCounts(
+      retryAgainst.flatMap((counterpart) => entriesBySource.get(counterpart) || [])
+    );
+    const entries = entriesBySource.get(source) || [];
     for (const entry of entries) {
       const text = JSON.stringify(entry);
-      if (seenEntries.has(text)) continue;
-      seenEntries.add(text);
+      if (consumeSerializedEntry(retryOverlap, text)) continue;
       docs.push(text);
       const match = matchJsonEntry(entry, query);
       if (!match) continue;
@@ -383,18 +503,44 @@ async function listMemoryArchiveSources(memoryDir, { reader, root }) {
       .map((entry) => ({ entry, match: entry.name.match(matcher) }))
       .filter(({ match }) => match)
       .sort((left, right) => Number(left.match[1]) - Number(right.match[1]));
+    let newestShardSource = null;
     for (const { entry } of shards) {
+      const source = `memory/${entry.name}`;
       sources.push({
         filePath: path.join(memoryDir, entry.name),
-        source: `memory/${entry.name}`
+        source,
+        family: family === "events-archive" ? "events" : "signals",
+        generation: "archive-shard"
       });
+      newestShardSource = source;
     }
+    const source = `memory/${family}.jsonl`;
     sources.push({
       filePath: path.join(memoryDir, `${family}.jsonl`),
-      source: `memory/${family}.jsonl`
+      source,
+      family: family === "events-archive" ? "events" : "signals",
+      generation: "archive-active",
+      retryAgainst: newestShardSource ? [newestShardSource] : []
     });
   }
   return sources;
+}
+
+function serializedEntryCounts(entries) {
+  const counts = new Map();
+  for (const entry of entries) {
+    const serialized = JSON.stringify(entry);
+    counts.set(serialized, (counts.get(serialized) || 0) + 1);
+  }
+  return counts;
+}
+
+function consumeSerializedEntry(counts, serialized) {
+  const remaining = counts.get(serialized) || 0;
+  if (remaining === 0) return false;
+  if (remaining === 1) counts.delete(serialized);
+  else counts.set(serialized, remaining - 1);
+  return true;
 }
 
 export async function searchJsonlEntries(filePath, query, { source, reader = null, root = path.dirname(filePath) }) {
@@ -429,45 +575,59 @@ export async function searchMarkdownDir(dir, query, {
     root,
     dir,
     { extensions, includeFile, skipEntry: shouldSkipEntry, concurrency: CONCURRENCY },
-    async (transaction) => {
-      // Every accepted file is observed once by the transaction. Matching,
-      // snippet construction, corpus statistics, and ranking all stay inside
-      // its callback, so no derived result can escape before the transaction's
-      // final directory-generation validation succeeds.
-      const observedFiles = await transaction.mapFiles((observed) =>
-        collectSearchFile(observed, dir, query, sourcePrefix)
-      );
-      const docs = [];
-      const candidates = [];
-      for (const item of observedFiles) {
-        if (!item) continue;
-        docs.push(item.content);
-        if (item.candidate) candidates.push(item.candidate);
-      }
-
-      const corpus = buildCorpusStats(docs);
-      const now = Date.now();
-      const terms = queryTerms(query);
-      const ranked = candidates.map((candidate) => {
-        const ageMs = candidate.mtimeMs === null ? null : now - candidate.mtimeMs;
-        const haystack = candidate.content.toLowerCase();
-        const matchedTerms = terms.filter((term) => haystack.includes(term));
-        const rank = rankSearchHit({
-          kind: candidate.kind,
-          matchedTerms,
-          corpus,
-          ageMs,
-          structuralBoost: candidate.structuralBoost
-        });
-        return { result: candidate.result, rank };
-      });
-
-      return ranked
-        .sort((a, b) => (b.rank - a.rank) || a.result.file.localeCompare(b.result.file))
-        .slice(0, limit)
-        .map(({ result }) => result);
-    }
+    (transaction) => rankMarkdownTransaction(transaction, dir, query, sourcePrefix, limit)
   );
+}
+
+async function searchPreparedMarkdownDir(prepared, config, query, { limit, reader }) {
+  return reader.withPreparedTextCorpus(
+    prepared,
+    (transaction) => rankMarkdownTransaction(
+      transaction,
+      config.dir,
+      query,
+      config.sourcePrefix,
+      limit
+    )
+  );
+}
+
+async function rankMarkdownTransaction(transaction, dir, query, sourcePrefix, limit) {
+  // Every accepted file is observed once by the transaction. Matching,
+  // snippet construction, corpus statistics, and ranking all stay inside
+  // its callback, so no derived result can escape before final validation.
+  const observedFiles = await transaction.mapFiles((observed) =>
+    collectSearchFile(observed, dir, query, sourcePrefix)
+  );
+  const docs = [];
+  const candidates = [];
+  for (const item of observedFiles) {
+    if (!item) continue;
+    docs.push(item.content);
+    if (item.candidate) candidates.push(item.candidate);
+  }
+
+  const corpus = buildCorpusStats(docs);
+  const now = Date.now();
+  const terms = queryTerms(query);
+  const ranked = candidates.map((candidate) => {
+    const ageMs = candidate.mtimeMs === null ? null : now - candidate.mtimeMs;
+    const haystack = candidate.content.toLowerCase();
+    const matchedTerms = terms.filter((term) => haystack.includes(term));
+    const rank = rankSearchHit({
+      kind: candidate.kind,
+      matchedTerms,
+      corpus,
+      ageMs,
+      structuralBoost: candidate.structuralBoost
+    });
+    return { result: candidate.result, rank };
+  });
+
+  return ranked
+    .sort((a, b) => (b.rank - a.rank) || a.result.file.localeCompare(b.result.file))
+    .slice(0, limit)
+    .map(({ result }) => result);
 }
 
 function collectSearchFile({ filePath, content, mtimeMs }, dir, query, sourcePrefix) {
@@ -768,6 +928,68 @@ async function searchSessionsScope(aiosPath, query, {
     project: entry.project,
     matches: snippet ? [{ line: 0, content: snippet, match: "phrase", area: "body" }] : [],
   }));
+}
+
+async function inspectSessionsScope(aiosPath, { reader }) {
+  const sessionsRoot = path.resolve(aiosPath, "memory", "sessions");
+  const indexPath = path.join(sessionsRoot, "index.jsonl");
+  return Object.freeze({
+    kind: "sessions-metadata",
+    index: await reader.prepareJsonlMetadata(aiosPath, indexPath)
+  });
+}
+
+async function discoverSessionsScope(aiosPath, _query, inspected, {
+  agent,
+  project,
+  since,
+  reader
+} = {}) {
+  const sessionsRoot = path.resolve(aiosPath, "memory", "sessions");
+  const index = await reader.materializePreparedJsonl(inspected.index);
+  const { filterSessions } = await import("./sessions.mjs");
+  const entries = await filterSessions(aiosPath, {
+    agent,
+    project,
+    since,
+    readOnly: true,
+    root: aiosPath,
+    reader: {
+      readJsonl: async () => reader.readPreparedJsonl(index)
+    }
+  });
+  const bodies = new Map();
+  for (const entry of entries) {
+    if (typeof entry.path !== "string" || entry.path.length === 0 || path.isAbsolute(entry.path)) {
+      throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
+    }
+    const filePath = path.resolve(aiosPath, entry.path);
+    if (
+      !isPathWithinLexically(path.resolve(aiosPath), filePath)
+      || !isPathWithinLexically(sessionsRoot, filePath)
+    ) {
+      throw new EvidenceReadError("DOTAIOS_EVIDENCE_PATH_UNSAFE");
+    }
+    bodies.set(filePath, await reader.prepareTextMetadata(aiosPath, filePath));
+  }
+  return Object.freeze({ kind: "sessions", index, bodies });
+}
+
+async function searchDiscoveredSessions(aiosPath, query, prepared, options) {
+  const bodyContents = new Map();
+  const replayReader = {
+    readJsonl: async () => options.reader.readPreparedJsonl(prepared.index),
+    readText: async (_root, filePath) => {
+      const resolved = path.resolve(filePath);
+      const body = prepared.bodies.get(resolved);
+      if (!body) return null;
+      if (!bodyContents.has(resolved)) {
+        bodyContents.set(resolved, options.reader.materializePreparedText(body));
+      }
+      return options.reader.readPreparedText(await bodyContents.get(resolved));
+    }
+  };
+  return searchSessionsScope(aiosPath, query, { ...options, reader: replayReader });
 }
 
 function compareTimestampsDesc(a, b) {

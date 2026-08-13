@@ -670,15 +670,19 @@ test("scope preflight protects later scopes deterministically before redistribut
   const result = await reader.withScopePreflight(
     ["large", "small", "later"],
     async (scope, scopeReader) => {
-      const value = await scopeReader.withTextCorpus(
+      const prepared = await scopeReader.prepareTextCorpus(
         root,
         path.join(root, scope),
-        { extensions: [".md"] },
-        (transaction) => transaction.mapFiles(({ content }) => content)
+        { extensions: [".md"] }
       );
       if (scope === "large") await new Promise((resolve) => setTimeout(resolve, 10));
-      return value;
+      return prepared;
     },
+    (_scope, _scopeReader, prepared) => prepared,
+    (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+      prepared,
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
     (transaction) => ({
       admitted: ["large", "small", "later"].filter((scope) => transaction.has(scope)),
       omissions: transaction.omissions
@@ -707,10 +711,14 @@ test("scope preflight revalidates a partially enumerated omitted directory befor
   await assert.rejects(
     () => reader.withScopePreflight(
       ["oversized", "safe"],
-      (scope, scopeReader) => scopeReader.withTextCorpus(
+      (scope, scopeReader) => scopeReader.prepareTextCorpus(
         root,
         path.join(root, scope),
-        { extensions: [".md"] },
+        { extensions: [".md"] }
+      ),
+      (_scope, _scopeReader, prepared) => prepared,
+      (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+        prepared,
         (transaction) => transaction.mapFiles(({ content }) => content)
       ),
       (transaction) => {
@@ -739,10 +747,14 @@ test("scope preflight caps omissions at 32 plus one frozen aggregate remainder",
 
   const omissions = await reader.withScopePreflight(
     scopes,
-    (scope, scopeReader) => scopeReader.withTextCorpus(
+    (scope, scopeReader) => scopeReader.prepareTextCorpus(
       root,
       path.join(root, scope),
-      { extensions: [".md"] },
+      { extensions: [".md"] }
+    ),
+    (_scope, _scopeReader, prepared) => prepared,
+    (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+      prepared,
       (transaction) => transaction.mapFiles(({ content }) => content)
     ),
     (transaction) => transaction.omissions
@@ -772,11 +784,16 @@ test("scope preflight fails closed when one scope observes conflicting generatio
   await assert.rejects(
     () => reader.withScopePreflight(
       ["memory"],
-      async (_scope, scopeReader) => {
-        await scopeReader.readJsonl(root, path.join(root, "events.jsonl"));
+      (_scope, scopeReader) => scopeReader.prepareJsonlMetadata(
+        root,
+        path.join(root, "events.jsonl")
+      ),
+      async (_scope, scopeReader, prepared) => {
+        await scopeReader.materializePreparedJsonl(prepared);
         fs.writeFileSync(path.join(root, "late.md"), "late\n");
-        return scopeReader.readJsonl(root, path.join(root, "events.jsonl"));
+        return scopeReader.materializePreparedJsonl(prepared);
       },
+      () => "must not execute",
       () => "must not escape"
     ),
     (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
