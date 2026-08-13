@@ -11,17 +11,51 @@ import {
 } from "./contained-read.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 
+// These bound an explicit, user-invoked read of the person's own folder —
+// search, skill resolution, project-source retrieval. That is a different job
+// from the bounded startup projection, which must stay small on every launch
+// and keeps its own much tighter budget in working-context.mjs.
+//
+// They were the projection's numbers: 512 files, 4,096 entries, 16 MiB. A
+// lived-in AIOS passes all three long before it feels large — one real folder
+// measured ~3,300 markdown files, ~53,000 traversed entries, and 39 MB of
+// markdown — so every query on it failed closed, including queries that should
+// have matched nothing. Sized here for a corpus someone has actually
+// accumulated, with the ceilings kept as a runaway guard rather than a working
+// limit. Raising one alone only moves the failure to the next.
 export const DEFAULT_EVIDENCE_READ_LIMITS = Object.freeze({
-  maxBytes: 16 * 1024 * 1024,
-  maxFiles: 512,
-  maxEntries: 4096,
-  maxFileBytes: 1024 * 1024,
-  maxDirectoryEntries: 1024
+  maxBytes: 256 * 1024 * 1024,
+  maxFiles: 50_000,
+  maxEntries: 500_000,
+  maxFileBytes: 4 * 1024 * 1024,
+  maxDirectoryEntries: 8192
 });
+
+// A refusal the person cannot act on is barely better than a crash. Name what
+// stopped the read and what they can do about it — without naming a path, which
+// would leak the shape of their disk to an agent.
+//
+// This error reaches `search`, `skills`, `activate`, and MCP alike, so the
+// remedy has to be true for all of them: no command-specific flags, and nothing
+// that names a command which would not actually help. `dotaios cleanup` in
+// particular does not shrink a byte budget — it moves entries into
+// events-archive.jsonl and signals-archive.jsonl, which search.mjs:317-318 then
+// reads as well.
+const EVIDENCE_READ_FAILURES = {
+  DOTAIOS_EVIDENCE_BUDGET_EXCEEDED:
+    "DotAIOS stopped reading: this folder is past the safe read budget for one request. "
+    + "Ask for a narrower part of it, or move older material out of the folder.",
+  DOTAIOS_EVIDENCE_FILE_TOO_LARGE:
+    "DotAIOS stopped reading: one file is past the safe per-file size limit. "
+    + "Split that file, or move it out of the folder.",
+  DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE:
+    "DotAIOS stopped reading: one directory holds more entries than the safe limit. "
+    + "Move some of its entries elsewhere."
+};
 
 export class EvidenceReadError extends Error {
   constructor(code = "DOTAIOS_EVIDENCE_READ_FAILED") {
-    super("DotAIOS could not read the evidence corpus safely.");
+    super(EVIDENCE_READ_FAILURES[code] || "DotAIOS could not read the evidence corpus safely.");
     this.name = "EvidenceReadError";
     this.code = code;
   }

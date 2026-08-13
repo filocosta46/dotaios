@@ -103,16 +103,26 @@ test("search rejects invalid UTF-8 without replacing bytes", async () => {
   assert.deepEqual(fs.readFileSync(filePath), bytes);
 });
 
-test("search fails closed on the 513th opened source file", async () => {
+// This asserted the budget by its number — "the 513th file" — so it passed only
+// while the default was the bounded projection's 512, which made every search on
+// a real folder fail closed. The property worth keeping is that an exhausted
+// budget still refuses rather than quietly returning a partial corpus; the
+// number it happens to be set to is not that property. The default's real size
+// is covered in tests/core/search_corpus_scale.test.mjs.
+test("search fails closed when its read budget is genuinely exhausted", async () => {
   const root = tmpDir();
   const context = path.join(root, "context");
   fs.mkdirSync(context);
-  for (let index = 0; index < 513; index += 1) {
+  for (let index = 0; index < 8; index += 1) {
     fs.writeFileSync(path.join(context, `${String(index).padStart(3, "0")}.md`), `# Note ${index}\n\nneedle\n`);
   }
+  const reader = createEvidenceReader({
+    roots: [root],
+    limits: { maxBytes: 4096, maxFiles: 2, maxEntries: 4, maxFileBytes: 4096 }
+  });
 
   await assert.rejects(
-    () => searchAios({ aiosPath: root, query: "needle", scope: "context" }),
+    () => searchAios({ aiosPath: root, query: "needle", scope: "context", evidenceReader: reader }),
     (error) => error?.code === "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED"
   );
 });
