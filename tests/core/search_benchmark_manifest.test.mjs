@@ -8,9 +8,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   assertExactResults,
+  createBenchmarkReport,
   generateFixture,
   loadManifest,
   manifestReceipt,
+  runPublicSearchBenchmarkSample,
+  runSafeCorpusReadBenchmarkSample,
+  assertPublicSearchOperationGate,
   runUnsafeBenchmarkOnlyRawSearchSample
 } from "../../scripts/bench-search.mjs";
 
@@ -59,6 +63,88 @@ test("the same manifest and seed produce the same fixture inventory and controll
   assert.equal(manifestReceipt(manifest), first.manifestSha256);
   assert.equal(first.fileCount, selection.fileCount);
   assert.ok(first.controlledResults["low-hit"].length > 0);
+});
+
+test("the safe benchmark sample measures complete default all-scope searchAios", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-public-search-benchmark-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const manifest = await loadManifest(manifestPath);
+  assert.deepEqual(manifest.corpus.fileCounts, [500, 2500, 10000], "the formal matrix stays fixed");
+  const fixtureRoot = path.join(root, "fixture");
+  const fixtureReceipt = await generateFixture({
+    manifest,
+    destination: fixtureRoot,
+    selection: { fileCount: 500, layout: "shallow", distribution: "prose" }
+  });
+  const query = manifest.queries.find(({ id }) => id === "low-hit");
+  const highHitQuery = manifest.queries.find(({ id }) => id === "high-hit");
+
+  const sample = await runPublicSearchBenchmarkSample({ manifest, fixtureRoot, fixtureReceipt, query });
+  const highHitSample = await runPublicSearchBenchmarkSample({
+    manifest,
+    fixtureRoot,
+    fixtureReceipt,
+    query: highHitQuery
+  });
+  const safeControl = await runSafeCorpusReadBenchmarkSample({ manifest, fixtureRoot, fixtureReceipt });
+
+  assert.deepEqual(sample.exactResults, fixtureReceipt.controlledResults[query.id]);
+  assert.ok(sample.exactResults.length > 0, "the controlled low-hit proof cannot be vacuous");
+  assert.deepEqual(highHitSample.exactResults, fixtureReceipt.controlledResults[highHitQuery.id]);
+  assert.ok(highHitSample.exactResults.length > 0, "the controlled high-hit proof cannot be vacuous");
+  assert.deepEqual(sample.surface, {
+    entryPoint: "searchAios",
+    requestedScope: "all",
+    completeness: "complete",
+    omissions: [],
+    returnedScopes: ["sessions", "context", "memory", "vault", "decisions", "skills", "references", "plugins"]
+  });
+  assert.doesNotThrow(() => assertPublicSearchOperationGate(
+    [
+      { id: query.id, warm: { operations: sample.operations } },
+      { id: highHitQuery.id, warm: { operations: highHitSample.operations } }
+    ],
+    { warm: { operations: safeControl.operations } }
+  ));
+});
+
+test("new benchmark reports are v2 while checked-in v1 receipts remain historical", async () => {
+  const manifest = await loadManifest(manifestPath);
+  const operations = { lstat: 10, realpath: 2, open: 1 };
+  const report = createBenchmarkReport({
+    manifest,
+    fixtureReceipt: {
+      inventorySha256: "0".repeat(64),
+      selection: { fileCount: 500, layout: "shallow", distribution: "prose" }
+    },
+    searches: [{ id: "low-hit", warm: { operations } }],
+    rawSearchControl: [],
+    rawReadControl: {},
+    safeCorpusReadControl: { warm: { operations } }
+  });
+
+  assert.equal(report.schemaVersion, "dotaios-search-benchmark-result/v2");
+  assert.deepEqual(report.searchSurface, {
+    entryPoint: "searchAios",
+    requestedScope: "all",
+    completeness: "complete"
+  });
+  assert.equal(report.operationGate.passed, true);
+});
+
+test("the public operation gate rejects per-file containment multiplication", () => {
+  const safeControl = { warm: { operations: { lstat: 2_100, realpath: 200, open: 500 } } };
+  assert.doesNotThrow(() => assertPublicSearchOperationGate(
+    [{ id: "optimized", warm: { operations: { lstat: 2_300, realpath: 210, open: 500 } } }],
+    safeControl
+  ));
+  assert.throws(
+    () => assertPublicSearchOperationGate(
+      [{ id: "regressed", warm: { operations: { lstat: 20_000, realpath: 9_000, open: 500 } } }],
+      safeControl
+    ),
+    /operation gate/i
+  );
 });
 
 test("any manifest corpus, query, or protocol change invalidates the receipt", async () => {

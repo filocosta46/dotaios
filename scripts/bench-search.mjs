@@ -8,10 +8,15 @@ import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { createEvidenceReader } from "../packages/core/src/evidence-reader.mjs";
-import { searchMarkdownDir } from "../packages/core/src/search.mjs";
+import { searchAios, searchMarkdownDir } from "../packages/core/src/search.mjs";
 
 const repoRoot = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 const defaultManifestPath = path.join(repoRoot, "benchmarks", "search", "manifest.json");
+const PUBLIC_SEARCH_DIRECTORY_OPERATION_ALLOWANCE = Object.freeze({
+  lstat: 512,
+  realpath: 256,
+  open: 16
+});
 const PROSE_WORDS = [
   "account", "action", "agent", "archive", "brief", "campaign", "client", "context",
   "decision", "delivery", "evidence", "experiment", "feedback", "handoff", "identity", "insight",
@@ -107,7 +112,7 @@ export async function runBenchmark({ manifest, fixtureRoot, fixtureReceipt }) {
     searches.push(await measureOperation({
       id: query.id,
       manifest,
-      operation: () => runContainedSearch({ manifest, fixtureRoot, fixtureReceipt, query })
+      operation: () => runPublicSearchBenchmarkSample({ manifest, fixtureRoot, fixtureReceipt, query })
     }));
   }
   const rawSearchControl = await measureRawSearchControl({ manifest, fixtureRoot, fixtureReceipt });
@@ -119,12 +124,31 @@ export async function runBenchmark({ manifest, fixtureRoot, fixtureReceipt }) {
   const safeCorpusReadControl = await measureOperation({
     id: "safe-corpus-read-control",
     manifest,
-    operation: () => runSafeCorpusReadControl({ manifest, fixtureRoot, fixtureReceipt })
+    operation: () => runSafeCorpusReadBenchmarkSample({ manifest, fixtureRoot, fixtureReceipt })
   });
   await verifyFixtureInventory(fixtureRoot, fixtureReceipt);
 
-  return {
-    schemaVersion: "dotaios-search-benchmark-result/v1",
+  return createBenchmarkReport({
+    manifest,
+    fixtureReceipt,
+    searches,
+    rawSearchControl,
+    rawReadControl,
+    safeCorpusReadControl
+  });
+}
+
+export function createBenchmarkReport({
+  manifest,
+  fixtureReceipt,
+  searches,
+  rawSearchControl,
+  rawReadControl,
+  safeCorpusReadControl
+}) {
+  const operationGate = assertPublicSearchOperationGate(searches, safeCorpusReadControl);
+  return Object.freeze({
+    schemaVersion: "dotaios-search-benchmark-result/v2",
     benchmarkId: manifest.benchmarkId,
     manifestSha256: manifestReceipt(manifest),
     inventorySha256: fixtureReceipt.inventorySha256,
@@ -132,10 +156,16 @@ export async function runBenchmark({ manifest, fixtureRoot, fixtureReceipt }) {
     runtime: runtimeReceipt(),
     protocol: { ...manifest.protocol },
     searches,
+    searchSurface: Object.freeze({
+      entryPoint: "searchAios",
+      requestedScope: "all",
+      completeness: "complete"
+    }),
+    operationGate,
     rawSearchControl,
     rawReadControl,
     safeCorpusReadControl
-  };
+  });
 }
 
 /**
@@ -207,20 +237,40 @@ export async function verifyFixtureInventory(fixtureRoot, fixtureReceipt) {
   return actualHash;
 }
 
-async function runContainedSearch({ manifest, fixtureRoot, fixtureReceipt, query }) {
+export async function runPublicSearchBenchmarkSample({ manifest, fixtureRoot, fixtureReceipt, query }) {
   const { filesystem, counts, acceptedFilePathCounts, containmentPathCounts } = countingFilesystem({ fixtureRoot, fixtureReceipt });
   const reader = createEvidenceReader({ roots: [fixtureRoot], filesystem });
   const rss = monitorRss(manifest.protocol.rssPollIntervalMs);
   const started = process.hrtime.bigint();
   try {
-    const results = await searchMarkdownDir(fixtureRoot, query.text, {
+    const groups = await searchAios({
+      aiosPath: fixtureRoot,
+      vaultPath: fixtureRoot,
+      query: query.text,
       limit: query.expectation.resultLimit ?? manifest.protocol.resultLimit,
-      sourcePrefix: "vault",
-      reader,
-      root: fixtureRoot
+      evidenceReader: reader
     });
+    if (groups.omissions.length > 0) {
+      throw new Error(`Public search benchmark was incomplete: ${JSON.stringify(groups.omissions)}.`);
+    }
+    const vault = groups.find((group) => group.scope === "vault");
+    if (!vault) throw new Error("Public search benchmark did not return the controlled vault scope.");
+    const results = vault.results;
     const sources = results.map(({ source }) => source);
+    if (query.expectation.kind !== "none" && (
+      fixtureReceipt.controlledResults[query.id].length === 0
+      || sources.length === 0
+    )) {
+      throw new Error(`Public search benchmark rejected vacuous controlled hits for ${query.id}.`);
+    }
     assertExactResults(sources, fixtureReceipt.controlledResults[query.id], { queryId: query.id });
+    const surface = Object.freeze({
+      entryPoint: "searchAios",
+      requestedScope: "all",
+      completeness: "complete",
+      omissions: Object.freeze([]),
+      returnedScopes: Object.freeze(groups.map(({ scope }) => scope))
+    });
     return {
       durationMs: elapsedMs(started),
       peakRssBytes: rss.stop(),
@@ -230,6 +280,7 @@ async function runContainedSearch({ manifest, fixtureRoot, fixtureReceipt, query
         containmentPaths: { ...containmentPathCounts }
       },
       readBudget: reader.snapshot(),
+      surface,
       exactResults: sources,
       outputSha256: sha256(canonicalJson(results))
     };
@@ -425,23 +476,31 @@ async function runRawReadControl({ manifest, fixtureRoot, fixtureReceipt }) {
   }
 }
 
-async function runSafeCorpusReadControl({ manifest, fixtureRoot, fixtureReceipt }) {
+export async function runSafeCorpusReadBenchmarkSample({ manifest, fixtureRoot, fixtureReceipt }) {
   const { filesystem, counts, acceptedFilePathCounts, containmentPathCounts } = countingFilesystem({ fixtureRoot, fixtureReceipt });
   const reader = createEvidenceReader({ roots: [fixtureRoot], filesystem });
   const rss = monitorRss(manifest.protocol.rssPollIntervalMs);
   const started = process.hrtime.bigint();
   try {
-    const exactResults = await reader.withTextCorpus(
-      fixtureRoot,
-      fixtureRoot,
-      { extensions: [".md"], concurrency: manifest.protocol.concurrency },
-      async (transaction) => {
-        const byteLengths = await transaction.mapFiles(({ content }) => Buffer.byteLength(content));
-        return {
-          fileCount: byteLengths.length,
-          totalBytes: byteLengths.reduce((sum, bytes) => sum + bytes, 0)
-        };
-      }
+    const exactResults = await reader.withScopePreflight(
+      ["corpus"],
+      (_scope, scopeReader) => scopeReader.prepareTextCorpus(
+        fixtureRoot,
+        fixtureRoot,
+        { extensions: [".md"], concurrency: manifest.protocol.concurrency }
+      ),
+      (_scope, _scopeReader, prepared) => prepared,
+      (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+        prepared,
+        async (transaction) => {
+          const byteLengths = await transaction.mapFiles(({ content }) => Buffer.byteLength(content));
+          return {
+            fileCount: byteLengths.length,
+            totalBytes: byteLengths.reduce((sum, bytes) => sum + bytes, 0)
+          };
+        }
+      ),
+      (transaction) => transaction.get("corpus")
     );
     if (exactResults.fileCount !== fixtureReceipt.fileCount || exactResults.totalBytes !== fixtureReceipt.totalBytes) {
       throw new Error(
@@ -483,9 +542,37 @@ async function measureOperation({ id, manifest, operation }) {
     id,
     cold: summarizeSamples(cold),
     warm: summarizeSamples(warm),
+    ...(warm[0].surface ? { surface: warm[0].surface } : {}),
     exactResults: warm[0].exactResults,
     outputSha256: warm[0].outputSha256
   };
+}
+
+export function assertPublicSearchOperationGate(
+  searches,
+  safeCorpusReadControl,
+  allowance = PUBLIC_SEARCH_DIRECTORY_OPERATION_ALLOWANCE
+) {
+  const control = safeCorpusReadControl?.warm?.operations;
+  if (!control) throw new Error("Public search operation gate requires the safe corpus-read control.");
+  for (const search of searches || []) {
+    const operations = search?.warm?.operations;
+    if (!operations) throw new Error(`Public search operation gate lacks operations for ${search?.id || "unknown"}.`);
+    for (const name of ["lstat", "realpath", "open"]) {
+      const maximum = control[name] + allowance[name];
+      if (operations[name] > maximum) {
+        throw new Error(
+          `Public search operation gate failed for ${search.id}:${name}: `
+          + `${operations[name]} > safe control ${control[name]} + directory allowance ${allowance[name]}.`
+        );
+      }
+    }
+  }
+  return Object.freeze({
+    comparison: "safe-corpus-read-control-plus-fixed-directory-allowance",
+    allowance: Object.freeze({ ...allowance }),
+    passed: true
+  });
 }
 
 function summarizeSamples(samples) {

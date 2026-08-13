@@ -2,12 +2,14 @@ import localFilesystem from "node:fs/promises";
 import path from "node:path";
 
 import {
+  assertContainedPathEntrySnapshotsUnchanged,
   assertContainedDirectorySnapshotsUnchanged,
   ContainedReadError,
   createContainedReadBudget,
   inspectContainedDirectory,
   inspectNearestContainedDirectory,
   inspectContainedPathEntry,
+  inspectContainedSnapshotPathEntry,
   readContainedDirectory,
   readContainedFile,
   readContainedSnapshotDirectory,
@@ -504,11 +506,12 @@ function createEvidenceReaderView(roots, state) {
     if (typeof callback !== "function") {
       throw new TypeError("Evidence corpus transactions require a callback.");
     }
-    const { root: authorizedRoot, canonicalRoot, observation, options } = prepared;
+    const { root: authorizedRoot, observation, options } = prepared;
     assertAuthorizedRoot(authorizedRoot);
     let active = true;
     let consumed = false;
     let mappingPromise = null;
+    const completedFiles = new Map();
     const transaction = Object.freeze({
       mapFiles(mapper) {
         if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
@@ -519,11 +522,14 @@ function createEvidenceReaderView(roots, state) {
         consumed = true;
         mappingPromise = mapObservedTextFiles(
           authorizedRoot,
-          canonicalRoot,
           observation.files,
           options,
           mapper,
-          executionBudget
+          executionBudget,
+          (filePath, snapshot) => {
+            completedFiles.set(path.resolve(filePath), snapshot);
+            rememberFileObservation(authorizedRoot, filePath, snapshot);
+          }
         );
         return mappingPromise;
       }
@@ -546,6 +552,13 @@ function createEvidenceReaderView(roots, state) {
     }
     if (callbackError) throw callbackError;
     try {
+      if (!collectRequestObservations) {
+        await assertContainedPathEntrySnapshotsUnchanged(
+          authorizedRoot,
+          [...completedFiles].map(([filePath, snapshot]) => ({ filePath, snapshot })),
+          { filesystem }
+        );
+      }
       await assertContainedDirectorySnapshotsUnchanged(
         authorizedRoot,
         observation.directories,
@@ -621,9 +634,10 @@ function createEvidenceReaderView(roots, state) {
       }
       let expectedEntry = null;
       if (containment.measureFiles) {
-        expectedEntry = await inspectContainedPathEntry(root, filePath, {
+        expectedEntry = await inspectContainedSnapshotPathEntry(root, filePath, {
           filesystem,
-          expectedDirectories: [{ path: path.resolve(directoryPath), snapshot: observed.snapshot }]
+          parentPath: path.resolve(directoryPath),
+          parentSnapshot: observed.snapshot
         });
         rememberFileObservation(root, filePath, expectedEntry);
         if (!expectedEntry || expectedEntry.type !== "regular-file") {
@@ -647,7 +661,14 @@ function createEvidenceReaderView(roots, state) {
     }
   }
 
-  async function mapObservedTextFiles(root, canonicalRoot, files, options, mapper, readBudget = budget) {
+  async function mapObservedTextFiles(
+    root,
+    files,
+    options,
+    mapper,
+    readBudget = budget,
+    observeCompleted = () => {}
+  ) {
     const concurrency = normalizeCorpusConcurrency(options.concurrency);
     const mapped = new Array(files.length);
     for (let index = 0; index < files.length; index += concurrency) {
@@ -655,18 +676,11 @@ function createEvidenceReaderView(roots, state) {
       const values = await Promise.all(batch.map(async (file) => {
         let observed;
         try {
-          if (file.expectedEntry) {
-            await inspectContainedPathEntry(root, file.filePath, {
-              filesystem,
-              expectedSnapshot: file.expectedEntry,
-              expectedDirectories: [{ path: file.parentPath, snapshot: file.parentSnapshot }]
-            });
-          }
           observed = await readContainedSnapshotFile(root, file.filePath, {
             filesystem,
-            canonicalRoot,
             parentPath: file.parentPath,
             parentSnapshot: file.parentSnapshot,
+            expectedSnapshot: file.expectedEntry,
             encoding: "utf8",
             budget: readBudget,
             maxBytes: options.maxBytes ?? effectiveLimits.maxFileBytes,
@@ -675,6 +689,11 @@ function createEvidenceReaderView(roots, state) {
         } catch (error) {
           throw normalizeEvidenceReadError(error);
         }
+        observeCompleted(file.filePath, Object.freeze({
+          type: "regular-file",
+          stats: observed.stats,
+          ancestors: []
+        }));
         return mapper(Object.freeze({
           filePath: file.filePath,
           content: observed.content,
@@ -913,13 +932,7 @@ function createEvidenceReaderView(roots, state) {
         active = false;
       }
       try {
-        for (const item of prepared) {
-          for (const observation of item.reader.fileObservations()) {
-            await inspectEntry(observation.root, observation.filePath, {
-              expectedEntry: observation.expectedEntry
-            });
-          }
-        }
+        await revalidateObservedFiles(prepared);
         await revalidateObservedDirectories();
         return result;
       } catch (error) {
@@ -1053,6 +1066,41 @@ function createEvidenceReaderView(roots, state) {
         .map(({ path: directoryPath, snapshot }) => ({ path: directoryPath, snapshot }));
       if (directories.length > 0) {
         await assertContainedDirectorySnapshotsUnchanged(root, directories, { filesystem });
+      }
+    }
+  }
+
+  async function revalidateObservedFiles(scopeItems) {
+    for (const root of authorizedRoots) {
+      const files = new Map();
+      for (const item of scopeItems) {
+        for (const observation of item.reader.fileObservations()) {
+          if (observation.root !== root) continue;
+          const retained = files.get(observation.filePath);
+          if (
+            retained
+            && !(
+              retained.expectedEntry === null && observation.expectedEntry === null
+              || (
+                retained.expectedEntry?.type === observation.expectedEntry?.type
+                && sameContainedFileMetadataSnapshot(retained.expectedEntry, observation.expectedEntry)
+              )
+            )
+          ) {
+            throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
+          }
+          if (!retained) files.set(observation.filePath, observation);
+        }
+      }
+      if (files.size > 0) {
+        await assertContainedPathEntrySnapshotsUnchanged(
+          root,
+          [...files.values()].map(({ filePath, expectedEntry }) => ({
+            filePath,
+            snapshot: expectedEntry
+          })),
+          { filesystem }
+        );
       }
     }
   }

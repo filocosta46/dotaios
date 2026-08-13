@@ -170,6 +170,103 @@ export async function inspectContainedPathEntry(root, filePath, options = {}) {
   return Object.freeze({ type, ...snapshot });
 }
 
+/**
+ * Observe one final component relative to a corpus transaction's already
+ * canonicalized root and exact parent snapshot.
+ *
+ * The transaction, not this inspector, owns root/ancestor/directory
+ * validation. Keeping that proof request-owned means accepted sibling files
+ * do not each repeat the same ancestor walk.
+ */
+export async function inspectContainedSnapshotPathEntry(root, filePath, options = {}) {
+  const filesystem = options.filesystem || localFilesystem;
+  const resolvedRoot = path.resolve(root);
+  const resolvedFile = path.resolve(filePath);
+  const resolvedParent = path.resolve(options.parentPath || path.dirname(resolvedFile));
+  if (
+    !isPathWithinLexically(resolvedRoot, resolvedFile)
+    || resolvedParent !== path.dirname(resolvedFile)
+    || !options.parentSnapshot?.stats
+  ) {
+    throw new ContainedReadError();
+  }
+
+  let current;
+  try {
+    current = await filesystem.lstat(resolvedFile);
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      if (Object.hasOwn(options, "expectedSnapshot") && options.expectedSnapshot === null) {
+        return null;
+      }
+      throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    }
+    throw error;
+  }
+  const type = current.isSymbolicLink()
+    ? "symbolic-link"
+    : current.isFile()
+      ? "regular-file"
+      : "other";
+  const snapshot = Object.freeze({ type, stats: current, ancestors: [] });
+  if (
+    Object.hasOwn(options, "expectedSnapshot")
+    && (
+      options.expectedSnapshot === null
+      || options.expectedSnapshot.type !== snapshot.type
+      || !sameFile(options.expectedSnapshot.stats, snapshot.stats)
+    )
+  ) {
+    throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+  }
+  return snapshot;
+}
+
+/** Final-check each observed file once; shared directories are checked elsewhere. */
+export async function assertContainedPathEntrySnapshotsUnchanged(root, observations, options = {}) {
+  const concurrency = Math.max(1, Math.min(128, Number(options.concurrency) || 64));
+  const unique = new Map();
+  for (const observation of observations || []) {
+    const filePath = path.resolve(observation.filePath || observation.path);
+    if (!isPathWithinLexically(root, filePath) || !Object.hasOwn(observation, "snapshot")) {
+      throw new ContainedReadError();
+    }
+    const retained = unique.get(filePath);
+    if (retained) {
+      const unchanged = retained.snapshot === null && observation.snapshot === null
+        || (
+          retained.snapshot?.type === observation.snapshot?.type
+          && sameFile(retained.snapshot.stats, observation.snapshot.stats)
+        );
+      if (!unchanged) throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      continue;
+    }
+    unique.set(filePath, { filePath, snapshot: observation.snapshot });
+  }
+  const values = [...unique.values()];
+  for (let index = 0; index < values.length; index += concurrency) {
+    await Promise.all(values.slice(index, index + concurrency).map(async ({ filePath, snapshot }) => {
+      let current;
+      try {
+        current = await (options.filesystem || localFilesystem).lstat(filePath);
+      } catch (error) {
+        if ((error?.code === "ENOENT" || error?.code === "ENOTDIR") && snapshot === null) return;
+        if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+          throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+        }
+        throw error;
+      }
+      if (
+        snapshot === null
+        || snapshot.type !== (current.isSymbolicLink() ? "symbolic-link" : current.isFile() ? "regular-file" : "other")
+        || !sameFile(snapshot.stats, current)
+      ) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
+    }));
+  }
+}
+
 /** Snapshot regular-file metadata without opening or reading source bytes. */
 export async function inspectContainedFileMetadata(root, filePath, options = {}) {
   const filesystem = options.filesystem || localFilesystem;
@@ -451,16 +548,16 @@ export function sameContainedDirectorySnapshot(left, right) {
  * This is intentionally narrower than readContainedFile: callers must supply
  * the canonical authorized root and the exact parent-directory observation
  * that admitted the path. It lets a request-scoped corpus transaction reuse
- * traversal invariants while retaining a no-follow handle, handle/path
- * identity, canonical containment, bounded bytes, UTF-8, and mutation checks
- * for every file.
+ * traversal invariants while retaining a no-follow handle, expected-entry /
+ * handle identity, exact-parent identity, bounded bytes, UTF-8, and mutation
+ * checks for every file. Canonical containment is owned by the transaction's
+ * directory walk and final generation validation rather than repeated here.
  */
 export async function readContainedSnapshotFile(root, filePath, options = {}) {
   const filesystem = options.filesystem || localFilesystem;
   const resolvedRoot = path.resolve(root);
   const resolvedFile = path.resolve(filePath);
   const resolvedParent = path.resolve(options.parentPath || path.dirname(resolvedFile));
-  const canonicalRoot = path.resolve(options.canonicalRoot || root);
   if (
     !isPathWithinLexically(resolvedRoot, resolvedFile)
     || resolvedParent !== path.dirname(resolvedFile)
@@ -471,35 +568,32 @@ export async function readContainedSnapshotFile(root, filePath, options = {}) {
   if (typeof filesystem.open !== "function") {
     throw new ContainedReadError("DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE");
   }
+  const noFollowFlag = Object.hasOwn(options, "noFollowFlag")
+    ? options.noFollowFlag
+    : fsConstants.O_NOFOLLOW;
+  if (!Number.isSafeInteger(noFollowFlag) || noFollowFlag <= 0) {
+    throw new ContainedReadError("DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE");
+  }
 
   let handle;
   try {
     handle = await filesystem.open(
       resolvedFile,
       fsConstants.O_RDONLY
-        | (fsConstants.O_NOFOLLOW || 0)
+        | noFollowFlag
         | (fsConstants.O_NONBLOCK || 0)
     );
     const opened = await handle.stat();
-    const current = await lstatAfterObservation(filesystem, resolvedFile);
     const currentParent = await lstatAfterObservation(filesystem, resolvedParent, { bigint: true });
     const allowedRootParentLink = resolvedParent === resolvedRoot && currentParent.isSymbolicLink();
-    let canonicalFile;
-    try {
-      canonicalFile = await filesystem.realpath(resolvedFile);
-    } catch (error) {
-      if (["ENOENT", "ENOTDIR", "ELOOP"].includes(error?.code)) {
-        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
-      }
-      throw error;
-    }
     if (
       !opened.isFile()
-      || current.isSymbolicLink()
-      || !sameFile(opened, current)
+      || (options.expectedSnapshot && (
+        options.expectedSnapshot.type !== "regular-file"
+        || !sameFile(options.expectedSnapshot.stats, opened)
+      ))
       || !sameBigIntFile(options.parentSnapshot.stats, currentParent)
       || (!allowedRootParentLink && (!currentParent.isDirectory() || currentParent.isSymbolicLink()))
-      || !isPathWithinLexically(canonicalRoot, canonicalFile)
     ) {
       throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
     }

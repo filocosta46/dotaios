@@ -157,3 +157,47 @@ test("exhausting the read budget returns one actionable whole-scope omission", a
     "omissions stay path-free"
   );
 });
+
+test("public search preflight amortizes containment work across a deep corpus", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-public-search-operations-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const corpus = path.join(root, "vault", "deep", "nested", "notes");
+  await fs.mkdir(corpus, { recursive: true });
+  const fileCount = 64;
+  await Promise.all(Array.from({ length: fileCount }, (_, index) =>
+    fs.writeFile(path.join(corpus, `${index}.md`), `# Note ${index}\n\npublic operation canary\n`)
+  ));
+
+  const operations = { lstat: 0, realpath: 0, open: 0 };
+  const filesystem = new Proxy(fs, {
+    get(target, property) {
+      if (Object.hasOwn(operations, property)) {
+        return async (...args) => {
+          operations[property] += 1;
+          return target[property](...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+  const reader = createEvidenceReader({ roots: [root], filesystem });
+
+  const groups = await searchAios({
+    aiosPath: root,
+    query: "public operation canary",
+    scope: "vault",
+    evidenceReader: reader
+  });
+
+  assert.equal(groups[0].results.length, 20, "the operation receipt must cover real ranked hits");
+  assert.equal(operations.open, fileCount, "every accepted file remains handle-bound");
+  assert.ok(
+    operations.lstat <= fileCount * 10 + 120,
+    `public preflight repeated containment work per ancestor: ${JSON.stringify(operations)}`
+  );
+  assert.ok(
+    operations.realpath <= fileCount + 120,
+    `public preflight repeated canonicalization work per phase: ${JSON.stringify(operations)}`
+  );
+});

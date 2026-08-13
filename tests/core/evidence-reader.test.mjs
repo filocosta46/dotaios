@@ -6,10 +6,47 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createEvidenceReader, EvidenceReadError } from "../../packages/core/src/evidence-reader.mjs";
+import { readContainedSnapshotFile } from "../../packages/core/src/contained-read.mjs";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-evidence-reader-"));
 }
+
+test("snapshot file reads fail closed before open when no no-follow capability exists", async () => {
+  const root = tmpDir();
+  const filePath = path.join(root, "note.md");
+  fs.writeFileSync(filePath, "bounded evidence\n");
+  let openCalls = 0;
+  const filesystem = new Proxy(fsp, {
+    get(target, property) {
+      if (property === "open") {
+        return async (...args) => {
+          openCalls += 1;
+          return target.open(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+
+  await assert.rejects(
+    () => readContainedSnapshotFile(root, filePath, {
+      filesystem,
+      parentPath: root,
+      parentSnapshot: { stats: fs.lstatSync(root, { bigint: true }), ancestors: [] },
+      expectedSnapshot: {
+        type: "regular-file",
+        stats: fs.lstatSync(filePath),
+        ancestors: []
+      },
+      noFollowFlag: 0,
+      encoding: "utf8"
+    }),
+    (error) => error?.code === "DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE"
+  );
+  assert.equal(openCalls, 0, "an unsupported platform must be refused before pathname open");
+});
 
 test("evidence reader lists one directory deterministically without traversing it", async () => {
   const root = tmpDir();
