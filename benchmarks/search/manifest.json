@@ -1,0 +1,128 @@
+{
+  "schemaVersion": "dotaios-search-benchmark/v1",
+  "benchmarkId": "search-baseline-2026-08-13",
+  "referenceMachine": {
+    "identifier": "mac16-1-m4-10c-16gb",
+    "modelIdentifier": "Mac16,1",
+    "chip": "Apple M4",
+    "cpuCores": 10,
+    "memoryGiB": 16,
+    "operatingSystem": "macOS 26.6.1 build 25G76 (Darwin 25.6.0)",
+    "powerProfile": {
+      "source": "battery",
+      "lowPowerMode": false,
+      "requireIdleMachine": true
+    }
+  },
+  "runtime": {
+    "supportedNodeMajors": [
+      20,
+      22
+    ],
+    "baselineNode": "22.22.3"
+  },
+  "corpus": {
+    "generator": {
+      "version": "dotaios-search-fixture-v1",
+      "seed": 20260813,
+      "fixedMtime": "2026-08-13T00:00:00.000Z"
+    },
+    "fileCounts": [
+      500,
+      2500,
+      10000
+    ],
+    "layouts": {
+      "shallow": {
+        "kind": "bucketed",
+        "directoryDepth": 1,
+        "bucketCount": 2
+      },
+      "nested": {
+        "kind": "tree",
+        "directoryDepth": 3,
+        "branchingFactor": 8
+      }
+    },
+    "distributions": {
+      "prose": {
+        "kind": "representative-prose",
+        "targetBytes": {
+          "min": 768,
+          "max": 1280
+        },
+        "vocabularySize": 192,
+        "frontmatterEvery": 4
+      },
+      "high-entropy": {
+        "kind": "adversarial-high-entropy",
+        "targetBytes": {
+          "min": 768,
+          "max": 1280
+        },
+        "tokenLength": 18,
+        "frontmatterEvery": 4
+      }
+    },
+    "scenarioMatrix": [
+      {
+        "layout": "shallow",
+        "distribution": "prose"
+      },
+      {
+        "layout": "nested",
+        "distribution": "high-entropy"
+      }
+    ]
+  },
+  "queries": [
+    {
+      "id": "no-hit",
+      "text": "zqxj-unfindable-20260813",
+      "expectation": {
+        "kind": "none",
+        "hitCount": 0
+      }
+    },
+    {
+      "id": "low-hit",
+      "text": "controlled-peregrine-benchmark-needle",
+      "expectation": {
+        "kind": "fixed-indices",
+        "fileIndices": [
+          3,
+          17,
+          101,
+          307
+        ],
+        "hitCount": 4
+      }
+    },
+    {
+      "id": "high-hit",
+      "text": "common-benchmark-marker-needle",
+      "expectation": {
+        "kind": "modulo",
+        "modulo": 25,
+        "remainder": 0,
+        "resultLimit": 20
+      }
+    }
+  ],
+  "protocol": {
+    "coldSamples": 3,
+    "warmupSamples": 3,
+    "measuredSamples": 20,
+    "concurrency": 32,
+    "resultLimit": 20,
+    "rssPollIntervalMs": 5,
+    "coldDefinition": "fresh request-scoped reader before harness warm-up; operating-system file cache is uncontrolled",
+    "warmDefinition": "fresh request-scoped reader after warm-up in the same Node process",
+    "rawReadControl": {
+      "enabled": true,
+      "method": "open-handle-read-all",
+      "validation": "exact file count and byte total",
+      "concurrency": 32
+    }
+  }
+}
