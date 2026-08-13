@@ -18,8 +18,10 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const manifestPath = path.join(repoRoot, "benchmarks", "search", "manifest.json");
 const benchmarkReceiptPaths = [
   path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-baseline.md"),
-  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-optimized.md")
+  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-optimized.md"),
+  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-final.md")
 ];
+const finalReportsDirectory = path.join(repoRoot, "docs", "benchmarks", "reports");
 
 function declaredManifestReceipt(receiptPath, receipt) {
   const declarations = [...receipt.matchAll(/^\- Manifest SHA-256: `([^`]+)`\s*$/gmi)];
@@ -81,6 +83,43 @@ test("checked-in benchmark receipts declare the current manifest receipt", async
     const receipt = await fs.readFile(receiptPath, "utf8");
     assert.equal(declaredManifestReceipt(receiptPath, receipt), expectedManifestReceipt, receiptPath);
   }
+});
+
+test("final benchmark reports cover the frozen matrix and retain exact authority", async () => {
+  const manifest = await loadManifest(manifestPath);
+  const expectedManifestReceipt = manifestReceipt(manifest);
+  const expectedSelections = manifest.corpus.fileCounts.flatMap((fileCount) =>
+    manifest.corpus.scenarioMatrix.map(({ layout, distribution }) =>
+      `${fileCount}:${layout}:${distribution}`
+    )
+  );
+  const reportNames = (await fs.readdir(finalReportsDirectory))
+    .filter((name) => name.startsWith("2026-08-13-") && name.endsWith(".report.json"))
+    .sort();
+  assert.equal(reportNames.length, expectedSelections.length);
+
+  const selections = [];
+  for (const reportName of reportNames) {
+    const report = JSON.parse(await fs.readFile(path.join(finalReportsDirectory, reportName), "utf8"));
+    assert.equal(report.schemaVersion, "dotaios-search-benchmark-result/v1");
+    assert.equal(report.manifestSha256, expectedManifestReceipt);
+    assert.deepEqual(report.protocol, manifest.protocol);
+    assert.deepEqual(report.searches.map(({ id }) => id), manifest.queries.map(({ id }) => id));
+    assert.equal(report.searches.every(({ warm }) => warm.samples === manifest.protocol.measuredSamples), true);
+    assert.equal(report.rawSearchControl.length, report.searches.length);
+    for (const result of report.searches) {
+      assert.equal(
+        report.rawSearchControl.find(({ id }) => id === result.id)?.outputSha256,
+        result.outputSha256,
+        `${reportName}:${result.id} must preserve exact safe/unsafe output parity.`
+      );
+    }
+    selections.push(
+      `${report.selection.fileCount}:${report.selection.layout}:${report.selection.distribution}`
+    );
+  }
+
+  assert.deepEqual(selections.sort(), expectedSelections.sort());
 });
 
 test("fixture generation rejects an outside path that resolves back into the repository", async (t) => {

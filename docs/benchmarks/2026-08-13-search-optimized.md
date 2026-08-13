@@ -1,5 +1,10 @@
 # Search benchmark optimized receipt — 2026-08-13
 
+> Historical U6 implementation receipt. It is superseded by the
+> [post-review final receipt](./2026-08-13-search-final.md), which includes the
+> request-wide budget and final file-generation fixes plus checked-in raw JSON
+> reports. Do not use the latency or operation values below as release evidence.
+
 This is the U6 measurement receipt for request-scoped safe bulk search. It uses
 the frozen U8 authority unchanged and records both passing gates and observed
 exceptions; an empty, reordered, unstable, errored, or inventory-mismatched
