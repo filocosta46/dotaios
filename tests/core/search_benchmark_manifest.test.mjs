@@ -16,6 +16,27 @@ import {
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const manifestPath = path.join(repoRoot, "benchmarks", "search", "manifest.json");
+const benchmarkReceiptPaths = [
+  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-baseline.md"),
+  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-optimized.md")
+];
+
+function declaredManifestReceipt(receiptPath, receipt) {
+  const declarations = [...receipt.matchAll(/^\- Manifest SHA-256: `([^`]+)`\s*$/gmi)];
+  assert.equal(
+    declarations.length,
+    1,
+    `${path.relative(repoRoot, receiptPath)} must declare exactly one Manifest SHA-256.`
+  );
+
+  const receiptHash = declarations[0][1];
+  assert.match(
+    receiptHash,
+    /^[a-f0-9]{64}$/,
+    `${path.relative(repoRoot, receiptPath)} must declare a lowercase SHA-256 digest.`
+  );
+  return receiptHash;
+}
 
 test("the same manifest and seed produce the same fixture inventory and controlled order", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-search-benchmark-test-"));
@@ -51,6 +72,15 @@ test("any manifest corpus, query, or protocol change invalidates the receipt", a
   assert.notEqual(manifestReceipt(changedQuery), original);
   assert.notEqual(manifestReceipt(changedProtocol), original);
   assert.notEqual(manifestReceipt(changedCorpus), original);
+});
+
+test("checked-in benchmark receipts declare the current manifest receipt", async () => {
+  const expectedManifestReceipt = manifestReceipt(await loadManifest(manifestPath));
+
+  for (const receiptPath of benchmarkReceiptPaths) {
+    const receipt = await fs.readFile(receiptPath, "utf8");
+    assert.equal(declaredManifestReceipt(receiptPath, receipt), expectedManifestReceipt, receiptPath);
+  }
 });
 
 test("fixture generation rejects an outside path that resolves back into the repository", async (t) => {

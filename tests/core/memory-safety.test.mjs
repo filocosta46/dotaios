@@ -32,6 +32,55 @@ function readLines(filePath) {
   return fs.readFileSync(filePath, "utf8").split("\n").filter((l) => l.trim());
 }
 
+function legacyRotationFixture() {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const legacy = Array.from({ length: 3 }, (_, index) => JSON.stringify({
+    ts: `2026-01-01T00:00:0${index}.000Z`,
+    type: "legacy-rotation",
+    id: `legacy-${index}`,
+    summary: "x".repeat(720_000)
+  }));
+  const pending = [
+    JSON.stringify({ ts: "2026-01-01T00:00:03.000Z", type: "legacy-rotation", id: "pending-0" }),
+    JSON.stringify({ ts: "2026-01-01T00:00:04.000Z", type: "legacy-rotation", id: "pending-1" })
+  ];
+  const live = JSON.stringify({ ts: "2026-01-01T00:00:05.000Z", type: "legacy-rotation", id: "live" });
+  fs.writeFileSync(archivePath, `${legacy.join("\n")}\n`, { mode: 0o600 });
+  fs.writeFileSync(eventsPath, `${[...pending, live].join("\n")}\n`, { mode: 0o600 });
+  return { dir, eventsPath, archivePath, expectedArchive: [...legacy, ...pending], live };
+}
+
+function failAfterArchiveBoundary(method, matches) {
+  let interrupted = false;
+  return {
+    filesystem: {
+      ...fsp,
+      async [method](...args) {
+        const result = await fsp[method](...args);
+        if (!interrupted && matches(...args)) {
+          interrupted = true;
+          throw new Error(`injected-crash:${method}`);
+        }
+        return result;
+      }
+    },
+    interrupted: () => interrupted
+  };
+}
+
+function readEventsArchiveLines(dir) {
+  return fs.readdirSync(dir)
+    .filter((name) => /^events-archive(?:\.\d{6})?\.jsonl$/.test(name))
+    .sort((left, right) => {
+      if (left === "events-archive.jsonl") return 1;
+      if (right === "events-archive.jsonl") return -1;
+      return left.localeCompare(right);
+    })
+    .flatMap((name) => readLines(path.join(dir, name)));
+}
+
 // Injectable fs double: throws once at the Nth call of a method, otherwise
 // delegates to the real promises fs. Simulates a crash at an exact step.
 function faultFs(failures) {
@@ -192,6 +241,58 @@ test("rotating compaction recovers every shard publication boundary without loss
       .map((name) => path.join(dir, name));
     const settled = settledPaths.flatMap(readLines);
     assert.deepEqual([...settled].sort(), [...original].sort());
+  }
+});
+
+test("legacy active normalization recovers marker, shard, and active transitions exactly once", async (t) => {
+  const boundaries = [
+    {
+      name: "marker publication",
+      method: "link",
+      matches: (source, destination, archivePath) => destination === `${archivePath}.rotation`,
+      shardExists: false
+    },
+    {
+      name: "shard publication",
+      method: "link",
+      matches: (source, destination, archivePath) => destination === archivePath.replace(/\.jsonl$/, ".000001.jsonl"),
+      shardExists: true
+    },
+    {
+      name: "active replacement",
+      method: "rename",
+      matches: (source, destination, archivePath) => destination === archivePath,
+      shardExists: true
+    }
+  ];
+  for (const boundary of boundaries) {
+    await t.test(boundary.name, async () => {
+      const { dir, eventsPath, archivePath, expectedArchive, live } = legacyRotationFixture();
+      const fault = failAfterArchiveBoundary(
+        boundary.method,
+        (source, destination) => boundary.matches(source, destination, archivePath)
+      );
+
+      await assert.rejects(
+        compactEvents(eventsPath, 1, { filesystem: fault.filesystem }),
+        /injected-crash/
+      );
+
+      assert.equal(fault.interrupted(), true, `${boundary.name} must be reached`);
+      assert.equal(fs.existsSync(`${archivePath}.rotation`), true, "the recovery marker remains authoritative");
+      assert.equal(
+        fs.existsSync(archivePath.replace(/\.jsonl$/, ".000001.jsonl")),
+        boundary.shardExists,
+        "the interrupted boundary must leave the expected shard state"
+      );
+
+      await compactEvents(eventsPath, 1);
+
+      assert.deepEqual(readEventsArchiveLines(dir), expectedArchive);
+      assert.deepEqual(readLines(eventsPath), [live]);
+      assert.equal(fs.existsSync(`${archivePath}.rotation`), false, "recovery consumes its marker");
+      assert.equal(fs.existsSync(`${archivePath}.pending`), false, "recovery consumes the staged batch");
+    });
   }
 });
 

@@ -32,6 +32,20 @@ function archiveEvent(index, payloadBytes) {
   };
 }
 
+function readEventsArchiveGeneration(dir) {
+  return fs.readdirSync(dir)
+    .filter((name) => /^events-archive(?:\.\d{6})?\.jsonl$/.test(name))
+    .sort((left, right) => {
+      if (left === "events-archive.jsonl") return 1;
+      if (right === "events-archive.jsonl") return -1;
+      return left.localeCompare(right);
+    })
+    .flatMap((name) => fs.readFileSync(path.join(dir, name), "utf8")
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line)));
+}
+
 test("parseJsonlLine parses valid JSON and skips blanks", () => {
   assert.deepEqual(parseJsonlLine('{"a":1}'), { a: 1 });
   assert.equal(parseJsonlLine(""), null);
@@ -166,6 +180,24 @@ test("compactEvents rotates complete JSONL lines into immutable numbered shards"
   assert.equal(fs.statSync(activePath).mode & 0o777, 0o600);
   const archived = [...await readJsonl(shardPath), ...await readJsonl(activePath)];
   assert.deepEqual(archived.map(({ summary }) => summary.slice(0, 9)), ["archive-0", "archive-1", "archive-2"]);
+});
+
+test("legacy over-target active archive normalizes before compacting a pending batch", async () => {
+  const dir = tmpDir();
+  const eventsPath = path.join(dir, "events.jsonl");
+  const archivePath = path.join(dir, "events-archive.jsonl");
+  const legacy = [archiveEvent(0, 720_000), archiveEvent(1, 720_000), archiveEvent(2, 720_000)];
+  const pending = [archiveEvent(3, 16), archiveEvent(4, 16)];
+  const live = archiveEvent(5, 16);
+  fs.writeFileSync(archivePath, legacy.map(formatJsonlEntry).join(""), { mode: 0o600 });
+  fs.writeFileSync(eventsPath, [...pending, live].map(formatJsonlEntry).join(""), { mode: 0o600 });
+
+  const result = await compactEvents(eventsPath, 1);
+
+  assert.deepEqual(result, { archived: 2, kept: 1 });
+  assert.equal(fs.existsSync(path.join(dir, "events-archive.000001.jsonl")), true);
+  assert.deepEqual(readEventsArchiveGeneration(dir), [...legacy, ...pending]);
+  assert.deepEqual(await readJsonl(eventsPath), [live]);
 });
 
 test("normal rotations preserve legitimate byte-identical event records", async () => {
@@ -397,4 +429,34 @@ test("searchMemory discovers numbered shards in numeric order and deduplicates r
   ]);
   assert.equal(results.filter(({ summary }) => summary.endsWith("overlap")).length, 1);
   assert.match(results.find(({ summary }) => summary.endsWith("older")).source, /000001/);
+});
+
+test("searchMemory preserves legitimate identical records outside retry overlap", async () => {
+  const dir = tmpDir();
+  const memoryDir = path.join(dir, "memory");
+  const signalsDir = path.join(memoryDir, "signals");
+  fs.mkdirSync(signalsDir, { recursive: true });
+  const duplicate = {
+    ts: "2026-05-06T12:00:00.000Z",
+    type: "note",
+    summary: "legitimate duplicate needle"
+  };
+  const serialized = formatJsonlEntry(duplicate);
+
+  fs.writeFileSync(path.join(memoryDir, "events.jsonl"), `${serialized}${serialized}`);
+  fs.writeFileSync(path.join(memoryDir, "events-archive.jsonl"), serialized, { mode: 0o600 });
+  fs.writeFileSync(path.join(signalsDir, "laptop-2026-05-06.jsonl"), serialized);
+  fs.writeFileSync(path.join(signalsDir, "mini-2026-05-06.jsonl"), serialized);
+
+  const results = await searchMemory(memoryDir, "legitimate duplicate needle", { limit: 10 });
+
+  assert.equal(results.length, 4, "one event retry copy is suppressed without collapsing canonical duplicates");
+  assert.equal(results.filter(({ source }) => source === "memory/events.jsonl").length, 1);
+  assert.deepEqual(
+    results.filter(({ source }) => source.startsWith("memory/signals/")).map(({ source }) => source).sort(),
+    [
+      "memory/signals/laptop-2026-05-06.jsonl",
+      "memory/signals/mini-2026-05-06.jsonl"
+    ]
+  );
 });
