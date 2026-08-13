@@ -4,24 +4,45 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
-Your assistants no longer read your whole personal folder every time they start.
+## [2.0.3] - 2026-08-13
 
-Until now, connecting Claude Code or Gemini CLI put a line in its settings file
-that made it load all of `~/aios` at the beginning of every conversation —
-including conversations in unrelated projects that had nothing to do with you.
-Now that line says where the folder is and when to open it: when you are working
-inside it, or when you ask about yourself, your work, or one of your saved
-workflows. A question about some other codebase stays a question about that
-codebase. (Codex was never affected: its bridge already pointed at the folder
-rather than importing it.)
+**Search worked again.** On a folder with real material in it, every search had
+been failing — not returning nothing, but refusing outright with "could not read
+the evidence corpus safely", on every query, including ones that should have
+matched nothing. Search was being held to the size limit meant for the small
+summary your assistant reads at the start of a session, so the moment your notes
+outgrew that limit, searching them stopped working. Assistants asking through the
+optional MCP adapter hit the same wall. The limits now fit a folder someone has
+actually been using, and when one is genuinely reached the message says what
+stopped and what to do about it.
 
-Nothing in your folder changed, and nothing you wrote in your tools' settings
-files was touched. To pick this up, run `npx dotaios activate` once. Until you
-do, everything keeps working the way it did.
+**Your assistants no longer read your whole personal folder every time they
+start.** Connecting Claude Code or Gemini CLI used to put a line in its settings
+file that loaded all of `~/aios` at the beginning of every conversation,
+including conversations in unrelated projects. That line now says where the
+folder is and when to open it. (Codex was never affected; its bridge already
+pointed at the folder rather than importing it.)
 
-`npx dotaios doctor` now tells you when a bridge is still the older kind, and
-names that command. It used to report those bridges as healthy, so anyone who
-had already installed DotAIOS would never have found out.
+**`doctor` now tells you when your connection is out of date** and names the one
+command that updates it. It used to report an older connection as healthy, so
+anyone who had already installed DotAIOS would never have found out.
+
+**Saving an article can no longer write outside your vault.** If a shelf file or
+folder was a shortcut pointing somewhere else, `ingest` followed it and wrote
+there while telling you it had saved to the vault. It now refuses.
+
+**Gemini setup no longer undoes itself.** `activate` and `connect gemini` wrote
+different blocks into the same place, so whichever you ran last silently replaced
+the other, and `doctor` then reported the result as wrong.
+
+**Installing is less likely to dead-end.** If Node.js is missing, an assistant
+helping you install now sets it up and tells you what it did, instead of handing
+you a question you had no way to answer. The questions that are actually yours —
+private sync, daily brief, saving conversations, the browser helper — are still
+asked one at a time and still default to No.
+
+Nothing in your folder changed. To pick up the connection fix, run
+`npx dotaios activate` once; `doctor` will tell you if you still need to.
 
 ## [2.0.2] - 2026-08-12
 
