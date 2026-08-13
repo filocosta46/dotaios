@@ -106,7 +106,7 @@ for (const [label, bridgeContent] of Object.entries(malformedBridgeCases)) {
     const output = runDoctor(t, `doctor-${label}`, bridgeContent);
 
     assert.match(output, /\[warn\] Claude Code\n/);
-    assert.match(output, /connection markers are malformed/i);
+    assert.match(output, /connection markers are damaged/i);
     assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
   });
 }
@@ -121,7 +121,7 @@ test("doctor ignores a correct target outside a valid managed block for another 
   ].join("\n"));
 
   assert.match(output, /\[warn\] Claude Code\n/);
-  assert.match(output, /connection points to a different AIOS folder/i);
+  assert.match(output, /connected to a different AIOS folder/i);
   assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
 });
 
@@ -135,7 +135,7 @@ test("doctor ignores an expected-path comment inside a valid block with the wron
   ].join("\n"));
 
   assert.match(output, /\[warn\] Claude Code\n/);
-  assert.match(output, /connection points to a different AIOS folder/i);
+  assert.match(output, /connected to a different AIOS folder/i);
   assert.doesNotMatch(output, /\[ok\] Claude Code\n/);
 });
 
