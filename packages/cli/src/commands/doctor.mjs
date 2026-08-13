@@ -46,6 +46,7 @@ follow along.
 Options:
   --path <dir>  Check an AIOS folder other than ~/aios
   --home <dir>  Check agent bridges somewhere other than your home
+  --verbose     Show paths and operator-level diagnostic detail
 `;
 
 export async function doctorCommand(args, { detection } = {}) {
@@ -54,7 +55,8 @@ export async function doctorCommand(args, { detection } = {}) {
     return;
   }
 
-  const options = parsePathHomeOptions(args);
+  const verbose = args.includes("--verbose");
+  const options = parsePathHomeOptions(args.filter((arg) => arg !== "--verbose"));
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   const homePath = path.resolve(expandHome(options.home || os.homedir()));
 
@@ -69,19 +71,21 @@ export async function doctorCommand(args, { detection } = {}) {
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
-  checks.push(...await checkAgentBridges(target, homePath, detection));
+  checks.push(...await checkAgentBridges(target, homePath, detection, { verbose }));
 
   console.log("DotAIOS doctor");
   console.log("");
-  for (const check of checks) {
-    console.log(`${tag(check.status)} ${check.name}`);
-    if (check.detail) console.log(`        ${check.detail}`);
-    if (check.fix) console.log(`        Fix: ${check.fix}`);
+  for (const rawCheck of checks) {
+    const check = verbose ? rawCheck : conciseDoctorCheck(rawCheck);
+    const display = (value) => verbose ? String(value || "") : humanizeDoctorPath(value, target, homePath);
+    console.log(`${tag(check.status)} ${display(check.name)}`);
+    if (check.detail) console.log(`        ${display(check.detail)}`);
+    if (check.fix) console.log(`        Fix: ${display(check.fix)}`);
   }
 
   console.log("");
   console.log("Using another local AI tool that can read files? Paste this line into it:");
-  console.log(`  Read ${path.join(target, "AGENTS.md")} first and follow it.`);
+  console.log(`  Read ${verbose ? path.join(target, "AGENTS.md") : humanizeDoctorPath(path.join(target, "AGENTS.md"), target, homePath)} first and follow it.`);
   console.log("  Browser chats need an attached file or a pasted, reviewed brief.");
   console.log("");
 
@@ -479,7 +483,7 @@ function skipReason(skipped) {
   return "update check unavailable";
 }
 
-async function checkAgentBridges(target, homePath, detection = {}) {
+async function checkAgentBridges(target, homePath, detection = {}, { verbose = false } = {}) {
   const results = [];
   let foundBridge = false;
   let foundNativeRuntime = false;
@@ -489,11 +493,13 @@ async function checkAgentBridges(target, homePath, detection = {}) {
   const runtimes = await readNativeRuntimes(target, homePath, detection);
   for (const agent of registry) {
     if (!await isAgentInstalled(homePath, agent, detection)) {
-      results.push({
-        name: `${agent.name} (not installed)`,
-        status: "ok",
-        detail: "Not detected on this machine — nothing to connect."
-      });
+      if (verbose) {
+        results.push({
+          name: `${agent.name} (not installed)`,
+          status: "ok",
+          detail: "Not detected on this machine — nothing to connect."
+        });
+      }
       continue;
     }
     anyInstalled = true;
@@ -597,9 +603,9 @@ async function checkAgentBridges(target, homePath, detection = {}) {
 
   if (!anyInstalled) {
     results.push({
-      name: "At least one AI tool installed",
+      name: "Local AI apps",
       status: "warn",
-      detail: "No known AI tools detected on this machine.",
+      detail: "No supported local AI app was detected on this machine.",
       fix: "Install Claude Code, Cursor, Codex, or Gemini, then run `npx dotaios activate`."
     });
   } else if (!foundBridge && !foundNativeRuntime) {
@@ -612,6 +618,37 @@ async function checkAgentBridges(target, homePath, detection = {}) {
   }
 
   return results;
+}
+
+function conciseDoctorCheck(check) {
+  const name = check.name
+    .replace(/ bridge$/, "")
+    .replace(/ native skills$/, "");
+  const replaceOperatorTerms = (value) => String(value || "")
+    .replace(/managed bridge/gi, "connection")
+    .replace(/\bbridge\b/gi, "connection")
+    .replace(/native skill configuration/gi, "app configuration")
+    .replace(/native skills/gi, "app connection")
+    .replace(/projection/gi, "connection");
+  return {
+    ...check,
+    name: replaceOperatorTerms(name),
+    detail: check.detail ? replaceOperatorTerms(check.detail) : check.detail,
+    fix: check.fix ? replaceOperatorTerms(check.fix) : check.fix
+  };
+}
+
+function humanizeDoctorPath(value, target, homePath) {
+  let output = String(value || "");
+  const resolvedHome = path.resolve(homePath);
+  const resolvedTarget = path.resolve(target);
+  const targetRelative = path.relative(resolvedHome, resolvedTarget);
+  if (targetRelative && !targetRelative.startsWith("..") && !path.isAbsolute(targetRelative)) {
+    output = output.split(resolvedTarget).join(`~/${targetRelative.split(path.sep).join("/")}`);
+  } else if (resolvedTarget === resolvedHome) {
+    output = output.split(resolvedTarget).join("~");
+  }
+  return output.split(resolvedHome).join("~");
 }
 
 // A runtime with no bridge file keeps its skills in its own configuration, so

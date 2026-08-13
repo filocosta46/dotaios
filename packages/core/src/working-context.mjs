@@ -166,8 +166,8 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const deduped = dedupeUpdateChannels(signals, events);
 
   const candidates = {
-    identity: compactHeader(identity),
-    priorities: compactHeader(priorities),
+    identity: compactHeader(stripMarkdownFrontmatter(identity)),
+    priorities: compactHeader(stripMarkdownFrontmatter(priorities)),
     decisions: recentDecisions(decisionsLog, MAX_DECISION_ITEMS),
     today: {
       focus: firstLine(readSection(todayNote, "Focus")),
@@ -418,6 +418,14 @@ function compactHeader(content) {
   return visible.length > MAX_HEADER_CHARS
     ? `${visible.slice(0, MAX_HEADER_CHARS - 1).trimEnd()}…`
     : visible;
+}
+
+function stripMarkdownFrontmatter(content) {
+  const source = String(content || "");
+  if (!source.startsWith("---\n") && !source.startsWith("---\r\n")) return source;
+  const lines = source.split(/\r?\n/);
+  const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  return closing === -1 ? source : lines.slice(closing + 1).join("\n").replace(/^\n+/, "");
 }
 
 function firstLine(content) {

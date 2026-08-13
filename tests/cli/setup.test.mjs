@@ -27,6 +27,7 @@ test("setup --dry-run previews concrete actions without DotAIOS-managed changes"
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {
@@ -81,7 +82,7 @@ test("setup --dry-run promises every skill-link directory the real run creates",
   const target = ["--path", aiosPath, "--home", homePath];
 
   try {
-    const preview = spawnSync(process.execPath, [cli, "setup", "--dry-run", ...target], {
+    const preview = spawnSync(process.execPath, [cli, "setup", "--dry-run", "--verbose", ...target], {
       encoding: "utf8",
       env
     });
@@ -122,6 +123,7 @@ test("setup --dry-run reports an unmanaged bridge collision without changing it"
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {
@@ -154,6 +156,7 @@ test("setup --dry-run preserves a bridge whose managed markers are reversed", ()
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {
@@ -192,6 +195,7 @@ test("setup --dry-run preserves a bridge with duplicate managed markers", () => 
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {

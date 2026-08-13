@@ -253,6 +253,23 @@ test("compact projection answers identity and priorities within the same budget"
   assert.equal(result.context.budget.used, result.rendered.length);
 });
 
+test("compact projection strips identity frontmatter without changing source files", async () => {
+  const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "context"), { recursive: true });
+  const identityPath = path.join(aiosPath, "context", "identity.md");
+  const prioritiesPath = path.join(aiosPath, "context", "priorities.md");
+  fs.writeFileSync(identityPath, "---\nsource: private-import\nkind: context\n---\n# Identity\n\nI lead the launch.\n");
+  fs.writeFileSync(prioritiesPath, "---\nupdated_at: 2026-08-13\n---\n# Priorities\n\nShip the trust release.\n");
+  const before = [fs.readFileSync(identityPath), fs.readFileSync(prioritiesPath)];
+
+  const result = await buildWorkingContext(aiosPath, {}, { clock: fixedClock });
+
+  assert.match(result.rendered, /I lead the launch/);
+  assert.match(result.rendered, /Ship the trust release/);
+  assert.doesNotMatch(result.rendered, /private-import|updated_at|kind: context|^---$/m);
+  assert.deepEqual([fs.readFileSync(identityPath), fs.readFileSync(prioritiesPath)], before);
+});
+
 test("projection reads durable project metadata from the local README", async () => {
   const aiosPath = tmpAios();
   fs.mkdirSync(path.join(aiosPath, "projects", "project-a"), { recursive: true });
