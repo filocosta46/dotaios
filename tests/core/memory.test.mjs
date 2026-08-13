@@ -220,17 +220,7 @@ test("normal rotations preserve legitimate byte-identical event records", async 
   fs.appendFileSync(eventsPath, formatJsonlEntry(secondTail));
   await compactEvents(eventsPath, 1);
 
-  const stored = fs.readdirSync(dir)
-    .filter((name) => /^events-archive(?:\.\d{6})?\.jsonl$/.test(name))
-    .sort((left, right) => {
-      if (left === "events-archive.jsonl") return 1;
-      if (right === "events-archive.jsonl") return -1;
-      return left.localeCompare(right);
-    })
-    .flatMap((name) => fs.readFileSync(path.join(dir, name), "utf8")
-      .split("\n")
-      .filter(Boolean)
-      .map((line) => JSON.parse(line)));
+  const stored = readEventsArchiveGeneration(dir);
   stored.push(...await readJsonl(eventsPath));
 
   assert.deepEqual(

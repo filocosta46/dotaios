@@ -3,7 +3,6 @@
 import { createHash } from "node:crypto";
 import { constants as fsConstants, existsSync, realpathSync } from "node:fs";
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -661,12 +660,32 @@ function validateManifest(manifest) {
   }
   for (const name of ["shallow", "nested"]) if (!manifest.corpus.layouts?.[name]) throw new Error(`Missing ${name} layout.`);
   for (const name of ["prose", "high-entropy"]) if (!manifest.corpus.distributions?.[name]) throw new Error(`Missing ${name} distribution.`);
+  if (!Array.isArray(manifest.corpus.scenarioMatrix) || manifest.corpus.scenarioMatrix.length === 0) {
+    throw new Error("Manifest scenario matrix must be a non-empty array.");
+  }
+  const scenarioKeys = new Set();
+  for (const scenario of manifest.corpus.scenarioMatrix) {
+    if (
+      !scenario
+      || typeof scenario.layout !== "string"
+      || typeof scenario.distribution !== "string"
+      || !manifest.corpus.layouts[scenario.layout]
+      || !manifest.corpus.distributions[scenario.distribution]
+    ) {
+      throw new Error("Each scenario must name a declared layout and distribution.");
+    }
+    const key = `${scenario.layout}:${scenario.distribution}`;
+    if (scenarioKeys.has(key)) throw new Error(`Duplicate benchmark scenario: ${key}.`);
+    scenarioKeys.add(key);
+  }
   const queryIds = new Set((manifest.queries || []).map(({ id }) => id));
   for (const id of ["no-hit", "low-hit", "high-hit"]) if (!queryIds.has(id)) throw new Error(`Missing ${id} query.`);
   if (!Number.isSafeInteger(manifest.protocol?.coldSamples) || manifest.protocol.coldSamples < 1) throw new Error("Cold samples must be positive.");
   if (!Number.isSafeInteger(manifest.protocol?.warmupSamples) || manifest.protocol.warmupSamples < 1) throw new Error("Warm-up samples must be positive.");
   if (!Number.isSafeInteger(manifest.protocol?.measuredSamples) || manifest.protocol.measuredSamples < 20) throw new Error("Measured samples must be at least 20.");
   if (!Number.isSafeInteger(manifest.protocol?.concurrency) || manifest.protocol.concurrency < 1) throw new Error("Fixture concurrency must be positive.");
+  if (!Number.isSafeInteger(manifest.protocol?.resultLimit) || manifest.protocol.resultLimit < 1) throw new Error("Result limit must be a positive safe integer.");
+  if (!Number.isSafeInteger(manifest.protocol?.rssPollIntervalMs) || manifest.protocol.rssPollIntervalMs < 1) throw new Error("RSS polling interval must be a positive safe integer.");
   if (!manifest.protocol?.rawReadControl?.enabled) throw new Error("Raw-read control must be enabled.");
   if (!Number.isSafeInteger(manifest.protocol.rawReadControl.concurrency) || manifest.protocol.rawReadControl.concurrency < 1) {
     throw new Error("Raw-read control concurrency must be positive.");
@@ -684,8 +703,7 @@ function runtimeReceipt() {
   return {
     node: process.versions.node,
     platform: process.platform,
-    architecture: process.arch,
-    hostname: os.hostname()
+    architecture: process.arch
   };
 }
 
@@ -819,17 +837,22 @@ async function main(args) {
     const destination = readOption(args, "--output");
     if (!destination) throw new Error("generate requires --output outside the repository.");
     const receiptPath = path.resolve(readOption(args, "--receipt", `${destination}.receipt.json`));
-    const receipt = await generateFixture({
-      manifest,
-      destination,
-      selection: {
-        fileCount: Number(readOption(args, "--count")),
-        layout: readOption(args, "--layout"),
-        distribution: readOption(args, "--distribution")
-      }
-    });
-    await fs.writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, { flag: "wx" });
-    process.stdout.write(`${JSON.stringify({ fixtureRoot: path.resolve(destination), receiptPath, ...receipt, inventory: undefined }, null, 2)}\n`);
+    const receiptOutput = await fs.open(receiptPath, "wx");
+    try {
+      const receipt = await generateFixture({
+        manifest,
+        destination,
+        selection: {
+          fileCount: Number(readOption(args, "--count")),
+          layout: readOption(args, "--layout"),
+          distribution: readOption(args, "--distribution")
+        }
+      });
+      await receiptOutput.writeFile(`${JSON.stringify(receipt, null, 2)}\n`);
+      process.stdout.write(`${JSON.stringify({ fixtureRoot: path.resolve(destination), receiptPath, ...receipt, inventory: undefined }, null, 2)}\n`);
+    } finally {
+      await receiptOutput.close();
+    }
     return;
   }
   if (command === "run") {
@@ -837,11 +860,16 @@ async function main(args) {
     const receiptPath = readOption(args, "--receipt");
     const outputPath = readOption(args, "--output");
     if (!fixtureRoot || !receiptPath) throw new Error("run requires --fixture and --receipt.");
-    const fixtureReceipt = JSON.parse(await fs.readFile(receiptPath, "utf8"));
-    const report = await runBenchmark({ manifest, fixtureRoot: path.resolve(fixtureRoot), fixtureReceipt });
-    const output = `${JSON.stringify(report, null, 2)}\n`;
-    if (outputPath) await fs.writeFile(path.resolve(outputPath), output, { flag: "wx" });
-    process.stdout.write(output);
+    const reportOutput = outputPath ? await fs.open(path.resolve(outputPath), "wx") : null;
+    try {
+      const fixtureReceipt = JSON.parse(await fs.readFile(receiptPath, "utf8"));
+      const report = await runBenchmark({ manifest, fixtureRoot: path.resolve(fixtureRoot), fixtureReceipt });
+      const output = `${JSON.stringify(report, null, 2)}\n`;
+      if (reportOutput) await reportOutput.writeFile(output);
+      process.stdout.write(output);
+    } finally {
+      if (reportOutput) await reportOutput.close();
+    }
     return;
   }
   if (command === "raw-search") {
@@ -849,15 +877,20 @@ async function main(args) {
     const receiptPath = readOption(args, "--receipt");
     const outputPath = readOption(args, "--output");
     if (!fixtureRoot || !receiptPath) throw new Error("raw-search requires --fixture and --receipt.");
-    const fixtureReceipt = JSON.parse(await fs.readFile(receiptPath, "utf8"));
-    const report = await runRawSearchBenchmark({
-      manifest,
-      fixtureRoot: path.resolve(fixtureRoot),
-      fixtureReceipt
-    });
-    const output = `${JSON.stringify(report, null, 2)}\n`;
-    if (outputPath) await fs.writeFile(path.resolve(outputPath), output, { flag: "wx" });
-    process.stdout.write(output);
+    const reportOutput = outputPath ? await fs.open(path.resolve(outputPath), "wx") : null;
+    try {
+      const fixtureReceipt = JSON.parse(await fs.readFile(receiptPath, "utf8"));
+      const report = await runRawSearchBenchmark({
+        manifest,
+        fixtureRoot: path.resolve(fixtureRoot),
+        fixtureReceipt
+      });
+      const output = `${JSON.stringify(report, null, 2)}\n`;
+      if (reportOutput) await reportOutput.writeFile(output);
+      process.stdout.write(output);
+    } finally {
+      if (reportOutput) await reportOutput.close();
+    }
     return;
   }
   throw new Error(

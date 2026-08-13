@@ -483,6 +483,7 @@ export async function readContainedSnapshotFile(root, filePath, options = {}) {
     const opened = await handle.stat();
     const current = await lstatAfterObservation(filesystem, resolvedFile);
     const currentParent = await lstatAfterObservation(filesystem, resolvedParent, { bigint: true });
+    const allowedRootParentLink = resolvedParent === resolvedRoot && currentParent.isSymbolicLink();
     let canonicalFile;
     try {
       canonicalFile = await filesystem.realpath(resolvedFile);
@@ -497,8 +498,7 @@ export async function readContainedSnapshotFile(root, filePath, options = {}) {
       || current.isSymbolicLink()
       || !sameFile(opened, current)
       || !sameBigIntFile(options.parentSnapshot.stats, currentParent)
-      || !currentParent.isDirectory()
-      || currentParent.isSymbolicLink()
+      || (!allowedRootParentLink && (!currentParent.isDirectory() || currentParent.isSymbolicLink()))
       || !isPathWithinLexically(canonicalRoot, canonicalFile)
     ) {
       throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
@@ -555,9 +555,9 @@ export async function readContainedSnapshotDirectory(root, directoryPath, option
   let directory;
   try {
     const before = await lstatAfterObservation(filesystem, resolvedDirectory, { bigint: true });
+    const allowedRootLink = resolvedDirectory === resolvedRoot && before.isSymbolicLink();
     if (
-      !before.isDirectory()
-      || before.isSymbolicLink()
+      (!allowedRootLink && (!before.isDirectory() || before.isSymbolicLink()))
       || (options.expectedSnapshot && !sameBigIntFile(options.expectedSnapshot.stats, before))
     ) {
       throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
@@ -576,9 +576,9 @@ export async function readContainedSnapshotDirectory(root, directoryPath, option
         throw new ContainedReadError();
       }
       const currentParent = await lstatAfterObservation(filesystem, resolvedParent, { bigint: true });
+      const allowedRootParentLink = resolvedParent === resolvedRoot && currentParent.isSymbolicLink();
       if (
-        !currentParent.isDirectory()
-        || currentParent.isSymbolicLink()
+        (!allowedRootParentLink && (!currentParent.isDirectory() || currentParent.isSymbolicLink()))
         || !sameBigIntFile(options.parentSnapshot.stats, currentParent)
       ) {
         throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
@@ -649,10 +649,15 @@ export async function assertContainedDirectorySnapshotsUnchanged(root, observati
     if (!isPathWithinLexically(resolvedRoot, observedPath) || !observation.snapshot) {
       throw new ContainedReadError();
     }
+    const observedRootAncestor = observedPath === resolvedRoot
+      ? observation.snapshot.ancestors?.find(
+        (ancestor) => path.resolve(ancestor.path) === resolvedRoot
+      )
+      : null;
     rememberExpectedDirectory(expectedPaths, observedPath, {
       stats: observation.snapshot.stats,
-      resolvedPath: observedPath,
-      resolvedStats: observation.snapshot.stats
+      resolvedPath: observedRootAncestor?.resolvedPath || observedPath,
+      resolvedStats: observedRootAncestor?.resolvedStats || observation.snapshot.stats
     });
     for (const ancestor of observation.snapshot.ancestors || []) {
       rememberExpectedDirectory(expectedPaths, ancestor.path, ancestor);
@@ -724,7 +729,10 @@ async function inspectContainedDirectorySnapshot(root, directoryPath, options = 
   if (!await isPathWithin(root, directoryPath, { fileSystem: filesystem })) {
     throw new ContainedReadError();
   }
-  if (!before.isDirectory() || before.isSymbolicLink()) throw new ContainedReadError();
+  const allowedRootLink = path.resolve(directoryPath) === path.resolve(root) && before.isSymbolicLink();
+  if (!allowedRootLink && (!before.isDirectory() || before.isSymbolicLink())) {
+    throw new ContainedReadError();
+  }
   const ancestors = await inspectContainedAncestors(root, directoryPath, filesystem);
   const confirmed = await lstatAfterObservation(filesystem, directoryPath, { bigint: true });
   if (!sameBigIntFile(before, confirmed)) {

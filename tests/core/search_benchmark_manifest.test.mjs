@@ -103,6 +103,7 @@ test("final benchmark reports cover the frozen matrix and retain exact authority
     const report = JSON.parse(await fs.readFile(path.join(finalReportsDirectory, reportName), "utf8"));
     assert.equal(report.schemaVersion, "dotaios-search-benchmark-result/v1");
     assert.equal(report.manifestSha256, expectedManifestReceipt);
+    assert.equal(Object.hasOwn(report.runtime, "hostname"), false);
     assert.deepEqual(report.protocol, manifest.protocol);
     assert.deepEqual(report.searches.map(({ id }) => id), manifest.queries.map(({ id }) => id));
     assert.equal(report.searches.every(({ warm }) => warm.samples === manifest.protocol.measuredSamples), true);
@@ -120,6 +121,42 @@ test("final benchmark reports cover the frozen matrix and retain exact authority
   }
 
   assert.deepEqual(selections.sort(), expectedSelections.sort());
+});
+
+test("manifest validation rejects malformed harness sampling and scenario fields", async () => {
+  const manifest = await loadManifest(manifestPath);
+  for (const mutate of [
+    (value) => { value.protocol.resultLimit = 0; },
+    (value) => { value.protocol.rssPollIntervalMs = Number.MAX_SAFE_INTEGER + 1; },
+    (value) => { value.corpus.scenarioMatrix = []; },
+    (value) => { value.corpus.scenarioMatrix = [{ layout: "missing", distribution: "prose" }]; }
+  ]) {
+    const invalid = structuredClone(manifest);
+    mutate(invalid);
+    assert.throws(() => manifestReceipt(invalid));
+  }
+});
+
+test("benchmark commands reserve exclusive output before reading or timing fixtures", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-search-benchmark-output-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const occupied = path.join(root, "occupied.json");
+  const missingReceipt = path.join(root, "missing-receipt.json");
+  await fs.writeFile(occupied, "do not replace\n");
+
+  for (const command of ["run", "raw-search"]) {
+    const result = spawnSync(process.execPath, [
+      path.join(repoRoot, "scripts", "bench-search.mjs"),
+      command,
+      "--fixture", path.join(root, "missing-fixture"),
+      "--receipt", missingReceipt,
+      "--output", occupied
+    ], { cwd: repoRoot, encoding: "utf8" });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /EEXIST/);
+    assert.doesNotMatch(result.stderr, /missing-receipt/);
+    assert.equal(await fs.readFile(occupied, "utf8"), "do not replace\n");
+  }
 });
 
 test("fixture generation rejects an outside path that resolves back into the repository", async (t) => {

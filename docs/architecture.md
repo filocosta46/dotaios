@@ -158,10 +158,11 @@ transaction-owned and is revalidated before results resolve; all phase readers
 and prepared capabilities close on success or failure.
 
 Successful search arrays retain their iterable group shape and expose frozen,
-non-enumerable `scope` and `omissions` metadata. Omissions use the closed reason
-codes `file_too_large`, `directory_entries_exceeded`,
+non-enumerable `scope` and `omissions` metadata. Omissions use the five primary
+closed reason codes `file_too_large`, `directory_entries_exceeded`,
 `aggregate_bytes_exceeded`, `file_count_exceeded`, and
-`entry_count_exceeded`; contain bounded counts and path-free recovery text; and
+`entry_count_exceeded`; the explicit aggregate-remainder reason is
+`omissions_truncated`; contain bounded counts and path-free recovery text; and
 are capped at 32 records plus one defensive aggregate remainder. A directory
 ceiling is `partially_enumerated`; other ceiling omissions are `not_searched`.
 Every observed directory, including a directory stopped at its ceiling, is

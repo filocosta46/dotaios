@@ -101,7 +101,7 @@ snippet-building, corpus-statistics, and ranking code unchanged, but its reader
 does not perform containment, ancestor, directory-generation, or budget
 validation. `listFiles` returns only paths from the immutable receipt inventory;
 `readText(..., { returnSnapshot: true })` uses an `O_NOFOLLOW` open, handle read,
-and `fstat`, then returns canonical search its content and mtime. The harness
+and `fstat`, then returns the file content and mtime to canonical search. The harness
 verifies the fixture inventory before and after the matrix and validates exact
 ordered results before accepting every sample. This reader lives only in
 `scripts/bench-search.mjs`; it is not a production reader or a safe design

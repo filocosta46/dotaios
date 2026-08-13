@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
+import { createEvidenceReader, EvidenceReadError } from "../../packages/core/src/evidence-reader.mjs";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-evidence-reader-"));
@@ -206,6 +206,26 @@ test("evidence corpus transactions revalidate the authorized root even when the 
   );
 });
 
+test("evidence corpus revalidation accepts an unchanged symlinked authorized root", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink creation requires elevated Windows privileges");
+  const parent = tmpDir();
+  const realRoot = path.join(parent, "real-authorized");
+  const linkedRoot = path.join(parent, "linked-authorized");
+  fs.mkdirSync(realRoot);
+  fs.writeFileSync(path.join(realRoot, "note.md"), "SYMLINKED_ROOT_CORPUS_CANARY\n");
+  fs.symlinkSync(realRoot, linkedRoot, "dir");
+  const reader = createEvidenceReader({ roots: [linkedRoot] });
+
+  const observed = await reader.withTextCorpus(
+    linkedRoot,
+    linkedRoot,
+    { extensions: [".md"] },
+    (transaction) => transaction.mapFiles(({ content }) => content)
+  );
+
+  assert.deepEqual(observed, ["SYMLINKED_ROOT_CORPUS_CANARY\n"]);
+});
+
 test("evidence corpus transactions revalidate the nearest observed ancestor of a nested missing corpus", async () => {
   const root = tmpDir();
   const existing = path.join(root, "existing");
@@ -310,7 +330,7 @@ test("evidence corpus transaction capabilities close before successful results e
       return mapped;
     }
   );
-  pending.finally(() => { settled = true; });
+  pending.finally(() => { settled = true; }).catch(() => {});
 
   await entered;
   await new Promise((resolve) => setImmediate(resolve));
@@ -472,15 +492,21 @@ test("evidence corpus transactions reject in-place file mutation during a handle
   filesystem.open = async (targetPath, ...args) => {
     const handle = await fsp.open(targetPath, ...args);
     if (path.resolve(String(targetPath)) !== path.resolve(source)) return handle;
-    return Object.create(handle, {
-      read: { value: async (...readArgs) => {
-        const result = await handle.read(...readArgs);
-        if (!mutated && result.bytesRead > 0) {
-          mutated = true;
-          await fsp.writeFile(source, "# Mutated!\n\nMUTATION_CANARY\n");
+    return new Proxy(handle, {
+      get(target, property) {
+        if (property === "read") {
+          return async (...readArgs) => {
+            const result = await target.read(...readArgs);
+            if (!mutated && result.bytesRead > 0) {
+              mutated = true;
+              await fsp.writeFile(source, "# Mutated!\n\nMUTATION_CANARY\n");
+            }
+            return result;
+          };
         }
-        return result;
-      } }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
     });
   };
   const reader = createEvidenceReader({ roots: [root], filesystem });
@@ -692,6 +718,35 @@ test("scope preflight protects later scopes deterministically before redistribut
   assert.deepEqual(result.admitted, ["small", "later"]);
   assert.equal(result.omissions[0].scope, "large");
   assert.equal(result.omissions[0].reason, "file_count_exceeded");
+});
+
+test("scope preflight admits and revalidates a corpus through a symlinked authorized root", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink creation requires elevated Windows privileges");
+  const parent = tmpDir();
+  const realRoot = path.join(parent, "real-authorized");
+  const linkedRoot = path.join(parent, "linked-authorized");
+  const corpus = path.join(linkedRoot, "context");
+  fs.mkdirSync(path.join(realRoot, "context"), { recursive: true });
+  fs.writeFileSync(path.join(realRoot, "context", "note.md"), "SYMLINKED_ROOT_PREFLIGHT_CANARY\n");
+  fs.symlinkSync(realRoot, linkedRoot, "dir");
+  const reader = createEvidenceReader({ roots: [linkedRoot] });
+
+  const result = await reader.withScopePreflight(
+    ["context"],
+    (_scope, scopeReader) => scopeReader.prepareTextCorpus(
+      linkedRoot,
+      corpus,
+      { extensions: [".md"] }
+    ),
+    (_scope, _scopeReader, prepared) => prepared,
+    (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+      prepared,
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (transaction) => transaction.get("context")
+  );
+
+  assert.deepEqual(result, ["SYMLINKED_ROOT_PREFLIGHT_CANARY\n"]);
 });
 
 test("scope preflight protects later scopes before metadata and JSONL discovery spend entries", async (t) => {
@@ -944,6 +999,89 @@ test("scope preflight caps omissions exactly once at 32 plus the full aggregate 
   });
   assert.equal(Object.isFrozen(omissions), true);
   assert.equal(Object.isFrozen(omissions[32]), true);
+});
+
+test("scope preflight converts only skippable execution ceilings into whole-scope omissions", async (t) => {
+  await t.test("preserves successful scopes and reports a bounded omission", async () => {
+    const root = tmpDir();
+    const reader = createEvidenceReader({ roots: [root] });
+
+    const result = await reader.withScopePreflight(
+      ["oversized", "safe"],
+      () => null,
+      (_scope, _scopeReader, prepared) => prepared,
+      (scope) => {
+        if (scope === "oversized") {
+          throw new EvidenceReadError("DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED");
+        }
+        return "safe-result";
+      },
+      (transaction) => ({
+        safe: transaction.get("safe"),
+        oversized: transaction.has("oversized"),
+        omissions: transaction.omissions
+      })
+    );
+
+    assert.equal(result.safe, "safe-result");
+    assert.equal(result.oversized, false);
+    assert.equal(result.omissions.length, 1);
+    assert.equal(result.omissions[0].scope, "oversized");
+    assert.equal(result.omissions[0].reason, "file_count_exceeded");
+    assert.equal(Object.isFrozen(result.omissions), true);
+  });
+
+  await t.test("keeps integrity failures request-fatal", async () => {
+    const root = tmpDir();
+    const reader = createEvidenceReader({ roots: [root] });
+
+    await assert.rejects(
+      () => reader.withScopePreflight(
+        ["changed", "safe"],
+        () => null,
+        (_scope, _scopeReader, prepared) => prepared,
+        (scope) => {
+          if (scope === "changed") throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
+          return "must not escape";
+        },
+        () => "must not publish"
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+    );
+  });
+
+  await t.test("retains final validation for successful scopes", async () => {
+    const root = tmpDir();
+    const safeFile = path.join(root, "safe.md");
+    fs.writeFileSync(safeFile, "safe\n");
+    const reader = createEvidenceReader({ roots: [root] });
+
+    await assert.rejects(
+      () => reader.withScopePreflight(
+        ["oversized", "safe"],
+        (scope, scopeReader) => scope === "safe"
+          ? scopeReader.prepareTextCorpus(root, root, { extensions: [".md"] })
+          : null,
+        (_scope, _scopeReader, prepared) => prepared,
+        (scope, scopeReader, prepared) => {
+          if (scope === "oversized") {
+            throw new EvidenceReadError("DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED");
+          }
+          return scopeReader.withPreparedTextCorpus(
+            prepared,
+            (transaction) => transaction.mapFiles(({ content }) => content)
+          );
+        },
+        (transaction) => {
+          assert.deepEqual(transaction.get("safe"), ["safe\n"]);
+          assert.equal(transaction.has("oversized"), false);
+          fs.writeFileSync(safeFile, "late\n");
+          return "must not escape";
+        }
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+    );
+  });
 });
 
 test("scope preflight fails closed when one scope observes conflicting generations of the same directory", async () => {

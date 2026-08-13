@@ -279,6 +279,48 @@ test("mcp search budgets bound the exact serialized response at minimum, default
   }
 });
 
+test("search_aios stabilizes budget metadata across the pretty-to-compact boundary", () => {
+  const { aiosPath } = setupAios();
+  for (let index = 0; index < 20; index += 1) {
+    fs.writeFileSync(
+      path.join(aiosPath, "context", `boundary-${index}.md`),
+      `# Boundary ${index}\n\nserialization-boundary ${"x".repeat(193)}\n`,
+    );
+  }
+
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "serialization-boundary", scope: "context", limit: 20, budget: 32000 },
+    },
+  };
+  const [fullResponse] = runMcp(aiosPath, [request]);
+  const fullPayload = JSON.parse(toolText(fullResponse));
+  const boundarySeed = {
+    ...fullPayload,
+    budget: { ...fullPayload.budget, limit: 10000, used: 0 },
+  };
+  const boundaryBudget = JSON.stringify(boundarySeed, null, 2).length + 3;
+
+  assert.ok(boundaryBudget >= 10000 && boundaryBudget <= 32000);
+  assert.ok(JSON.stringify(boundarySeed).length < 10000);
+
+  request.id = 2;
+  request.params.arguments.budget = boundaryBudget;
+  const [boundaryResponse] = runMcp(aiosPath, [request]);
+
+  assert.equal(boundaryResponse.error, undefined);
+  const text = toolText(boundaryResponse);
+  const payload = JSON.parse(text);
+  assert.equal(payload.results.length, 20);
+  assert.equal(payload.budget.limit, boundaryBudget);
+  assert.equal(payload.budget.used, text.length);
+  assert.equal(payload.budget.truncated, false);
+});
+
 test("mcp skill budgets bound every returned field at minimum, default, and maximum", () => {
   const { aiosPath } = setupAios();
   const skillDir = path.join(aiosPath, "skills", "verbose");

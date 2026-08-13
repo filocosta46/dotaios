@@ -11,8 +11,7 @@
   "runtime": {
     "node": "22.22.3",
     "platform": "darwin",
-    "architecture": "arm64",
-    "hostname": "MacBook-Pro-3.local"
+    "architecture": "arm64"
   },
   "protocol": {
     "coldSamples": 3,

@@ -146,7 +146,7 @@ accepted-file-path work that the invariant is intended to constrain.
 
 ## Real AIOS folder check
 
-The product CLI searched the configured `/Users/filo/aios` vault for
+The product CLI searched the configured local vault (`~/aios`) for
 `indexing`, limited to five results. The returned output was inspected and
 contained five substantive research records about source handling, retrieval,
 competitive systems, and web discoverability. The pre-change and optimized

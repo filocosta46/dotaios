@@ -401,6 +401,10 @@ test("non-interactive setup does not download the optional web browsing engine b
     env: { ...process.env, HOME: processHomePath, PATH: "/usr/bin:/bin" }
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.ok(
+    result.stdout.includes(`  2. Open the ${aiosPath} folder or make it your working directory.`),
+    `setup guidance must name the resolved --path target, got:\n${result.stdout}`
+  );
   assert.match(result.stdout, /Web browsing engine: not installed.*plain fetch remains available/);
   assert.equal(fsSync.existsSync(path.join(homePath, ".dotaios", "bin", "lightpanda")), false);
   assert.doesNotMatch(result.stdout, /All set\./);

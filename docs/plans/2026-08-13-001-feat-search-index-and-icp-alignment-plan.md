@@ -11,6 +11,11 @@ deepened: 2026-08-13
 
 # Search Scale, Resilience, and ICP Alignment - Plan
 
+> **Amended by:**
+> [`2026-08-13-002-search-performance-gate-amendment.md`](./2026-08-13-002-search-performance-gate-amendment.md),
+> which governs and supersedes the withdrawn U5/U6 bytes-only `raw-read`
+> performance clauses. All other requirements in this plan remain in force.
+
 ## Goal Capsule
 
 Make end-to-end search fast and predictably degradable as a personal corpus

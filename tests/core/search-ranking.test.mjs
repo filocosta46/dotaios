@@ -24,7 +24,35 @@ function writeEvents(memoryDir, entries) {
 
 function genericContainedCorpusReader(roots) {
   const baseReader = createEvidenceReader({ roots: Array.isArray(roots) ? roots : [roots] });
-  return {
+  const genericScopeReader = (scopeReader) => ({
+    ...scopeReader,
+    async prepareTextCorpus(transactionRoot, directoryPath, options) {
+      return Object.freeze({
+        kind: "generic-contained-corpus",
+        root: transactionRoot,
+        options: Object.freeze({ ...options }),
+        files: await scopeReader.listFiles(transactionRoot, directoryPath, options)
+      });
+    },
+    async withPreparedTextCorpus(prepared, callback) {
+      if (prepared?.kind !== "generic-contained-corpus") {
+        return scopeReader.withPreparedTextCorpus(prepared, callback);
+      }
+      return callback(Object.freeze({
+        async mapFiles(mapper) {
+          return Promise.all(prepared.files.map(async (filePath) => {
+            const observed = await scopeReader.readText(prepared.root, filePath, { returnSnapshot: true });
+            return mapper(Object.freeze({
+              filePath,
+              content: observed.content,
+              mtimeMs: observed.stats.mtimeMs
+            }));
+          }));
+        }
+      }));
+    }
+  });
+  const reader = {
     ...baseReader,
     async withTextCorpus(transactionRoot, directoryPath, options, callback) {
       const files = await baseReader.listFiles(transactionRoot, directoryPath, options);
@@ -40,8 +68,18 @@ function genericContainedCorpusReader(roots) {
           }));
         }
       }));
+    },
+    async withScopePreflight(scopes, inspect, discover, execute, callback) {
+      return baseReader.withScopePreflight(
+        scopes,
+        (scope, scopeReader) => inspect(scope, genericScopeReader(scopeReader)),
+        (scope, scopeReader, prepared) => discover(scope, genericScopeReader(scopeReader), prepared),
+        (scope, scopeReader, prepared) => execute(scope, genericScopeReader(scopeReader), prepared),
+        callback
+      );
     }
   };
+  return reader;
 }
 
 // (a) Recency decay: a fresh hit must beat a stale hit of comparable lexical

@@ -82,6 +82,19 @@ export function bridgeAttentionLines(blockedBridges) {
   return lines;
 }
 
+export function catalogConflictActivationResult(skillsIndex) {
+  return {
+    detectedClientCount: 0,
+    configuredContextCount: 0,
+    detectedClientNames: [],
+    configuredClientNames: [],
+    blockedContextCount: 0,
+    blockedHermesCount: 0,
+    blockedCatalogCount: skillsIndex.conflicts.length,
+    results: skillsIndex.results
+  };
+}
+
 export async function activateCommand(args, { lifecycle = {}, quiet = false } = {}) {
   if (hasHelpFlag(args)) {
     printActivateHelp();
@@ -154,14 +167,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false } = 
       ? `Connection needs attention: preserved ${skillsIndex.conflicts.length} existing app configuration conflict(s); no app instructions were changed.`
       : `Activation needs attention: preserved ${skillsIndex.conflicts.length} skill catalog collision(s); no client bridges were changed.`);
     process.exitCode = 1;
-    return {
-      detectedClientCount: 0,
-      configuredContextCount: 0,
-      configuredClientNames: [],
-      blockedContextCount: 0,
-      blockedCatalogCount: skillsIndex.conflicts.length,
-      results
-    };
+    return catalogConflictActivationResult(skillsIndex);
   }
 
   const global = await createGlobalBridges(

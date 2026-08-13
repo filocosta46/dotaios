@@ -870,19 +870,29 @@ function createEvidenceReaderView(roots, state) {
         budget.remaining(),
         available
       );
-      const allocation = Object.freeze({
-        admitted: finalAllocation.admitted,
-        omissions: freezeOmissions([
-          ...preliminary.omissions,
-          ...finalAllocation.omissions
-        ])
-      });
       const admitted = new Map();
+      const executionOmissions = [];
       for (const item of candidates) {
-        if (!allocation.admitted.has(item.scope)) continue;
+        if (!finalAllocation.admitted.has(item.scope)) continue;
         item.reader = createScopeReader(item);
-        admitted.set(item.scope, await executeScope(item.scope, item.reader, item.value));
+        try {
+          admitted.set(item.scope, await executeScope(item.scope, item.reader, item.value));
+        } catch (error) {
+          const normalized = normalizeEvidenceReadError(error);
+          if (!SKIPPABLE_SCOPE_CODES.has(normalized.code)) throw normalized;
+          executionOmissions.push(createScopeOmission(
+            item.scope,
+            omissionReasonForError(normalized.code),
+            item.demandBudget.snapshot(),
+            scopeLimits
+          ));
+        }
       }
+      const omissions = freezeOmissions([
+        ...preliminary.omissions,
+        ...finalAllocation.omissions,
+        ...executionOmissions
+      ]);
       let active = true;
       const transaction = Object.freeze({
         has(scope) {
@@ -893,7 +903,7 @@ function createEvidenceReaderView(roots, state) {
           if (!active) throw new EvidenceReadError("DOTAIOS_EVIDENCE_TRANSACTION_CLOSED");
           return admitted.get(scope);
         },
-        omissions: allocation.omissions
+        omissions
       });
 
       let result;

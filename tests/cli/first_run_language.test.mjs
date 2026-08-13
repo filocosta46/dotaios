@@ -68,7 +68,14 @@ test("real setup keeps init detail concise by default and restores it with --ver
     assert.equal(concise.status, 0, `${concise.stdout}\n${concise.stderr}`);
     const conciseOutput = `${concise.stdout}\n${concise.stderr}`;
     assert.match(conciseOutput, /Folder ready\. Claude Code can now use your context\./);
-    assert.doesNotMatch(conciseOutput, new RegExp(escapeRegExp(tempRoot)));
+    assert.match(
+      conciseOutput,
+      new RegExp(`Open the ${escapeRegExp(conciseAios)} folder or make it your working directory`)
+    );
+    assert.doesNotMatch(
+      conciseOutput.replaceAll(conciseAios, "<selected-aios-path>"),
+      new RegExp(escapeRegExp(tempRoot))
+    );
     assert.doesNotMatch(conciseOutput, /AIOS path:|Vault path:|Files: \d+ created|\nNext steps:\n/);
     assert.doesNotMatch(conciseOutput, /not detected on this machine/);
 
@@ -154,6 +161,7 @@ test("default doctor reports the user outcome without listing absent clients", (
 
   try {
     const concise = run(["doctor", "--path", aiosPath, "--home", homePath]);
+    assert.equal(concise.status, 0, concise.stderr);
     assert.match(concise.stdout, /No supported local AI app was detected|No local AI app is connected/i);
     assert.match(concise.stdout, /install|activate/i);
     assert.match(concise.stdout, /~\/aios/);
@@ -161,6 +169,7 @@ test("default doctor reports the user outcome without listing absent clients", (
     assert.doesNotMatch(concise.stdout, new RegExp(escapeRegExp(tempRoot)));
 
     const verbose = run(["doctor", "--verbose", "--path", aiosPath, "--home", homePath]);
+    assert.equal(verbose.status, 0, verbose.stderr);
     assert.match(verbose.stdout, /\(not installed\)|native skills/i);
     assert.match(verbose.stdout, new RegExp(escapeRegExp(tempRoot)));
   } finally {

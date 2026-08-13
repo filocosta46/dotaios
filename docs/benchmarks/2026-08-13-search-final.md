@@ -75,8 +75,23 @@ parity, safety, regression, or scaling gates.
 - **Exact parity: PASS.** Every safe result SHA-256 equals both the frozen U8
   authority and the corresponding full unsafe canonical-search control.
 - **500-file regression: PASS.** Worst shallow p95 is 33.00 ms and worst nested
-  p95 is 181.80 ms, below their frozen contained baselines plus the larger of
-  20% or 50 ms.
+  p95 is 181.80 ms. Both remain below the frozen contained
+  [500-file baselines](./2026-08-13-search-baseline.md): shallow
+  111.40 / 109.07 / 107.91 ms and nested 942.54 / 958.30 / 958.66 ms for
+  no-hit / low-hit / high-hit, plus the larger of 20% or 50 ms.
+- **Relative diagnostic: EXCEPTION.** The 10,000-file nested safe/full-unsafe
+  ratios are 1.66x / 1.67x / 1.59x for no-hit / low-hit / high-hit. The governing
+  [performance amendment](../plans/2026-08-13-002-search-performance-gate-amendment.md)
+  supersedes the original 1.5x proxy gate and makes this comparator diagnostic:
+  the nested safe path performs the required containment and final-generation
+  validation omitted by the full unsafe control, while R1, parity, safety,
+  regression, and scaling all pass.
+- **U5 bytes-only diagnostic: EXCEPTION.** On the 10,000-file nested fixture,
+  safe-corpus p95 minus raw-read p95 is +401.66 ms (551.26 - 149.60), above the
+  original raw-read-plus-150 ms proxy. The same amendment supersedes that clause
+  because raw-read is a bytes-only lower bound that omits traversal,
+  containment, generation validation, decoding, and canonical search work; it
+  is informational and is not a release gate.
 - **Operation scaling: PASS.** Accepted file paths remain exactly one `lstat`,
   one `realpath`, and one `open` per file. Between 2,500 and 10,000 at fixed
   topology, totals add exactly two `lstat`, one `realpath`, and one `open` per

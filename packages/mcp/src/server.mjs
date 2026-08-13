@@ -464,19 +464,21 @@ function serializeSkillEnvelope({ intent, matches, limit, truncated }) {
 }
 
 function serializeSearchEnvelope({ query, scope, scopeDetail, results, complete, omissions, limit, truncated }) {
+  const envelope = (used) => ({
+    query,
+    scope,
+    ...(scopeDetail ? { scope_selection: scopeDetail } : {}),
+    results,
+    complete,
+    omissions,
+    budget: { limit, used, truncated },
+  });
+  // Keep the representation fixed so changing `used` cannot oscillate across the limit.
+  const usePretty = JSON.stringify(envelope(limit), null, 2).length <= limit;
   let used = 0;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const value = {
-      query,
-      scope,
-      ...(scopeDetail ? { scope_selection: scopeDetail } : {}),
-      results,
-      complete,
-      omissions,
-      budget: { limit, used, truncated },
-    };
-    const pretty = JSON.stringify(value, null, 2);
-    const serialized = pretty.length <= limit ? pretty : JSON.stringify(value);
+    const value = envelope(used);
+    const serialized = usePretty ? JSON.stringify(value, null, 2) : JSON.stringify(value);
     if (serialized.length === used) return serialized;
     used = serialized.length;
   }

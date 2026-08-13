@@ -905,7 +905,10 @@ test("legacy archive mode repair never follows a substituted pathname", async ()
     }
   };
 
-  await assert.rejects(() => compactEvents(eventsPath, 1, { filesystem }), /invalid|state/i);
+  await assert.rejects(
+    () => compactEvents(eventsPath, 1, { filesystem }),
+    (error) => error?.code === "DOTAIOS_OWNED_STATE_INVALID"
+  );
 
   assert.equal(substituted, true, "the pathname must be swapped at the repair boundary");
   assert.equal(fs.statSync(outsidePath).mode & 0o777, 0o644, "repair must not chmod the symlink target");

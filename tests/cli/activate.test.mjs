@@ -71,6 +71,27 @@ describe("activateCommand — symlinks", () => {
     assert.ok(content.includes("Test Skill"), "symlink should resolve to skill content");
   });
 
+  it("returns the full stable activation result shape for a catalog conflict", async () => {
+    const { catalogConflictActivationResult } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+    const results = [{ action: "kept", path: "skills/INDEX.md" }];
+
+    assert.deepEqual(
+      catalogConflictActivationResult({ conflicts: [{ path: "skills/INDEX.md" }], results }),
+      {
+        detectedClientCount: 0,
+        configuredContextCount: 0,
+        detectedClientNames: [],
+        configuredClientNames: [],
+        blockedContextCount: 0,
+        blockedHermesCount: 0,
+        blockedCatalogCount: 1,
+        results
+      }
+    );
+  });
+
   it("refuses to connect a temporary AIOS into the real home", async () => {
     const { activateCommand } = await import(
       path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
