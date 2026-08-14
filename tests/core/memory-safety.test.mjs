@@ -3,6 +3,7 @@ import fsp from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -389,6 +390,31 @@ test("a raw legacy pending JSONL batch remains recoverable", async () => {
   assert.equal(fs.existsSync(`${archivePath}.pending`), false);
 });
 
+test("unmarked legacy pending accepts only JSON object records", async (t) => {
+  for (const pendingBefore of ["null\n", "42\n", '"text"\n', "[1,2,3]\n"]) {
+    await t.test(pendingBefore.trim(), async () => {
+      const dir = tmpDir();
+      const eventsPath = path.join(dir, "events.jsonl");
+      const archivePath = path.join(dir, "events-archive.jsonl");
+      const pendingPath = `${archivePath}.pending`;
+      const liveBefore = '{"type":"live"}\n';
+      const archiveBefore = '{"type":"existing-archive"}\n';
+      fs.writeFileSync(eventsPath, liveBefore, { mode: 0o600 });
+      fs.writeFileSync(archivePath, archiveBefore, { mode: 0o600 });
+      fs.writeFileSync(pendingPath, pendingBefore, { mode: 0o600 });
+
+      await assert.rejects(
+        compactEvents(eventsPath, 10),
+        (error) => error?.code === "DOTAIOS_ARCHIVE_STATE_INVALID"
+      );
+
+      assert.equal(fs.readFileSync(eventsPath, "utf8"), liveBefore);
+      assert.equal(fs.readFileSync(archivePath, "utf8"), archiveBefore);
+      assert.equal(fs.readFileSync(pendingPath, "utf8"), pendingBefore);
+    });
+  }
+});
+
 test("a crash after pending publication cannot route a new batch through legacy recovery", async () => {
   const dir = tmpDir();
   const eventsPath = path.join(dir, "events.jsonl");
@@ -506,38 +532,55 @@ test("prepared recovery preserves complete records appended by an older writer",
   );
 });
 
-test("prepared recovery scans a large live prefix in bounded time", async () => {
-  const dir = tmpDir();
-  const eventsPath = path.join(dir, "events.jsonl");
-  const archivePath = path.join(dir, "events-archive.jsonl");
-  const original = seedEvents(eventsPath, 5_000);
-  const suffix = JSON.stringify({
-    ts: "2026-01-01T00:01:00.000Z",
-    type: "older-writer-suffix"
-  });
-  let interrupted = false;
-  const filesystem = {
-    ...fsp,
-    async link(source, destination) {
-      const result = await fsp.link(source, destination);
-      if (!interrupted && destination === `${archivePath}.pending`) {
-        interrupted = true;
-        throw new Error("injected-crash:prepared-published");
+test("prepared recovery scales linearly with a large live prefix", async () => {
+  const measureRecovery = async (count) => {
+    const dir = tmpDir();
+    const eventsPath = path.join(dir, "events.jsonl");
+    const archivePath = path.join(dir, "events-archive.jsonl");
+    seedEvents(eventsPath, count);
+    const suffix = JSON.stringify({
+      ts: "2026-01-01T00:01:00.000Z",
+      type: "older-writer-suffix"
+    });
+    let interrupted = false;
+    const filesystem = {
+      ...fsp,
+      async link(source, destination) {
+        const result = await fsp.link(source, destination);
+        if (!interrupted && destination === `${archivePath}.pending`) {
+          interrupted = true;
+          throw new Error("injected-crash:prepared-published");
+        }
+        return result;
       }
-      return result;
-    }
+    };
+
+    await assert.rejects(
+      compactEvents(eventsPath, 1, { filesystem }),
+      /injected-crash:prepared-published/
+    );
+    assert.equal(interrupted, true, "the prepared-publication crash must fire");
+    fs.appendFileSync(eventsPath, `${suffix}\n`);
+    const started = performance.now();
+    const result = await compactEvents(eventsPath, count + 10);
+    const elapsedMs = performance.now() - started;
+
+    assert.deepEqual(result, { archived: 0, kept: count + 1 });
+    assert.equal(fs.existsSync(`${archivePath}.pending`), false);
+    assert.equal(readLines(eventsPath).length, count + 1);
+    return elapsedMs;
   };
 
-  await assert.rejects(compactEvents(eventsPath, 1, { filesystem }));
-  fs.appendFileSync(eventsPath, `${suffix}\n`);
-  const started = performance.now();
-  await compactEvents(eventsPath, 1);
-  const elapsedMs = performance.now() - started;
+  const smallCount = 1_250;
+  const largeCount = 5_000;
+  const smallMs = await measureRecovery(smallCount);
+  const largeMs = await measureRecovery(largeCount);
+  const linearGrowth = largeCount / smallCount;
+  const allowedMs = smallMs * linearGrowth * 2 + 25;
 
-  assert.ok(elapsedMs < 2_000, `large recovery took ${elapsedMs.toFixed(1)}ms`);
-  assert.deepEqual(
-    [...readEventsArchiveLines(dir), ...readLines(eventsPath)],
-    [...original, suffix]
+  assert.ok(
+    largeMs <= allowedMs,
+    `4x recovery grew from ${smallMs.toFixed(1)}ms to ${largeMs.toFixed(1)}ms; allowed ${allowedMs.toFixed(1)}ms`
   );
 });
 

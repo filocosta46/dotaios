@@ -810,9 +810,21 @@ function validateManifest(manifest) {
   const queryIds = new Set((manifest.queries || []).map(({ id }) => id));
   for (const id of ["no-hit", "low-hit", "high-hit"]) if (!queryIds.has(id)) throw new Error(`Missing ${id} query.`);
   for (const query of manifest.queries || []) {
-    if (!["none", "fixed-indices", "modulo"].includes(query.expectation?.kind)) {
+    const expectation = query.expectation;
+    if (!["none", "fixed-indices", "modulo"].includes(expectation?.kind)) {
       throw new Error(`Unsupported query expectation kind for ${query.id}.`);
     }
+    if (expectation.kind === "fixed-indices" && (
+      !Array.isArray(expectation.fileIndices)
+      || expectation.fileIndices.some((index) => !Number.isSafeInteger(index) || index < 0)
+    )) throw new Error(`Fixed-indices expectation for ${query.id} must contain non-negative safe integers.`);
+    if (expectation.kind === "modulo" && (
+      !Number.isSafeInteger(expectation.modulo)
+      || expectation.modulo < 1
+      || !Number.isSafeInteger(expectation.remainder)
+      || expectation.remainder < 0
+      || expectation.remainder >= expectation.modulo
+    )) throw new Error(`Modulo expectation for ${query.id} must define a positive modulus and valid remainder.`);
   }
   if (!Number.isSafeInteger(manifest.protocol?.coldSamples) || manifest.protocol.coldSamples < 1) throw new Error("Cold samples must be positive.");
   if (!Number.isSafeInteger(manifest.protocol?.warmupSamples) || manifest.protocol.warmupSamples < 1) throw new Error("Warm-up samples must be positive.");

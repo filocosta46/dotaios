@@ -668,9 +668,7 @@ function parsePendingArchiveArtifact(content) {
 
 function parseLegacyPendingArchive(content) {
   const pendingLines = content.split("\n").filter((line) => line.trim());
-  try {
-    for (const line of pendingLines) JSON.parse(line);
-  } catch {
+  if (pendingLines.some((line) => !isCompleteJsonlRecord(`${line}\n`))) {
     throw archiveStateError();
   }
   return { kind: "legacy", payload: content, pendingLines };

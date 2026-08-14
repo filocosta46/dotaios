@@ -347,7 +347,13 @@ test("manifest validation rejects malformed harness sampling and scenario fields
     (value) => { value.protocol.resultLimit = 0; },
     (value) => { value.protocol.rssPollIntervalMs = Number.MAX_SAFE_INTEGER + 1; },
     (value) => { value.corpus.scenarioMatrix = []; },
-    (value) => { value.corpus.scenarioMatrix = [{ layout: "missing", distribution: "prose" }]; }
+    (value) => { value.corpus.scenarioMatrix = [{ layout: "missing", distribution: "prose" }]; },
+    (value) => { value.queries[1].expectation.fileIndices = null; },
+    (value) => { value.queries[1].expectation.fileIndices = [3, -1]; },
+    (value) => { value.queries[2].expectation.modulo = 0; },
+    (value) => { value.queries[2].expectation.modulo = Number.POSITIVE_INFINITY; },
+    (value) => { value.queries[2].expectation.remainder = -1; },
+    (value) => { value.queries[2].expectation.remainder = value.queries[2].expectation.modulo; }
   ]) {
     const invalid = structuredClone(manifest);
     mutate(invalid);
