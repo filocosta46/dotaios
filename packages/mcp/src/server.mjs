@@ -116,6 +116,7 @@ class DotaiosMcpServer {
   }
 
   async callTool(name, args) {
+    validateMcpToolArguments(name, args);
     const memoryPolicy = resolveMcpMemoryPolicy(args);
     if (memoryPolicy.mode === "off") return serializeOffToolResult(name, args, memoryPolicy);
     await this.assertAios();
@@ -376,6 +377,51 @@ function memoryModeSchema() {
     default: "shared",
     description: "Shared uses personal continuity, project requires a project selector, and off performs no DotAIOS read, search, save, or capture."
   };
+}
+
+function validateMcpToolArguments(name, args) {
+  if (name === "read_working_context") {
+    assertAllowedArguments(args, ["memory", "project", "limit", "budget"]);
+    optionalString(args.project, "project", 200);
+    if (args.limit !== undefined) boundedInteger(args.limit, "limit", 1, 10);
+    if (args.budget !== undefined) boundedInteger(args.budget, "budget", 256, 32000);
+    return;
+  }
+  if (name === "search_aios") {
+    assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+    requireString(args.query, "query", 500);
+    const project = args.project === undefined
+      ? undefined
+      : requireString(args.project, "project", 200);
+    const scope = optionalString(args.scope) || "all";
+    if (!SEARCH_SCOPES.includes(scope)) {
+      throw protocolError(-32602, `scope must be one of: ${SEARCH_SCOPES.join(", ")}`);
+    }
+    if (scope === "projects" && !project) {
+      throw protocolError(-32602, "project is required when scope is projects");
+    }
+    if (project) {
+      try {
+        validateProjectSelector(project);
+      } catch (error) {
+        throw protocolError(-32602, error.message);
+      }
+    }
+    if (args.limit !== undefined) boundedInteger(args.limit, "limit", 1, 20);
+    if (args.budget !== undefined) {
+      boundedInteger(args.budget, "budget", MIN_SEARCH_RESULT_BUDGET, 32000);
+    }
+    return;
+  }
+  if (name === "resolve_skill") {
+    assertAllowedArguments(args, ["memory", "project", "intent", "limit", "budget"]);
+    optionalString(args.project, "project", 200);
+    requireString(args.intent, "intent", 500);
+    if (args.limit !== undefined) boundedInteger(args.limit, "limit", 1, 10);
+    if (args.budget !== undefined) boundedInteger(args.budget, "budget", 256, 32000);
+    return;
+  }
+  throw protocolError(-32602, `Unknown tool: ${name}`);
 }
 
 function resolveMcpMemoryPolicy(args) {

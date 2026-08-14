@@ -260,6 +260,8 @@ test("compact CLI documents and enforces the shared project selector contract", 
     const help = run(["brief", "--help"]);
     assert.match(help.stdout, /nonblank.*no control characters.*200 Unicode code points/is);
     assert.match(help.stdout, /--memory <mode>.*shared, project, or off/is);
+    assert.match(help.stdout, /off may be used alone.*no DotAIOS write/is);
+    assert.match(help.stdout, /--cwd <dir>.*With --compact.*with or without.*--first-message/is);
 
     const projectDir = path.join(aiosPath, "projects", "client-work");
     fs.mkdirSync(projectDir, { recursive: true });

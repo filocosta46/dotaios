@@ -118,6 +118,36 @@ test("Gemini first-message reader supports current JSONL transcripts and resumed
   );
 });
 
+test("Gemini first-message reader ignores plain JSONL metadata and update records", async () => {
+  const root = tmp();
+  const transcriptPath = path.join(root, "session.jsonl");
+  fs.writeFileSync(transcriptPath, geminiJsonl(
+    { sessionId: "gemini-session-1", projectHash: "project-hash" },
+    { type: "metadata", timestamp: "2026-08-14T00:00:00.500Z", label: "resume" },
+    { update: "model-routing", timestamp: "2026-08-14T00:00:00.750Z" },
+    { id: "user-1", type: "user", content: "Only this project from a valid message" }
+  ));
+
+  assert.equal(
+    await readGeminiFirstUserMessage(hookInput({ transcript_path: transcriptPath })),
+    "Only this project from a valid message"
+  );
+});
+
+test("Gemini first-message reader rejects malformed message-shaped JSONL records", async () => {
+  const root = tmp();
+  const transcriptPath = path.join(root, "session.jsonl");
+  fs.writeFileSync(transcriptPath, geminiJsonl(
+    { sessionId: "gemini-session-1", projectHash: "project-hash" },
+    { id: 42, type: "user", content: "Private chat must not be silently ignored" }
+  ));
+
+  await assert.rejects(
+    () => readGeminiFirstUserMessage(hookInput({ transcript_path: transcriptPath })),
+    /malformed message record/i
+  );
+});
+
 test("Gemini first-message reader keeps the original session lock across JSONL rewind and checkpoints", async () => {
   const root = tmp();
   const rewoundPath = path.join(root, "rewound.jsonl");
@@ -261,7 +291,7 @@ test("Gemini v2 hook is safe while older SessionStart settings still point at it
   fs.mkdirSync(binDir);
   fs.writeFileSync(path.join(binDir, "npx"), [
     "#!/usr/bin/env bash",
-    "shift 3",
+    "shift 5",
     `exec ${process.execPath} ${cliPath} \"$@\"`
   ].join("\n"), { mode: 0o700 });
   fs.writeFileSync(scriptPath, buildGeminiHookScript(path.join(root, "missing-aios")), { mode: 0o700 });
@@ -294,7 +324,7 @@ test("Gemini generated hook routes Shared through the hidden audited hook seam",
   fs.writeFileSync(transcriptPath, JSON.stringify({ sessionId: "gemini-session-1", messages: [] }));
   fs.writeFileSync(path.join(binDir, "npx"), [
     "#!/usr/bin/env bash",
-    "shift 3",
+    "shift 5",
     `exec ${process.execPath} ${cliPath} \"$@\"`
   ].join("\n"), { mode: 0o700 });
   fs.writeFileSync(scriptPath, buildGeminiHookScript(aiosPath), { mode: 0o700 });
@@ -318,6 +348,7 @@ test("Gemini generated hook routes Shared through the hidden audited hook seam",
 
 test("Gemini hook emits one valid JSON object when the pinned brief fails", () => {
   const root = tmp();
+  const transcriptPath = path.join(root, "session.json");
   const scriptPath = path.join(root, "dotaios-context-hook.sh");
   const binDir = path.join(root, "bin");
   fs.mkdirSync(binDir);
@@ -326,12 +357,13 @@ test("Gemini hook emits one valid JSON object when the pinned brief fails", () =
     "#!/usr/bin/env bash\necho 'brief failed' >&2\nexit 9\n",
     { mode: 0o700 }
   );
+  fs.writeFileSync(transcriptPath, JSON.stringify({ sessionId: "gemini-session-1", messages: [] }));
   fs.writeFileSync(scriptPath, buildGeminiHookScript(path.join(root, "aios")), { mode: 0o700 });
 
   const result = spawnSync(scriptPath, [], {
     encoding: "utf8",
     input: JSON.stringify(hookInput({
-      transcript_path: path.join(root, "first-turn-not-written-yet.json"),
+      transcript_path: transcriptPath,
       prompt: "Use my memory"
     })),
     env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}` }
@@ -339,8 +371,11 @@ test("Gemini hook emits one valid JSON object when the pinned brief fails", () =
 
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.continue, false);
-  assert.match(output.stopReason, /could not load memory safely/i);
+  assert.notEqual(output.continue, false);
+  assert.equal(output.hookSpecificOutput.hookEventName, "BeforeAgent");
+  assert.equal(output.hookSpecificOutput.additionalContext, "");
+  assert.equal(output.dotaiosMemory.mode, "closed");
+  assert.match(output.systemMessage, /could not verify the session mode|left memory closed/i);
   assert.equal(result.stdout.trim().split("\n").length, 1);
 });
 
@@ -392,7 +427,9 @@ test("Gemini generated hook rejects a malformed successful child envelope", () =
   });
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.continue, false);
+  assert.notEqual(output.continue, false);
+  assert.equal(output.hookSpecificOutput.hookEventName, "BeforeAgent");
+  assert.equal(output.hookSpecificOutput.additionalContext, "");
   assert.match(output.systemMessage, /left memory closed|could not load memory safely/i);
 });
 
@@ -411,7 +448,7 @@ test("Gemini generated hook self-heals through the pinned CLI when its install c
   fs.writeFileSync(path.join(binDir, "npx"), [
     "#!/usr/bin/env bash",
     `touch ${JSON.stringify(npxSentinel)}`,
-    "shift 3",
+    "shift 5",
     `exec ${process.execPath} ${cliPath} "$@"`
   ].join("\n"), { mode: 0o700 });
 
@@ -458,7 +495,9 @@ test("Gemini generated hook closes memory when an established Private prompt has
   });
   assert.equal(result.status, 0, result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.equal(output.continue, false);
+  assert.notEqual(output.continue, false);
+  assert.equal(output.hookSpecificOutput.hookEventName, "BeforeAgent");
+  assert.equal(output.hookSpecificOutput.additionalContext, "");
   assert.match(output.systemMessage, /^Memory: Closed\b/);
   assert.doesNotMatch(output.systemMessage, /^Memory: Off\b/);
   assert.equal(fs.existsSync(missingAios), false);

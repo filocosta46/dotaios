@@ -76,6 +76,33 @@ test("search and update reject contradictory Shared plus project inputs before A
   }
 });
 
+test("project search explains when a requested global scope is forbidden", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-search-project-omission-"));
+  const aiosPath = path.join(root, "aios");
+  try {
+    const initialized = run(["init", "--path", aiosPath, "--yes"]);
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const readme = path.join(aiosPath, "projects", "alpha", "README.md");
+    fs.mkdirSync(path.dirname(readme), { recursive: true });
+    fs.writeFileSync(readme, "---\nid: project-alpha-001\nproject: alpha\n---\n# Alpha\n");
+
+    const result = run([
+      "search", "anything",
+      "--memory", "project",
+      "--project", "project-alpha-001",
+      "--scope", "vault",
+      "--path", aiosPath
+    ]);
+
+    assert.equal(result.status, 2, result.stderr);
+    assert.match(result.stdout, /No results found in inspected sources.*Search incomplete.*vault/is);
+    assert.match(result.stderr, /Search incomplete for vault.*choose Shared memory.*scope_forbidden_by_memory_policy/is);
+    assert.doesNotMatch(result.stderr, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("project update prints its receipt and attributes both save representations", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-update-project-"));
   const aiosPath = path.join(root, "aios");

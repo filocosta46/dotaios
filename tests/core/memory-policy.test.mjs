@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  detectMemoryModeFromFirstMessage,
   MEMORY_MODES,
   resolveMemoryPolicy
 } from "../../packages/core/src/memory-policy.mjs";
@@ -54,10 +55,12 @@ test("explicit Off cannot be re-enabled by a forwarded first-message phrase", ()
 });
 
 test("the first-message phrases select shared and project behavior", () => {
-  assert.equal(resolveMemoryPolicy({
+  const shared = resolveMemoryPolicy({
     project: "project-acme-001",
     firstUserMessage: "Use my memory for this"
-  }).mode, "shared");
+  });
+  assert.equal(shared.mode, "shared");
+  assert.equal(shared.projectSelector, null);
   assert.equal(resolveMemoryPolicy({
     project: "project-acme-001",
     firstUserMessage: "Only this project, please"
@@ -78,4 +81,21 @@ test("explicit project mode requires a selector and contradictory CLI inputs fai
 test("memory policy rejects unknown modes and exposes only the three product choices", () => {
   assert.deepEqual(MEMORY_MODES, ["shared", "project", "off"]);
   assert.throws(() => resolveMemoryPolicy({ mode: "automatic" }), /memory mode/i);
+});
+
+test("public memory-policy inputs fail with the stable contract error", () => {
+  for (const resolve of [
+    () => resolveMemoryPolicy({ mode: "automatic" }),
+    () => resolveMemoryPolicy({ mode: 1 }),
+    () => resolveMemoryPolicy({ project: "" }),
+    () => resolveMemoryPolicy({ project: [] }),
+    () => resolveMemoryPolicy({ firstUserMessage: "" }),
+    () => resolveMemoryPolicy({ firstUserMessage: {} }),
+    () => detectMemoryModeFromFirstMessage("   "),
+    () => detectMemoryModeFromFirstMessage(false)
+  ]) {
+    assert.throws(resolve, (error) => (
+      error instanceof TypeError && error.code === "DOTAIOS_MEMORY_POLICY_INVALID"
+    ));
+  }
 });

@@ -129,12 +129,15 @@ export async function searchAios(options = {}) {
     : null;
   const scopes = searchScopesForPolicy(scope, policy, projectIdentity);
   if (scopes.length === 0) {
+    const omissions = policy.mode === "project"
+      ? Object.freeze([projectScopeOmission(scope)])
+      : Object.freeze([]);
     return attachSearchMetadata([], {
       requested: scope,
       project: projectIdentity?.slug || null,
       project_id: projectIdentity?.id || null,
       projects_omitted: false
-    }, [], policy);
+    }, omissions, policy);
   }
 
   return reader.withScopePreflight(
@@ -181,6 +184,19 @@ export async function searchAios(options = {}) {
       }, transaction.omissions, policy);
     }
   );
+}
+
+function projectScopeOmission(scope) {
+  return Object.freeze({
+    scope,
+    reason: "scope_forbidden_by_memory_policy",
+    observed: Object.freeze({ files: 0, bytes: 0, entries: 0 }),
+    inspection: "not_searched",
+    recovery: Object.freeze({
+      code: "choose_project_scope_or_shared_memory",
+      message: "Search sessions, memory, or projects, or choose Shared memory for this scope."
+    })
+  });
 }
 
 function searchScopesForPolicy(scope, policy, projectIdentity) {

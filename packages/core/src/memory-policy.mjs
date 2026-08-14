@@ -74,8 +74,8 @@ function normalizeProjectSelector(project) {
 
 export function detectMemoryModeFromFirstMessage(firstUserMessage) {
   if (firstUserMessage === undefined || firstUserMessage === null) return null;
-  if (typeof firstUserMessage !== "string") {
-    throw memoryPolicyError("First user message must be a string.");
+  if (typeof firstUserMessage !== "string" || firstUserMessage.trim().length === 0) {
+    throw memoryPolicyError("First user message must be a non-empty string.");
   }
   return FIRST_MESSAGE_MODES.find(({ pattern }) => pattern.test(firstUserMessage))?.mode || null;
 }

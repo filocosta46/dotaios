@@ -69,7 +69,7 @@ test("real setup keeps init detail concise by default and restores it with --ver
     const conciseOutput = `${concise.stdout}\n${concise.stderr}`;
     assert.match(conciseOutput, /Folder ready\. Claude Code can now use your context\./);
     assert.match(conciseOutput, new RegExp(`Your one AIOS folder: ${escapeRegExp(conciseAios)}`));
-    assert.match(conciseOutput, /Start the agent from your usual folder or an attached project/i);
+    assert.match(conciseOutput, /project checkout already attached with `dotaios activate`/i);
     assert.doesNotMatch(conciseOutput, /make it your working directory/i);
     assert.match(conciseOutput, /Opening the AIOS folder itself may let the app read its router before your first prompt/i);
     assert.match(conciseOutput, /Use my memory/);

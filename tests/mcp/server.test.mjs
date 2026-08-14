@@ -53,6 +53,37 @@ test("MCP Off mode returns before inspecting a missing AIOS folder", () => {
   assert.deepEqual(skills.matches, []);
 });
 
+test("MCP Off mode validates every tool schema before its zero-AIOS response", () => {
+  const missingAios = path.join(os.tmpdir(), `dotaios-mcp-off-schema-${process.pid}-${Date.now()}`);
+  const calls = [
+    { name: "search_aios", arguments: { memory: "off" } },
+    { name: "search_aios", arguments: { memory: "off", query: 42 } },
+    { name: "search_aios", arguments: { memory: "off", query: "x".repeat(501) } },
+    { name: "search_aios", arguments: { memory: "off", query: "x", scope: "projects" } },
+    { name: "resolve_skill", arguments: { memory: "off" } },
+    { name: "resolve_skill", arguments: { memory: "off", intent: [] } },
+    { name: "resolve_skill", arguments: { memory: "off", intent: "x".repeat(501) } },
+    { name: "read_working_context", arguments: { memory: "off", budget: 20 } },
+    { name: "read_working_context", arguments: { memory: "automatic" } },
+    { name: "read_working_context", arguments: { memory: "off", surprise: true } }
+  ];
+  const responses = runMcp(missingAios, calls.map((call, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: call
+  })));
+
+  for (const response of responses) {
+    assert.equal(response.error?.code, -32602);
+    assert.doesNotMatch(
+      response.error.message,
+      new RegExp(missingAios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    );
+  }
+  assert.equal(fs.existsSync(missingAios), false);
+});
+
 test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   const { aiosPath } = setupAios();
   fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nMCP_SHARED_IDENTITY_CANARY\n");

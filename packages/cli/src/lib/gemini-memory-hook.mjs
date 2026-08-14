@@ -1,11 +1,13 @@
 import fs from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
-import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
+import {
+  detectMemoryModeFromFirstMessage,
+  resolveMemoryPolicy
+} from "../../../core/src/memory-policy.mjs";
 
 const DEFAULT_TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
 const HOOK_INPUT_MAX_BYTES = 1024 * 1024;
-const PRIVATE_CHAT_RE = /^\s*private chat\b/i;
 
 export async function readGeminiHookInput(stream = process.stdin) {
   const chunks = [];
@@ -57,7 +59,7 @@ export async function resolveGeminiPrivateHookOutput(input, options = {}) {
       dotaiosMemory: { mode: "closed", project: null }
     };
   }
-  if (!PRIVATE_CHAT_RE.test(request.firstMessage)) return null;
+  if (detectMemoryModeFromFirstMessage(request.firstMessage) !== "off") return null;
   const policy = resolveMemoryPolicy({ mode: "off" });
   const additionalContext = `${policy.receipt}\n\n${policy.notice}`;
   return {
@@ -232,13 +234,19 @@ function parseGeminiFirstUserMessage(text, sessionId, currentPrompt) {
       appendGeminiMessage(messages, record);
       continue;
     }
+    if (Object.hasOwn(record, "id")) {
+      appendGeminiMessage(messages, record);
+    }
     if (Object.hasOwn(record, "sessionId")) {
       if (record.sessionId !== sessionId) {
         throw new Error("Gemini transcript does not belong to this session.");
       }
       continue;
     }
-    throw new Error("Gemini transcript contains an unsupported JSONL record.");
+    // Current Gemini transcripts can include plain metadata/update records.
+    // They do not affect the first-user-message lock, so ignore them while
+    // keeping recognized message and session records strict above.
+    continue;
   }
 
   return lockedFirstUserMessage ?? currentPrompt;

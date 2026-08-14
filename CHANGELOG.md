@@ -57,7 +57,10 @@ there while telling you it had saved to the vault. It now refuses.
 
 **Gemini setup no longer undoes itself.** `activate` and `connect gemini` wrote
 different blocks into the same place, so whichever you ran last silently replaced
-the other, and `doctor` then reported the result as wrong.
+the other, and `doctor` then reported the result as wrong. Gemini continuity now
+uses a prompt-aware `BeforeAgent` hook instead of the earlier `SessionStart`
+shape. Existing Gemini users should rerun `dotaios connect gemini` to migrate
+their managed hook.
 
 **Installing is less likely to dead-end.** If Node.js is missing, an assistant
 helping you install now sets it up and tells you what it did, instead of handing
@@ -166,10 +169,9 @@ changed, which is why this is a 2 and not a 1.29.
   `inspection_failed`,
   and never inventories protected memory shelves.
 - `dotaios connect gemini` now preflights all three managed artifacts and writes
-  `settings.json` last as the BeforeAgent activation point. Its generated hook
-  selects memory from Gemini's first prompt, invokes the exact shipped DotAIOS
-  package version, and does not allow an opened project's local `dotaios` binary
-  to shadow the command.
+  `settings.json` last as the SessionStart activation point. Its generated hook
+  invokes the exact shipped DotAIOS package version instead of allowing an
+  opened project's local `dotaios` binary to shadow the command.
 - Project attachment no longer writes `<project>/.hermes/config.yaml`. Hermes
   loads the config selected through `HERMES_HOME`, and DotAIOS does not own that
   selector, so the earlier project target could look configured while remaining

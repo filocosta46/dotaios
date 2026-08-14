@@ -40,7 +40,7 @@ agent retrieves it.
 Open Claude Code, Codex, Cursor, or another local assistant that can run
 commands, and paste:
 
-> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/main/INSTALL.md — the “If an AI assistant is helping you” section. Preview every change, ask me only about choices I can evaluate, verify it, and show me my one AIOS folder.
+> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/v2.0.3/INSTALL.md — the “If an AI assistant is helping you” section. Preview every change, ask me only about choices I can evaluate, verify it, and show me my one AIOS folder.
 
 The assistant checks and, when needed, installs supported Node.js; previews the
 exact folder and app changes; runs setup; and translates the result into plain
@@ -73,12 +73,12 @@ The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), publis
 These commands inspect registry provenance and packaged contents without running DotAIOS setup:
 
 ```sh
-npm view dotaios@2.0.3 version dist.integrity dist.tarball gitHead
+npm view dotaios@2.0.3 version dist.integrity dist.tarball gitHead _npmUser.name
 npm view dotaios@2.0.3 scripts
 npm pack dotaios@2.0.3 --dry-run
 ```
 
-Those three commands show you the publisher, the integrity record, and every file in the package before anything runs. The package defines no `preinstall`, `install`, or `postinstall` script, so nothing executes until you invoke the CLI yourself. The commands above omit `npx -y` on purpose, so npm still asks you to confirm the pinned package — approve it once what you see matches what you expect. Interactive setup then offers private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every one of them defaults to No. [INSTALL.md](INSTALL.md) has the full sequence and [the security model](docs/security.md) has the package and permission boundaries.
+Those three commands show you the registry publisher (`_npmUser.name`), the integrity record, and every file in the package before anything runs. The package defines no `preinstall`, `install`, or `postinstall` script, so nothing executes until you invoke the CLI yourself. The commands above omit `npx -y` on purpose, so npm still asks you to confirm the pinned package — approve it once what you see matches what you expect. Interactive setup then offers private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every one of them defaults to No. [INSTALL.md](INSTALL.md) has the full sequence and [the security model](docs/security.md) has the package and permission boundaries.
 
 ## What you have afterward
 

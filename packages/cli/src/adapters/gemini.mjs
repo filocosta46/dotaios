@@ -119,19 +119,19 @@ function buildGeminiHookScriptVersion(aiosPath, { moduleUrl, packageVersion }) {
   const encodedPath = Buffer.from(aiosPath, "utf8").toString("base64");
   const encodedModule = Buffer.from(moduleUrl, "utf8").toString("base64");
   const fallback = JSON.stringify({
-    continue: false,
-    stopReason: "DotAIOS could not load memory safely.",
-    systemMessage: "Memory: Closed — DotAIOS could not verify the session mode, so it left memory closed."
+    systemMessage: "Memory: Closed — DotAIOS could not verify the session mode, so it left memory closed.",
+    hookSpecificOutput: { hookEventName: "BeforeAgent", additionalContext: "" },
+    dotaiosMemory: { mode: "closed", project: null }
   });
-  const privateClassifier = `import fs from "node:fs";
+  const privateClassifier = `let readGeminiHookInput;
 let resolveGeminiPrivateHookOutput;
 try {
-  ({ resolveGeminiPrivateHookOutput } = await import(${JSON.stringify(moduleUrl)}));
+  ({ readGeminiHookInput, resolveGeminiPrivateHookOutput } = await import(${JSON.stringify(moduleUrl)}));
 } catch {
   process.exit(3);
 }
 try {
-  const input = JSON.parse(fs.readFileSync(0, "utf8"));
+  const input = await readGeminiHookInput();
   const output = await resolveGeminiPrivateHookOutput(input);
   if (!output) process.exit(3);
   process.stdout.write(JSON.stringify(output) + "\\n");
@@ -171,7 +171,7 @@ if [ "$private_status" -ne 3 ]; then
   printf '%s\\n' ${shSingleQuote(fallback)}
   exit 0
 fi
-output="$(printf '%s' "$input" | (cd / && npx -y --loglevel=error ${shSingleQuote(`dotaios@${packageVersion}`)} brief --compact --json --path ${shSingleQuote(aiosPath)} --gemini-hook))"
+output="$(printf '%s' "$input" | (cd / && npx -y --loglevel=error --package ${shSingleQuote(`dotaios@${packageVersion}`)} dotaios brief --compact --json --path ${shSingleQuote(aiosPath)} --gemini-hook))"
 status=$?
 if [ "$status" -eq 0 ] && printf '%s' "$output" | node --input-type=module -e ${shSingleQuote(validator)}; then
   exit 0
@@ -275,7 +275,7 @@ function isCurrentGeminiHookScript(content) {
   } catch {
     return false;
   }
-  const versionMatch = /dotaios@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)/.exec(content);
+  const versionMatch = /npx -y --loglevel=error --package 'dotaios@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)' dotaios brief --compact --json --path /.exec(content);
   if (!versionMatch) return false;
   return content === buildGeminiHookScriptVersion(embeddedPath, {
     moduleUrl: embeddedModule,

@@ -21,7 +21,7 @@ You do not need a GitHub account, npm account, or paid plan.
 Open a local agent that can run commands and paste:
 
 > Help me install DotAIOS by following the “If an AI assistant is helping you”
-> section of https://github.com/filocosta46/dotaios/blob/main/INSTALL.md. Preview
+> section of https://github.com/filocosta46/dotaios/blob/v2.0.3/INSTALL.md. Preview
 > every change first, ask me only about choices I can evaluate, then verify the
 > setup and show me my one AIOS folder.
 

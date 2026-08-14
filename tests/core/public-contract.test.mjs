@@ -111,6 +111,19 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
     assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must retain a pinned manual recovery path`);
   }
   assert.match(documents["README.md"], /open .*assistant.*paste/is, "README must lead with one assistant request");
+  for (const relativePath of ["README.md", "docs/friend-setup.md"]) {
+    assert.match(
+      documents[relativePath],
+      new RegExp(`github\\.com/filocosta46/dotaios/blob/v${pkg.version.replaceAll(".", "\\.")}/INSTALL\\.md`),
+      `${relativePath} must pin the assistant handoff to the release tag`
+    );
+    assert.doesNotMatch(
+      documents[relativePath],
+      /github\.com\/filocosta46\/dotaios\/blob\/(?:main|master)\/INSTALL\.md/,
+      `${relativePath} must not delegate installation to a mutable branch`
+    );
+  }
+  assert.match(documents["README.md"], /_npmUser\.name/, "README provenance must request the publisher it claims to display");
   assert.match(documents["INSTALL.md"], /If an AI assistant is helping you/i, "INSTALL must carry the assistant through setup");
   assert.match(documents["docs/friend-setup.md"], /recommended path is to ask a local AI agent/i, "friend setup must recommend the nontechnical path");
   assert.match(documents["docs/getting-started.md"], /You do not need to understand[\s>]*Node, npm, Git, or MCP/i, "getting started must not assume developer knowledge");

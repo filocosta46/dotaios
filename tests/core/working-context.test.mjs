@@ -150,10 +150,27 @@ test("This project memory exposes only its README and explicitly attributed cont
 
   assert.equal(context.memoryMode, "project");
   assert.match(rendered, /^Memory: This project\b/);
-  assert.match(rendered, /PROJECT_A_README|PROJECT_A_SESSION|PROJECT_A_SIGNAL|PROJECT_A_EVENT/);
+  assert.match(rendered, /PROJECT_A_README/);
+  assert.match(rendered, /PROJECT_A_SESSION/);
+  assert.match(rendered, /PROJECT_A_SIGNAL/);
+  assert.match(rendered, /PROJECT_A_EVENT/);
   assert.doesNotMatch(
     rendered,
     /GLOBAL_|UNSCOPED_|PROJECT_B_|### Identity|### Priorities|### Decisions|### Today|### Carry-overs/,
+  );
+});
+
+test("renderer accepts only string Off metadata and derives receipts only from valid modes", () => {
+  assert.equal(renderWorkingContext({
+    memoryMode: "off",
+    memoryReceipt: { unsafe: true },
+    memoryNotice: 42
+  }), "");
+  assert.match(renderWorkingContext({ memoryMode: "project", today: "2026-08-14" }), /^Memory: This project\b/);
+  assert.match(renderWorkingContext({ memoryMode: "shared", today: "2026-08-14" }), /^Memory: Shared\b/);
+  assert.doesNotMatch(
+    renderWorkingContext({ memoryMode: "malformed", today: "2026-08-14" }),
+    /Memory: Shared/
   );
 });
 

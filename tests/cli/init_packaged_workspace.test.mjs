@@ -86,14 +86,9 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
 });
 
 function dependencyNodeModules(start) {
-  let current = start;
-  while (true) {
-    const candidate = path.join(current, "node_modules");
-    if (fs.existsSync(candidate)) return candidate;
-    const parent = path.dirname(current);
-    if (parent === current) throw new Error("Could not locate the checkout dependency tree.");
-    current = parent;
-  }
+  const candidate = path.join(start, "node_modules");
+  if (fs.existsSync(candidate)) return candidate;
+  throw new Error(`Could not locate the repository-local dependency tree at ${candidate}.`);
 }
 
 function run(command, args, options = {}) {

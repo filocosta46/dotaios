@@ -21,8 +21,9 @@ Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Print the brief without writing the daily note
   --compact     Print the canonical working-context projection (no file write)
-  --memory <mode>  With --compact: shared, project, or off. A project selector
-                   implies project mode; project mode requires --project.
+  --memory <mode>  shared, project, or off. Shared/project require --compact;
+                   off may be used alone and performs no DotAIOS write. A
+                   project selector implies project mode and requires --project.
   --project <slug-or-id>  With --compact: include only continuity for this project.
                           Must be nonblank, contain no control characters, and
                           be at most 200 Unicode code points.
@@ -34,7 +35,8 @@ Options:
   --json        With --compact: wrap output as Gemini CLI hook JSON
   --first-message <text>  With --compact: select memory from a host session's
                           first user message (managed agent bridges only)
-  --cwd <dir>    With --compact and --first-message: detect an attached project
+  --cwd <dir>    With --compact: detect an attached project, with or without
+                 --first-message
 `;
 
 const OPEN_LOOP_RE = /\b(open|loop|blocker|blocked|waiting|follow[- ]?up|todo|to do|next action|deadline|due|carry[- ]?over)\b/i;

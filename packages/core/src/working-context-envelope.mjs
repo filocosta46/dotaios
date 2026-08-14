@@ -49,6 +49,7 @@ function buildOffEnvelope(memoryPolicy) {
     generatedAt: null,
     projectFilter: null,
     memoryMode: memoryPolicy.mode,
+    memoryReceipt: memoryPolicy.receipt,
     operational: {
       migration: { status: "not_read", severity: "none", action: null },
     },

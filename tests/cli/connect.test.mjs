@@ -38,6 +38,7 @@ test("buildGeminiHookScript pins DotAIOS instead of executing a project-local bi
   const script = buildGeminiHookScript("/home/u/aios");
   assert.match(script, new RegExp(`dotaios@${DOTAIOS_PACKAGE_VERSION.replaceAll(".", "\\.")}`));
   assert.match(script, /cd \/ && npx /);
+  assert.match(script, /--package 'dotaios@[^']+' dotaios brief/);
   assert.match(script, /--gemini-hook/);
 });
 
@@ -61,6 +62,12 @@ test("Gemini hook never executes a matching project-local DotAIOS package", () =
   );
   fs.symlinkSync(path.join("..", "dotaios", "bin.mjs"), path.join(binDir, "dotaios"));
 
+  const transcriptPath = path.join(root, "session.json");
+  fs.writeFileSync(transcriptPath, JSON.stringify({
+    sessionId: "session-shadow-test",
+    messages: []
+  }));
+
   const scriptPath = path.join(root, "gemini-hook.sh");
   fs.writeFileSync(scriptPath, buildGeminiHookScript("/missing/aios"), { mode: 0o700 });
   const result = spawnSync(scriptPath, [], {
@@ -68,7 +75,7 @@ test("Gemini hook never executes a matching project-local DotAIOS package", () =
     encoding: "utf8",
     input: JSON.stringify({
       session_id: "session-shadow-test",
-      transcript_path: path.join(root, "first-turn-transcript-not-written-yet.json"),
+      transcript_path: transcriptPath,
       cwd: project,
       hook_event_name: "BeforeAgent",
       prompt: "Help with this project"
@@ -127,10 +134,16 @@ test("writeGeminiHookScript recognizes and updates its current hook with apostro
 test("writeGeminiHookScript upgrades an exact managed v2 hook pinned to an older release", async () => {
   const dir = tmp();
   const scriptPath = path.join(dir, "dotaios-context-hook.sh");
-  const older = buildGeminiHookScript("/home/u/aios").replace(
+  let older = buildGeminiHookScript("/home/u/aios").replace(
     `dotaios@${DOTAIOS_PACKAGE_VERSION}`,
     "dotaios@2.0.2"
   );
+  const encodedModule = /^# dotaios-hook-module-base64: (.+)$/m.exec(older)?.[1];
+  const moduleUrl = Buffer.from(encodedModule, "base64").toString("utf8");
+  const misleadingModuleUrl = `${moduleUrl}?cache=dotaios@9.9.9`;
+  older = older
+    .replace(encodedModule, Buffer.from(misleadingModuleUrl, "utf8").toString("base64"))
+    .replaceAll(moduleUrl, misleadingModuleUrl);
   fs.writeFileSync(scriptPath, older, { mode: 0o700 });
 
   const result = await writeGeminiHookScript(scriptPath, "/home/u/aios");

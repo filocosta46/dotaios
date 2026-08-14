@@ -333,7 +333,9 @@ function recentDecisions(text, limit) {
 
 function renderUnbounded(context) {
   if (context?.memoryMode === "off") {
-    return [context.memoryReceipt, "", context.memoryNotice].filter((line) => line !== null).join("\n");
+    const receipt = typeof context.memoryReceipt === "string" ? context.memoryReceipt : "";
+    const notice = typeof context.memoryNotice === "string" ? context.memoryNotice : "";
+    return receipt && notice ? `${receipt}\n\n${notice}` : receipt || notice;
   }
   const today = context?.today || "";
   const todayContext = context?.todayContext || { focus: "", plan: [] };
@@ -341,7 +343,15 @@ function renderUnbounded(context) {
   const sessions = context?.sessions || [];
   const signals = context?.signals || [];
   const events = context?.events || [];
-  const lines = [context?.memoryReceipt || "Memory: Shared", "", `## Active Context · ${today}`, ""];
+  const fallbackReceipt = context?.memoryMode === "project"
+    ? "Memory: This project"
+    : context?.memoryMode === "shared"
+      ? "Memory: Shared"
+      : "";
+  const receipt = typeof context?.memoryReceipt === "string"
+    ? context.memoryReceipt
+    : fallbackReceipt;
+  const lines = [receipt, "", `## Active Context · ${today}`, ""];
 
   if (context?.identity) lines.push("### Identity", context.identity, "");
   if (context?.priorities) lines.push("### Priorities", context.priorities, "");

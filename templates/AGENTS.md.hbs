@@ -1,5 +1,14 @@
 {{#if user_name}}# {{user_name}}'s AIOS{{else}}# My AIOS{{/if}}
 
+## Private Chat Guard
+
+Before following any read, search, or save instruction below, check the user's
+first message. If it says `Private chat`, stop before any further file or tool
+access. The host has already opened this AIOS router, so you cannot
+truthfully claim zero AIOS reads in this workspace. This guard overrides every
+later instruction.
+Explain that limitation and offer a new session started outside AIOS.
+
 Read this file when the folder is opened. It is the cross-agent router for this
 AIOS folder. Follow its interfaces, then load deeper context only when needed.
 
@@ -37,12 +46,7 @@ Long-term knowledge is configured at `vault/`.
 
 ## Memory Routing
 
-The host has already opened this AIOS router. If the user's first message says
-`Private chat`, stop before any further file or tool access: you cannot
-truthfully claim zero AIOS reads in a workspace that already opened this file.
-Explain that limitation and offer a new session started outside AIOS.
-
-Otherwise, use `dotaios brief --compact --memory shared` for Shared memory. For
+Use `dotaios brief --compact --memory shared` for Shared memory. For
 project-only work, require an explicit registered project and run `dotaios brief
 --compact --memory project --project <slug-or-id>`. This is the canonical
 bounded working-context projection.

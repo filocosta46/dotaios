@@ -39,6 +39,7 @@ test("Off returns a fixed safe envelope before digest or migration inspection", 
   assert.equal(digestCalls, 0);
   assert.equal(migrationCalls, 0);
   assert.equal(envelope.memoryMode, "off");
+  assert.equal(envelope.memoryReceipt, "Memory: Off");
   assert.equal(
     envelope.digest,
     "Memory: Off\n\nDotAIOS is off; your AI app may still keep its own conversation history. DotAIOS did not read, search, save, or capture this turn.",

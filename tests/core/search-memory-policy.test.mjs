@@ -109,7 +109,7 @@ test("project memory searches only selected project files and explicitly attribu
   );
 });
 
-test("project memory returns a complete empty result for a forbidden global scope", async (t) => {
+test("project memory returns a path-free incomplete omission for a forbidden global scope", async (t) => {
   const aiosPath = await makeProjectPolicyFixture(t);
   const groups = await searchAios({
     aiosPath,
@@ -120,9 +120,33 @@ test("project memory returns a complete empty result for a forbidden global scop
   });
 
   assert.deepEqual(groups, []);
-  assert.equal(groups.complete, true);
+  assert.equal(groups.complete, false);
   assert.equal(groups.memory, "project");
   assert.equal(groups.receipt, "Memory: This project");
+  assert.deepEqual(groups.omissions, [{
+    scope: "vault",
+    reason: "scope_forbidden_by_memory_policy",
+    observed: { files: 0, bytes: 0, entries: 0 },
+    inspection: "not_searched",
+    recovery: {
+      code: "choose_project_scope_or_shared_memory",
+      message: "Search sessions, memory, or projects, or choose Shared memory for this scope."
+    }
+  }]);
+  assert.doesNotMatch(JSON.stringify(groups.omissions), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("project memory rejects an unknown selector before searching", async (t) => {
+  const aiosPath = await makeProjectPolicyFixture(t);
+  await assert.rejects(
+    () => searchAios({
+      aiosPath,
+      query: "POLICY_SEARCH_CANARY",
+      memoryMode: "project",
+      projectSelector: "ghost-project"
+    }),
+    (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+  );
 });
 
 test("off memory returns its fixed complete result without touching DotAIOS", async () => {

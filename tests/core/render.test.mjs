@@ -157,6 +157,16 @@ test("AGENTS.md.hbs stays a bounded router instead of embedding skill procedures
   assert.doesNotMatch(tpl, /npx dotaios install \/tmp\/dotaios-plugin/);
 });
 
+test("AGENTS.md.hbs puts the Private chat guard before every file-access route", async () => {
+  const tpl = await fs.readFile(path.resolve("templates/AGENTS.md.hbs"), "utf8");
+  const guard = tpl.indexOf("## Private Chat Guard");
+  assert.ok(guard > 0);
+  assert.ok(guard < tpl.indexOf("Read this file"));
+  assert.ok(guard < tpl.indexOf("## Read Order"));
+  assert.match(tpl.slice(guard, tpl.indexOf("## What This Is")), /overrides every\s+later instruction/i);
+  assert.match(tpl.slice(guard, tpl.indexOf("## What This Is")), /new session started outside AIOS/i);
+});
+
 test("AGENTS.md.hbs retains portability, ownership, and durable-write approval boundaries", async () => {
   const tpl = await fs.readFile(
     path.resolve("templates/AGENTS.md.hbs"),
