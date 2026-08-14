@@ -571,10 +571,15 @@ test("prepared recovery scales linearly with a large live prefix", async () => {
     return elapsedMs;
   };
 
+  const sampleMinimum = async (count) => {
+    const samples = [];
+    for (let sample = 0; sample < 3; sample += 1) samples.push(await measureRecovery(count));
+    return Math.min(...samples);
+  };
   const smallCount = 1_250;
   const largeCount = 5_000;
-  const smallMs = await measureRecovery(smallCount);
-  const largeMs = await measureRecovery(largeCount);
+  const smallMs = await sampleMinimum(smallCount);
+  const largeMs = await sampleMinimum(largeCount);
   const linearGrowth = largeCount / smallCount;
   const allowedMs = smallMs * linearGrowth * 2 + 25;
 
