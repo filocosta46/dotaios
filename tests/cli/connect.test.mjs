@@ -28,16 +28,18 @@ test("shSingleQuote neutralizes shell metacharacters in a path", () => {
   assert.equal(fs.existsSync(sentinel), false); // the injected command did not run
 });
 
-test("buildGeminiHookScript single-quotes the AIOS path (no shell interpolation)", () => {
+test("buildGeminiHookScript embeds the AIOS path as one inert shell word", () => {
   const script = buildGeminiHookScript(`/home/u/ai'os`);
   assert.match(script, /--path '\/home\/u\/ai'\\''os'/);
-  assert.doesNotMatch(script, /--path "/); // never wraps the path in double quotes
+  assert.doesNotMatch(script, /require\(|execSync|shell:\s*true/);
 });
 
 test("buildGeminiHookScript pins DotAIOS instead of executing a project-local binary", () => {
   const script = buildGeminiHookScript("/home/u/aios");
-  assert.match(script, new RegExp(`npx -y --loglevel=error dotaios@${DOTAIOS_PACKAGE_VERSION.replaceAll(".", "\\.")} brief`));
-  assert.doesNotMatch(script, /npx dotaios brief/);
+  assert.match(script, new RegExp(`dotaios@${DOTAIOS_PACKAGE_VERSION.replaceAll(".", "\\.")}`));
+  assert.match(script, /cd \/ && npx /);
+  assert.match(script, /--package 'dotaios@[^']+' dotaios brief/);
+  assert.match(script, /--gemini-hook/);
 });
 
 test("Gemini hook never executes a matching project-local DotAIOS package", () => {
@@ -60,9 +62,24 @@ test("Gemini hook never executes a matching project-local DotAIOS package", () =
   );
   fs.symlinkSync(path.join("..", "dotaios", "bin.mjs"), path.join(binDir, "dotaios"));
 
-  const result = spawnSync("bash", ["-c", buildGeminiHookScript("/missing/aios")], {
+  const transcriptPath = path.join(root, "session.json");
+  fs.writeFileSync(transcriptPath, JSON.stringify({
+    sessionId: "session-shadow-test",
+    messages: []
+  }));
+
+  const scriptPath = path.join(root, "gemini-hook.sh");
+  fs.writeFileSync(scriptPath, buildGeminiHookScript("/missing/aios"), { mode: 0o700 });
+  const result = spawnSync(scriptPath, [], {
     cwd: project,
     encoding: "utf8",
+    input: JSON.stringify({
+      session_id: "session-shadow-test",
+      transcript_path: transcriptPath,
+      cwd: project,
+      hook_event_name: "BeforeAgent",
+      prompt: "Help with this project"
+    }),
     env: {
       ...process.env,
       HOME: root,
@@ -99,6 +116,39 @@ test("writeGeminiHookScript refuses an existing foreign script", async () => {
   );
   assert.equal(fs.readFileSync(scriptPath, "utf8"), original);
   assert.equal(fs.statSync(scriptPath).mode & 0o777, 0o700);
+});
+
+test("writeGeminiHookScript recognizes and updates its current hook with apostrophes in the AIOS path", async () => {
+  const dir = tmp();
+  const scriptPath = path.join(dir, "dotaios-context-hook.sh");
+  fs.writeFileSync(scriptPath, buildGeminiHookScript("/home/u/first'aios"), { mode: 0o700 });
+
+  const updated = await writeGeminiHookScript(scriptPath, "/home/u/second'aios");
+  const unchanged = await writeGeminiHookScript(scriptPath, "/home/u/second'aios");
+
+  assert.equal(updated.action, "updated");
+  assert.equal(unchanged.action, "unchanged");
+  assert.equal(fs.readFileSync(scriptPath, "utf8"), buildGeminiHookScript("/home/u/second'aios"));
+});
+
+test("writeGeminiHookScript upgrades an exact managed v2 hook pinned to an older release", async () => {
+  const dir = tmp();
+  const scriptPath = path.join(dir, "dotaios-context-hook.sh");
+  let older = buildGeminiHookScript("/home/u/aios").replace(
+    `dotaios@${DOTAIOS_PACKAGE_VERSION}`,
+    "dotaios@2.0.2"
+  );
+  const encodedModule = /^# dotaios-hook-module-base64: (.+)$/m.exec(older)?.[1];
+  const moduleUrl = Buffer.from(encodedModule, "base64").toString("utf8");
+  const misleadingModuleUrl = `${moduleUrl}?cache=dotaios@9.9.9`;
+  older = older
+    .replace(encodedModule, Buffer.from(misleadingModuleUrl, "utf8").toString("base64"))
+    .replaceAll(moduleUrl, misleadingModuleUrl);
+  fs.writeFileSync(scriptPath, older, { mode: 0o700 });
+
+  const result = await writeGeminiHookScript(scriptPath, "/home/u/aios");
+  assert.equal(result.action, "updated");
+  assert.equal(fs.readFileSync(scriptPath, "utf8"), buildGeminiHookScript("/home/u/aios"));
 });
 
 test("writeGeminiHookScript makes a legacy managed hook executable without widening its backup mode", async () => {
@@ -199,17 +249,22 @@ test("mergeGeminiSettings refuses malformed entries inside SessionStart", async 
   }
 });
 
-test("mergeGeminiSettings respects an explicitly disabled DotAIOS hook", async () => {
-  const dir = tmp();
-  const settingsPath = path.join(dir, "settings.json");
-  const original = `${JSON.stringify({ hooks: { disabled: ["dotaios-context"] } })}\n`;
-  fs.writeFileSync(settingsPath, original);
+test("mergeGeminiSettings respects Gemini 0.38 hook disable settings", async () => {
+  for (const hooksConfig of [
+    { enabled: false },
+    { enabled: true, disabled: ["dotaios-context"] }
+  ]) {
+    const dir = tmp();
+    const settingsPath = path.join(dir, "settings.json");
+    const original = `${JSON.stringify({ hooksConfig })}\n`;
+    fs.writeFileSync(settingsPath, original);
 
-  await assert.rejects(
-    () => mergeGeminiSettings(settingsPath, path.join(dir, "hook.sh"), "/home/u/aios"),
-    /dotaios-context.*disabled|enable.*then retry/i
-  );
-  assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+    await assert.rejects(
+      () => mergeGeminiSettings(settingsPath, path.join(dir, "hook.sh"), "/home/u/aios"),
+      /hooks.*disabled|dotaios-context.*disabled|enable.*then retry/i
+    );
+    assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
+  }
 });
 
 test("mergeGeminiSettings leaves a concurrent user edit untouched", async () => {
@@ -257,7 +312,7 @@ test("mergeOpenCodeSettings refuses non-object OpenCode configuration", async ()
   assert.equal(fs.readFileSync(settingsPath, "utf8"), original);
 });
 
-test("mergeGeminiSettings writes a SessionStart hook into a fresh config", async () => {
+test("mergeGeminiSettings writes a prompt-aware BeforeAgent hook into a fresh config", async () => {
   const dir = tmp();
   const settingsPath = path.join(dir, "settings.json");
   const hookPath = path.join(dir, "hook.sh");
@@ -265,8 +320,9 @@ test("mergeGeminiSettings writes a SessionStart hook into a fresh config", async
   await mergeGeminiSettings(settingsPath, hookPath, "/home/u/aios");
 
   const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-  const names = written.hooks.SessionStart.flatMap((h) => h.hooks.map((hh) => hh.name));
+  const names = written.hooks.BeforeAgent.flatMap((h) => h.hooks.map((hh) => hh.name));
   assert.ok(names.includes("dotaios-context"));
+  assert.equal(written.hooks.SessionStart, undefined);
   assert.equal(written.mcp, undefined);
 });
 
@@ -280,7 +336,7 @@ test("mergeGeminiSettings shell-quotes a hook path containing spaces", async () 
   await mergeGeminiSettings(settingsPath, hookPath, "/home/u/aios");
 
   const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-  const managed = written.hooks.SessionStart
+  const managed = written.hooks.BeforeAgent
     .flatMap((entry) => entry.hooks)
     .find((entry) => entry.name === "dotaios-context");
   assert.equal(managed.command, shSingleQuote(hookPath));
@@ -325,7 +381,7 @@ test("mergeGeminiSettings refuses ambiguous legacy DotAIOS MCP entries", async (
   }
 });
 
-test("mergeGeminiSettings updates the one named DotAIOS hook and preserves foreign hooks", async () => {
+test("mergeGeminiSettings migrates only the managed SessionStart hook and preserves foreign hooks", async () => {
   const dir = tmp();
   const settingsPath = path.join(dir, "settings.json");
   const hookPath = path.join(dir, "hook.sh");
@@ -352,8 +408,10 @@ test("mergeGeminiSettings updates the one named DotAIOS hook and preserves forei
   await mergeGeminiSettings(settingsPath, hookPath, "/home/u/aios");
 
   const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-  const hooks = written.hooks.SessionStart.flatMap((entry) => entry.hooks);
-  assert.deepEqual(hooks.find((entry) => entry.name === "dotaios-context"), {
+  const sessionHooks = written.hooks.SessionStart.flatMap((entry) => entry.hooks);
+  const beforeAgentHooks = written.hooks.BeforeAgent.flatMap((entry) => entry.hooks);
+  assert.equal(sessionHooks.some((entry) => entry.name === "dotaios-context"), false);
+  assert.deepEqual(beforeAgentHooks.find((entry) => entry.name === "dotaios-context"), {
     type: "command",
     command: shSingleQuote(hookPath),
     name: "dotaios-context",
@@ -361,11 +419,46 @@ test("mergeGeminiSettings updates the one named DotAIOS hook and preserves forei
     description: "Keep this user-facing description",
     customUserField: { keep: true }
   });
-  assert.deepEqual(hooks.find((entry) => entry.name === "foreign"), {
+  assert.deepEqual(sessionHooks.find((entry) => entry.name === "foreign"), {
     type: "command",
     command: "/foreign/hook.sh",
     name: "foreign",
     timeout: 2500
+  });
+});
+
+test("mergeGeminiSettings removes the retired managed SessionStart wrapper without touching foreign settings", async () => {
+  const dir = tmp();
+  const settingsPath = path.join(dir, "settings.json");
+  const hookPath = path.join(dir, "hook.sh");
+  fs.writeFileSync(settingsPath, `${JSON.stringify({
+    theme: "user-owned",
+    hooks: {
+      SessionStart: [{
+        matcher: "startup",
+        sequential: true,
+        hooks: [{
+          type: "command",
+          command: hookPath,
+          name: "dotaios-context",
+          timeout: 10000
+        }]
+      }],
+      BeforeAgent: [{
+        matcher: "*",
+        hooks: [{ type: "command", command: "/foreign/before-agent", name: "foreign" }]
+      }]
+    }
+  }, null, 2)}\n`);
+
+  await mergeGeminiSettings(settingsPath, hookPath, "/home/u/aios");
+
+  const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  assert.equal(written.theme, "user-owned");
+  assert.equal(written.hooks.SessionStart, undefined);
+  assert.deepEqual(written.hooks.BeforeAgent[0], {
+    matcher: "*",
+    hooks: [{ type: "command", command: "/foreign/before-agent", name: "foreign" }]
   });
 });
 

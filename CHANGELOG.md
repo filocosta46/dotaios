@@ -4,7 +4,31 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
-## [2.0.3] - 2026-08-13
+## [2.0.3] - 2026-08-14
+
+**You can now decide what DotAIOS may remember in each session.** `Use my
+memory` selects **Memory: Shared**. `Only this project` selects **Memory: This
+project** and excludes personal, unscoped, and other-project material before it
+is searched or rendered. `Private chat` selects **Memory: Off** before any
+subsequent DotAIOS file or tool reads, searches, saves, or captures; the AIOS
+router may already have been opened. The receipt is visible, and DotAIOS says
+plainly that the AI app may still keep its own chat history.
+
+**One AIOS folder is the memory.** Agent instruction files, MCP responses,
+search data, and client hooks are bounded views of that user-owned folder, not
+new memory stores. One explicit save appears as one conceptual result when a
+second agent finds it; two separate saves remain two memories.
+
+**Setup now starts with one request to a local assistant.** The assistant checks
+Node.js, previews the exact folder and app changes, leaves the meaningful
+privacy choices to the person, verifies the result, and shows the one AIOS
+folder. The pinned Terminal commands remain available as the recovery path.
+
+**Private material has a clearer boundary.** DotAIOS is not a password manager.
+Provider credentials belong in the provider or operating-system credential
+store; `.env` remains an ignored, local fallback. `doctor` checks its ownership
+and permissions without reading its contents, while search, context, MCP, and
+sync continue to exclude it.
 
 **Search worked again.** On a folder with real material in it, every search had
 been failing — not returning nothing, but refusing outright with "could not read
@@ -33,7 +57,10 @@ there while telling you it had saved to the vault. It now refuses.
 
 **Gemini setup no longer undoes itself.** `activate` and `connect gemini` wrote
 different blocks into the same place, so whichever you ran last silently replaced
-the other, and `doctor` then reported the result as wrong.
+the other, and `doctor` then reported the result as wrong. Gemini continuity now
+uses a prompt-aware `BeforeAgent` hook instead of the earlier `SessionStart`
+shape. Existing Gemini users should rerun `dotaios connect gemini` to migrate
+their managed hook.
 
 **Installing is less likely to dead-end.** If Node.js is missing, an assistant
 helping you install now sets it up and tells you what it did, instead of handing

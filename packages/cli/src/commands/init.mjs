@@ -533,36 +533,46 @@ function firstSessionTemplate() {
 
 Welcome to {{#if user_name}}{{user_name}}'s{{else}}your{{/if}} local AIOS.
 
-## What To Open
+This folder is the source of truth. Agent instruction files, MCP responses, and
+search results are bounded views of it; they are not a second memory.
 
-Run \`npx dotaios activate\` once to connect DotAIOS to global Claude, Codex, and Gemini memory files.
+## Try the continuity loop
 
-For Gmail and Calendar beta setup, run:
+1. Start a connected local agent outside the AIOS folder: use your usual folder
+   for Shared memory, or an attached project for project-only memory.
+2. Keep this AIOS folder as the storage you own; do not make it the agent's
+   working directory when you want a zero-read private session.
+3. Start with: \`Use my memory. Tell me what you know about how I work.\`
+4. Tell it one useful preference or decision and explicitly ask it to save it.
+5. Switch to a second connected agent and ask it to find that item and show the
+   source it came from.
 
-\`\`\`
-npx dotaios connect google --dry-run
-\`\`\`
+DotAIOS saves deliberately; it does not treat every chat sentence as a durable fact.
 
-For a project you use in Cursor, run:
+## Choose memory at the start
 
-\`\`\`
-npx dotaios attach /path/to/project
-\`\`\`
+- \`Use my memory\` — Shared: personal context and continuity.
+- \`Only this project\` — This project: only that project's files and explicitly
+  attributed continuity; no personal or unscoped memory.
+- \`Private chat\` — Off: DotAIOS does not read, search, save, or capture for the
+  session. Your AI app may still keep its own conversation history.
 
-## First Prompt To Try
+The agent should show \`Memory: Shared\`, \`Memory: This project\`, or
+\`Memory: Off\` so the choice is visible.
 
-\`\`\`
-Read my local AIOS entrypoint, then help me plan what to work on today.
-\`\`\`
+Opening the AIOS folder itself can make your app preload its router before your
+first prompt. \`Private chat\` cannot undo that earlier host read; start the agent
+outside AIOS when you need the zero-read Off guarantee.
 
-## What To Edit First
+## Keep it useful
 
-- \`context/identity.md\`
-- \`context/work.md\`
-- \`context/priorities.md\`
-- \`context/north-star.md\`
+- Ask the agent to update your identity, work, priorities, and preferences when
+  they change, or run \`dotaios interview --review\`.
+- Put durable project context under \`projects/<slug>/README.md\`.
+- Never put passwords, API keys, OAuth tokens, or recovery codes in memory.
 
-Keep these files short and true. Detail belongs in projects, skills, memory, or vault files.
+Optional Gmail, Calendar, and Drive access is read-only beta setup. Preview it
+later with \`dotaios connect google --dry-run\`.
 `;
 }
 
@@ -581,7 +591,7 @@ Local-first memory and context for AI agents.
 
 ## Safety
 
-- Keep secrets in \`.env\`, not in chat.
+- Keep passwords in a password manager and provider credentials in provider-owned auth. Use \`.env\` only for a required local environment variable; never paste it into chat or memory.
 - Durable writes to identity, wiki, and CRM knowledge should be approved.
 - Companies and people live only in \`vault/org/\`.
 `;

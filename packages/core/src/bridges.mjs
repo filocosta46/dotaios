@@ -299,8 +299,12 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
   const lines = [
     MANAGED_START,
     pointerLine,
-    `Leave that folder closed unless the working directory is inside it, or the user asks about their context, who they are, what they are working on, or one of their saved workflows.`,
-    `When you do open it, read ${AGENT_ENTRYPOINT} first, then run \`dotaios brief --compact\` (add \`--project <slug-or-id>\` for project work); route events, signals, and saved sessions only through the canonical bounded projection.`
+    "Choose memory access for this session before any AIOS read:",
+    "- `Private chat` locks `Memory: Off`: keep AIOS closed — no DotAIOS read, search, save, or capture. Say once that the host may keep its history.",
+    "- In an attached working directory, or after `Only this project`, use `Memory: This project` and exclude all other memory. If not registered, keep AIOS closed, say so, offer `dotaios activate`, and never fall back to Shared. Only after registration and exact identity are verified, read AGENTS.md and run `dotaios brief --compact --memory project --project <slug-or-id>`.",
+    "- When the user asks `Use my memory`, use `Memory: Shared`; this is the default elsewhere. Only in Shared, read AGENTS.md and run `dotaios brief --compact --memory shared`.",
+    "Lead every response with the selected receipt: `Memory: Shared`, `Memory: This project`, or `Memory: Off`.",
+    "Route events, signals, and saved sessions only through the canonical bounded projection."
   ];
 
   if (skillsFirst) {

@@ -43,6 +43,87 @@ async function runDoctor({ aiosPath, homePath, detection }) {
 // the sandbox home, which is what each of these fixtures is controlling.
 const noAgentBinaries = { env: { PATH: "" } };
 
+describe("doctor secret boundary", () => {
+  it("requires a local .env to be a private regular file without reading it", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-secret-"));
+    const aiosPath = await makeMinimalAios(root);
+    const secretPath = path.join(aiosPath, ".env");
+    const { checkSecretBoundary } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    try {
+      await fs.writeFile(secretPath, "API_KEY=never-read-this\n", { mode: 0o644 });
+      const exposed = await checkSecretBoundary(aiosPath, { platform: "darwin" });
+      assert.equal(exposed.status, "fail");
+      assert.match(exposed.fix, /chmod 600/);
+
+      await fs.chmod(secretPath, 0o600);
+      assert.equal((await checkSecretBoundary(aiosPath, { platform: "darwin" })).status, "ok");
+
+      await fs.unlink(secretPath);
+      await fs.symlink(path.join(root, "outside.env"), secretPath);
+      assert.equal((await checkSecretBoundary(aiosPath, { platform: "darwin" })).status, "fail");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a private-looking .env owned by another POSIX account", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-secret-owner-"));
+    const aiosPath = await makeMinimalAios(root);
+    const secretPath = path.join(aiosPath, ".env");
+    const { checkSecretBoundary } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    try {
+      await fs.writeFile(secretPath, "TOKEN=secret\n", { mode: 0o600 });
+      const actual = await fs.lstat(secretPath);
+      const foreign = new Proxy(actual, {
+        get(target, property) {
+          if (property === "uid") return 99999;
+          const value = Reflect.get(target, property, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+      });
+      const check = await checkSecretBoundary(aiosPath, {
+        platform: "linux",
+        currentUid: 1000,
+        fileSystem: { lstat: async () => foreign }
+      });
+      assert.equal(check.status, "fail");
+      assert.match(`${check.detail} ${check.fix}`, /owned|account|ownership/i);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("warns on Windows when local ACL privacy cannot be verified", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-secret-windows-"));
+    const aiosPath = await makeMinimalAios(root);
+    const { checkSecretBoundary } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    try {
+      const stats = {
+        isFile: () => true,
+        isSymbolicLink: () => false,
+        nlink: 1,
+        mode: 0o100600,
+        uid: 1000
+      };
+      const check = await checkSecretBoundary(aiosPath, {
+        platform: "win32",
+        fileSystem: { lstat: async () => stats }
+      });
+      assert.equal(check.status, "warn");
+      assert.match(`${check.detail} ${check.fix}`, /ACL|Windows|privacy|permissions/i);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("doctor native-skill runtimes", () => {
   let tmpBase;
 

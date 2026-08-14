@@ -116,11 +116,11 @@ test("project context keeps --budget an int input and context_budget an object",
   );
 });
 
-// Finding 5 — documented continuity window: untagged global entries are carried
-// into a project payload (marked unscoped); raw entries older than the
-// operational window are not (durable continuity comes from promotion).
+// Project context uses the same strict This-project boundary as brief/search:
+// untagged global entries never enter the payload, and old raw entries remain
+// outside the operational window.
 
-test("project context carries untagged global entries but drops out-of-window raw entries", async (t) => {
+test("project context excludes untagged global and out-of-window raw entries", async (t) => {
   const { aiosPath, homePath, statePath } = await fixture(t);
   await writeProjectReadme(aiosPath, "alpha", "project_id: a5\nproject: alpha\nstatus: active");
   const today = new Date().toISOString();
@@ -134,6 +134,6 @@ test("project context carries untagged global entries but drops out-of-window ra
   await projectCommand(["context", "alpha", ...base(aiosPath, homePath, statePath)], { output });
   const text = lines.join("\n");
   assert.match(text, /Alpha in-window scoped note/);
-  assert.match(text, /Global untagged in-window note/, "global untagged entries are shared into every project's window by design");
+  assert.doesNotMatch(text, /Global untagged in-window note/, "This project excludes personal and unscoped continuity");
   assert.doesNotMatch(text, /stale out-of-window note/, "raw entries older than the operational window are not carried; promote to persist");
 });

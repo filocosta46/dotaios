@@ -48,8 +48,52 @@ test("compact brief never injects owned skill bodies", () => {
   );
 
   const result = run(["brief", "--compact", "--budget", "6000", "--path", aiosPath]);
+  assert.match(result.stdout, /^Memory: Shared\b/);
   assert.doesNotMatch(result.stdout, new RegExp(canary));
   assert.ok(result.stdout.length <= 6000);
+});
+
+test("compact Off returns the fixed text and hook envelope without opening or creating an AIOS folder", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-brief-off-"));
+  const missingAios = path.join(tempRoot, "must-not-exist");
+  try {
+    const plain = run(["brief", "--compact", "--memory", "off", "--path", missingAios]);
+    const hook = JSON.parse(run([
+      "brief", "--compact", "--memory", "off", "--json", "--path", missingAios,
+    ]).stdout);
+    const expected = "Memory: Off\n\nDotAIOS is off; your AI app may still keep its own conversation history. DotAIOS did not read, search, save, or capture this turn.";
+
+    assert.equal(plain.stdout.trimEnd(), expected);
+    assert.equal(hook.hookSpecificOutput.additionalContext, expected);
+    assert.equal(fs.existsSync(missingAios), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test("explicit compact Off stays closed when a host also forwards Use my memory", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-brief-explicit-off-"));
+  const missing = path.join(root, "must-stay-missing");
+  try {
+    const result = run(["brief", "--compact", "--memory", "off", "--first-message", "Use my memory", "--path", missing]);
+    assert.match(result.stdout, /^Memory: Off\b/);
+    assert.equal(fs.existsSync(missing), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("explicit Off never writes the daily brief", () => {
+  const { aiosPath } = setupAios();
+  const result = run(["brief", "--memory", "off", "--path", aiosPath]);
+  assert.match(result.stdout, /^Memory: Off\b/);
+  assert.equal(fs.existsSync(path.join(aiosPath, "memory", "daily", `${today()}.md`)), false);
+});
+
+test("lean brief discloses that it uses Shared memory", () => {
+  const { aiosPath } = setupAios();
+  const result = run(["brief", "--lean", "--path", aiosPath]);
+  assert.match(result.stdout, /^Memory: Shared\b/);
 });
 
 test("brief writes a ## Brief section into today's daily note", () => {
@@ -70,9 +114,11 @@ test("brief writes a ## Brief section into today's daily note", () => {
     source: "test"
   })}\n`);
 
-  run(["brief", "--path", aiosPath]);
+  const result = run(["brief", "--path", aiosPath]);
 
   const note = fs.readFileSync(path.join(aiosPath, "memory", "daily", `${today()}.md`), "utf8");
+  assert.match(result.stdout, /Memory: Shared/);
+  assert.match(note, /Memory: Shared/);
   assert.match(note, /## Brief/);
   assert.match(note, /Ship Output Loop v1/);
   assert.match(note, /Follow up on the output loop blocker/);
@@ -213,6 +259,9 @@ test("compact CLI documents and enforces the shared project selector contract", 
   try {
     const help = run(["brief", "--help"]);
     assert.match(help.stdout, /nonblank.*no control characters.*200 Unicode code points/is);
+    assert.match(help.stdout, /--memory <mode>.*shared, project, or off/is);
+    assert.match(help.stdout, /off may be used alone.*no DotAIOS write/is);
+    assert.match(help.stdout, /--cwd <dir>.*With --compact.*with or without.*--first-message/is);
 
     const projectDir = path.join(aiosPath, "projects", "client-work");
     fs.mkdirSync(projectDir, { recursive: true });
@@ -223,7 +272,16 @@ test("compact CLI documents and enforces the shared project selector contract", 
     const accepted = run([
       "brief", "--compact", "--project", "café:client/01", "--path", aiosPath
     ]);
+    assert.match(accepted.stdout, /^Memory: This project\b/);
     assert.match(accepted.stdout, /Client Work/);
+    const explicitProject = run([
+      "brief", "--compact", "--memory", "project", "--project", "café:client/01", "--path", aiosPath,
+    ]);
+    const explicitShared = run([
+      "brief", "--compact", "--memory", "shared", "--path", aiosPath,
+    ]);
+    assert.match(explicitProject.stdout, /^Memory: This project\b/);
+    assert.match(explicitShared.stdout, /^Memory: Shared\b/);
 
     for (const project of ["🚀".repeat(201), "bad\u0007id"]) {
       const rejected = spawnSync(

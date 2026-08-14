@@ -28,7 +28,7 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   // The packed source resolves its normal dependencies through the checkout's
   // installed node_modules. The package files themselves remain untouched.
   fs.symlinkSync(
-    path.join(repoRoot, "node_modules"),
+    dependencyNodeModules(repoRoot),
     path.join(packageRoot, "node_modules"),
     process.platform === "win32" ? "junction" : "dir"
   );
@@ -37,6 +37,25 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   const aiosPath = path.join(root, "aios");
   const homePath = path.join(root, "home");
   fs.mkdirSync(homePath);
+
+  const version = run(process.execPath, [cli, "--version"], { cwd: packageRoot });
+  assert.equal(version.stdout.trim(), "2.0.3", "the packed CLI must report the release version");
+
+  const help = run(process.execPath, [cli, "--help"], { cwd: packageRoot });
+  assert.match(help.stdout, /dotaios/i, "the packed CLI entrypoint must load from extracted bytes");
+
+  const setupPath = path.join(root, "setup-preview-aios");
+  const setupPreview = run(process.execPath, [
+    cli, "setup", "--dry-run", "--yes", "--skip-reveal",
+    "--path", setupPath, "--home", homePath
+  ], { cwd: packageRoot });
+  assert.match(setupPreview.stdout, new RegExp(escapeRegExp(setupPath)));
+  assert.equal(
+    fs.existsSync(setupPath),
+    false,
+    "the packed setup preview must not create the proposed AIOS folder"
+  );
+
   run(process.execPath, [cli, "init", "--yes", "--path", aiosPath], { cwd: packageRoot });
 
   const ignorePath = path.join(aiosPath, ".gitignore");
@@ -84,6 +103,16 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   assert.equal(receipt.machine_local.results[0].destination, path.join(aiosPath, "workspaces", "packed-project"));
   assert.equal(fs.readFileSync(ignorePath, "utf8"), ignoreBeforeRestore, "restore must not rewrite the boundary");
 });
+
+function dependencyNodeModules(start) {
+  const candidate = path.join(start, "node_modules");
+  if (fs.existsSync(candidate)) return candidate;
+  throw new Error(`Could not locate the repository-local dependency tree at ${candidate}.`);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {

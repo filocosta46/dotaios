@@ -1,11 +1,14 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEvent, isoDate } from "../../../core/src/memory.mjs";
+import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { resolveProjectContext } from "../../../core/src/projects.mjs";
 import { readSection, replaceSection } from "../../../core/src/sections.mjs";
 import { selectWorkingContext } from "../../../core/src/working-context.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { buildWorkingContextEnvelope } from "../../../core/src/working-context-envelope.mjs";
+import { readGeminiHookInput, resolveGeminiHookRequest } from "../lib/gemini-memory-hook.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios brief [daily] [options]
@@ -18,6 +21,9 @@ Options:
   --path <dir>  Use an AIOS folder other than ~/aios
   --dry-run     Print the brief without writing the daily note
   --compact     Print the canonical working-context projection (no file write)
+  --memory <mode>  shared, project, or off. Shared/project require --compact;
+                   off may be used alone and performs no DotAIOS write. A
+                   project selector implies project mode and requires --project.
   --project <slug-or-id>  With --compact: include only continuity for this project.
                           Must be nonblank, contain no control characters, and
                           be at most 200 Unicode code points.
@@ -27,6 +33,10 @@ Options:
                 north-star, today's daily note, and the first active project
                 README. The rest of memory/ stays opt-in. No file write.
   --json        With --compact: wrap output as Gemini CLI hook JSON
+  --first-message <text>  With --compact: select memory from a host session's
+                          first user message (managed agent bridges only)
+  --cwd <dir>    With --compact: detect an attached project, with or without
+                 --first-message
 `;
 
 const OPEN_LOOP_RE = /\b(open|loop|blocker|blocked|waiting|follow[- ]?up|todo|to do|next action|deadline|due|carry[- ]?over)\b/i;
@@ -38,18 +48,92 @@ export async function briefCommand(args) {
   }
 
   const options = parseOptions(args);
+  if (options.geminiHook) {
+    assertGeminiHookOptions(options);
+    const request = await resolveGeminiHookRequest(await readGeminiHookInput());
+    if (request.kind === "legacy-session-start") {
+      process.stdout.write(`${JSON.stringify({
+        systemMessage: "Memory: Closed — DotAIOS is updating its Gemini hook; memory stayed closed for this session start.",
+        hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "" },
+        dotaiosMemory: { mode: "closed", project: null }
+      })}\n`);
+      return;
+    }
+    options.firstMessage = request.firstMessage;
+    options.cwd = request.cwd;
+  }
+  if (!options.compact && (options.firstMessage !== null || options.cwd !== null)) {
+    throw new Error("--first-message and --cwd are supported with --compact only.");
+  }
+  if (options.cwd !== null && (!path.isAbsolute(options.cwd) || /[\0-\x1f\x7f]/.test(options.cwd))) {
+    throw new Error("--cwd must be an absolute path without control characters.");
+  }
+
+  let memoryPolicy;
+  try {
+    memoryPolicy = resolveMemoryPolicy({
+      mode: options.memory,
+      project: options.project,
+      firstUserMessage: options.firstMessage
+    });
+  } catch (error) {
+    const canResolveAttachedProject = error?.code === "DOTAIOS_MEMORY_POLICY_INVALID"
+      && options.cwd !== null
+      && options.memory === null
+      && options.project === null;
+    if (!canResolveAttachedProject) throw error;
+  }
+  if (memoryPolicy?.mode === "off") {
+    const additionalContext = `${memoryPolicy.receipt}\n\n${memoryPolicy.notice}`;
+    if (options.json) {
+      process.stdout.write(JSON.stringify({
+        systemMessage: `${memoryPolicy.receipt} — ${memoryPolicy.notice}`,
+        hookSpecificOutput: { hookEventName: "BeforeAgent", additionalContext },
+        dotaiosMemory: { mode: memoryPolicy.mode, project: null },
+        contextBudget: {
+          limit: additionalContext.length,
+          used: additionalContext.length,
+          remaining: 0,
+          truncated: false,
+        },
+      }) + "\n");
+    } else {
+      process.stdout.write(`${additionalContext}\n`);
+    }
+    return;
+  }
+  if (!options.compact && (options.memory !== null || options.project !== null)) {
+    throw new Error("--memory and --project are supported with --compact only.");
+  }
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
 
+  let projectSelector = options.project;
+  if (options.cwd !== null && options.memory === null && projectSelector === null) {
+    const attached = await resolveProjectContext({ aiosPath: target, cwd: options.cwd });
+    projectSelector = attached?.id || null;
+  }
+  memoryPolicy = resolveMemoryPolicy({
+    mode: options.memory,
+    project: projectSelector,
+    firstUserMessage: options.firstMessage
+  });
+
   if (options.compact) {
     const { digest, budget, notice } = await buildWorkingContextEnvelope(target, {
-      project: options.project,
+      memory: memoryPolicy.mode,
+      project: memoryPolicy.projectSelector,
       visibleCharacterBudget: options.budget
     });
     const additionalContext = notice ? `${notice}\n\n${digest}` : digest;
     if (options.json) {
       process.stdout.write(JSON.stringify({
-        hookSpecificOutput: { additionalContext },
+        systemMessage: memoryPolicy.receipt,
+        hookSpecificOutput: { hookEventName: "BeforeAgent", additionalContext },
+        dotaiosMemory: {
+          mode: memoryPolicy.mode,
+          project: memoryPolicy.projectSelector
+        },
         contextBudget: budget
       }) + "\n");
     } else {
@@ -86,7 +170,7 @@ export async function briefCommand(args) {
     source: "dotaios brief"
   });
 
-  console.log(`Brief saved at ${dailyPath}`);
+  console.log(`${memoryPolicy.receipt}\nBrief saved at ${dailyPath}`);
 }
 
 function parseOptions(args = []) {
@@ -97,7 +181,11 @@ function parseOptions(args = []) {
     json: false,
     path: null,
     project: null,
-    budget: undefined
+    memory: null,
+    firstMessage: null,
+    cwd: null,
+    budget: undefined,
+    geminiHook: false
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -118,17 +206,38 @@ function parseOptions(args = []) {
     } else if (arg === "--project") {
       options.project = readOptionValue(args, index, "--project");
       index += 1;
+    } else if (arg === "--memory") {
+      options.memory = readOptionValue(args, index, "--memory");
+      index += 1;
+    } else if (arg === "--first-message") {
+      options.firstMessage = readOptionValue(args, index, "--first-message");
+      index += 1;
+    } else if (arg === "--cwd") {
+      options.cwd = readOptionValue(args, index, "--cwd");
+      index += 1;
     } else if (arg === "--budget") {
       const value = readOptionValue(args, index, "--budget");
       if (!/^\d+$/.test(value)) throw new Error("--budget must be a non-negative whole number.");
       options.budget = Number(value);
       index += 1;
+    } else if (arg === "--gemini-hook") {
+      options.geminiHook = true;
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
   }
 
   return options;
+}
+
+function assertGeminiHookOptions(options) {
+  if (!options.compact || !options.json || options.path === null) {
+    throw new Error("--gemini-hook requires --compact, --json, and --path.");
+  }
+  if (options.dryRun || options.lean || options.memory !== null || options.project !== null
+    || options.firstMessage !== null || options.cwd !== null || options.budget !== undefined) {
+    throw new Error("--gemini-hook cannot be combined with user-facing memory or output options.");
+  }
 }
 
 // A small high-signal surface for boot: identity, priorities, north-star,
@@ -146,6 +255,8 @@ export async function buildLeanBrief(aiosPath, date = isoDate(new Date())) {
   ]);
 
   const sections = [
+    "Memory: Shared",
+    "",
     "# Lean brief",
     "",
     `Generated by \`dotaios brief --lean\` on ${date}.`,
@@ -227,6 +338,8 @@ function extractOpenLoops(entries) {
 
 function renderBrief({ date, priorities, openLoops, carryOver }) {
   return [
+    "Memory: Shared",
+    "",
     `Generated by \`dotaios brief\` on ${date}.`,
     "",
     "### Priorities",

@@ -15,9 +15,13 @@ import {
 } from "../../core/src/evidence-reader.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
-import { validateProjectSelector } from "../../core/src/projects.mjs";
+import {
+  resolvePortableProjectIdentity,
+  validateProjectSelector
+} from "../../core/src/projects.mjs";
 import { rankSkills } from "../../core/src/skill-resolver.mjs";
 import { collectSkills } from "../../core/src/skills.mjs";
+import { MEMORY_MODES, resolveMemoryPolicy } from "../../core/src/memory-policy.mjs";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_VERSION = JSON.parse(
@@ -26,7 +30,11 @@ const SERVER_VERSION = JSON.parse(
 const DEFAULT_RESULT_BUDGET = 6000;
 const MAX_SEARCH_CONFIG_BYTES = 1024 * 1024;
 const SEARCH_QUERY_TRUNCATION_MARKER = "[query truncated]";
-const MIN_SEARCH_RESULT_BUDGET = deriveMinimumSearchResultBudget();
+const LEGACY_MIN_SEARCH_RESULT_BUDGET = 3530;
+const MIN_SEARCH_RESULT_BUDGET = Math.max(
+  LEGACY_MIN_SEARCH_RESULT_BUDGET,
+  deriveMinimumSearchResultBudget()
+);
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) {
@@ -111,18 +119,21 @@ class DotaiosMcpServer {
   }
 
   async callTool(name, args) {
+    validateMcpToolArguments(name, args);
+    const memoryPolicy = resolveMcpMemoryPolicy(args);
+    if (memoryPolicy.mode === "off") return serializeOffToolResult(name, args, memoryPolicy);
     await this.assertAios();
     if (name === "read_working_context") {
-      assertAllowedArguments(args, ["project", "limit", "budget"]);
-      return this.readWorkingContext(args);
+      assertAllowedArguments(args, ["memory", "project", "limit", "budget"]);
+      return this.readWorkingContext(args, memoryPolicy);
     }
     if (name === "search_aios") {
-      assertAllowedArguments(args, ["query", "scope", "project", "limit", "budget"]);
-      return this.searchAios(args);
+      assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+      return this.searchAios(args, memoryPolicy);
     }
     if (name === "resolve_skill") {
-      assertAllowedArguments(args, ["intent", "limit", "budget"]);
-      return this.resolveSkill(args);
+      assertAllowedArguments(args, ["memory", "project", "intent", "limit", "budget"]);
+      return this.resolveSkill(args, memoryPolicy);
     }
     throw protocolError(-32602, `Unknown tool: ${name}`);
   }
@@ -146,7 +157,7 @@ class DotaiosMcpServer {
     );
   }
 
-  async readWorkingContext(args) {
+  async readWorkingContext(args, memoryPolicy) {
     const project = optionalString(args.project, "project", 200);
     if (project && /\p{Cc}/u.test(project)) {
       throw protocolError(-32602, "project must be a project slug or stable id");
@@ -158,7 +169,8 @@ class DotaiosMcpServer {
     let envelope;
     try {
       envelope = await buildWorkingContextEnvelope(this.aiosPath, {
-        project,
+        memory: memoryPolicy.mode,
+        project: memoryPolicy.projectSelector || project,
         limit,
         visibleCharacterBudget,
       });
@@ -169,10 +181,20 @@ class DotaiosMcpServer {
       ) {
         throw protocolError(-32602, "project selector is ambiguous; use its stable id");
       }
+      if (
+        error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+        || error?.cause?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+      ) {
+        throw protocolError(-32602, "project is not registered; choose a registered slug or stable id");
+      }
       throw error;
     }
-    const { digest, budget, generatedAt, projectFilter, operational } = envelope;
+    const { digest, budget, generatedAt, projectFilter, operational, memoryMode, memoryReceipt } = envelope;
     const metadata = {
+      memory: memoryMode,
+      receipt: memoryReceipt,
+      notice: null,
+      complete: true,
       scope: { project: projectFilter },
       generated_at: generatedAt,
       budget,
@@ -184,14 +206,17 @@ class DotaiosMcpServer {
     return JSON.stringify({ markdown: digest, ...metadata }, null, 2);
   }
 
-  async resolveSkill(args) {
+  async resolveSkill(args, memoryPolicy) {
     const intent = requireString(args.intent, "intent", 500);
     const limit = args.limit === undefined ? 1 : boundedInteger(args.limit, "limit", 1, 10);
     const budget = args.budget === undefined
       ? DEFAULT_RESULT_BUDGET
       : boundedInteger(args.budget, "budget", 256, 32000);
-    const skillsDir = path.join(this.aiosPath, "skills");
     const reader = createEvidenceReader({ roots: [this.aiosPath] });
+    if (memoryPolicy.mode === "project") {
+      await assertRegisteredProjectSelector(this.aiosPath, memoryPolicy.projectSelector, reader);
+    }
+    const skillsDir = path.join(this.aiosPath, "skills");
     const skills = await collectSkills(this.aiosPath, { reader, root: this.aiosPath });
     const matches = rankSkills(intent, skills, { skillsDir })
       .slice(0, limit)
@@ -203,10 +228,10 @@ class DotaiosMcpServer {
         reason: entry.reason,
         resource: `skills/${entry.dir}/SKILL.md`,
       }));
-    return serializeBoundedSkillResults({ intent, matches, limit: budget });
+    return serializeBoundedSkillResults({ intent, matches, limit: budget, memoryPolicy });
   }
 
-  async searchAios(args) {
+  async searchAios(args, memoryPolicy) {
     const query = requireString(args.query, "query", 500);
     const project = args.project === undefined
       ? undefined
@@ -241,7 +266,8 @@ class DotaiosMcpServer {
         query,
         scope,
         limit,
-        projectSelector: project,
+        memoryPolicy,
+        projectSelector: memoryPolicy.projectSelector || project,
         evidenceReader: reader
       });
     } catch (error) {
@@ -260,6 +286,11 @@ class DotaiosMcpServer {
           : null,
       groups,
       omissions: groups.omissions,
+      memoryPolicy: {
+        mode: groups.memory,
+        receipt: groups.receipt,
+        notice: groups.notice,
+      },
       limit: budget
     });
   }
@@ -283,6 +314,7 @@ function tools() {
         type: "object",
         additionalProperties: false,
         properties: {
+          memory: memoryModeSchema(),
           project: {
             type: "string",
             minLength: 1,
@@ -303,6 +335,7 @@ function tools() {
         type: "object",
         additionalProperties: false,
         properties: {
+          memory: memoryModeSchema(),
           query: { type: "string", minLength: 1, maxLength: 500 },
           scope: { type: "string", enum: SEARCH_SCOPES, default: "all" },
           project: {
@@ -332,6 +365,14 @@ function tools() {
         type: "object",
         additionalProperties: false,
         properties: {
+          memory: memoryModeSchema(),
+          project: {
+            type: "string",
+            minLength: 1,
+            maxLength: 200,
+            pattern: "^[^\\s\\u0000-\\u001F\\u007F-\\u009F/\\\\]+$",
+            description: "Required only when memory is project. Skills remain capabilities rather than memory."
+          },
           intent: { type: "string", minLength: 1, maxLength: 500 },
           limit: { type: "integer", minimum: 1, maximum: 10, default: 1 },
           budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000 },
@@ -342,7 +383,140 @@ function tools() {
   ];
 }
 
-function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omissions = [], limit }) {
+function memoryModeSchema() {
+  return {
+    type: "string",
+    enum: MEMORY_MODES,
+    default: "shared",
+    description: "Shared uses personal continuity, project requires a project selector, and off performs no DotAIOS read, search, save, or capture."
+  };
+}
+
+function validateMcpToolArguments(name, args) {
+  if (name === "read_working_context") {
+    assertAllowedArguments(args, ["memory", "project", "limit", "budget"]);
+    optionalString(args.project, "project", 200);
+    if (args.limit !== undefined) boundedInteger(args.limit, "limit", 1, 10);
+    if (args.budget !== undefined) boundedInteger(args.budget, "budget", 256, 32000);
+    return;
+  }
+  if (name === "search_aios") {
+    assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+    requireString(args.query, "query", 500);
+    const project = args.project === undefined
+      ? undefined
+      : requireString(args.project, "project", 200);
+    const scope = optionalString(args.scope) || "all";
+    if (!SEARCH_SCOPES.includes(scope)) {
+      throw protocolError(-32602, `scope must be one of: ${SEARCH_SCOPES.join(", ")}`);
+    }
+    if (scope === "projects" && !project) {
+      throw protocolError(-32602, "project is required when scope is projects");
+    }
+    if (project) {
+      try {
+        validateProjectSelector(project);
+      } catch (error) {
+        throw protocolError(-32602, error.message);
+      }
+    }
+    if (args.limit !== undefined) boundedInteger(args.limit, "limit", 1, 20);
+    if (args.budget !== undefined) {
+      boundedInteger(args.budget, "budget", MIN_SEARCH_RESULT_BUDGET, 32000);
+    }
+    return;
+  }
+  if (name === "resolve_skill") {
+    assertAllowedArguments(args, ["memory", "project", "intent", "limit", "budget"]);
+    const project = optionalString(args.project, "project", 200);
+    if (project) {
+      try {
+        validateProjectSelector(project);
+      } catch (error) {
+        throw protocolError(-32602, error.message);
+      }
+    }
+    requireString(args.intent, "intent", 500);
+    if (args.limit !== undefined) boundedInteger(args.limit, "limit", 1, 10);
+    if (args.budget !== undefined) boundedInteger(args.budget, "budget", 256, 32000);
+    return;
+  }
+  throw protocolError(-32602, `Unknown tool: ${name}`);
+}
+
+function resolveMcpMemoryPolicy(args) {
+  try {
+    return resolveMemoryPolicy({ mode: args.memory, project: args.project });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_MEMORY_POLICY_INVALID") {
+      throw protocolError(-32602, error.message);
+    }
+    throw error;
+  }
+}
+
+function serializeOffToolResult(name, args, policy) {
+  const shared = {
+    memory: policy.mode,
+    receipt: policy.receipt,
+    notice: policy.notice,
+    complete: true
+  };
+  if (name === "read_working_context") {
+    assertAllowedArguments(args, ["memory", "project", "limit", "budget"]);
+    return JSON.stringify({
+      markdown: `${policy.receipt}\n\n${policy.notice}`,
+      scope: { project: null },
+      ...shared
+    }, null, 2);
+  }
+  if (name === "search_aios") {
+    assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+    return JSON.stringify({
+      query: typeof args.query === "string" ? args.query : "",
+      scope: typeof args.scope === "string" ? args.scope : "all",
+      results: [],
+      omissions: [],
+      ...shared
+    }, null, 2);
+  }
+  if (name === "resolve_skill") {
+    const intent = requireString(args.intent, "intent", 500);
+    const limit = args.budget === undefined
+      ? DEFAULT_RESULT_BUDGET
+      : boundedInteger(args.budget, "budget", 256, 32000);
+    return serializeBoundedSkillResults({
+      intent,
+      matches: [],
+      memoryPolicy: policy,
+      limit
+    });
+  }
+  throw protocolError(-32602, `Unknown tool: ${name}`);
+}
+
+async function assertRegisteredProjectSelector(aiosPath, selector, evidenceReader) {
+  try {
+    await resolvePortableProjectIdentity({
+      aiosPath,
+      projectSelector: selector,
+      evidenceReader
+    });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN") {
+      throw protocolError(-32602, "project is not registered; choose a registered slug or stable id");
+    }
+    if (error?.code === "DOTAIOS_PROJECT_SELECTOR_AMBIGUOUS") {
+      throw protocolError(-32602, "project selector is ambiguous; use its stable id");
+    }
+    if (error?.code === "DOTAIOS_PROJECT_SELECTOR_INVALID") {
+      throw protocolError(-32602, error.message);
+    }
+    throw error;
+  }
+}
+
+function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omissions = [], memoryPolicy, limit }) {
   const complete = omissions.length === 0;
   const selected = [];
   let truncated = false;
@@ -351,7 +525,7 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omis
       const result = sanitizeResultValue(rawResult);
       const candidate = [...selected, { scope: group.scope, ...result }];
       const candidateText = serializeSearchEnvelope({
-        query, scope, scopeDetail, results: candidate, complete, omissions, limit, truncated: false
+        query, scope, scopeDetail, results: candidate, complete, omissions, memoryPolicy, limit, truncated: false
       });
       if (candidateText.length > limit) {
         truncated = true;
@@ -363,13 +537,13 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omis
 
   let boundedQuery = query;
   let serialized = serializeSearchEnvelope({
-    query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, limit, truncated
+    query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, memoryPolicy, limit, truncated
   });
   while (serialized.length > limit && selected.length > 0) {
     selected.pop();
     truncated = true;
     serialized = serializeSearchEnvelope({
-      query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, limit, truncated
+      query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, memoryPolicy, limit, truncated
     });
   }
 
@@ -386,6 +560,7 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omis
         results: selected,
         complete,
         omissions,
+        memoryPolicy,
         limit,
         truncated
       })
@@ -402,13 +577,13 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omis
   return serialized;
 }
 
-function serializeBoundedSkillResults({ intent, matches, limit }) {
+function serializeBoundedSkillResults({ intent, matches, limit, memoryPolicy }) {
   const selected = [];
   let truncated = false;
   for (const rawMatch of matches) {
     const match = sanitizeResultValue(rawMatch, "", Number.POSITIVE_INFINITY);
     const candidate = [...selected, match];
-    if (serializeSkillEnvelope({ intent, matches: candidate, limit, truncated: false }).length > limit) {
+    if (serializeSkillEnvelope({ intent, matches: candidate, memoryPolicy, limit, truncated: false }).length > limit) {
       truncated = true;
       break;
     }
@@ -416,11 +591,11 @@ function serializeBoundedSkillResults({ intent, matches, limit }) {
   }
 
   let boundedIntent = intent;
-  let serialized = serializeSkillEnvelope({ intent: boundedIntent, matches: selected, limit, truncated });
+  let serialized = serializeSkillEnvelope({ intent: boundedIntent, matches: selected, memoryPolicy, limit, truncated });
   while (serialized.length > limit && selected.length > 0) {
     selected.pop();
     truncated = true;
-    serialized = serializeSkillEnvelope({ intent: boundedIntent, matches: selected, limit, truncated });
+    serialized = serializeSkillEnvelope({ intent: boundedIntent, matches: selected, memoryPolicy, limit, truncated });
   }
 
   if (serialized.length > limit) {
@@ -433,6 +608,7 @@ function serializeBoundedSkillResults({ intent, matches, limit }) {
       serialize: (candidate) => serializeSkillEnvelope({
         intent: candidate,
         matches: selected,
+        memoryPolicy,
         limit,
         truncated
       })
@@ -449,12 +625,16 @@ function serializeBoundedSkillResults({ intent, matches, limit }) {
   return serialized;
 }
 
-function serializeSkillEnvelope({ intent, matches, limit, truncated }) {
+function serializeSkillEnvelope({ intent, matches, memoryPolicy, limit, truncated }) {
   let used = 0;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const serialized = JSON.stringify({
       intent,
       matches,
+      memory: memoryPolicy.mode,
+      receipt: memoryPolicy.receipt,
+      notice: memoryPolicy.notice,
+      complete: true,
       budget: { limit, used, truncated },
     }, null, 2);
     if (serialized.length === used) return serialized;
@@ -463,10 +643,13 @@ function serializeSkillEnvelope({ intent, matches, limit, truncated }) {
   throw new Error("Could not stabilize skill response budget metadata");
 }
 
-function serializeSearchEnvelope({ query, scope, scopeDetail, results, complete, omissions, limit, truncated }) {
+function serializeSearchEnvelope({ query, scope, scopeDetail, results, complete, omissions, memoryPolicy, limit, truncated }) {
   const envelope = (used) => ({
     query,
     scope,
+    memory: memoryPolicy.mode,
+    receipt: memoryPolicy.receipt,
+    notice: memoryPolicy.notice,
     ...(scopeDetail ? { scope_selection: scopeDetail } : {}),
     results,
     complete,
@@ -486,9 +669,11 @@ function serializeSearchEnvelope({ query, scope, scopeDetail, results, complete,
 }
 
 function deriveMinimumSearchResultBudget() {
-  const maximumSelector = "\u{10400}".repeat(200);
   const maximumOmissions = SEARCH_SCOPES
-    .filter((scope) => scope !== "all")
+    // Shared searches cannot simultaneously select a strict project corpus.
+    // Project mode has only three scopes, so eight Shared omissions are the
+    // largest envelope users can actually request.
+    .filter((scope) => scope !== "all" && scope !== "projects")
     .map((scope) => ({
       scope,
       reason: "directory_entries_exceeded",
@@ -508,10 +693,11 @@ function deriveMinimumSearchResultBudget() {
     const serialized = serializeSearchEnvelope({
       query: SEARCH_QUERY_TRUNCATION_MARKER,
       scope: "all",
-      scopeDetail: { project: maximumSelector, project_id: maximumSelector },
+      scopeDetail: { projects: "omitted" },
       results: [],
       complete: false,
       omissions: maximumOmissions,
+      memoryPolicy: { mode: "shared", receipt: "Memory: Shared", notice: null },
       limit: candidate,
       truncated: true,
     });

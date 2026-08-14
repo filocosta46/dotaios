@@ -7,10 +7,17 @@ import {
   writeFileSafe
 } from "../../../core/src/files.mjs";
 import { DOTAIOS_PACKAGE_VERSION } from "../lib/mcp-launcher.mjs";
+import { HOOK_INPUT_MAX_BYTES } from "../lib/gemini-memory-hook.mjs";
 
-const GEMINI_HOOK_MARKER = "# dotaios-managed: gemini-context-hook/v1";
-const GEMINI_HOOK_DESCRIPTION = "# DotAIOS context injection for Gemini CLI SessionStart";
-const GEMINI_HOOK_DETAIL = "# Injects working memory digest as the first context turn.";
+const GEMINI_HOOK_MARKER = "# dotaios-managed: gemini-context-hook/v2";
+const GEMINI_HOOK_DESCRIPTION = "# DotAIOS context selection for Gemini CLI BeforeAgent";
+const GEMINI_HOOK_DETAIL = "# Selects memory access for this session from the first user prompt before loading context.";
+const GEMINI_LEGACY_HOOK_MARKER = "# dotaios-managed: gemini-context-hook/v1";
+const GEMINI_LEGACY_HOOK_DESCRIPTION = "# DotAIOS context injection for Gemini CLI SessionStart";
+const GEMINI_LEGACY_HOOK_DETAIL = "# Injects working memory digest as the first context turn.";
+const GEMINI_HOOK_PATH_PREFIX = "# dotaios-aios-path-base64: ";
+const GEMINI_HOOK_MODULE_PREFIX = "# dotaios-hook-module-base64: ";
+const GEMINI_HOOK_MODULE_URL = new URL("../lib/gemini-memory-hook.mjs", import.meta.url).href;
 
 export function assertSafeGeminiAiosPath(aiosPath) {
   if (/[\0-\x1f\x7f]/.test(aiosPath)) {
@@ -102,12 +109,79 @@ export function shSingleQuote(value) {
 }
 
 export function buildGeminiHookScript(aiosPath) {
+  return buildGeminiHookScriptVersion(aiosPath, {
+    moduleUrl: GEMINI_HOOK_MODULE_URL,
+    packageVersion: DOTAIOS_PACKAGE_VERSION
+  });
+}
+
+function buildGeminiHookScriptVersion(aiosPath, { moduleUrl, packageVersion }) {
   assertSafeGeminiAiosPath(aiosPath);
+  const encodedPath = Buffer.from(aiosPath, "utf8").toString("base64");
+  const encodedModule = Buffer.from(moduleUrl, "utf8").toString("base64");
+  const fallback = JSON.stringify({
+    systemMessage: "Memory: Closed — DotAIOS could not verify the session mode, so it left memory closed.",
+    hookSpecificOutput: { hookEventName: "BeforeAgent", additionalContext: "" },
+    dotaiosMemory: { mode: "closed", project: null }
+  });
+  const privateClassifier = `let readGeminiHookInput;
+let resolveGeminiPrivateHookOutput;
+try {
+  ({ readGeminiHookInput, resolveGeminiPrivateHookOutput } = await import(${JSON.stringify(moduleUrl)}));
+} catch {
+  process.exit(3);
+}
+try {
+  const input = await readGeminiHookInput();
+  const output = await resolveGeminiPrivateHookOutput(input);
+  if (!output) process.exit(3);
+  process.stdout.write(JSON.stringify(output) + "\\n");
+} catch {
+  process.exit(2);
+}`;
+  const validator = `import fs from "node:fs";
+const raw = fs.readFileSync(0, "utf8");
+const value = JSON.parse(raw);
+if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid hook envelope");
+if (typeof value.systemMessage !== "string" || !value.systemMessage.startsWith("Memory: ")) throw new Error("missing visible receipt");
+const hook = value.hookSpecificOutput;
+if (!hook || typeof hook !== "object" || Array.isArray(hook) || typeof hook.additionalContext !== "string") throw new Error("invalid hook output");
+if (!["BeforeAgent", "SessionStart"].includes(hook.hookEventName)) throw new Error("invalid hook event");
+if (hook.hookEventName === "BeforeAgent") {
+  const memory = value.dotaiosMemory;
+  if (!memory || !["shared", "project", "off"].includes(memory.mode)) throw new Error("invalid memory receipt");
+  const receipt = memory.mode === "shared" ? "Memory: Shared" : memory.mode === "project" ? "Memory: This project" : "Memory: Off";
+  if (!value.systemMessage.startsWith(receipt) || !hook.additionalContext.startsWith(receipt)) throw new Error("inconsistent memory receipt");
+  if ((memory.mode === "project") !== (typeof memory.project === "string" && memory.project.length > 0)) throw new Error("invalid project receipt");
+}
+process.stdout.write(JSON.stringify(value) + "\\n");`;
   return `#!/usr/bin/env bash
 ${GEMINI_HOOK_MARKER}
 ${GEMINI_HOOK_DESCRIPTION}
 ${GEMINI_HOOK_DETAIL}
-cd / && npx -y --loglevel=error dotaios@${DOTAIOS_PACKAGE_VERSION} brief --compact --json --path ${shSingleQuote(aiosPath)}
+${GEMINI_HOOK_PATH_PREFIX}${encodedPath}
+${GEMINI_HOOK_MODULE_PREFIX}${encodedModule}
+input=""
+if LC_ALL=C IFS= read -r -d '' -n ${HOOK_INPUT_MAX_BYTES + 1} input; then
+  printf '%s\\n' ${shSingleQuote(fallback)}
+  exit 0
+fi
+private_output="$(printf '%s' "$input" | node --input-type=module -e ${shSingleQuote(privateClassifier)})"
+private_status=$?
+if [ "$private_status" -eq 0 ]; then
+  printf '%s\\n' "$private_output"
+  exit 0
+fi
+if [ "$private_status" -ne 3 ]; then
+  printf '%s\\n' ${shSingleQuote(fallback)}
+  exit 0
+fi
+output="$(printf '%s' "$input" | (cd / && npx -y --loglevel=error --package ${shSingleQuote(`dotaios@${packageVersion}`)} dotaios brief --compact --json --path ${shSingleQuote(aiosPath)} --gemini-hook))"
+status=$?
+if [ "$status" -eq 0 ] && printf '%s' "$output" | node --input-type=module -e ${shSingleQuote(validator)}; then
+  exit 0
+fi
+printf '%s\\n' ${shSingleQuote(fallback)}
 `;
 }
 
@@ -150,20 +224,21 @@ export async function writeGeminiHookScript(
     throw new Error(`Existing ${scriptPath} is not valid UTF-8. Refusing to overwrite it.`);
   }
   const lines = existing.split("\n");
-  const managedCurrent = lines.length === 6
+  const managedCurrent = isCurrentGeminiHookScript(existing);
+  const managedPrevious = lines.length === 6
     && lines[0] === "#!/usr/bin/env bash"
-    && lines[1] === GEMINI_HOOK_MARKER
-    && lines[2] === GEMINI_HOOK_DESCRIPTION
-    && lines[3] === GEMINI_HOOK_DETAIL
+    && lines[1] === GEMINI_LEGACY_HOOK_MARKER
+    && lines[2] === GEMINI_LEGACY_HOOK_DESCRIPTION
+    && lines[3] === GEMINI_LEGACY_HOOK_DETAIL
     && /^cd \/ && npx -y --loglevel=error dotaios@[0-9A-Za-z.+-]+ brief --compact --json --path [^\r\n]+$/.test(lines[4])
     && lines[5] === "";
   const managedLegacy = lines.length === 5
     && lines[0] === "#!/usr/bin/env bash"
-    && lines[1] === GEMINI_HOOK_DESCRIPTION
-    && lines[2] === GEMINI_HOOK_DETAIL
+    && lines[1] === GEMINI_LEGACY_HOOK_DESCRIPTION
+    && lines[2] === GEMINI_LEGACY_HOOK_DETAIL
     && /^npx dotaios brief --compact --json --path [^\r\n]+ 2>\/dev\/null \|\| echo '\{\}'$/.test(lines[3])
     && lines[4] === "";
-  if (!managedCurrent && !managedLegacy) {
+  if (!managedCurrent && !managedPrevious && !managedLegacy) {
     throw new Error(`Existing ${scriptPath} is not a DotAIOS-managed hook. Existing foreign script kept.`);
   }
 
@@ -186,6 +261,31 @@ export async function writeGeminiHookScript(
     throw new Error(`Could not update ${scriptPath}: it changed during connect. Concurrent edit kept.`);
   }
   return { action: "updated", ...(result.preservedPath ? { preservedPath: result.preservedPath } : {}) };
+}
+
+function isCurrentGeminiHookScript(content) {
+  const encoded = content.split("\n").find((line) => line.startsWith(GEMINI_HOOK_PATH_PREFIX))
+    ?.slice(GEMINI_HOOK_PATH_PREFIX.length);
+  if (!encoded || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+  const encodedModule = content.split("\n").find((line) => line.startsWith(GEMINI_HOOK_MODULE_PREFIX))
+    ?.slice(GEMINI_HOOK_MODULE_PREFIX.length);
+  if (!encodedModule || !/^[A-Za-z0-9+/]+={0,2}$/.test(encodedModule)) return false;
+  let embeddedPath;
+  let embeddedModule;
+  try {
+    embeddedPath = Buffer.from(encoded, "base64").toString("utf8");
+    if (Buffer.from(embeddedPath, "utf8").toString("base64") !== encoded) return false;
+    embeddedModule = Buffer.from(encodedModule, "base64").toString("utf8");
+    if (Buffer.from(embeddedModule, "utf8").toString("base64") !== encodedModule) return false;
+  } catch {
+    return false;
+  }
+  const versionMatch = /npx -y --loglevel=error --package 'dotaios@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)' dotaios brief --compact --json --path /.exec(content);
+  if (!versionMatch) return false;
+  return content === buildGeminiHookScriptVersion(embeddedPath, {
+    moduleUrl: embeddedModule,
+    packageVersion: versionMatch[1]
+  });
 }
 
 export async function mergeGeminiSettings(
@@ -234,51 +334,58 @@ export async function mergeGeminiSettings(
   } else if (typeof settings.hooks !== "object" || Array.isArray(settings.hooks)) {
     throw new Error(`Existing ${settingsPath} hooks field must contain a JSON object. Fix it, then retry — refusing to overwrite it.`);
   }
-  if (settings.hooks.disabled != null && !Array.isArray(settings.hooks.disabled)) {
-    throw new Error(`Existing ${settingsPath} hooks.disabled field must contain an array. Fix it, then retry — refusing to overwrite it.`);
-  }
-  if (settings.hooks.disabled?.includes("dotaios-context")) {
-    throw new Error(`Existing ${settingsPath} explicitly disables dotaios-context. Enable or remove that hook name, then retry.`);
-  }
-  if (settings.hooks.SessionStart == null) {
-    settings.hooks.SessionStart = [];
-  } else if (!Array.isArray(settings.hooks.SessionStart)) {
-    throw new Error(`Existing ${settingsPath} SessionStart field must contain an array. Fix it, then retry — refusing to overwrite it.`);
-  }
-  for (const sessionEntry of settings.hooks.SessionStart) {
-    if (!sessionEntry || typeof sessionEntry !== "object" || Array.isArray(sessionEntry)) {
-      throw new Error(`Existing ${settingsPath} contains a malformed SessionStart entry. Fix it, then retry — refusing to overwrite it.`);
-    }
-    if (!Array.isArray(sessionEntry.hooks)) {
-      throw new Error(`Existing ${settingsPath} SessionStart hooks field must contain an array. Fix it, then retry — refusing to overwrite it.`);
-    }
-    if (sessionEntry.hooks.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) {
-      throw new Error(`Existing ${settingsPath} contains a malformed SessionStart hook entry. Fix it, then retry — refusing to overwrite it.`);
-    }
-  }
+  validateGeminiHooksConfig(settings.hooksConfig, settingsPath);
+  validateGeminiHookGroups(settings.hooks.SessionStart, "SessionStart", settingsPath);
+  validateGeminiHookGroups(settings.hooks.BeforeAgent, "BeforeAgent", settingsPath);
 
   const hookEntry = {
+    matcher: "*",
     hooks: [{ type: "command", command: shSingleQuote(hookScriptPath), name: "dotaios-context", timeout: 10000 }]
   };
   const ownedHooks = [];
-  for (const sessionEntry of settings.hooks.SessionStart) {
-    for (let index = 0; index < sessionEntry.hooks.length; index += 1) {
-      if (sessionEntry.hooks[index]?.name === "dotaios-context") {
-        ownedHooks.push({ sessionEntry, index });
+  for (const eventName of ["SessionStart", "BeforeAgent"]) {
+    for (let groupIndex = 0; groupIndex < (settings.hooks[eventName] || []).length; groupIndex += 1) {
+      const group = settings.hooks[eventName][groupIndex];
+      for (let hookIndex = 0; hookIndex < group.hooks.length; hookIndex += 1) {
+        if (group.hooks[hookIndex]?.name === "dotaios-context") {
+          ownedHooks.push({ eventName, group, groupIndex, hookIndex });
+        }
       }
     }
   }
-  if (ownedHooks.length > 1) {
+  if (ownedHooks.filter(({ eventName }) => eventName === "SessionStart").length > 1
+    || ownedHooks.filter(({ eventName }) => eventName === "BeforeAgent").length > 1) {
     throw new Error(`Existing ${settingsPath} contains multiple dotaios-context hooks. Remove the duplicate, then retry — refusing an ambiguous update.`);
   }
-  if (ownedHooks.length === 1) {
-    const [{ sessionEntry, index }] = ownedHooks;
-    if (!isRecognizedGeminiHookEntry(sessionEntry.hooks[index], hookScriptPath)) {
+  for (const owned of ownedHooks) {
+    if (!isRecognizedGeminiHookEntry(owned.group.hooks[owned.hookIndex], hookScriptPath)) {
       throw new Error(`Existing ${settingsPath} contains an unrecognized dotaios-context hook. Rename or remove it, then retry — refusing to assume ownership.`);
     }
-    sessionEntry.hooks[index] = { ...sessionEntry.hooks[index], ...hookEntry.hooks[0] };
+  }
+
+  const previous = ownedHooks.find(({ eventName }) => eventName === "SessionStart") || null;
+  const current = ownedHooks.find(({ eventName }) => eventName === "BeforeAgent") || null;
+  const migratedFields = previous ? previous.group.hooks[previous.hookIndex] : null;
+  if (previous) {
+    previous.group.hooks.splice(previous.hookIndex, 1);
+    const groups = settings.hooks.SessionStart;
+    if (previous.group.hooks.length === 0 && isManagedGeminiHookGroup(previous.group)) {
+      groups.splice(previous.groupIndex, 1);
+    }
+    if (groups.length === 0) delete settings.hooks.SessionStart;
+  }
+
+  if (current) {
+    current.group.hooks[current.hookIndex] = {
+      ...current.group.hooks[current.hookIndex],
+      ...hookEntry.hooks[0]
+    };
   } else {
-    settings.hooks.SessionStart.push(hookEntry);
+    settings.hooks.BeforeAgent ||= [];
+    settings.hooks.BeforeAgent.push({
+      ...hookEntry,
+      hooks: [{ ...(migratedFields || {}), ...hookEntry.hooks[0] }]
+    });
   }
 
   removeLegacyGeminiMcpEntry(settings, settingsPath);
@@ -308,6 +415,47 @@ export async function mergeGeminiSettings(
     throw new Error(`Could not update ${settingsPath}: it changed during connect. Concurrent edit kept.`);
   }
   return { action: "updated", ...(result.preservedPath ? { preservedPath: result.preservedPath } : {}) };
+}
+
+function isManagedGeminiHookGroup(group) {
+  return Object.keys(group).every((key) => ["hooks", "matcher", "sequential"].includes(key));
+}
+
+function validateGeminiHookGroups(groups, eventName, settingsPath) {
+  if (groups == null) return;
+  if (!Array.isArray(groups)) {
+    throw new Error(`Existing ${settingsPath} ${eventName} field must contain an array. Fix it, then retry — refusing to overwrite it.`);
+  }
+  for (const group of groups) {
+    if (!group || typeof group !== "object" || Array.isArray(group)) {
+      throw new Error(`Existing ${settingsPath} contains a malformed ${eventName} entry. Fix it, then retry — refusing to overwrite it.`);
+    }
+    if (!Array.isArray(group.hooks)) {
+      throw new Error(`Existing ${settingsPath} ${eventName} hooks field must contain an array. Fix it, then retry — refusing to overwrite it.`);
+    }
+    if (group.hooks.some((entry) => !entry || typeof entry !== "object" || Array.isArray(entry))) {
+      throw new Error(`Existing ${settingsPath} contains a malformed ${eventName} hook entry. Fix it, then retry — refusing to overwrite it.`);
+    }
+  }
+}
+
+function validateGeminiHooksConfig(config, settingsPath) {
+  if (config == null) return;
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error(`Existing ${settingsPath} hooksConfig field must contain a JSON object. Fix it, then retry — refusing to overwrite it.`);
+  }
+  if (config.enabled != null && typeof config.enabled !== "boolean") {
+    throw new Error(`Existing ${settingsPath} hooksConfig.enabled field must be true or false. Fix it, then retry — refusing to overwrite it.`);
+  }
+  if (config.disabled != null && (!Array.isArray(config.disabled) || config.disabled.some((name) => typeof name !== "string"))) {
+    throw new Error(`Existing ${settingsPath} hooksConfig.disabled field must contain hook names. Fix it, then retry — refusing to overwrite it.`);
+  }
+  if (config.enabled === false) {
+    throw new Error(`Existing ${settingsPath} has Gemini hooks disabled. Enable hooks, then retry.`);
+  }
+  if (config.disabled?.includes("dotaios-context")) {
+    throw new Error(`Existing ${settingsPath} explicitly disables dotaios-context. Enable or remove that hook name, then retry.`);
+  }
 }
 
 function isRecognizedGeminiHookEntry(entry, hookScriptPath) {

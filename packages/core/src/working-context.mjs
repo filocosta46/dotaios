@@ -10,6 +10,7 @@ import {
   readContainedFile,
   sameContainedFileSnapshot
 } from "./contained-read.mjs";
+import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { readProjectCatalog } from "./projects.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
@@ -69,11 +70,18 @@ export async function buildWorkingContext(aiosPath, options = {}, dependencies =
  * state. The project filter is applied identically to every timeline source.
  */
 export async function selectWorkingContext(aiosPath, options = {}, dependencies = {}) {
+  const memoryPolicy = resolveMemoryPolicy({
+    mode: options.memory,
+    project: options.project,
+    firstUserMessage: options.firstUserMessage,
+  });
+  if (memoryPolicy.mode === "off") return selectOffWorkingContext(memoryPolicy);
   const { filesystem, clock } = resolveDependencies(dependencies);
   const now = readClock(clock);
   const today = isoDate(now);
   const yesterday = isoDate(previousLocalDay(now));
-  const requestedProject = normalizeProject(options.project);
+  const requestedProject = normalizeProject(memoryPolicy.projectSelector);
+  const includesSharedSurfaces = memoryPolicy.mode === "shared";
   const sessionLimit = normalizeLimit(options.limit, DEFAULT_SESSION_LIMIT);
   const visibleCharacterBudget = normalizeBudget(options);
   const readBudget = createContainedReadBudget({
@@ -98,11 +106,21 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
       throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
     }
     sources = await Promise.all([
-      readText(filesystem, path.join(aiosPath, "context", "identity.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
-      readText(filesystem, path.join(aiosPath, "context", "priorities.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
-      readText(filesystem, path.join(aiosPath, "decisions", "log.md"), aiosPath, readBudget, MAX_DECISIONS_SOURCE_BYTES),
-      readText(filesystem, path.join(dailyDir, `${today}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
-      readText(filesystem, path.join(dailyDir, `${yesterday}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES),
+      includesSharedSurfaces
+        ? readText(filesystem, path.join(aiosPath, "context", "identity.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        : "",
+      includesSharedSurfaces
+        ? readText(filesystem, path.join(aiosPath, "context", "priorities.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        : "",
+      includesSharedSurfaces
+        ? readText(filesystem, path.join(aiosPath, "decisions", "log.md"), aiosPath, readBudget, MAX_DECISIONS_SOURCE_BYTES)
+        : "",
+      includesSharedSurfaces
+        ? readText(filesystem, path.join(dailyDir, `${today}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        : "",
+      includesSharedSurfaces
+        ? readText(filesystem, path.join(dailyDir, `${yesterday}.md`), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        : "",
       readJsonl(
         filesystem,
         path.join(aiosPath, "memory", "sessions", "index.jsonl"),
@@ -151,16 +169,16 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const projectScope = resolveProjectScope(requestedProject, projects);
   const projectFilter = projectScope?.filter || null;
   const sessions = stableSessionOrder(sessionEntries)
-    .filter((session) => matchesProject(session, projectScope))
+    .filter((session) => matchesProject(session, projectScope, memoryPolicy.mode))
     .map((session) => markUnscoped(session, projectScope));
   const signals = stableTimelineOrder(signalEntries)
     .filter((signal) => isOperationalDate(signal.date, today, yesterday))
-    .filter((signal) => matchesProject(signal, projectScope))
+    .filter((signal) => matchesProject(signal, projectScope, memoryPolicy.mode))
     .filter(hasTimelineSummary)
     .map((signal) => markUnscoped(signal, projectScope));
   const events = stableTimelineOrder(eventEntries)
     .filter((event) => isOperationalDate(event.date, today, yesterday))
-    .filter((event) => matchesProject(event, projectScope))
+    .filter((event) => matchesProject(event, projectScope, memoryPolicy.mode))
     .filter(hasTimelineSummary)
     .map((event) => markUnscoped(event, projectScope));
   const deduped = dedupeUpdateChannels(signals, events);
@@ -185,6 +203,8 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
       generatedAt: now.toISOString(),
       today,
       yesterday,
+      memoryMode: memoryPolicy.mode,
+      memoryReceipt: memoryPolicy.receipt,
       projectFilter,
     },
     candidates,
@@ -312,13 +332,26 @@ function recentDecisions(text, limit) {
 }
 
 function renderUnbounded(context) {
+  if (context?.memoryMode === "off") {
+    const receipt = typeof context.memoryReceipt === "string" ? context.memoryReceipt : "";
+    const notice = typeof context.memoryNotice === "string" ? context.memoryNotice : "";
+    return receipt && notice ? `${receipt}\n\n${notice}` : receipt || notice;
+  }
   const today = context?.today || "";
   const todayContext = context?.todayContext || { focus: "", plan: [] };
   const carryOver = context?.carryOver || [];
   const sessions = context?.sessions || [];
   const signals = context?.signals || [];
   const events = context?.events || [];
-  const lines = [`## Active Context · ${today}`, ""];
+  const fallbackReceipt = context?.memoryMode === "project"
+    ? "Memory: This project"
+    : context?.memoryMode === "shared"
+      ? "Memory: Shared"
+      : "";
+  const receipt = typeof context?.memoryReceipt === "string"
+    ? context.memoryReceipt
+    : fallbackReceipt;
+  const lines = [receipt, "", `## Active Context · ${today}`, ""];
 
   if (context?.identity) lines.push("### Identity", context.identity, "");
   if (context?.priorities) lines.push("### Priorities", context.priorities, "");
@@ -370,6 +403,32 @@ function renderUnbounded(context) {
   }
 
   return lines.join("\n").trimEnd();
+}
+
+function selectOffWorkingContext(memoryPolicy) {
+  const context = {
+    generatedAt: null,
+    today: "",
+    yesterday: "",
+    memoryMode: memoryPolicy.mode,
+    memoryReceipt: memoryPolicy.receipt,
+    memoryNotice: memoryPolicy.notice,
+    projectFilter: null,
+    identity: "",
+    priorities: "",
+    decisions: [],
+    todayContext: { focus: "", plan: [] },
+    carryOver: [],
+    activeProject: null,
+    sessions: [],
+    signals: [],
+    events: [],
+  };
+  const used = renderWorkingContext(context).length;
+  return {
+    ...context,
+    budget: { limit: used, used, remaining: 0, truncated: false },
+  };
 }
 
 function renderProject(project) {
@@ -489,19 +548,15 @@ function normalizeTimelineEntry(entry, {
 
 /**
  * Project filter for operational timeline rows.
- * Entries with neither `project` nor `project_id` are shared into every scoped
- * projection and later marked `unscoped` — intentional global carry, not a
- * leak. Every present attribution field must agree with the selected catalog
- * identity. Malformed, conflicting, and differently attributed rows fail
- * closed. Durable continuity beyond the today+yesterday operational window
- * requires promotion into durable surfaces (project README, decisions, vault),
- * not widening this filter.
+ * This project memory admits only explicitly attributed rows. Every present
+ * attribution field must agree with the selected catalog identity. Unscoped,
+ * malformed, conflicting, and differently attributed rows fail closed.
  */
-function matchesProject(entry, projectScope) {
+function matchesProject(entry, projectScope, memoryMode = "shared") {
   if (!projectScope) return true;
   const project = readProjectAttribution(entry, "project");
   const projectId = readProjectAttribution(entry, "project_id");
-  if (!project.present && !projectId.present) return true;
+  if (!project.present && !projectId.present) return memoryMode !== "project";
   if (!project.valid || !projectId.valid) return false;
   if (project.present && !projectScope.aliases.has(project.value)) return false;
   if (projectId.present && projectId.value !== projectScope.id) return false;
@@ -554,12 +609,17 @@ function resolveProjectScope(reference, projects) {
     error.code = "DOTAIOS_AMBIGUOUS_PROJECT";
     throw error;
   }
-  const selected = matches[0] || null;
-  const filter = selected?.slug || reference;
-  const aliases = selected ? projectAliases(selected) : new Set([reference]);
-  const uniqueAliases = selected
-    ? new Set([...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1))
-    : new Set([reference]);
+  if (matches.length === 0) {
+    const error = new TypeError("Project selector is unknown.");
+    error.code = "DOTAIOS_PROJECT_SELECTOR_UNKNOWN";
+    throw error;
+  }
+  const selected = matches[0];
+  const filter = selected.slug;
+  const aliases = projectAliases(selected);
+  const uniqueAliases = new Set(
+    [...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1)
+  );
   const selectedId = typeof selected?.id === "string" && selected.id.length > 0 ? selected.id : null;
   const id = selectedId && projects.filter((project) => project.id === selectedId).length === 1
     ? selectedId

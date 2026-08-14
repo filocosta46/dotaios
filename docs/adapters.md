@@ -38,11 +38,20 @@ dotaios connect gemini
 Installs three things in `~/.gemini/`:
 - a `GEMINI.md` bridge that preserves surrounding user instructions and points
   Gemini at your AIOS folder,
-- a version-pinned `dotaios-context-hook.sh` command that produces the bounded
+- a version-pinned `dotaios-context-hook.sh` command that selects the session
+  memory policy from Gemini's first user prompt and then produces bounded
   working-context JSON, and
 - a guarded `settings.json` merge that activates that command as a
-  **SessionStart hook**. Discovery and invocation remain client-version
+  **BeforeAgent hook**. Discovery and invocation remain client-version
   dependent.
+
+`Private chat` returns **Memory: Off** from the hook before the pinned DotAIOS
+command or AIOS folder is opened. An attached project defaults to **Memory:
+This project**; `Use my memory` explicitly selects Shared. Gemini's own bounded
+session transcript supplies the first-prompt lock on later turns. If the hook
+cannot verify that transcript, it leaves automatic memory closed instead of
+guessing. Updating a managed older connection migrates only DotAIOS's
+SessionStart hook and preserves foreign hooks.
 
 DotAIOS preflights all three files before writing and activates settings last.
 It refuses unsafe or ambiguous paths, malformed managed markers, foreign hook

@@ -8,6 +8,11 @@ The adapter is useful only when a local MCP-capable client cannot use those simp
 
 - Local stdio transport only. No background daemon.
 - Read-only. It cannot append memory, edit files, or run Google Workspace commands.
+- Every tool accepts `memory: shared | project | off` and returns a visible
+  memory receipt. Off returns before the configured AIOS folder is inspected.
+  Project requires a selector and exposes only project files plus explicitly
+  attributed session/event/signal evidence. Skills remain capabilities, but
+  Off still avoids reading the AIOS skill catalog.
 - Bounded canonical Markdown with explicit truncation metadata. Rendered
   operational notices and non-Markdown response metadata are separately capped
   at 1,024 characters.
@@ -31,12 +36,15 @@ The adapter is useful only when a local MCP-capable client cannot use those simp
 
 The adapter exposes exactly these three read-only tool names:
 
-- `read_working_context`: return the same bounded, project-filtered projection as `dotaios brief --compact`; accepts optional `project`, session `limit`, and character `budget`
+- `read_working_context`: return the same bounded projection as `dotaios brief
+  --compact`; accepts `memory`, optional `project`, session `limit`, and
+  character `budget`
 - `search_aios`: search bounded local results by `query`, with optional `scope`,
   canonical project `project`, result `limit`, and a complete-response character
   `budget` from 3,530 to 32,000 (default 6,000); project-only scope requires the
   selector, while all-scope search without it omits projects as selection metadata
-- `resolve_skill`: match an `intent` to installed workflows, with an optional
+- `resolve_skill`: match an `intent` to installed workflows, with `memory`, an
+  optional project selector for a project-mode receipt, optional
   result `limit` and character `budget` from 256 to 32,000 (default 6,000);
   the complete serialized response, including budget metadata, stays within it
 
@@ -48,9 +56,9 @@ apply. Task text and MCP calls cannot approve a grant.
 `search_aios` has a higher budget floor than the other two tools because its
 smallest honest incomplete response must retain the full omission objects. The
 3,530-character floor is mechanically derived from the closed field bounds,
-the maximum 200-code-point project selector metadata, and all nine logical
-scopes the current tool can select at once; a public MCP fixture exercises that
-maximum set at the exact floor. A budget from 256 through 3,529 is therefore a
+the largest selectable response: eight Shared logical scopes (Project mode has
+three). A public MCP fixture exercises that maximum set at the exact floor. A
+budget from 256 through 3,529 is therefore a
 specific input error for `search_aios`, while `read_working_context` and
 `resolve_skill` continue to accept 256. Callers that do not need a custom limit
 should omit `budget` and use the 6,000-character default.
@@ -72,7 +80,7 @@ contains only `scope`, a closed `reason`, bounded `observed` counts,
 `directory_entries_exceeded`, `aggregate_bytes_exceeded`,
 `file_count_exceeded`, and `entry_count_exceeded`. At most 32 omissions plus one
 defensive `omissions_truncated` remainder are returned by the shared collector;
-the current MCP scope allowlist can produce at most nine omissions in one call.
+the current MCP policy can produce at most eight omissions in one call.
 Linked or non-regular
 evidence, unsafe paths, unauthorized roots, invalid UTF-8 or configuration,
 observed mutation, and unexpected I/O remain failed tool calls.

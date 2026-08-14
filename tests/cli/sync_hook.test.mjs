@@ -49,6 +49,28 @@ test("compact, hook JSON, and lean briefs are classified read-only and never spa
   }
 });
 
+test("Off updates and Claude capture hooks never wake portable sync", async () => {
+  const commands = [
+    ["update", ["Private note", "--memory", "off"]],
+    ["update", ["--memory", "off", "Private note"]],
+    ["capture", ["hook", "claude-code", "--path", "/must-stay-closed"]]
+  ];
+  for (const [command, args] of commands) {
+    const readOnly = skipsPortableMirrorSync(command, args);
+    assert.equal(readOnly, true, `${command} ${args.join(" ")}`);
+    let spawned = false;
+    await fireSyncHook({
+      allowAutoSync: true,
+      command,
+      isSyncEnabled: async () => true,
+      readOnly,
+      spawnImpl: () => { spawned = true; },
+      testContext: null
+    });
+    assert.equal(spawned, false, `${command} ${args.join(" ")}`);
+  }
+});
+
 test("search and skill lookup surfaces are classified read-only while skill writers are not", async () => {
   const readOnlyCommands = [
     ["search", ["continuity"]],

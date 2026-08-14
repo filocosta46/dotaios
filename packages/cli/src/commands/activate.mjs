@@ -961,12 +961,15 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
 function projectAgentsBridge(aiosPath, project, homePath) {
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
-    `At session start run \`dotaios brief --compact --project ${project.slug}\`.`,
+    "This attached checkout defaults to `Memory: This project`.",
+    `At session start run \`dotaios brief --compact --memory project --project ${project.id}\`.`,
+    `Keep later searches and explicit saves in the same mode with \`--memory project --project ${project.id}\`.`,
+    "This mode may use only this project's files and explicitly attributed sessions, signals, and events; exclude personal, unscoped, and other-project memory.",
     ...(project.registered ? [] : ["This checkout is not in the project catalog yet; run `dotaios project add <repo-path>` to enable automatic writer attribution."]),
     "",
-    `Before personal recommendations or cross-project planning, read: ${portableAiosPointer(aiosPath, homePath)}`,
+    `The DotAIOS entrypoint is ${portableAiosPointer(aiosPath, homePath)}. Do not open personal context from it while this session is in project mode.`,
     "",
-    "Keep project-specific instructions in this file short. Durable personal context belongs in DotAIOS."
+    "Keep project-specific instructions in this file short."
   ]);
 }
 

@@ -1,6 +1,7 @@
 import path from "node:path";
 import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { createEvidenceReader } from "../../../core/src/evidence-reader.mjs";
+import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
 import { markMatches, SEARCH_SCOPES, searchAios } from "../../../core/src/search.mjs";
 import { validateProjectSelector } from "../../../core/src/projects.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
@@ -25,8 +26,19 @@ export async function searchCommand(args) {
   const limit = options.limit;
   validateScope(scope);
   validateLimit(limit);
-  if (scope === "projects" && !options.projectSelector) validateProjectSelector(null);
-  if (options.projectSelector) validateProjectSelector(options.projectSelector);
+  const memoryPolicy = resolveMemoryPolicy({
+    mode: options.memory,
+    project: options.projectSelector
+  });
+  if (memoryPolicy.mode === "off") {
+    const groups = await searchAios({ query, scope, memoryPolicy });
+    printMemoryReceipt(groups);
+    console.log("No results found.");
+    return;
+  }
+  console.log(memoryPolicy.receipt);
+  if (scope === "projects" && !memoryPolicy.projectSelector) validateProjectSelector(null);
+  if (memoryPolicy.projectSelector) validateProjectSelector(memoryPolicy.projectSelector);
 
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
@@ -52,7 +64,8 @@ export async function searchCommand(args) {
     query,
     scope,
     limit,
-    projectSelector: options.projectSelector,
+    projectSelector: memoryPolicy.projectSelector,
+    memoryPolicy,
     sessionFilters,
     evidenceReader: reader
   });
@@ -94,6 +107,7 @@ function parseOptions(args = []) {
     agent: null,
     projectSelector: null,
     sessionProject: null,
+    memory: null,
     since: null
   };
 
@@ -114,6 +128,9 @@ function parseOptions(args = []) {
       index += 1;
     } else if (arg === "--project") {
       options.projectSelector = readOptionValue(args, index, "--project");
+      index += 1;
+    } else if (arg === "--memory") {
+      options.memory = readOptionValue(args, index, "--memory");
       index += 1;
     } else if (arg === "--session-project") {
       options.sessionProject = readOptionValue(args, index, "--session-project");
@@ -164,6 +181,7 @@ Examples:
 Options:
   --scope <s>      Limit search: sessions, memory, vault, context, skills, references, plugins, or all (default: all)
   --agent <name>   Filter sessions by agent (e.g. claude-code, manual)
+  --memory <mode>  Use shared, project, or off memory (default: shared)
   --project <id>   Select the portable project corpus by slug or stable id
   --session-project <name>
                    Filter sessions by arbitrary project tag
@@ -173,6 +191,11 @@ Options:
 
 Use --project to select a portable project corpus; use --session-project only to filter session tags.
 `);
+}
+
+function printMemoryReceipt(groups) {
+  console.log(groups.receipt);
+  if (groups.notice) console.log(groups.notice);
 }
 
 function printGroup(scope, results, query) {

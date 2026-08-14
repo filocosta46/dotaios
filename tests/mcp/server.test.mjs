@@ -13,8 +13,106 @@ const server = path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 const SEARCH_RESULT_BUDGET_FLOOR = 3530;
 
+test("MCP Off mode returns before inspecting a missing AIOS folder", () => {
+  const missingAios = path.join(os.tmpdir(), `dotaios-mcp-off-${process.pid}-${Date.now()}`);
+  const responses = runMcp(missingAios, [
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "read_working_context", arguments: { memory: "off" } }
+    },
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: "private", memory: "off" } }
+    },
+    {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "resolve_skill", arguments: { intent: "plan privately", memory: "off" } }
+    }
+  ]);
+
+  for (const tool of responses[0].result.tools) {
+    assert.deepEqual(tool.inputSchema.properties.memory.enum, ["shared", "project", "off"]);
+  }
+  for (const response of responses.slice(1)) {
+    assert.equal(response.error, undefined);
+    assert.match(toolText(response), /Memory: Off/);
+    assert.match(toolText(response), /AI app may still keep its own conversation history/i);
+    assert.doesNotMatch(toolText(response), new RegExp(missingAios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  const search = JSON.parse(toolText(responses[2]));
+  assert.deepEqual(search.results, []);
+  assert.equal(search.complete, true);
+  const skills = JSON.parse(toolText(responses[3]));
+  assert.deepEqual(skills.matches, []);
+});
+
+test("MCP Off mode validates every tool schema before its zero-AIOS response", () => {
+  const missingAios = path.join(os.tmpdir(), `dotaios-mcp-off-schema-${process.pid}-${Date.now()}`);
+  const calls = [
+    { name: "search_aios", arguments: { memory: "off" } },
+    { name: "search_aios", arguments: { memory: "off", query: 42 } },
+    { name: "search_aios", arguments: { memory: "off", query: "x".repeat(501) } },
+    { name: "search_aios", arguments: { memory: "off", query: "x", scope: "projects" } },
+    { name: "resolve_skill", arguments: { memory: "off" } },
+    { name: "resolve_skill", arguments: { memory: "off", intent: [] } },
+    { name: "resolve_skill", arguments: { memory: "off", intent: "x".repeat(501) } },
+    { name: "read_working_context", arguments: { memory: "off", budget: 20 } },
+    { name: "read_working_context", arguments: { memory: "automatic" } },
+    { name: "read_working_context", arguments: { memory: "off", surprise: true } }
+  ];
+  const responses = runMcp(missingAios, calls.map((call, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: call
+  })));
+
+  for (const response of responses) {
+    assert.equal(response.error?.code, -32602);
+    assert.doesNotMatch(
+      response.error.message,
+      new RegExp(missingAios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    );
+  }
+  assert.equal(fs.existsSync(missingAios), false);
+});
+
+test("MCP Off skill resolution respects the requested response budget", () => {
+  const missingAios = path.join(os.tmpdir(), `dotaios-mcp-off-budget-${process.pid}-${Date.now()}`);
+  const responses = runMcp(missingAios, [256, 512].map((budget, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: { memory: "off", intent: "x".repeat(500), budget }
+    }
+  })));
+  assert.equal(responses[0].error.code, -32602);
+  assert.match(responses[0].error.message, /budget 256 is too small/i);
+
+  const text = toolText(responses[1]);
+  const payload = JSON.parse(text);
+
+  assert.ok(text.length <= 512);
+  assert.equal(payload.memory, "off");
+  assert.equal(payload.receipt, "Memory: Off");
+  assert.deepEqual(payload.matches, []);
+  assert.equal(payload.budget.limit, 512);
+  assert.equal(payload.budget.used, text.length);
+  assert.equal(fs.existsSync(missingAios), false);
+});
+
 test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   const { aiosPath } = setupAios();
+  fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nMCP_SHARED_IDENTITY_CANARY\n");
   fs.writeFileSync(path.join(aiosPath, "context", "work.md"), "# Work\n\nBuilding the DotAIOS context gateway.\n");
   fs.mkdirSync(path.join(aiosPath, "projects", "demo"), { recursive: true });
   fs.writeFileSync(
@@ -81,11 +179,17 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.equal(new RegExp(projectSchema.pattern, "u").test("demo\n"), false);
 
   const workingContext = JSON.parse(toolText(responses[2]));
+  assert.equal(workingContext.memory, "project");
+  assert.equal(workingContext.receipt, "Memory: This project");
+  assert.equal(workingContext.complete, true);
   assert.equal(workingContext.scope.project, "demo");
   assert.match(workingContext.markdown, /Gateway session/);
+  assert.doesNotMatch(workingContext.markdown, /MCP_SHARED_IDENTITY_CANARY/);
   assert.ok(workingContext.markdown.length <= 1000);
 
   const search = JSON.parse(toolText(responses[3]));
+  assert.equal(search.memory, "project");
+  assert.equal(search.receipt, "Memory: This project");
   assert.equal(search.scope, "projects");
   assert.match(JSON.stringify(search.results), /Gateway acceptance/);
   assert.doesNotMatch(JSON.stringify(search), /private\/machine/);
@@ -93,6 +197,9 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.ok(toolText(responses[3]).length <= search.budget.limit);
 
   const resolved = JSON.parse(toolText(responses[4]));
+  assert.equal(resolved.memory, "shared");
+  assert.equal(resolved.receipt, "Memory: Shared");
+  assert.equal(resolved.complete, true);
   assert.equal(resolved.matches[0].name, "plan-today");
   assert.equal(resolved.matches[0].resource, "skills/plan-today/SKILL.md");
   assert.doesNotMatch(JSON.stringify(resolved), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -732,7 +839,6 @@ test("search_aios fits its maximum selectable omission set at the exact budget f
         arguments: {
           query: "missing",
           scope: "all",
-          project: projectSlug,
           budget: SEARCH_RESULT_BUDGET_FLOOR - 1,
         },
       },
@@ -746,7 +852,6 @@ test("search_aios fits its maximum selectable omission set at the exact budget f
         arguments: {
           query: "missing",
           scope: "all",
-          project: projectSlug,
           budget: SEARCH_RESULT_BUDGET_FLOOR,
         },
       },
@@ -763,9 +868,9 @@ test("search_aios fits its maximum selectable omission set at the exact budget f
   assert.deepEqual(payload.results, []);
   assert.deepEqual(
     payload.omissions.map((omission) => omission.scope),
-    ["sessions", "context", "memory", "vault", "projects", "decisions", "skills", "references", "plugins"],
+    ["sessions", "context", "memory", "vault", "decisions", "skills", "references", "plugins"],
   );
-  assert.equal(payload.omissions.length, 9);
+  assert.equal(payload.omissions.length, 8);
   for (const omission of payload.omissions) {
     assert.equal(omission.reason, "file_too_large");
     assert.deepEqual(Object.keys(omission.observed), ["files", "bytes", "entries"]);
@@ -1196,6 +1301,58 @@ test("read_working_context reports an ambiguous project selector as a safe input
   assert.doesNotMatch(response.error.message, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
 
+test("MCP project receipts reject unknown project selectors as safe input errors", () => {
+  const { aiosPath } = setupAios();
+  const responses = runMcp(aiosPath, ["read_working_context", "resolve_skill"].map((name, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: {
+      name,
+      arguments: name === "read_working_context"
+        ? { memory: "project", project: "missing-project", budget: 256 }
+        : { memory: "project", project: "missing-project", intent: "plan this work", budget: 6000 }
+    }
+  })));
+
+  for (const response of responses) {
+    assert.equal(response.error.code, -32602);
+    assert.match(response.error.message, /project.*not registered|unknown project/i);
+    assert.doesNotMatch(response.error.message, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
+test("MCP skill resolution accepts an explicitly registered project identity", () => {
+  const { aiosPath } = setupAios();
+  const projectDir = path.join(aiosPath, "projects", "client-work");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, "README.md"),
+    "---\nid: client-work-001\nproject: client-work\n---\n# Client Work\n",
+  );
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: {
+        memory: "project",
+        project: "client-work-001",
+        intent: "plan this work",
+        budget: 6000
+      }
+    }
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.equal(payload.memory, "project");
+  assert.equal(payload.receipt, "Memory: This project");
+  assert.equal(payload.complete, true);
+  assert.ok(payload.matches.length > 0);
+});
+
 test("read_working_context preserves opaque stable project identifiers", () => {
   const { aiosPath } = setupAios();
   const projectDir = path.join(aiosPath, "projects", "client-work");
@@ -1222,7 +1379,11 @@ test("read_working_context preserves opaque stable project identifiers", () => {
 
 test("maximum project input and operational metadata stay inside the fixed metadata bound", () => {
   const { aiosPath } = setupAios();
-  for (const project of ["x".repeat(200), "🚀".repeat(200)]) {
+  for (const [index, project] of ["x".repeat(200), "🚀".repeat(200)].entries()) {
+    const slug = `maximum-project-${index}`;
+    const directory = path.join(aiosPath, "projects", slug);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "README.md"), `---\nid: ${project}\nproject: ${slug}\n---\n# Maximum Project\n`);
     const [response] = runMcp(aiosPath, [{
       jsonrpc: "2.0",
       id: 1,
@@ -1232,7 +1393,7 @@ test("maximum project input and operational metadata stay inside the fixed metad
     const text = toolText(response);
     const payload = JSON.parse(text);
 
-    assert.equal(Array.from(payload.scope.project).length, 200);
+    assert.equal(payload.scope.project, slug);
     assert.ok(payload.markdown.length <= 256);
     assert.ok(workingContextMetadataText(payload).length <= 1024);
   }

@@ -8,6 +8,15 @@ import { promisify } from "node:util";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const run = promisify(execFile);
 
+function extractAssistantInstallRefs(markdown) {
+  return Array.from(
+    markdown.matchAll(
+      /https:\/\/github\.com\/filocosta46\/dotaios\/blob\/((?:[^/\s]+\/)*[^/\s]+)\/INSTALL\.md/g
+    ),
+    (match) => match[1]
+  );
+}
+
 async function npmPackDryRun() {
   const { stdout } = await run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: repoRoot,
@@ -43,6 +52,36 @@ test("public claims stay inside the verified product boundary", async () => {
 
   assert.doesNotMatch(corpus, /gumroad\.com|lemonsqueezy\.com|updated weekly|refreshed every week/i);
   assert.doesNotMatch(corpus, /every AI reads|no cloud memory|native in every tool/i);
+});
+
+test("README leads with the nondeveloper continuity outcome before technical reference", async () => {
+  const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
+  const opening = readme.slice(0, 1200);
+  const who = readme.indexOf("## Who this is for");
+  const install = readme.indexOf("## Install with one request");
+  const choices = readme.indexOf("## Choose what your AI can remember");
+  const afterward = readme.indexOf("## What you have afterward");
+  const technical = readme.indexOf("## Technical reference");
+
+  assert.match(opening, /stop (?:repeating|retelling)|start(?:ing)? from zero/i);
+  assert.match(opening, /one (?:readable |local )?folder/i);
+  assert.doesNotMatch(opening, /\bMCP\b|package manager|npm provenance|adapter configuration/i);
+  assert.ok(who > 0, "README must name the first customer explicitly");
+  assert.match(
+    readme.slice(who, install),
+    /independent consultant|freelancer/i,
+    "README must identify the first buyer before installation"
+  );
+  assert.ok(install > who, "customer fit must come before installation");
+  assert.ok(choices > install, "privacy choices must follow the primary activation path");
+  assert.ok(afterward > choices, "the memory-choice section must end before the product outcome resumes");
+  assert.ok(technical > afterward, "operator material must stay behind a technical-reference boundary");
+  assert.match(readme, /install[\s\S]{0,300}personalize[\s\S]{0,300}save[\s\S]{0,300}switch[\s\S]{0,300}privacy/i);
+  const memoryChoices = readme.slice(choices, afterward);
+  assert.match(memoryChoices, /Codex and Claude Code[\s\S]{0,240}forward[\s\S]{0,120}Off/i);
+  assert.match(memoryChoices, /instructions or context.*may already have loaded/i);
+  assert.match(memoryChoices, /Off.*cannot (?:undo|erase)/i);
+  assert.match(memoryChoices, /AI app may still keep its own chat history/i);
 });
 
 test("Hermes claims a global adapter without inventing a project-local selector", async () => {
@@ -87,7 +126,7 @@ test("Hermes claims a global adapter without inventing a project-local selector"
   assert.match(documentato, /Project attachment no longer writes `<project>\/\.hermes\/config\.yaml`/i);
 });
 
-test("first-time onboarding stays human-run, pinned, and free of install lifecycle scripts", async () => {
+test("first-time onboarding stays assistant-guided, consent-first, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
   assert.equal(pkg.version, "2.0.3", "the public onboarding contract must target the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
@@ -108,9 +147,45 @@ test("first-time onboarding stays human-run, pinned, and free of install lifecyc
 
   for (const relativePath of relativeFiles) {
     assert.match(documents[relativePath], new RegExp(`${pinnedPattern} --dry-run`), `${relativePath} must pin the preview`);
-    assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must pin human-run setup`);
+    assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must retain a pinned manual recovery path`);
   }
-  assert.doesNotMatch(corpus, /Please set up DotAIOS for me|agent-led setup|you are on the agent path/i);
+  assert.match(documents["README.md"], /open .*assistant.*paste/is, "README must lead with one assistant request");
+  assert.deepEqual(
+    extractAssistantInstallRefs([
+      `https://github.com/filocosta46/dotaios/blob/v${pkg.version}/INSTALL.md`,
+      "https://github.com/filocosta46/dotaios/blob/feature/privacy/INSTALL.md"
+    ].join("\n")),
+    [`v${pkg.version}`, "feature/privacy"],
+    "assistant handoff extraction must include slash-containing mutable refs"
+  );
+  for (const relativePath of ["README.md", "docs/friend-setup.md"]) {
+    const handoffRefs = extractAssistantInstallRefs(documents[relativePath]);
+    assert.deepEqual(
+      handoffRefs,
+      [`v${pkg.version}`],
+      `${relativePath} must use exactly one release-pinned assistant handoff`
+    );
+  }
+  assert.match(documents["README.md"], /_npmUser\.name/, "README provenance must request the publisher it claims to display");
+  assert.match(documents["INSTALL.md"], /If an AI assistant is helping you/i, "INSTALL must carry the assistant through setup");
+  assert.match(documents["docs/friend-setup.md"], /recommended path is to ask a local AI agent/i, "friend setup must recommend the nontechnical path");
+  const projectVerificationContract = /explicitly registered project(?=[\s\S]{0,100}\bslug\b)(?=[\s\S]{0,100}\bstable ID\b)[\s\S]{0,200}> Only this project\./i;
+  for (const incompletePrerequisite of [
+    "registered project with a slug or stable ID\n\n> Only this project.",
+    "explicitly registered project\n\n> Only this project."
+  ]) {
+    assert.doesNotMatch(
+      incompletePrerequisite,
+      projectVerificationContract,
+      "project verification must require explicit registration plus a slug or stable ID"
+    );
+  }
+  assert.match(documents["docs/friend-setup.md"], projectVerificationContract, "friend setup must verify project mode with a project first message");
+  assert.match(documents["docs/friend-setup.md"], /otherwise[\s\S]{0,200}> Use my memory\./i, "friend setup must verify Shared with a Shared first message");
+  assert.match(documents["docs/friend-setup.md"], /verify Off[\s\S]{0,200}> Private chat\./i, "friend setup must retain a separate Off verification message");
+  assert.match(documents["docs/getting-started.md"], /You do not need to understand[\s>]*Node, npm, Git, or MCP/i, "getting started must not assume developer knowledge");
+  assert.match(corpus, /preview every change|previewing every change/i, "assistant-led setup must remain preview-first");
+  assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
   assert.doesNotMatch(documents["docs/friend-setup.md"], /dotaios@latest (?:init|activate|setup)/, "friend setup must not switch first-time commands back to @latest");

@@ -28,12 +28,22 @@ function writeJsonl(filePath, entries) {
   fs.writeFileSync(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 }
 
+function registerProject(aiosPath, slug, id = `${slug}-id`) {
+  const directory = path.join(aiosPath, "projects", slug);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(
+    path.join(directory, "README.md"),
+    `---\nid: ${id}\nproject: ${slug}\nstatus: active\n---\n# ${slug}\n`,
+  );
+}
+
 function fixedClock() {
   return new Date(FIXED_NOW.getTime());
 }
 
 test("project filter scopes sessions, namespaced signals, and events with stable ordering", async () => {
   const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
   writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
     {
       session_id: "project-b",
@@ -100,8 +110,113 @@ test("project filter scopes sessions, namespaced signals, and events with stable
   assert.doesNotMatch(rendered, /Project B|Stale A/);
 });
 
-test("scoped views retain unattributed evidence without leaking another project", async () => {
+test("This project memory exposes only its README and explicitly attributed continuity", async () => {
   const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "context"), { recursive: true });
+  fs.mkdirSync(path.join(aiosPath, "decisions"), { recursive: true });
+  fs.mkdirSync(path.join(aiosPath, "projects", "project-a"), { recursive: true });
+  fs.mkdirSync(path.join(aiosPath, "projects", "project-b"), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nGLOBAL_IDENTITY_SECRET\n");
+  fs.writeFileSync(path.join(aiosPath, "context", "priorities.md"), "# Priorities\n\nGLOBAL_PRIORITY_SECRET\n");
+  fs.writeFileSync(path.join(aiosPath, "decisions", "log.md"), "## 2026-07-15 GLOBAL_DECISION_SECRET\n");
+  fs.writeFileSync(path.join(aiosPath, "memory", "daily", "2026-07-15.md"), "## Focus\nGLOBAL_DAILY_SECRET\n");
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "project-a", "README.md"),
+    "---\nid: project-a-id\nproject: project-a\nstatus: active\n---\n# Project A\n\nPROJECT_A_README\n",
+  );
+  fs.writeFileSync(
+    path.join(aiosPath, "projects", "project-b", "README.md"),
+    "---\nid: project-b-id\nproject: project-b\nstatus: active\n---\n# Project B\n\nPROJECT_B_README_SECRET\n",
+  );
+  writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
+    { session_id: "a", project_id: "project-a-id", captured_at: "2026-07-15T09:00:00.000Z", title: "PROJECT_A_SESSION" },
+    { session_id: "b", project_id: "project-b-id", captured_at: "2026-07-15T08:00:00.000Z", title: "PROJECT_B_SESSION_SECRET" },
+    { session_id: "global", captured_at: "2026-07-15T07:00:00.000Z", title: "UNSCOPED_SESSION_SECRET" },
+  ]);
+  writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", project: "project-a", summary: "PROJECT_A_SIGNAL" },
+    { ts: "2026-07-15T08:00:00.000Z", summary: "UNSCOPED_SIGNAL_SECRET" },
+  ]);
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", project: "project-a", project_id: "project-a-id", summary: "PROJECT_A_EVENT" },
+    { ts: "2026-07-15T08:00:00.000Z", project: "project-b", summary: "PROJECT_B_EVENT_SECRET" },
+  ]);
+
+  const { context, rendered } = await buildWorkingContext(
+    aiosPath,
+    { memory: "project", project: "project-a-id" },
+    { clock: fixedClock },
+  );
+
+  assert.equal(context.memoryMode, "project");
+  assert.match(rendered, /^Memory: This project\b/);
+  assert.match(rendered, /PROJECT_A_README/);
+  assert.match(rendered, /PROJECT_A_SESSION/);
+  assert.match(rendered, /PROJECT_A_SIGNAL/);
+  assert.match(rendered, /PROJECT_A_EVENT/);
+  assert.doesNotMatch(
+    rendered,
+    /GLOBAL_|UNSCOPED_|PROJECT_B_|### Identity|### Priorities|### Decisions|### Today|### Carry-overs/,
+  );
+});
+
+test("renderer accepts only string Off metadata and derives receipts only from valid modes", () => {
+  assert.equal(renderWorkingContext({
+    memoryMode: "off",
+    memoryReceipt: { unsafe: true },
+    memoryNotice: 42
+  }), "");
+  assert.match(renderWorkingContext({ memoryMode: "project", today: "2026-08-14" }), /^Memory: This project\b/);
+  assert.match(renderWorkingContext({ memoryMode: "shared", today: "2026-08-14" }), /^Memory: Shared\b/);
+  assert.doesNotMatch(
+    renderWorkingContext({ memoryMode: "malformed", today: "2026-08-14" }),
+    /^Memory:/m
+  );
+});
+
+test("Off returns its fixed receipt without consulting the AIOS folder or clock", async () => {
+  let filesystemCalls = 0;
+  const unreadableFilesystem = new Proxy({}, {
+    get() {
+      return async () => {
+        filesystemCalls += 1;
+        throw new Error("Off touched the filesystem");
+      };
+    },
+  });
+
+  const { context, rendered } = await buildWorkingContext(
+    "/canonical/aios/must-not-be-opened",
+    { memory: "off" },
+    {
+      filesystem: unreadableFilesystem,
+      clock: () => { throw new Error("Off consulted the clock"); },
+    },
+  );
+
+  assert.equal(filesystemCalls, 0);
+  assert.equal(context.memoryMode, "off");
+  assert.equal(
+    rendered,
+    "Memory: Off\n\nDotAIOS is off; your AI app may still keep its own conversation history. DotAIOS did not read, search, save, or capture this turn.",
+  );
+});
+
+test("This project memory rejects an unregistered selector instead of trusting matching row text", async () => {
+  const aiosPath = tmpAios();
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", project: "ghost", summary: "UNREGISTERED_PROJECT_CANARY" },
+  ]);
+  await assert.rejects(
+    () => selectWorkingContext(aiosPath, { memory: "project", project: "ghost" }, { clock: fixedClock }),
+    (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+  );
+});
+
+test("This project views exclude unattributed evidence and other projects", async () => {
+  const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
+  registerProject(aiosPath, "project-b");
   writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
     { session_id: "a", project: "project-a", captured_at: "2026-07-15T09:00:00.000Z", title: "A fact" },
     { session_id: "b", project: "project-b", captured_at: "2026-07-15T08:00:00.000Z", title: "B fact" },
@@ -124,10 +239,10 @@ test("scoped views retain unattributed evidence without leaking another project"
 
   assert.match(scopedA.rendered, /A fact|A update/);
   assert.doesNotMatch(scopedA.rendered, /B fact|B update/);
-  assert.match(scopedA.rendered, /Unscoped fact|Unscoped update/);
-  assert.match(scopedA.rendered, /unscoped/);
+  assert.doesNotMatch(scopedA.rendered, /Unscoped fact|Unscoped update|unscoped/);
   assert.match(scopedB.rendered, /B fact|B update/);
   assert.doesNotMatch(scopedB.rendered, /A fact|A update/);
+  assert.doesNotMatch(scopedB.rendered, /Unscoped fact|Unscoped update|unscoped/);
   assert.equal((unscoped.rendered.match(/Unscoped update/g) || []).length, 1);
 });
 
@@ -179,13 +294,13 @@ test("scoped views authorize project and project_id attribution consistently", a
       ...context.events.map((entry) => entry.summary),
     ];
 
-    for (const label of ["BETA_ID_ONLY_SECRET", "CONFLICTING_SECRET", "MALFORMED_EMPTY_SECRET"]) {
+    for (const label of ["GLOBAL_ROW", "BETA_ID_ONLY_SECRET", "CONFLICTING_SECRET", "MALFORMED_EMPTY_SECRET"]) {
       assert.equal(visible.includes(label), false, `${selector} must exclude ${label}`);
     }
-    for (const label of ["ALPHA_BOTH", "ALPHA_ID_ONLY", "ALPHA_LEGACY_ID_IN_PROJECT", "GLOBAL_ROW"]) {
+    for (const label of ["ALPHA_BOTH", "ALPHA_ID_ONLY", "ALPHA_LEGACY_ID_IN_PROJECT"]) {
       assert.ok(visible.includes(label), `${selector} must include ${label}`);
     }
-    assert.ok(context.sessions.find((entry) => entry.title === "GLOBAL_ROW")?.unscoped);
+    assert.equal(context.sessions.find((entry) => entry.title === "GLOBAL_ROW"), undefined);
     assert.equal(context.sessions.find((entry) => entry.title === "ALPHA_ID_ONLY")?.unscoped, undefined);
   }
 });
@@ -228,6 +343,7 @@ test("an ambiguous project alias requires a matching unique project_id", async (
 
 test("scoped views dedupe update channels like unscoped views", async () => {
   const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
   writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), [
     { ts: "2026-07-15T09:00:00.000Z", type: "update", source: "dotaios update", project: "project-a", summary: "A update" },
   ]);
@@ -388,13 +504,14 @@ test("supplied project selectors reject blank, non-string, oversized, and contro
 test("project selector character limits count Unicode code points", async () => {
   const aiosPath = tmpAios();
   const maximum = "🚀".repeat(200);
+  registerProject(aiosPath, "maximum-selector", maximum);
 
   const accepted = await selectWorkingContext(
     aiosPath,
     { project: maximum },
     { clock: fixedClock }
   );
-  assert.equal(accepted.projectFilter, maximum);
+  assert.equal(accepted.projectFilter, "maximum-selector");
   await assert.rejects(
     selectWorkingContext(aiosPath, { project: `${maximum}🚀` }, { clock: fixedClock }),
     TypeError

@@ -67,6 +67,7 @@ export async function doctorCommand(args, { detection } = {}) {
   checks.push(await checkAiosFolder(target));
   checks.push(await checkUnfinishedSetup(target));
   checks.push(await checkAiosConfig(target));
+  checks.push(await checkSecretBoundary(target));
   checks.push(checkTrackedGitlinks(target));
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
@@ -109,6 +110,67 @@ const STATUS_TAGS = { ok: "[ok]", warn: "[warn]", fail: "[fail]" };
 
 function tag(status) {
   return STATUS_TAGS[status] || "[fail]";
+}
+
+export async function checkSecretBoundary(target, {
+  platform = process.platform,
+  currentUid = typeof process.getuid === "function" ? process.getuid() : null,
+  fileSystem = fs
+} = {}) {
+  const name = "Local secret file is private and outside memory";
+  const secretPath = path.join(target, ".env");
+  let stats;
+  try {
+    stats = await fileSystem.lstat(secretPath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return { name, status: "ok", detail: "No local .env file is present." };
+    }
+    return {
+      name,
+      status: "fail",
+      detail: "The local .env file could not be inspected safely.",
+      fix: "Keep credentials in provider-owned auth or a password manager; otherwise replace .env with a private regular file."
+    };
+  }
+
+  if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) {
+    return {
+      name,
+      status: "fail",
+      detail: ".env must be one ordinary local file, never a link or shared hard link.",
+      fix: "Remove the linked .env and create a private local regular file instead."
+    };
+  }
+  if (platform !== "win32" && (stats.mode & 0o077) !== 0) {
+    return {
+      name,
+      status: "fail",
+      detail: ".env can be read or changed by another local account.",
+      fix: "Run `chmod 600 <aios-folder>/.env`, then run `dotaios doctor` again."
+    };
+  }
+  if (platform !== "win32" && currentUid !== null && stats.uid !== currentUid) {
+    return {
+      name,
+      status: "fail",
+      detail: ".env is owned by another local account.",
+      fix: "Replace .env with a private file owned by your current account, then run `dotaios doctor` again."
+    };
+  }
+  if (platform === "win32") {
+    return {
+      name,
+      status: "warn",
+      detail: ".env is a local regular file and is excluded from memory, but DotAIOS did not verify its Windows ACL privacy.",
+      fix: "Review the file's Windows Security permissions so only your account can read it, or keep credentials in provider-owned auth or Windows Credential Manager."
+    };
+  }
+  return {
+    name,
+    status: "ok",
+    detail: ".env is a private local file; search, MCP, and sync exclude it."
+  };
 }
 
 // A gitlink (mode 160000) records another repository's commit id instead of the
