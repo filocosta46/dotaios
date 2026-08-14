@@ -61,8 +61,10 @@ project—not from inside the printed AIOS storage folder—and ask:
 
 > Use my memory. Read my DotAIOS context and tell me what I am working on.
 
-At the start of a session you can instead say `Only this project` or `Private
-chat`. The agent should visibly reply with `Memory: Shared`, `Memory: This
+At the start of a session, `Only this project` is available when the current
+folder resolves to an explicitly registered project with a slug or stable ID.
+Without that registration, say `Use my memory` for Shared or `Private chat` for
+Off. The agent should visibly reply with `Memory: Shared`, `Memory: This
 project`, or `Memory: Off`.
 
 If the tool was already open during setup, restart it first so it reloads its

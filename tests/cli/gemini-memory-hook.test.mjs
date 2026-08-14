@@ -204,6 +204,21 @@ test("Gemini first-message reader rejects malformed and mixed-session JSONL", as
     () => readGeminiFirstUserMessage(hookInput({ transcript_path: mixedPath })),
     /does not belong|session/i
   );
+
+  const foreignMessagePath = path.join(root, "foreign-message.jsonl");
+  fs.writeFileSync(foreignMessagePath, geminiJsonl(
+    { sessionId: "gemini-session-1", projectHash: "project-hash" },
+    {
+      id: "foreign-user",
+      sessionId: "another-session",
+      type: "user",
+      content: "Only this project must not cross sessions"
+    }
+  ));
+  await assert.rejects(
+    () => readGeminiFirstUserMessage(hookInput({ transcript_path: foreignMessagePath })),
+    /does not belong|session/i
+  );
 });
 
 test("Gemini first-message reader fails closed for missing or relative transcript evidence", async () => {

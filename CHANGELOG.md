@@ -9,10 +9,10 @@ All notable changes to DotAIOS will be documented in this file.
 **You can now decide what DotAIOS may remember in each session.** `Use my
 memory` selects **Memory: Shared**. `Only this project` selects **Memory: This
 project** and excludes personal, unscoped, and other-project material before it
-is searched or rendered. `Private chat` selects **Memory: Off** before DotAIOS
-opens, searches, saves, or captures anything in the AIOS folder. The receipt is
-visible, and DotAIOS says plainly that the AI app may still keep its own chat
-history.
+is searched or rendered. `Private chat` selects **Memory: Off** before any
+subsequent DotAIOS file or tool reads, searches, saves, or captures; the AIOS
+router may already have been opened. The receipt is visible, and DotAIOS says
+plainly that the AI app may still keep its own chat history.
 
 **One AIOS folder is the memory.** Agent instruction files, MCP responses,
 search data, and client hooks are bounded views of that user-owned folder, not

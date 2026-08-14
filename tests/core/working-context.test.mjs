@@ -170,7 +170,7 @@ test("renderer accepts only string Off metadata and derives receipts only from v
   assert.match(renderWorkingContext({ memoryMode: "shared", today: "2026-08-14" }), /^Memory: Shared\b/);
   assert.doesNotMatch(
     renderWorkingContext({ memoryMode: "malformed", today: "2026-08-14" }),
-    /Memory: Shared/
+    /^Memory:/m
   );
 });
 

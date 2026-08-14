@@ -205,6 +205,9 @@ function parseGeminiFirstUserMessage(text, sessionId, currentPrompt) {
     if (!isPlainObject(record)) {
       throw new Error("Gemini transcript contains a malformed JSONL record.");
     }
+    if (Object.hasOwn(record, "sessionId") && record.sessionId !== sessionId) {
+      throw new Error("Gemini transcript does not belong to this session.");
+    }
     if (typeof record.$rewindTo === "string") {
       rewindGeminiMessages(messages, record.$rewindTo);
       continue;
@@ -238,9 +241,6 @@ function parseGeminiFirstUserMessage(text, sessionId, currentPrompt) {
       appendGeminiMessage(messages, record);
     }
     if (Object.hasOwn(record, "sessionId")) {
-      if (record.sessionId !== sessionId) {
-        throw new Error("Gemini transcript does not belong to this session.");
-      }
       continue;
     }
     // Current Gemini transcripts can include plain metadata/update records.

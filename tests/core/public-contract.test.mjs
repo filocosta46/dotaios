@@ -112,15 +112,16 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   }
   assert.match(documents["README.md"], /open .*assistant.*paste/is, "README must lead with one assistant request");
   for (const relativePath of ["README.md", "docs/friend-setup.md"]) {
-    assert.match(
-      documents[relativePath],
-      new RegExp(`github\\.com/filocosta46/dotaios/blob/v${pkg.version.replaceAll(".", "\\.")}/INSTALL\\.md`),
-      `${relativePath} must pin the assistant handoff to the release tag`
+    const handoffRefs = Array.from(
+      documents[relativePath].matchAll(
+        /https:\/\/github\.com\/filocosta46\/dotaios\/blob\/([^/\s]+)\/INSTALL\.md/g
+      ),
+      (match) => match[1]
     );
-    assert.doesNotMatch(
-      documents[relativePath],
-      /github\.com\/filocosta46\/dotaios\/blob\/(?:main|master)\/INSTALL\.md/,
-      `${relativePath} must not delegate installation to a mutable branch`
+    assert.deepEqual(
+      handoffRefs,
+      [`v${pkg.version}`],
+      `${relativePath} must use exactly one release-pinned assistant handoff`
     );
   }
   assert.match(documents["README.md"], /_npmUser\.name/, "README provenance must request the publisher it claims to display");
