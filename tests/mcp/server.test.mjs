@@ -55,6 +55,7 @@ test("MCP Off mode returns before inspecting a missing AIOS folder", () => {
 
 test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   const { aiosPath } = setupAios();
+  fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nMCP_SHARED_IDENTITY_CANARY\n");
   fs.writeFileSync(path.join(aiosPath, "context", "work.md"), "# Work\n\nBuilding the DotAIOS context gateway.\n");
   fs.mkdirSync(path.join(aiosPath, "projects", "demo"), { recursive: true });
   fs.writeFileSync(
@@ -121,11 +122,17 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.equal(new RegExp(projectSchema.pattern, "u").test("demo\n"), false);
 
   const workingContext = JSON.parse(toolText(responses[2]));
+  assert.equal(workingContext.memory, "project");
+  assert.equal(workingContext.receipt, "Memory: This project");
+  assert.equal(workingContext.complete, true);
   assert.equal(workingContext.scope.project, "demo");
   assert.match(workingContext.markdown, /Gateway session/);
+  assert.doesNotMatch(workingContext.markdown, /MCP_SHARED_IDENTITY_CANARY/);
   assert.ok(workingContext.markdown.length <= 1000);
 
   const search = JSON.parse(toolText(responses[3]));
+  assert.equal(search.memory, "project");
+  assert.equal(search.receipt, "Memory: This project");
   assert.equal(search.scope, "projects");
   assert.match(JSON.stringify(search.results), /Gateway acceptance/);
   assert.doesNotMatch(JSON.stringify(search), /private\/machine/);
@@ -133,6 +140,9 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.ok(toolText(responses[3]).length <= search.budget.limit);
 
   const resolved = JSON.parse(toolText(responses[4]));
+  assert.equal(resolved.memory, "shared");
+  assert.equal(resolved.receipt, "Memory: Shared");
+  assert.equal(resolved.complete, true);
   assert.equal(resolved.matches[0].name, "plan-today");
   assert.equal(resolved.matches[0].resource, "skills/plan-today/SKILL.md");
   assert.doesNotMatch(JSON.stringify(resolved), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -772,7 +782,6 @@ test("search_aios fits its maximum selectable omission set at the exact budget f
         arguments: {
           query: "missing",
           scope: "all",
-          project: projectSlug,
           budget: SEARCH_RESULT_BUDGET_FLOOR - 1,
         },
       },
@@ -786,7 +795,6 @@ test("search_aios fits its maximum selectable omission set at the exact budget f
         arguments: {
           query: "missing",
           scope: "all",
-          project: projectSlug,
           budget: SEARCH_RESULT_BUDGET_FLOOR,
         },
       },
@@ -803,9 +811,9 @@ test("search_aios fits its maximum selectable omission set at the exact budget f
   assert.deepEqual(payload.results, []);
   assert.deepEqual(
     payload.omissions.map((omission) => omission.scope),
-    ["sessions", "context", "memory", "vault", "projects", "decisions", "skills", "references", "plugins"],
+    ["sessions", "context", "memory", "vault", "decisions", "skills", "references", "plugins"],
   );
-  assert.equal(payload.omissions.length, 9);
+  assert.equal(payload.omissions.length, 8);
   for (const omission of payload.omissions) {
     assert.equal(omission.reason, "file_too_large");
     assert.deepEqual(Object.keys(omission.observed), ["files", "bytes", "entries"]);

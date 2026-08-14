@@ -1,4 +1,5 @@
 import { buildSessionDigest } from "./digest.mjs";
+import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { inspectMigrationState } from "./migrations.mjs";
 
 export const WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT = 1024;
@@ -9,6 +10,13 @@ export const WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT = 1024;
  * semantics; text-only adapters may render the returned notice ahead of it.
  */
 export async function buildWorkingContextEnvelope(aiosPath, options = {}, dependencies = {}) {
+  const memoryPolicy = resolveMemoryPolicy({
+    mode: options.memory,
+    project: options.project,
+    firstUserMessage: options.firstUserMessage,
+  });
+  if (memoryPolicy.mode === "off") return buildOffEnvelope(memoryPolicy);
+
   const digestBuilder = dependencies.buildSessionDigest || buildSessionDigest;
   const migrationInspector = dependencies.inspectMigrationState || inspectMigrationState;
 
@@ -29,6 +37,22 @@ export async function buildWorkingContextEnvelope(aiosPath, options = {}, depend
     ...digestResult,
     operational,
     notice
+  };
+}
+
+function buildOffEnvelope(memoryPolicy) {
+  const digest = `${memoryPolicy.receipt}\n\n${memoryPolicy.notice}`;
+  return {
+    digest,
+    sessionIds: [],
+    budget: { limit: digest.length, used: digest.length, remaining: 0, truncated: false },
+    generatedAt: null,
+    projectFilter: null,
+    memoryMode: memoryPolicy.mode,
+    operational: {
+      migration: { status: "not_read", severity: "none", action: null },
+    },
+    notice: null,
   };
 }
 

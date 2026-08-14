@@ -17,6 +17,35 @@ import {
   renderOperationalNotice
 } from "../../packages/core/src/working-context-envelope.mjs";
 
+test("Off returns a fixed safe envelope before digest or migration inspection", async () => {
+  let digestCalls = 0;
+  let migrationCalls = 0;
+
+  const envelope = await buildWorkingContextEnvelope(
+    "/canonical/aios/must-not-be-opened",
+    { memory: "off" },
+    {
+      buildSessionDigest: async () => {
+        digestCalls += 1;
+        throw new Error("Off built a digest");
+      },
+      inspectMigrationState: async () => {
+        migrationCalls += 1;
+        throw new Error("Off inspected migration state");
+      },
+    },
+  );
+
+  assert.equal(digestCalls, 0);
+  assert.equal(migrationCalls, 0);
+  assert.equal(envelope.memoryMode, "off");
+  assert.equal(
+    envelope.digest,
+    "Memory: Off\n\nDotAIOS is off; your AI app may still keep its own conversation history. DotAIOS did not read, search, save, or capture this turn.",
+  );
+  assert.equal(envelope.notice, null);
+});
+
 test("the operational envelope keeps the canonical digest and budget unchanged", async (t) => {
   const aiosPath = await makeAios(t, "1.1.0");
   await fs.mkdir(path.join(aiosPath, "context"), { recursive: true });

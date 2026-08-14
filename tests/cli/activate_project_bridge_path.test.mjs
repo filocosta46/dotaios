@@ -53,6 +53,10 @@ test("attach never writes the author's home path into the project bridge", () =>
 
     const bridge = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
     assert.match(bridge, /~\/aios\/AGENTS\.md/);
+    assert.match(bridge, /Memory: This project/);
+    assert.match(bridge, /--memory project --project/);
+    assert.match(bridge, /exclude personal, unscoped, and other-project memory/i);
+    assert.doesNotMatch(bridge, /Before personal recommendations.*read/is);
     assert.doesNotMatch(
       bridge,
       new RegExp(home.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),

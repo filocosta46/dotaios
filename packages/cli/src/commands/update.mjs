@@ -5,6 +5,7 @@ import path from "node:path";
 import { hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { appendEvent, appendSignal } from "../../../core/src/memory.mjs";
+import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
 import { readOptionValue } from "../lib/args.mjs";
 
@@ -23,6 +24,7 @@ Examples:
 
 Options:
   --path <dir>  Use a non-default AIOS folder
+  --memory <mode>  Use shared, project, or off memory (default: shared)
   --project <slug-or-id>  Attribute the update to a registered project
 `;
 
@@ -33,14 +35,26 @@ export async function updateCommand(args) {
   }
 
   const options = parseOptions(args);
+  const memoryPolicy = resolveMemoryPolicy({
+    mode: options.memory,
+    project: options.project
+  });
+  console.log(memoryPolicy.receipt);
+  if (memoryPolicy.mode === "off") {
+    console.log(memoryPolicy.notice);
+    return;
+  }
+
   const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(aiosPath);
 
-  const project = await resolveProjectContext({
-    aiosPath,
-    project: options.project,
-    cwd: process.cwd()
-  });
+  const project = memoryPolicy.mode === "project"
+    ? await resolveProjectContext({
+        aiosPath,
+        project: memoryPolicy.projectSelector,
+        cwd: process.cwd()
+      })
+    : null;
   const text = options.text;
   const note = text || await promptText();
 
@@ -82,7 +96,7 @@ async function promptText() {
 }
 
 function parseOptions(args) {
-  const options = { path: null, project: null, text: [] };
+  const options = { path: null, project: null, memory: null, text: [] };
   const result = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--path") {
@@ -90,6 +104,9 @@ function parseOptions(args) {
       i++;
     } else if (args[i] === "--project") {
       options.project = readOptionValue(args, i, "--project");
+      i++;
+    } else if (args[i] === "--memory") {
+      options.memory = readOptionValue(args, i, "--memory");
       i++;
     } else if (args[i].startsWith("--")) {
       throw new Error(`Unknown option: ${args[i]}`);

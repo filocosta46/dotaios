@@ -259,6 +259,25 @@ test("Claude live hook attributes a session through the checkout path", () => {
   assert.equal(typeof entries[0].project_id, "string");
 });
 
+test("Claude live hook keeps Private chat outside DotAIOS", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-private-hook-test-"));
+  const missingAiosPath = path.join(tempRoot, "must-not-be-opened");
+  const transcriptPath = path.join(tempRoot, "claude-private-transcript.jsonl");
+  fs.writeFileSync(transcriptPath, [
+    { type: "user", timestamp: "2026-08-14T10:00:00.000Z", message: { role: "user", content: "Private chat\nPlease help me think." } },
+    { type: "assistant", timestamp: "2026-08-14T10:01:00.000Z", message: { role: "assistant", content: "I can help." } }
+  ].map((line) => JSON.stringify(line)).join("\n") + "\n");
+
+  const result = run(["capture", "hook", "claude-code", "--path", missingAiosPath], {
+    cwd: tempRoot,
+    env: { ...process.env, HOME: path.join(tempRoot, "home") },
+    input: `${JSON.stringify({ transcript_path: transcriptPath, cwd: tempRoot })}\n`
+  });
+
+  assert.equal(result.stderr, "");
+  assert.equal(fs.existsSync(missingAiosPath), false, "Off must not create or inspect an AIOS folder");
+});
+
 // ---------- capture delete ----------
 
 test("capture delete removes session by id", () => {

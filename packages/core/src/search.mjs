@@ -1,5 +1,6 @@
 import path from "node:path";
 import { createEvidenceReader, EvidenceReadError } from "./evidence-reader.mjs";
+import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 import { resolvePortableProjectIdentity, validateProjectSelector } from "./projects.mjs";
 import { haystackHasInflectionOf } from "./search-inflections.mjs";
@@ -88,43 +89,53 @@ export function rankSearchHit({ kind, matchedTerms = [], corpus = null, ageMs = 
   return tier * RANK_TIER_WEIGHT + within;
 }
 
-export async function searchAios({
-  aiosPath,
-  vaultPath,
-  query,
-  scope = "all",
-  limit = DEFAULT_LIMIT,
-  sessionFilters = {},
-  projectSelector = null,
-  evidenceReader = null
-}) {
+export async function searchAios(options = {}) {
+  const {
+    memoryPolicy,
+    memoryMode,
+    projectSelector = null,
+    query,
+    scope = "all",
+    limit = DEFAULT_LIMIT,
+    sessionFilters = {}
+  } = options;
+  const policy = resolveMemoryPolicy({
+    mode: memoryPolicy?.mode ?? memoryMode,
+    project: memoryPolicy?.projectSelector ?? projectSelector
+  });
+  if (policy.mode === "off") {
+    return attachSearchMetadata([], {
+      requested: scope,
+      project: null,
+      project_id: null,
+      projects_omitted: false
+    }, [], policy);
+  }
+
+  const { aiosPath, vaultPath, evidenceReader = null } = options;
   const resolvedAiosPath = path.resolve(aiosPath);
   const resolvedVaultPath = path.resolve(vaultPath || path.join(aiosPath, "vault"));
   const vaultRoot = isPathWithinLexically(resolvedAiosPath, resolvedVaultPath)
     ? resolvedAiosPath
     : resolvedVaultPath;
   const reader = evidenceReader || createEvidenceReader({ roots: [resolvedAiosPath, vaultRoot] });
-  if (scope === "projects" && !projectSelector) validateProjectSelector(projectSelector);
-  const projectIdentity = projectSelector
+  if (scope === "projects" && !policy.projectSelector) validateProjectSelector(policy.projectSelector);
+  const projectIdentity = policy.projectSelector
     ? await resolvePortableProjectIdentity({
         aiosPath: resolvedAiosPath,
-        projectSelector,
+        projectSelector: policy.projectSelector,
         evidenceReader: reader
       })
     : null;
-  const scopes = scope === "all"
-    ? [
-        "sessions",
-        "context",
-        "memory",
-        "vault",
-        ...(projectIdentity ? ["projects"] : []),
-        "decisions",
-        "skills",
-        "references",
-        "plugins"
-      ]
-    : [scope];
+  const scopes = searchScopesForPolicy(scope, policy, projectIdentity);
+  if (scopes.length === 0) {
+    return attachSearchMetadata([], {
+      requested: scope,
+      project: projectIdentity?.slug || null,
+      project_id: projectIdentity?.id || null,
+      projects_omitted: false
+    }, [], policy);
+  }
 
   return reader.withScopePreflight(
     scopes,
@@ -135,6 +146,7 @@ export async function searchAios({
       query,
       limit,
       projectIdentity,
+      policy,
       sessionFilters,
       reader: scopeReader
     }),
@@ -142,6 +154,7 @@ export async function searchAios({
       aiosPath: resolvedAiosPath,
       query,
       limit,
+      projectIdentity,
       sessionFilters,
       reader: scopeReader
     }),
@@ -149,6 +162,7 @@ export async function searchAios({
       aiosPath: resolvedAiosPath,
       query,
       limit,
+      projectIdentity,
       sessionFilters,
       reader: scopeReader
     }),
@@ -164,12 +178,34 @@ export async function searchAios({
         project: projectIdentity?.slug || null,
         project_id: projectIdentity?.id || null,
         projects_omitted: scope === "all" && projectIdentity === null
-      }, transaction.omissions);
+      }, transaction.omissions, policy);
     }
   );
 }
 
-function attachSearchMetadata(groups, scope, omissions) {
+function searchScopesForPolicy(scope, policy, projectIdentity) {
+  if (policy.mode === "project") {
+    const allowed = new Set(["sessions", "memory", "projects"]);
+    return scope === "all"
+      ? ["sessions", "memory", "projects"]
+      : allowed.has(scope) ? [scope] : [];
+  }
+  return scope === "all"
+    ? [
+        "sessions",
+        "context",
+        "memory",
+        "vault",
+        ...(projectIdentity ? ["projects"] : []),
+        "decisions",
+        "skills",
+        "references",
+        "plugins"
+      ]
+    : [scope];
+}
+
+function attachSearchMetadata(groups, scope, omissions, policy) {
   Object.defineProperties(groups, {
     scope: {
       value: Object.freeze({ ...scope }),
@@ -179,6 +215,30 @@ function attachSearchMetadata(groups, scope, omissions) {
     },
     omissions: {
       value: omissions,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    },
+    complete: {
+      value: omissions.length === 0,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    },
+    memory: {
+      value: policy.mode,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    },
+    receipt: {
+      value: policy.receipt,
+      enumerable: false,
+      configurable: false,
+      writable: false
+    },
+    notice: {
+      value: policy.notice,
       enumerable: false,
       configurable: false,
       writable: false
@@ -194,6 +254,7 @@ async function inspectSearchScope(scope, {
   query,
   limit,
   projectIdentity,
+  policy,
   sessionFilters,
   reader
 }) {
@@ -203,7 +264,8 @@ async function inspectSearchScope(scope, {
   if (scope === "memory") {
     return inspectMemoryScope(path.join(aiosPath, "memory"), {
       reader,
-      root: aiosPath
+      root: aiosPath,
+      includeNotes: policy.mode !== "project"
     });
   }
   const config = markdownScopeConfig(scope, {
@@ -230,11 +292,17 @@ async function discoverSearchScope(scope, prepared, {
   aiosPath,
   query,
   limit,
+  projectIdentity,
   sessionFilters,
   reader
 }) {
   if (scope === "sessions") {
-    return discoverSessionsScope(aiosPath, query, prepared, { limit, reader, ...sessionFilters });
+    return discoverSessionsScope(aiosPath, query, prepared, {
+      limit,
+      reader,
+      projectIdentity,
+      ...sessionFilters
+    });
   }
   if (scope === "memory") {
     return discoverMemoryScope(prepared, { reader });
@@ -246,6 +314,7 @@ async function executeDiscoveredScope(_scope, prepared, {
   aiosPath,
   query,
   limit,
+  projectIdentity,
   sessionFilters,
   reader
 }) {
@@ -253,7 +322,7 @@ async function executeDiscoveredScope(_scope, prepared, {
     return prepared.results;
   }
   if (prepared?.kind === "memory") {
-    return searchDiscoveredMemory(prepared, query, { limit, reader });
+    return searchDiscoveredMemory(prepared, query, { limit, reader, projectIdentity });
   }
   if (prepared?.kind === "markdown") {
     return searchPreparedMarkdownDir(prepared.prepared, prepared.config, query, { limit, reader });
@@ -366,24 +435,26 @@ export async function searchMemoryDir(memoryDir, query, {
   return rankMemorySources(sources, entriesBySource, query, limit);
 }
 
-async function inspectMemoryScope(memoryDir, { reader, root }) {
+async function inspectMemoryScope(memoryDir, { reader, root, includeNotes = true }) {
   const sources = await memorySourceDescriptors(memoryDir, { reader, root });
   const entriesBySource = new Map();
   for (const { filePath, source } of sources) {
     entriesBySource.set(source, await reader.prepareJsonlMetadata(root, filePath));
   }
   const noteCorpora = [];
-  for (const relative of MEMORY_NOTE_DIRS) {
-    const dir = path.join(memoryDir, relative);
-    noteCorpora.push(Object.freeze({
-      relative,
-      dir,
-      prepared: await reader.prepareTextCorpus(
-        root,
+  if (includeNotes) {
+    for (const relative of MEMORY_NOTE_DIRS) {
+      const dir = path.join(memoryDir, relative);
+      noteCorpora.push(Object.freeze({
+        relative,
         dir,
-        { extensions: [".md"], skipEntry: shouldSkipEntry, concurrency: 32 }
-      )
-    }));
+        prepared: await reader.prepareTextCorpus(
+          root,
+          dir,
+          { extensions: [".md"], skipEntry: shouldSkipEntry, concurrency: 32 }
+        )
+      }));
+    }
   }
   return Object.freeze({ kind: "memory", sources, entriesBySource, noteCorpora });
 }
@@ -396,11 +467,11 @@ async function discoverMemoryScope(prepared, { reader }) {
   return Object.freeze({ ...prepared, entriesBySource });
 }
 
-async function searchDiscoveredMemory(prepared, query, { limit, reader }) {
+async function searchDiscoveredMemory(prepared, query, { limit, reader, projectIdentity = null }) {
   const entriesBySource = new Map(
     [...prepared.entriesBySource].map(([source, entries]) => [source, reader.readPreparedJsonl(entries)])
   );
-  const corpora = [rankMemorySources(prepared.sources, entriesBySource, query, limit)];
+  const corpora = [rankMemorySources(prepared.sources, entriesBySource, query, limit, { projectIdentity })];
   for (const note of prepared.noteCorpora) {
     corpora.push(await searchPreparedMarkdownDir(
       note.prepared,
@@ -433,7 +504,7 @@ async function memorySourceDescriptors(memoryDir, { reader, root }) {
   ];
 }
 
-function rankMemorySources(sources, entriesBySource, query, limit) {
+function rankMemorySources(sources, entriesBySource, query, limit, { projectIdentity = null } = {}) {
   // Every scanned entry (matched or not) feeds the corpus so IDF reflects how
   // common a term actually is in this folder, not just among the hits.
   const docs = [];
@@ -441,7 +512,8 @@ function rankMemorySources(sources, entriesBySource, query, limit) {
   const retrySuppression = buildMemoryRetrySuppression(sources, entriesBySource);
   for (const { source, family } of sources) {
     const suppressed = retrySuppression.get(source) || new Map();
-    const entries = entriesBySource.get(source) || [];
+    const entries = (entriesBySource.get(source) || [])
+      .filter((entry) => matchesProjectIdentity(entry, projectIdentity));
     for (const entry of entries) {
       const text = JSON.stringify(entry);
       if (consumeSerializedEntry(suppressed, text)) continue;
@@ -989,12 +1061,15 @@ async function discoverSessionsScope(aiosPath, query, inspected, {
   agent,
   project,
   since,
+  projectIdentity,
   reader
 } = {}) {
   const index = await reader.materializePreparedJsonl(inspected.index);
+  const entries = reader.readPreparedJsonl(index)
+    .filter((entry) => matchesProjectIdentity(entry, projectIdentity));
   const bodies = new Map();
   const replayReader = {
-    readJsonl: async () => reader.readPreparedJsonl(index),
+    readJsonl: async () => entries,
     readText: async (_root, filePath) => {
       const resolved = path.resolve(filePath);
       if (!bodies.has(resolved)) {
@@ -1011,6 +1086,17 @@ async function discoverSessionsScope(aiosPath, query, inspected, {
     reader: replayReader
   });
   return Object.freeze({ kind: "sessions", results });
+}
+
+function matchesProjectIdentity(record, projectIdentity) {
+  if (!projectIdentity) return true;
+  if (!record || typeof record !== "object" || Array.isArray(record)) return false;
+  const hasProject = Object.prototype.hasOwnProperty.call(record, "project");
+  const hasProjectId = Object.prototype.hasOwnProperty.call(record, "project_id");
+  if (!hasProject && !hasProjectId) return false;
+  if (hasProject && record.project !== projectIdentity.slug && record.project !== projectIdentity.id) return false;
+  if (hasProjectId && record.project_id !== projectIdentity.id) return false;
+  return true;
 }
 
 function compareTimestampsDesc(a, b) {

@@ -278,10 +278,10 @@ test("bulk search is exactly equal to the generic contained-read oracle across c
     evidenceReader: createEvidenceReader({ roots: [root, externalVault] })
   });
   const serialized = JSON.stringify(all);
-  assert.match(serialized, /memory\/daily\/2026-08-13\.md/);
-  assert.match(serialized, /memory\/inbox\/capture\.md/);
-  assert.match(serialized, /plugins\/demo\/manifest\.json/);
   assert.match(serialized, /projects\/acme\/README\.md/);
-  assert.match(serialized, /vault\/external\.md/);
-  assert.doesNotMatch(serialized, /package\.json|projects\/other|\.env\.md/);
+  assert.doesNotMatch(
+    serialized,
+    /memory\/daily|memory\/inbox|plugins\/demo|vault\/external|package\.json|projects\/other|\.env\.md/,
+    "a project selector now selects strict project memory instead of widening Shared search"
+  );
 });

@@ -67,7 +67,7 @@ function normalizeMode(mode) {
 function normalizeProjectSelector(project) {
   if (project === undefined || project === null) return null;
   if (typeof project !== "string" || project.length === 0) {
-    throw memoryPolicyError("Project selector must be a non-empty string.");
+    throw memoryPolicyError("Project must be a non-empty string.");
   }
   return project;
 }
@@ -85,4 +85,3 @@ function memoryPolicyError(message) {
   error.code = "DOTAIOS_MEMORY_POLICY_INVALID";
   return error;
 }
-

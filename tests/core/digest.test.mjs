@@ -32,6 +32,20 @@ test("buildSessionDigest returns digest and sessionIds", async () => {
   assert.ok(Array.isArray(sessionIds));
 });
 
+test("buildSessionDigest preserves the resolved memory receipt in its public result", async () => {
+  const result = await buildSessionDigest("/canonical/aios/must-not-be-opened", { memory: "off" }, {
+    filesystem: new Proxy({}, {
+      get() {
+        return async () => { throw new Error("Off touched the filesystem"); };
+      },
+    }),
+  });
+
+  assert.equal(result.memoryMode, "off");
+  assert.equal(result.memoryReceipt, "Memory: Off");
+  assert.match(result.digest, /AI app may still keep its own conversation history/i);
+});
+
 test("buildSessionDigest empty state returns minimal digest", async () => {
   const aiosPath = tmpAios();
   const { digest, sessionIds } = await buildSessionDigest(aiosPath);

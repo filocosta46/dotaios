@@ -9,5 +9,7 @@ export async function buildSessionDigest(aiosPath, options = {}, dependencies = 
     budget: context.budget,
     generatedAt: context.generatedAt,
     projectFilter: context.projectFilter,
+    memoryMode: context.memoryMode,
+    memoryReceipt: context.memoryReceipt,
   };
 }

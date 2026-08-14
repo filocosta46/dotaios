@@ -83,6 +83,11 @@ test("managed bridges route working memory through the canonical projection", as
 
   assert.match(content, /events, signals, and saved sessions only through the canonical bounded projection/);
   assert.match(content, /dotaios brief --compact/);
+  assert.match(content, /Private chat.*Memory: Off/is);
+  assert.match(content, /Only this project.*Memory: This project/is);
+  assert.match(content, /Use my memory.*Memory: Shared/is);
+  assert.match(content, /decide.*before opening.*AIOS/is);
+  assert.match(content, /host.*history/i);
   assert.match(content, /`read_working_context`, `search_aios`, and `resolve_skill`/);
   const retiredToolNames = [
     ["read", "session", "digest"], ["read", "context"], ["list", "skills"],

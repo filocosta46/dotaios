@@ -299,8 +299,12 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
   const lines = [
     MANAGED_START,
     pointerLine,
-    `Leave that folder closed unless the working directory is inside it, or the user asks about their context, who they are, what they are working on, or one of their saved workflows.`,
-    `When you do open it, read ${AGENT_ENTRYPOINT} first, then run \`dotaios brief --compact\` (add \`--project <slug-or-id>\` for project work); route events, signals, and saved sessions only through the canonical bounded projection.`
+    "Decide session memory before opening AIOS or calling its tools:",
+    "- `Private chat` locks `Memory: Off`: no DotAIOS read, search, save, or capture. Say once that the host may keep its own history.",
+    "- In an attached working directory, or when the user asks `Only this project`, use `Memory: This project`; require its exact identity and exclude personal, unscoped, and other-project memory.",
+    "- When the user asks `Use my memory`, use `Memory: Shared`; this is the default elsewhere.",
+    "Lead every response with the selected receipt: `Memory: Shared`, `Memory: This project`, or `Memory: Off`.",
+    `Leave the AIOS folder closed for Off. Otherwise read ${AGENT_ENTRYPOINT} first, then run \`dotaios brief --compact --memory shared\` or \`dotaios brief --compact --memory project --project <slug-or-id>\`; route events, signals, and saved sessions only through the canonical bounded projection.`
   ];
 
   if (skillsFirst) {

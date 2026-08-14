@@ -5,6 +5,7 @@ import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
 import { writeSession, readSessionIndex } from "../../../core/src/sessions.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
+import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
 
 export const name = "claude-code";
 export const level = ADAPTER_LEVELS.FULL_AUTO;
@@ -164,14 +165,30 @@ export async function handleHookPayload(aiosPath, { cwd = process.cwd() } = {}) 
     return;
   }
 
+  // The transcript belongs to Claude Code, so it is safe to inspect before
+  // opening DotAIOS. A first-turn Private chat must short-circuit here: no
+  // project lookup, AIOS read, session write, or capture side effect.
+  const unscopedSession = parseTranscript(lines, { sourcePath: transcriptPath });
+  const firstUserMessage = unscopedSession?.turns.find((turn) => turn.role === "user")?.content;
+  const memoryPolicy = resolveMemoryPolicy({ firstUserMessage });
+  if (memoryPolicy.mode === "off") {
+    process.exitCode = 0;
+    return;
+  }
+
   const project = await resolveProjectContext({
     aiosPath,
     cwd: payload.cwd || cwd
   });
+  const resolvedPolicy = resolveMemoryPolicy({
+    firstUserMessage,
+    project: project?.id || project?.slug || null,
+  });
+  const projectScoped = resolvedPolicy.mode === "project" ? project : null;
 
   const session = parseTranscript(lines, {
-    project: project?.slug || null,
-    projectId: project?.id || null,
+    project: projectScoped?.slug || null,
+    projectId: projectScoped?.id || null,
     sourcePath: transcriptPath,
   });
 
