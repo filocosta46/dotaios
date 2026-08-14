@@ -82,7 +82,20 @@ export function bridgeAttentionLines(blockedBridges) {
   return lines;
 }
 
-export async function activateCommand(args, { lifecycle = {} } = {}) {
+export function catalogConflictActivationResult(skillsIndex) {
+  return {
+    detectedClientCount: 0,
+    configuredContextCount: 0,
+    detectedClientNames: [],
+    configuredClientNames: [],
+    blockedContextCount: 0,
+    blockedHermesCount: 0,
+    blockedCatalogCount: skillsIndex.conflicts.length,
+    results: skillsIndex.results
+  };
+}
+
+export async function activateCommand(args, { lifecycle = {}, quiet = false } = {}) {
   if (hasHelpFlag(args)) {
     printActivateHelp();
     return;
@@ -149,18 +162,12 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
   // untrusted collision bytes).
   if (!options.dryRun && skillsIndex.conflicts.length > 0) {
     const results = skillsIndex.results;
-    printResults("DotAIOS activation stopped", results);
-    console.error(
-      `Activation needs attention: preserved ${skillsIndex.conflicts.length} skill catalog collision(s); no client bridges were changed.`
-    );
+    if (!quiet) printResults("DotAIOS activation stopped", results);
+    console.error(quiet
+      ? `Connection needs attention: preserved ${skillsIndex.conflicts.length} existing app configuration conflict(s); no app instructions were changed.`
+      : `Activation needs attention: preserved ${skillsIndex.conflicts.length} skill catalog collision(s); no client bridges were changed.`);
     process.exitCode = 1;
-    return {
-      detectedClientCount: 0,
-      configuredContextCount: 0,
-      blockedContextCount: 0,
-      blockedCatalogCount: skillsIndex.conflicts.length,
-      results
-    };
+    return catalogConflictActivationResult(skillsIndex);
   }
 
   const global = await createGlobalBridges(
@@ -188,30 +195,32 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     }
   }
 
-  printResults("DotAIOS activated", results);
+  if (!quiet) printResults("DotAIOS activated", results);
   const refreshAction = options.dryRun ? "would refresh" : "refreshed";
-  console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} workflow(s) indexed)`);
-  if (skillsIndex.unresolvedProjections?.length > 0) {
+  if (!quiet) console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} workflow(s) indexed)`);
+  if (!quiet && skillsIndex.unresolvedProjections?.length > 0) {
     console.warn(
       `[skills] preserved ${skillsIndex.unresolvedProjections.length} unmanaged native projection collision(s); run \`dotaios skills inventory\` to review adoption candidates.`
     );
   }
-  if (skillsFirst) {
+  if (skillsFirst && !quiet) {
     const verb = options.dryRun ? "would inline" : "inline";
     console.log(`[skills-first] bridge files ${verb} the current skill catalog.`);
   }
 
-  if (global.installedCount === 0) {
+  if (global.installedCount === 0 && !quiet) {
     console.log("\nNo known AI tools were detected on this machine.");
     console.log("DotAIOS connects a tool automatically once it is installed — re-run `dotaios activate` then.");
     console.log("To connect every known tool anyway, run `dotaios activate --all`.");
   }
 
-  console.log("\nUsing another local AI tool that can read files? Paste this line into it:");
-  console.log(`  Read ${path.join(aiosPath, "AGENTS.md")} first and follow it.`);
-  console.log("Browser chats cannot open that path. Attach AGENTS.md or paste a reviewed `dotaios brief --compact` instead.");
+  if (!quiet) {
+    console.log("\nUsing another local AI tool that can read files? Paste this line into it:");
+    console.log(`  Read ${path.join(aiosPath, "AGENTS.md")} first and follow it.`);
+    console.log("Browser chats cannot open that path. Attach AGENTS.md or paste a reviewed `dotaios brief --compact` instead.");
+  }
 
-  if (!options.project) {
+  if (!options.project && !quiet) {
     console.log("\nFor Cursor project rules, run `dotaios attach <project-dir>` inside a project.");
   }
 
@@ -220,20 +229,28 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
   const blockedHermesCount = results.filter((entry) => entry.action === "hermes:conflict").length;
   if (blockedContextCount > 0) {
     process.exitCode = 1;
-    for (const line of bridgeAttentionLines(blockedBridges)) console.error(line);
+    if (quiet) {
+      console.error(`Connection needs attention: preserved ${blockedContextCount} existing app instruction file(s). Run \`dotaios activate\` for details.`);
+    } else {
+      for (const line of bridgeAttentionLines(blockedBridges)) console.error(line);
+    }
   }
   if (skillStoreFailure) {
     process.exitCode = 1;
-    console.error(
-      `Activation needs attention: managed skill links could not be published. ${describeFileError(skillStoreFailure)}`
-    );
-    console.error("The client bridges above were still written. Fix that folder, then run `dotaios activate` again.");
+    if (quiet) {
+      console.error("Connection needs attention: app workflows could not be connected safely. Run `dotaios activate` for details.");
+    } else {
+      console.error(
+        `Activation needs attention: managed skill links could not be published. ${describeFileError(skillStoreFailure)}`
+      );
+      console.error("The client bridges above were still written. Fix that folder, then run `dotaios activate` again.");
+    }
   }
   if (blockedHermesCount > 0) {
     process.exitCode = 1;
-    console.error(
-      `Activation needs attention: preserved ${blockedHermesCount} concurrent Hermes config edit(s). Re-run activation after reviewing the file.`
-    );
+    console.error(quiet
+      ? `Connection needs attention: preserved ${blockedHermesCount} app configuration edit(s). Run \`dotaios activate\` for details.`
+      : `Activation needs attention: preserved ${blockedHermesCount} concurrent Hermes config edit(s). Re-run activation after reviewing the file.`);
   }
 
   return {
@@ -242,6 +259,8 @@ export async function activateCommand(args, { lifecycle = {} } = {}) {
     blockedContextCount,
     blockedHermesCount,
     blockedCatalogCount: 0,
+    detectedClientNames: global.installedAgentNames,
+    configuredClientNames: global.configuredAgentNames,
     results
   };
 }
@@ -396,7 +415,8 @@ async function createGlobalBridges(
   let installedCount = 0;
   let configuredContextCount = 0;
   const blockedBridges = [];
-  const installedAgentNames = new Set();
+  const installedAgentNames = [];
+  const configuredAgentNames = [];
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
@@ -407,7 +427,7 @@ async function createGlobalBridges(
       continue;
     }
     installedCount += 1;
-    installedAgentNames.add(agent.name.toLowerCase());
+    installedAgentNames.push(agent.name);
 
     if (!agent.bridge) {
       results.push({
@@ -441,6 +461,7 @@ async function createGlobalBridges(
     results.push(result);
     if (isConfiguredBridgeAction(result.action)) {
       configuredContextCount += 1;
+      configuredAgentNames.push(agent.name);
     } else {
       blockedBridges.push(result);
     }
@@ -456,6 +477,8 @@ async function createGlobalBridges(
   return {
     results: [...results, ...skills],
     installedCount,
+    installedAgentNames: Object.freeze(installedAgentNames),
+    configuredAgentNames: Object.freeze(configuredAgentNames),
     configuredContextCount,
     blockedBridges
   };

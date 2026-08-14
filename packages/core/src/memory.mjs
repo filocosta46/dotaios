@@ -1,9 +1,16 @@
 import crypto from "node:crypto";
+import { constants as fsConstants } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { formatJsonlEntry, parseJsonlLine, readJsonl } from "./jsonl.mjs";
 import { ContainedReadError, readContainedDirectory, readContainedFile } from "./contained-read.mjs";
 import { refreshLiveOkf, writeProjectLog } from "./okf-live.mjs";
+import {
+  assertOwnedFileStats,
+  publishOwnedFileExclusive,
+  recoverOwnedFileExclusivePublication,
+  syncOwnedDirectory
+} from "./owned-state.mjs";
 import { searchMarkdownDir, searchMemoryDir } from "./search.mjs";
 
 export { formatJsonlEntry, parseJsonlLine, readJsonl };
@@ -152,6 +159,7 @@ export class EventStoreLockError extends Error {
 export async function appendEventRecord(eventsPath, entry, options = {}) {
   const fileSystem = options.filesystem || fs;
   await withEventStoreLock(eventsPath, async () => {
+    await recoverPendingArchive(eventsPath, fileSystem);
     await fileSystem.appendFile(eventsPath, formatJsonlEntry(entry));
   }, options);
   return entry;
@@ -234,6 +242,14 @@ const LOCK_STALE_MS = 5 * 60_000;
 const LOCK_RETRY_DELAYS_MS = [50, 150, 300];
 const LOCK_MAX_ATTEMPTS = 8;
 const ARCHIVE_TAIL_BYTES = 262_144;
+const ARCHIVE_ROTATE_BYTES = 2 * 1024 * 1024;
+const ARCHIVE_LINE_MAX_BYTES = 4 * 1024 * 1024;
+const EVENT_COMPACTION_PENDING_CONTRACT = "dotaios-event-compaction/v1";
+const EVENT_COMPACTION_PENDING_MAGIC_PREFIX = "#!dotaios-event-compaction";
+const EVENT_COMPACTION_PENDING_MAGIC = `${EVENT_COMPACTION_PENDING_MAGIC_PREFIX}/v1`;
+// Distinguishes marker-protocol generations from ambiguous overlap left by the
+// previous markerless rotator. It is durable before any new rotation begins.
+const ARCHIVE_ROTATION_FORMAT = '{"version":1,"protocol":"durable-marker"}\n';
 
 function archivePathFor(eventsPath) {
   return eventsPath.replace(/\.jsonl$/, "-archive.jsonl");
@@ -356,21 +372,28 @@ async function malformedLockIsStale(lockPath, fileSystem, staleMs, now) {
 
 async function fsyncFile(fileSystem, filePath) {
   if (typeof fileSystem.open !== "function") return;
+  const handle = await fileSystem.open(filePath, "r+");
   try {
-    const handle = await fileSystem.open(filePath, "r+");
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    // fsync is best-effort; the commit point below is the atomicity boundary.
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
 async function writeFileDurable(fileSystem, filePath, content) {
-  await fileSystem.writeFile(filePath, content);
+  await fileSystem.writeFile(filePath, content, { flag: "wx", mode: 0o600 });
   await fsyncFile(fileSystem, filePath);
+}
+
+async function stagePendingArchive(fileSystem, filePath, content) {
+  assertArchiveLineBounds(content);
+  await fileSystem.writeFile(filePath, content, { flag: "wx", mode: 0o600 });
+  await fsyncFile(fileSystem, filePath);
+}
+
+async function stageEventPendingArchive(fileSystem, filePath, content) {
+  assertArchiveLineBounds(content);
+  await publishOwnedFileExclusive(filePath, content, { filesystem: fileSystem });
 }
 
 async function fileExists(fileSystem, filePath) {
@@ -382,85 +405,837 @@ async function fileExists(fileSystem, filePath) {
   }
 }
 
-// A crash can leave a staged archive batch behind. Decide whether the batch
-// committed (rename happened → events no longer holds it → finish the flush)
-// or not (events still holds it → the staging file is stale, drop it).
+// A crash can leave one self-describing pending artifact behind. `prepared`
+// evidence exists before archive inspection and can never authorize a live
+// rename. `ready` binds the exact ordered archive pre-state and can recover
+// publication after the live-file commit point. Raw legacy batches retain the
+// conservative compatibility path below.
 async function recoverPendingArchive(eventsPath, fileSystem) {
   const archivePath = archivePathFor(eventsPath);
   const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
+  let pendingStats;
   try {
-    pendingContent = await fileSystem.readFile(pendingPath, "utf8");
+    ({ content: pendingContent, stats: pendingStats } = await readOwnedArchiveFile(pendingPath, fileSystem, {
+      allowLegacyMode: true
+    }));
   } catch (error) {
     if (error.code === "ENOENT") return;
     throw error;
   }
-  const pendingLines = pendingContent.split("\n").filter((line) => line.trim());
+  const artifact = parsePendingArchiveArtifact(pendingContent);
+  const pendingLines = artifact.pendingLines;
   if (pendingLines.length === 0) {
-    await fileSystem.unlink(pendingPath);
+    await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
     return;
   }
-  let eventsContent = "";
-  try {
-    eventsContent = await fileSystem.readFile(eventsPath, "utf8");
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
+  const eventsContent = await readEventsContent(eventsPath, fileSystem);
+  if (artifact.kind === "transaction") {
+    const transaction = artifact.transaction;
+    const liveState = identifyTransactionLiveState(eventsContent, transaction);
+    if (transaction.phase === "prepared") {
+      if (liveState !== "before") throw archiveStateError();
+      await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
+      return;
+    }
+    if (liveState === "before") {
+      const archiveState = await inspectArchiveRecordState(archivePath, fileSystem);
+      if (
+        archiveState.records !== transaction.archiveRecordsBefore
+        || archiveState.chain !== transaction.archiveChainBefore
+      ) throw archiveStateError();
+      await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
+      return;
+    }
+    if (liveState !== "after") throw archiveStateError();
+    await flushPendingArchive(archivePath, fileSystem, {
+      archiveRecordsBefore: transaction.archiveRecordsBefore,
+      archiveChainBefore: transaction.archiveChainBefore
+    });
+    return;
   }
+
+  // Legacy raw pending batches predate the self-describing envelope. Preserve
+  // their old conservative recovery rule; every newly staged event batch is
+  // governed by the phase and exact-chain evidence above.
   const eventLines = new Set(eventsContent.split("\n").filter((line) => line.trim()));
   const first = pendingLines[0];
   const last = pendingLines[pendingLines.length - 1];
   if (eventLines.has(first) && eventLines.has(last)) {
-    await fileSystem.unlink(pendingPath);
+    await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
     return;
   }
   await flushPendingArchive(archivePath, fileSystem);
 }
 
-// Append the staged batch to the archive, line-idempotently: a crashed earlier
-// flush may already have written part or all of it. Returns only after the
-// append is on disk and fsynced, so callers may treat it as the point after
-// which deleting the source is safe.
-async function flushPendingArchive(archivePath, fileSystem) {
+function identifyTransactionLiveState(eventsContent, transaction) {
+  const eventsHash = archiveContentHash(eventsContent);
+  if (eventsHash === transaction.beforeHash) return "before";
+  if (eventsHash === transaction.afterHash) return "after";
+
+  // Validate each potential suffix record exactly once, then hash the live
+  // bytes once from left to right. Hash.copy() snapshots the prefix state at a
+  // newline without re-hashing every earlier byte for every boundary.
+  if (!eventsContent.endsWith("\n")) return null;
+  const records = splitArchiveRecords(eventsContent);
+  const validSuffix = new Array(records.length + 1).fill(false);
+  validSuffix[records.length] = true;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    validSuffix[index] = validSuffix[index + 1] && isCompleteJsonlRecord(records[index]);
+  }
+
+  const prefixHash = crypto.createHash("sha256");
+  for (let index = 0; index < records.length - 1; index += 1) {
+    prefixHash.update(records[index]);
+    if (!validSuffix[index + 1]) continue;
+    const digest = prefixHash.copy().digest("hex");
+    if (digest === transaction.beforeHash) return "before";
+    if (digest === transaction.afterHash) return "after";
+  }
+  return null;
+}
+
+function isCompleteJsonlRecord(record) {
+  if (!record.endsWith("\n")) return false;
+  const line = record.slice(0, -1);
+  if (!line.trim()) return false;
+  try {
+    const entry = JSON.parse(line);
+    return entry !== null && typeof entry === "object" && !Array.isArray(entry);
+  } catch {
+    return false;
+  }
+}
+
+// Publish the staged batch into the active archive and, when needed, immutable
+// numbered shards. Event envelopes prove exact ordered progress; legacy signal
+// batches retain their bounded compatibility behavior. Returns only after every
+// accepted line is fsynced, so callers may safely remove its source.
+async function flushPendingArchive(archivePath, fileSystem, options = {}) {
   const pendingPath = pendingPathFor(archivePath);
   let pendingContent;
+  let pendingStats;
   try {
-    pendingContent = await fileSystem.readFile(pendingPath, "utf8");
+    ({ content: pendingContent, stats: pendingStats } = await readOwnedArchiveFile(pendingPath, fileSystem, {
+      allowLegacyMode: true
+    }));
   } catch (error) {
     if (error.code === "ENOENT") return;
     throw error;
   }
-  const pendingLines = pendingContent.split("\n").filter((line) => line.trim());
-  let archiveContent = "";
+  const artifact = parsePendingArchiveArtifact(pendingContent);
+  const pendingLines = artifact.pendingLines;
+  assertArchiveLineBounds(artifact.payload);
+  if (artifact.kind === "transaction" && (
+    artifact.transaction.phase !== "ready"
+    || artifact.transaction.archiveRecordsBefore !== options.archiveRecordsBefore
+    || artifact.transaction.archiveChainBefore !== options.archiveChainBefore
+  )) throw archiveStateError();
+
+  let shards = await inspectArchiveShards(archivePath, fileSystem);
+  let active = await readArchiveActive(archivePath, fileSystem);
+  assertArchiveLineBounds(active.content);
+  let missing;
+  if (
+    Number.isSafeInteger(options.archiveRecordsBefore)
+    && typeof options.archiveChainBefore === "string"
+  ) {
+    // Finish any marker-governed rotation first. During the shard-before-active
+    // publication window the same logical records temporarily exist in both
+    // generations, so counting before recovery would mistake overlap for new
+    // records from this batch.
+    await appendArchiveLines(archivePath, active, shards, [], fileSystem);
+    shards = await inspectArchiveShards(archivePath, fileSystem);
+    active = await readArchiveActive(archivePath, fileSystem);
+    // A transaction records the archive's logical record count before this
+    // exact batch. The count delta tells us how much of the ordered batch was
+    // published before a crash without confusing equal bytes for one record.
+    const archiveState = await inspectArchiveRecordState(archivePath, fileSystem, { active, shards });
+    const published = archiveState.records - options.archiveRecordsBefore;
+    if (published < 0 || published > pendingLines.length) throw archiveStateError();
+    let expectedChain = options.archiveChainBefore;
+    for (const line of pendingLines.slice(0, published)) {
+      expectedChain = extendArchiveRecordChain(expectedChain, line);
+    }
+    if (archiveState.chain !== expectedChain) throw archiveStateError();
+    missing = pendingLines.slice(published);
+  } else {
+    const tailLines = await collectArchiveTailLines(
+      archivePath,
+      active,
+      shards,
+      Math.max(ARCHIVE_TAIL_BYTES, Buffer.byteLength(pendingContent) + 1024),
+      fileSystem
+    );
+    missing = pendingLines.filter((line) => !tailLines.has(line));
+  }
+  await appendArchiveLines(archivePath, active, shards, missing, fileSystem);
+
+  if (artifact.kind === "transaction") {
+    const settled = await inspectArchiveRecordState(archivePath, fileSystem);
+    if (
+      settled.records !== artifact.transaction.archiveRecordsBefore + artifact.transaction.pendingRecords
+      || settled.chain !== artifact.transaction.archiveChainAfter
+    ) throw archiveStateError();
+  }
+
+  await removeObservedArchiveFile(pendingPath, pendingStats, fileSystem);
+}
+
+async function readEventsContent(eventsPath, fileSystem) {
   try {
-    archiveContent = await fileSystem.readFile(archivePath, "utf8");
+    return await fileSystem.readFile(eventsPath, "utf8");
+  } catch (error) {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  }
+}
+
+async function inspectArchiveRecordState(archivePath, fileSystem, observed = {}) {
+  const shards = observed.shards || await inspectArchiveShards(archivePath, fileSystem);
+  const active = observed.active || await readArchiveActive(archivePath, fileSystem);
+  let records = 0;
+  let chain = "0".repeat(64);
+  for (const shard of shards) {
+    const content = (await readOwnedArchiveFile(shard.path, fileSystem)).content;
+    for (const line of content.split("\n").filter((item) => item.trim())) {
+      chain = extendArchiveRecordChain(chain, line);
+      records += 1;
+    }
+  }
+  for (const line of active.content.split("\n").filter((item) => item.trim())) {
+    chain = extendArchiveRecordChain(chain, line);
+    records += 1;
+  }
+  return { records, chain };
+}
+
+function extendArchiveRecordChain(chain, line) {
+  const bytes = Buffer.from(line);
+  const length = Buffer.allocUnsafe(4);
+  length.writeUInt32BE(bytes.length);
+  return crypto.createHash("sha256")
+    .update(Buffer.from(chain, "hex"))
+    .update(length)
+    .update(bytes)
+    .digest("hex");
+}
+
+function parsePendingArchiveArtifact(content) {
+  if (!content.startsWith(`${EVENT_COMPACTION_PENDING_MAGIC}\n`)) {
+    if (content.startsWith(EVENT_COMPACTION_PENDING_MAGIC_PREFIX)) throw archiveStateError();
+    return parseLegacyPendingArchive(content);
+  }
+  const headerStart = EVENT_COMPACTION_PENDING_MAGIC.length + 1;
+  const headerEnd = content.indexOf("\n", headerStart);
+  if (headerEnd < 0) throw archiveStateError();
+  const headerLine = content.slice(headerStart, headerEnd);
+  let transaction;
+  try {
+    transaction = JSON.parse(headerLine);
+  } catch {
+    throw archiveStateError();
+  }
+  if (transaction?.artifact_contract !== EVENT_COMPACTION_PENDING_CONTRACT) throw archiveStateError();
+  const payload = content.slice(headerEnd + 1);
+  const pendingLines = payload.split("\n").filter((line) => line.trim());
+  if (
+    !["prepared", "ready"].includes(transaction.phase)
+    || ![
+      transaction.beforeHash,
+      transaction.afterHash,
+      transaction.pendingHash
+    ]
+      .every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+    || !Number.isSafeInteger(transaction.pendingRecords)
+    || transaction.pendingRecords < 1
+    || archiveContentHash(payload) !== transaction.pendingHash
+    || pendingLines.length !== transaction.pendingRecords
+  ) throw archiveStateError();
+  if (transaction.phase === "ready" && (
+    ![transaction.archiveChainBefore, transaction.archiveChainAfter]
+      .every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+    || !Number.isSafeInteger(transaction.archiveRecordsBefore)
+    || transaction.archiveRecordsBefore < 0
+  )) throw archiveStateError();
+  if (transaction.phase === "prepared" && [
+    transaction.archiveRecordsBefore,
+    transaction.archiveChainBefore,
+    transaction.archiveChainAfter
+  ].some((value) => value !== undefined)) throw archiveStateError();
+  return { kind: "transaction", transaction, payload, pendingLines };
+}
+
+function parseLegacyPendingArchive(content) {
+  const pendingLines = content.split("\n").filter((line) => line.trim());
+  if (pendingLines.some((line) => !isCompleteJsonlRecord(`${line}\n`))) {
+    throw archiveStateError();
+  }
+  return { kind: "legacy", payload: content, pendingLines };
+}
+
+function renderPendingArchiveArtifact(transaction, payload) {
+  return `${EVENT_COMPACTION_PENDING_MAGIC}\n${JSON.stringify(transaction)}\n${payload}`;
+}
+
+async function removeObservedArchiveFile(filePath, expectedStats, fileSystem) {
+  const current = await fileSystem.lstat(filePath, { bigint: true });
+  assertOwnedArchiveFileStats(current);
+  if (!sameArchiveSnapshot(expectedStats, current)) throw archiveStateError();
+  await fileSystem.unlink(filePath);
+  await syncOwnedDirectory(path.dirname(filePath), { filesystem: fileSystem });
+}
+
+async function appendArchiveLines(archivePath, active, existingShards, lines, fileSystem) {
+  let activeContent = active.content;
+  let activeStats = active.stats;
+  let rotationMarkerRecovered;
+  ({ activeContent, activeStats, existingShards, rotationMarkerRecovered } = await recoverArchiveRotation(
+    archivePath,
+    activeContent,
+    activeStats,
+    existingShards,
+    fileSystem
+  ));
+  await ensureArchiveRotationFormat(
+    archivePath,
+    activeContent,
+    existingShards,
+    fileSystem,
+    rotationMarkerRecovered
+  );
+  let nextShard = existingShards.length === 0
+    ? 1
+    : existingShards.at(-1).number + 1;
+
+  // Normalize a legacy over-target active file one complete JSONL record at a
+  // time. The durable transition marker is the only authority allowed to
+  // interpret matching bytes in a shard and the active generation as overlap.
+  while (Buffer.byteLength(activeContent) > ARCHIVE_ROTATE_BYTES) {
+    const { chunk, remainder } = takeArchiveChunk(activeContent);
+    activeStats = await rotateArchiveActive(
+      archivePath,
+      nextShard,
+      activeContent,
+      chunk,
+      remainder,
+      activeStats,
+      fileSystem
+    );
+    nextShard += 1;
+    activeContent = remainder;
+  }
+
+  let activeParts = activeContent ? [activeContent] : [];
+  let activeBytes = Buffer.byteLength(activeContent);
+  let activeEndsWithNewline = activeContent.endsWith("\n");
+  const materializeActive = () => {
+    activeContent = activeParts.join("");
+    activeParts = activeContent ? [activeContent] : [];
+    return activeContent;
+  };
+  let changed = false;
+  for (const line of lines) {
+    const record = `${line}\n`;
+    const recordBytes = Buffer.byteLength(record);
+    if (recordBytes > ARCHIVE_LINE_MAX_BYTES) throw archiveLineTooLargeError();
+    const separator = activeBytes > 0 && !activeEndsWithNewline ? "\n" : "";
+    const separatorBytes = separator ? 1 : 0;
+    if (activeBytes > 0 && activeBytes + separatorBytes + recordBytes > ARCHIVE_ROTATE_BYTES) {
+      const completedActive = materializeActive();
+      activeStats = await replaceArchiveActive(archivePath, completedActive, activeStats, fileSystem);
+      activeStats = await rotateArchiveActive(
+        archivePath,
+        nextShard,
+        completedActive,
+        completedActive,
+        "",
+        activeStats,
+        fileSystem
+      );
+      nextShard += 1;
+      activeContent = "";
+      activeParts = [];
+      activeBytes = 0;
+      activeEndsWithNewline = false;
+      changed = false;
+    }
+    if (recordBytes > ARCHIVE_ROTATE_BYTES) {
+      await publishArchiveShard(archivePath, nextShard, record, fileSystem);
+      nextShard += 1;
+      continue;
+    }
+    if (separator) activeParts.push(separator);
+    activeParts.push(record);
+    activeBytes += separatorBytes + recordBytes;
+    activeEndsWithNewline = true;
+    changed = true;
+  }
+
+  if (changed || !activeStats) {
+    await replaceArchiveActive(archivePath, materializeActive(), activeStats, fileSystem);
+  }
+}
+
+async function recoverArchiveRotation(
+  archivePath,
+  activeContent,
+  activeStats,
+  existingShards,
+  fileSystem
+) {
+  const markerPath = rotationMarkerPathFor(archivePath);
+  let markerContent;
+  let markerStats;
+  try {
+    ({ content: markerContent, stats: markerStats } = await readOwnedArchiveFile(markerPath, fileSystem));
+  } catch (error) {
+    if (error.code === "ENOENT") {
+      return { activeContent, activeStats, existingShards, rotationMarkerRecovered: false };
+    }
+    throw error;
+  }
+
+  const marker = parseArchiveRotationMarker(markerContent);
+  const shard = existingShards.find(({ number }) => number === marker.shardNumber);
+  if (existingShards.some(({ number }) => number > marker.shardNumber)) throw archiveStateError();
+
+  const activeHash = archiveContentHash(activeContent);
+  if (activeHash === marker.beforeHash) {
+    const bytes = Buffer.from(activeContent);
+    const chunkBytes = bytes.subarray(0, marker.chunkBytes);
+    const remainderBytes = bytes.subarray(marker.chunkBytes);
+    const chunk = chunkBytes.toString("utf8");
+    const remainder = remainderBytes.toString("utf8");
+    if (
+      chunkBytes.length !== marker.chunkBytes
+      || Buffer.byteLength(chunk) !== marker.chunkBytes
+      || archiveContentHash(chunk) !== marker.chunkHash
+      || archiveContentHash(remainder) !== marker.afterHash
+    ) throw archiveStateError();
+
+    if (shard) {
+      const shardContent = (await readOwnedArchiveFile(shard.path, fileSystem)).content;
+      if (archiveContentHash(shardContent) !== marker.chunkHash) throw archiveStateError();
+    } else {
+      await publishArchiveShard(archivePath, marker.shardNumber, chunk, fileSystem);
+    }
+    activeStats = await replaceArchiveActive(archivePath, remainder, activeStats, fileSystem);
+    activeContent = remainder;
+  } else if (activeHash === marker.afterHash) {
+    if (!shard) throw archiveStateError();
+    const shardContent = (await readOwnedArchiveFile(shard.path, fileSystem)).content;
+    if (archiveContentHash(shardContent) !== marker.chunkHash) throw archiveStateError();
+  } else {
+    throw archiveStateError();
+  }
+
+  await ensureArchiveRotationFormat(
+    archivePath,
+    activeContent,
+    existingShards,
+    fileSystem,
+    true
+  );
+  await removeObservedArchiveFile(markerPath, markerStats, fileSystem);
+  return {
+    activeContent,
+    activeStats,
+    existingShards: await inspectArchiveShards(archivePath, fileSystem),
+    rotationMarkerRecovered: true
+  };
+}
+
+async function ensureArchiveRotationFormat(
+  archivePath,
+  activeContent,
+  existingShards,
+  fileSystem,
+  rotationMarkerRecovered
+) {
+  const formatPath = rotationFormatPathFor(archivePath);
+  try {
+    const { content } = await readOwnedArchiveFile(formatPath, fileSystem);
+    if (content !== ARCHIVE_ROTATION_FORMAT) throw archiveStateError();
+    return;
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
-  // The dedupe window must be at least as long as the batch it checks. A batch
-  // bigger than a fixed window would fail to find its own already-written early
-  // lines on a retry and append them a second time.
-  const windowBytes = Math.max(ARCHIVE_TAIL_BYTES, pendingContent.length + 1024);
-  const tailLines = new Set(archiveContent.slice(-windowBytes).split("\n").filter((line) => line.trim()));
-  const missing = pendingLines.filter((line) => !tailLines.has(line));
-  if (missing.length > 0) {
-    // A torn earlier append can leave the archive without a final newline;
-    // start on a fresh line so the fragment stays its own (visible) bad line.
-    const prefix = archiveContent.length > 0 && !archiveContent.endsWith("\n") ? "\n" : "";
-    await fileSystem.appendFile(archivePath, prefix + missing.map((line) => `${line}\n`).join(""));
-    await fsyncFile(fileSystem, archivePath);
+
+  if (!rotationMarkerRecovered) {
+    await assertNoMarkerlessArchiveOverlap(archivePath, activeContent, existingShards, fileSystem);
   }
-  await fileSystem.unlink(pendingPath);
+  await publishOwnedFileExclusive(formatPath, ARCHIVE_ROTATION_FORMAT, { filesystem: fileSystem });
+}
+
+async function assertNoMarkerlessArchiveOverlap(
+  archivePath,
+  activeContent,
+  existingShards,
+  fileSystem
+) {
+  const newest = existingShards.at(-1);
+  if (!newest || !activeContent) return;
+  const newestContent = (await readOwnedArchiveFile(newest.path, fileSystem)).content;
+  if (!newestContent || !activeContent.startsWith(newestContent)) return;
+  throw archiveLegacyRecoveryRequiredError(archivePath, newest.path);
+}
+
+async function rotateArchiveActive(
+  archivePath,
+  shardNumber,
+  activeContent,
+  chunk,
+  remainder,
+  activeStats,
+  fileSystem
+) {
+  const markerPath = rotationMarkerPathFor(archivePath);
+  const marker = {
+    version: 1,
+    shardNumber,
+    chunkBytes: Buffer.byteLength(chunk),
+    chunkHash: archiveContentHash(chunk),
+    beforeHash: archiveContentHash(activeContent),
+    afterHash: archiveContentHash(remainder)
+  };
+  await publishOwnedFileExclusive(
+    markerPath,
+    `${JSON.stringify(marker)}\n`,
+    { filesystem: fileSystem }
+  );
+  const markerStats = await inspectOwnedArchiveFile(markerPath, fileSystem);
+  await publishArchiveShard(archivePath, shardNumber, chunk, fileSystem);
+  const publishedStats = await replaceArchiveActive(archivePath, remainder, activeStats, fileSystem);
+  await removeObservedArchiveFile(markerPath, markerStats, fileSystem);
+  return publishedStats;
+}
+
+function parseArchiveRotationMarker(content) {
+  let marker;
+  try {
+    marker = JSON.parse(content);
+  } catch {
+    throw archiveStateError();
+  }
+  if (
+    marker?.version !== 1
+    || !Number.isSafeInteger(marker.shardNumber)
+    || marker.shardNumber < 1
+    || !Number.isSafeInteger(marker.chunkBytes)
+    || marker.chunkBytes < 1
+    || ![marker.chunkHash, marker.beforeHash, marker.afterHash]
+      .every((value) => typeof value === "string" && /^[a-f0-9]{64}$/.test(value))
+  ) throw archiveStateError();
+  return marker;
+}
+
+function archiveContentHash(content) {
+  return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+function rotationMarkerPathFor(archivePath) {
+  return `${archivePath}.rotation`;
+}
+
+function rotationFormatPathFor(archivePath) {
+  return `${archivePath}.rotation-format`;
+}
+
+function takeArchiveChunk(content) {
+  let chunkEnd = 0;
+  let chunkBytes = 0;
+  let recordStart = 0;
+  for (let index = 0; index <= content.length; index += 1) {
+    if (index < content.length && content[index] !== "\n") continue;
+    if (index === content.length && recordStart === content.length) break;
+    const recordEnd = index < content.length ? index + 1 : index;
+    const recordBytes = Buffer.byteLength(content.slice(recordStart, recordEnd));
+    if (chunkEnd > 0 && chunkBytes + recordBytes > ARCHIVE_ROTATE_BYTES) break;
+    chunkBytes += recordBytes;
+    chunkEnd = recordEnd;
+    recordStart = recordEnd;
+    if (chunkBytes > ARCHIVE_ROTATE_BYTES) break;
+  }
+  if (chunkEnd === 0) throw archiveStateError();
+  return { chunk: content.slice(0, chunkEnd), remainder: content.slice(chunkEnd) };
+}
+
+function splitArchiveRecords(content) {
+  if (!content) return [];
+  const records = [];
+  let start = 0;
+  for (let index = 0; index < content.length; index += 1) {
+    if (content[index] !== "\n") continue;
+    records.push(content.slice(start, index + 1));
+    start = index + 1;
+  }
+  if (start < content.length) records.push(content.slice(start));
+  return records;
+}
+
+function assertArchiveLineBounds(content) {
+  for (const record of splitArchiveRecords(content)) {
+    if (Buffer.byteLength(record) > ARCHIVE_LINE_MAX_BYTES) throw archiveLineTooLargeError();
+  }
+}
+
+async function inspectArchiveShards(archivePath, fileSystem) {
+  const directory = path.dirname(archivePath);
+  const stem = path.basename(archivePath, ".jsonl");
+  const matcher = new RegExp(`^${escapeRegExp(stem)}\\.(\\d{6})\\.jsonl$`);
+  let entries;
+  try {
+    entries = await fileSystem.readdir(directory, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
+  const shards = [];
+  for (const entry of entries) {
+    const match = entry.name.match(matcher);
+    if (!match) continue;
+    const filePath = path.join(directory, entry.name);
+    const stats = await inspectOwnedArchiveFile(filePath, fileSystem);
+    shards.push({ number: Number(match[1]), path: filePath, stats });
+  }
+  shards.sort((left, right) => left.number - right.number);
+  for (let index = 1; index < shards.length; index += 1) {
+    if (shards[index - 1].number === shards[index].number) throw archiveStateError();
+  }
+  return shards;
+}
+
+async function inspectOwnedArchiveFile(filePath, fileSystem) {
+  let stats = await fileSystem.lstat(filePath, { bigint: true });
+  if (Number(stats.nlink) === 2 && await recoverOwnedFileExclusivePublication(filePath, {
+    filesystem: fileSystem
+  })) {
+    stats = await fileSystem.lstat(filePath, { bigint: true });
+  }
+  assertOwnedArchiveFileStats(stats);
+  return stats;
+}
+
+async function collectArchiveTailLines(archivePath, active, shards, minimumBytes, fileSystem) {
+  const lines = new Set();
+  let observedBytes = 0;
+  const sources = [
+    { path: archivePath, content: active.content },
+    ...[...shards].reverse().map(({ path: filePath }) => ({ path: filePath, content: null }))
+  ];
+  for (const source of sources) {
+    const content = source.content === null
+      ? (await readOwnedArchiveFile(source.path, fileSystem)).content
+      : source.content;
+    observedBytes += Buffer.byteLength(content);
+    for (const line of content.split("\n")) if (line.trim()) lines.add(line);
+    if (observedBytes >= minimumBytes) break;
+  }
+  return lines;
+}
+
+async function readArchiveActive(archivePath, fileSystem) {
+  try {
+    return await readOwnedArchiveFile(archivePath, fileSystem, { allowLegacyMode: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return { content: "", stats: null };
+    throw error;
+  }
+}
+
+async function readOwnedArchiveFile(filePath, fileSystem, { allowLegacyMode = false } = {}) {
+  let pathStats = await fileSystem.lstat(filePath, { bigint: true });
+  if (Number(pathStats.nlink) === 2 && await recoverOwnedFileExclusivePublication(filePath, {
+    filesystem: fileSystem
+  })) {
+    pathStats = await fileSystem.lstat(filePath, { bigint: true });
+  }
+  const flags = fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0);
+  const handle = await fileSystem.open(filePath, flags);
+  try {
+    let before = await handle.stat({ bigint: true });
+    ({ pathStats, handleStats: before } = await validateArchiveFileMode(
+      filePath,
+      pathStats,
+      before,
+      handle,
+      fileSystem,
+      allowLegacyMode
+    ));
+    const content = await handle.readFile("utf8");
+    const after = await handle.stat({ bigint: true });
+    assertOwnedArchiveFileStats(after);
+    if (!sameArchiveSnapshot(before, after)) throw archiveStateError();
+    const current = await fileSystem.lstat(filePath, { bigint: true });
+    assertOwnedArchiveFileStats(current);
+    if (!sameArchiveSnapshot(after, current)) throw archiveStateError();
+    return { content, stats: current };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function validateArchiveFileMode(
+  filePath,
+  pathStats,
+  handleStats,
+  handle,
+  fileSystem,
+  allowLegacyMode
+) {
+  try {
+    assertOwnedArchiveFileStats(pathStats);
+    assertOwnedArchiveFileStats(handleStats);
+    if (!sameArchiveSnapshot(pathStats, handleStats)) throw archiveStateError();
+    return { pathStats, handleStats };
+  } catch (error) {
+    if (!allowLegacyMode || process.platform === "win32") throw error;
+    assertOwnedArchiveFileStats(pathStats, 0o644);
+    assertOwnedArchiveFileStats(handleStats, 0o644);
+    if (!sameArchiveSnapshot(pathStats, handleStats)) throw archiveStateError();
+    await handle.chmod(0o600);
+    const securedHandle = await handle.stat({ bigint: true });
+    const securedPath = await fileSystem.lstat(filePath, { bigint: true });
+    assertOwnedArchiveFileStats(securedHandle);
+    assertOwnedArchiveFileStats(securedPath);
+    if (
+      !sameArchiveObject(handleStats, securedHandle)
+      || !sameArchiveSnapshot(securedHandle, securedPath)
+    ) throw archiveStateError();
+    return { pathStats: securedPath, handleStats: securedHandle };
+  }
+}
+
+function sameArchiveObject(left, right) {
+  return Boolean(left && right
+    && left.dev === right.dev
+    && left.ino === right.ino
+    && left.nlink === right.nlink
+    && left.uid === right.uid);
+}
+
+function sameArchiveIdentity(left, right) {
+  return Boolean(sameArchiveObject(left, right)
+    && left.mode === right.mode
+    && left.size === right.size);
+}
+
+function sameArchiveSnapshot(left, right) {
+  return Boolean(left && right && [
+    "dev",
+    "ino",
+    "mode",
+    "nlink",
+    "uid",
+    "size",
+    "mtimeNs",
+    "ctimeNs"
+  ].every((field) => left[field] === right[field]));
+}
+
+function assertOwnedArchiveFileStats(stats, mode = 0o600) {
+  if (typeof stats?.mode !== "bigint") {
+    assertOwnedFileStats(stats, mode);
+    return;
+  }
+  assertOwnedFileStats({
+    isFile: () => stats.isFile(),
+    isSymbolicLink: () => stats.isSymbolicLink(),
+    mode: Number(stats.mode),
+    nlink: Number(stats.nlink),
+    uid: Number(stats.uid)
+  }, mode);
+}
+
+async function publishArchiveShard(archivePath, number, content, fileSystem) {
+  assertArchiveLineBounds(content);
+  const shardPath = archiveShardPath(archivePath, number);
+  await publishOwnedFileExclusive(shardPath, content, { filesystem: fileSystem });
+  return shardPath;
+}
+
+async function replaceArchiveActive(archivePath, content, expectedStats, fileSystem) {
+  assertArchiveLineBounds(content);
+  if (!expectedStats) {
+    await publishOwnedFileExclusive(archivePath, content, { filesystem: fileSystem });
+    return inspectOwnedArchiveFile(archivePath, fileSystem);
+  }
+  const current = await fileSystem.lstat(archivePath, { bigint: true });
+  assertOwnedArchiveFileStats(current);
+  if (!sameArchiveSnapshot(expectedStats, current)) throw archiveStateError();
+  const temporary = path.join(
+    path.dirname(archivePath),
+    `.${path.basename(archivePath)}.${crypto.randomUUID()}.tmp`
+  );
+  let handle;
+  try {
+    handle = await fileSystem.open(temporary, "wx", 0o600);
+    await handle.writeFile(content, "utf8");
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    const temporaryStats = await fileSystem.lstat(temporary, { bigint: true });
+    assertOwnedArchiveFileStats(temporaryStats);
+    const stillCurrent = await fileSystem.lstat(archivePath, { bigint: true });
+    assertOwnedArchiveFileStats(stillCurrent);
+    if (!sameArchiveSnapshot(expectedStats, stillCurrent)) throw archiveStateError();
+    await fileSystem.rename(temporary, archivePath);
+    const published = await fileSystem.lstat(archivePath, { bigint: true });
+    assertOwnedArchiveFileStats(published);
+    if (!sameArchiveIdentity(temporaryStats, published)) throw archiveStateError();
+    await syncOwnedDirectory(path.dirname(archivePath), { filesystem: fileSystem });
+    return published;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await fileSystem.rm(temporary, { force: true }).catch(() => {});
+  }
+}
+
+function archiveShardPath(archivePath, number) {
+  return archivePath.replace(/\.jsonl$/, `.${String(number).padStart(6, "0")}.jsonl`);
+}
+
+function archiveLineTooLargeError() {
+  const error = new Error("One archive record exceeds the safe 4 MiB read ceiling.");
+  error.code = "DOTAIOS_ARCHIVE_LINE_TOO_LARGE";
+  return error;
+}
+
+function archiveStateError() {
+  const error = new Error("Memory archive state changed or is not safely owned.");
+  error.code = "DOTAIOS_ARCHIVE_STATE_INVALID";
+  return error;
+}
+
+function archiveLegacyRecoveryRequiredError(archivePath, shardPath) {
+  const error = new Error(
+    "Memory archive needs explicit legacy rotation recovery; authoritative archive bytes were left unchanged."
+  );
+  error.code = "DOTAIOS_ARCHIVE_LEGACY_RECOVERY_REQUIRED";
+  error.diagnostic = Object.freeze({
+    kind: "markerless-rotation-overlap",
+    archive: path.basename(archivePath),
+    shard: path.basename(shardPath),
+    action: "preserve-and-inspect"
+  });
+  return error;
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
  * Compact events.jsonl: keep only the most recent N entries in the main file,
- * archive older entries to events-archive.jsonl.
+ * archive older entries to the bounded events-archive generation.
  *
- * Crash-safe transaction: kept-tail and archive batch are staged and fsynced,
- * the rename over events.jsonl is the single commit point, and the archive
- * append happens only after it (idempotently, so an interrupted run can be
- * re-run without losing or duplicating an event). Guarded by an advisory
- * lockfile next to events.jsonl.
+ * Crash-safe transaction: a self-describing prepared artifact is published
+ * before archive inspection, then ownership-safely advanced to ready with the
+ * exact ordered archive pre-state. Only ready may precede the rename over
+ * events.jsonl, the single live-file commit point. Archive publication happens
+ * afterward and verifies the expected ordered post-state before removing the
+ * artifact. Guarded by an advisory lockfile next to events.jsonl.
  *
  * Returns { archived, kept } — or { archived: 0, kept: 0, skipped: "locked" }
  * when another live process holds the lock.
@@ -478,12 +1253,60 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
 
       const toArchive = all.slice(0, -limit);
       const toKeep = all.slice(-limit);
-      const tmpPath = `${eventsPath}.tmp`;
+      const tmpPath = path.join(
+        path.dirname(eventsPath),
+        `.${path.basename(eventsPath)}.${crypto.randomUUID()}.tmp`
+      );
+      const archiveBatch = toArchive.map((entry) => formatJsonlEntry(entry)).join("");
+      const keptBatch = toKeep.map((entry) => formatJsonlEntry(entry)).join("");
+      assertArchiveLineBounds(archiveBatch);
 
-      await writeFileDurable(fileSystem, tmpPath, toKeep.map((entry) => formatJsonlEntry(entry)).join(""));
-      await writeFileDurable(fileSystem, pendingPathFor(archivePathFor(eventsPath)), toArchive.map((entry) => formatJsonlEntry(entry)).join(""));
-      await fileSystem.rename(tmpPath, eventsPath);
-      await flushPendingArchive(archivePathFor(eventsPath), fileSystem);
+      try {
+        const archivePath = archivePathFor(eventsPath);
+        const pendingPath = pendingPathFor(archivePath);
+        const eventsContent = await readEventsContent(eventsPath, fileSystem);
+        const prepared = {
+          artifact_contract: EVENT_COMPACTION_PENDING_CONTRACT,
+          phase: "prepared",
+          beforeHash: archiveContentHash(eventsContent),
+          afterHash: archiveContentHash(keptBatch),
+          pendingHash: archiveContentHash(archiveBatch),
+          pendingRecords: toArchive.length
+        };
+        await writeFileDurable(fileSystem, tmpPath, keptBatch);
+        await stageEventPendingArchive(
+          fileSystem,
+          pendingPath,
+          renderPendingArchiveArtifact(prepared, archiveBatch)
+        );
+        const preparedStats = await inspectOwnedArchiveFile(pendingPath, fileSystem);
+        const archiveState = await inspectArchiveRecordState(archivePath, fileSystem);
+        let archiveChainAfter = archiveState.chain;
+        for (const line of archiveBatch.split("\n").filter((item) => item.trim())) {
+          archiveChainAfter = extendArchiveRecordChain(archiveChainAfter, line);
+        }
+        const ready = {
+          ...prepared,
+          phase: "ready",
+          archiveRecordsBefore: archiveState.records,
+          archiveChainBefore: archiveState.chain,
+          archiveChainAfter
+        };
+        await replaceArchiveActive(
+          pendingPath,
+          renderPendingArchiveArtifact(ready, archiveBatch),
+          preparedStats,
+          fileSystem
+        );
+        await fileSystem.rename(tmpPath, eventsPath);
+        await syncOwnedDirectory(path.dirname(eventsPath), { filesystem: fileSystem });
+        await flushPendingArchive(archivePath, fileSystem, {
+          archiveRecordsBefore: ready.archiveRecordsBefore,
+          archiveChainBefore: ready.archiveChainBefore
+        });
+      } finally {
+        await fileSystem.rm(tmpPath, { force: true }).catch(() => {});
+      }
 
       return { archived: toArchive.length, kept: toKeep.length };
     }, options);
@@ -497,11 +1320,12 @@ export async function compactEvents(eventsPath, limit = RECENT_EVENT_LIMIT, opti
 
 /**
  * Move signal files older than retentionDays out of memory/signals/ and into
- * memory/signals-archive.jsonl. Retention controls what stays in the routed
- * daily window — it is not a licence to destroy what the user wrote.
+ * the bounded memory/signals-archive generation. Retention controls what stays
+ * in the routed daily window — it is not a licence to destroy what the user
+ * wrote.
  *
  * Crash-safe transaction: the batch is staged and fsynced, appended to the
- * archive line-idempotently, and only then are the source files unlinked.
+ * archive generation line-idempotently, and only then are the source files unlinked.
  * The unlink is the commit point, so every crash point leaves a line in both
  * places (transient duplication the next run collapses) and never in neither.
  * Staging order is unlink order, so a crash mid-delete leaves a suffix of the
@@ -576,7 +1400,9 @@ export async function trimSignals(signalsDir, retentionDays = SIGNAL_RETENTION_D
     if (sources.length === 0) return nothingToDo;
 
     if (staged.length > 0) {
-      await writeFileDurable(fileSystem, pendingPath, staged.map((line) => `${line}\n`).join(""));
+      const archiveBatch = staged.map((line) => `${line}\n`).join("");
+      assertArchiveLineBounds(archiveBatch);
+      await stagePendingArchive(fileSystem, pendingPath, archiveBatch);
       await flushPendingArchive(archivePath, fileSystem);
     }
 

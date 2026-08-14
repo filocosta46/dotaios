@@ -31,7 +31,7 @@ async function runDoctor({ aiosPath, homePath, detection }) {
   const prevExitCode = process.exitCode;
   console.log = (...args) => lines.push(args.join(" "));
   try {
-    await doctorCommand(["--path", aiosPath, "--home", homePath], { detection });
+    await doctorCommand(["--verbose", "--path", aiosPath, "--home", homePath], { detection });
     return { output: lines.join("\n"), exitCode: process.exitCode };
   } finally {
     console.log = origLog;
@@ -306,7 +306,7 @@ describe("doctorCommand", () => {
     const origLog = console.log.bind(console);
     console.log = (...args) => lines.push(args.join(" "));
     try {
-      await doctorCommand(["--path", aiosPath, "--home", tmpHome]);
+      await doctorCommand(["--verbose", "--path", aiosPath, "--home", tmpHome]);
     } finally {
       console.log = origLog;
       await fs.rm(tmpHome, { recursive: true, force: true });

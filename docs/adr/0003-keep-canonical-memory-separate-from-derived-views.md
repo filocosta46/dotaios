@@ -15,7 +15,7 @@ host-specific views without making their loss or corruption a loss of memory.
 | --- | --- | --- | --- |
 | Durable user context | User-authored files under `context/`, project records, decisions, and daily memory | The person directly, or a command they explicitly invoke for that exact record | Working context, search results, generated summaries |
 | Source material | Provenance-bearing files under `vault/` and other explicit imports | Explicit ingest/capture commands; later edits remain the person's | Search snippets, source indexes |
-| Recent event and signal memory | Append-only records under `memory/` | Explicit capture/log workflows and configured local automations with a named write contract | Bounded startup selection, search results, archives produced by explicit maintenance |
+| Recent event and signal memory | Append-only live records and bounded archive shards under `memory/` | Explicit capture/log workflows and configured local automations with a named write contract; maintenance may move complete records into canonical cold-storage shards | Bounded startup selection and search results |
 | Session evidence | Readable session Markdown under `memory/sessions/<date>/` | Explicit save/import or a separately enabled host-capture workflow | `memory/sessions/index.jsonl`, working-context selections, search results |
 | Managed scaffold | Files or marked regions DotAIOS can prove it owns | Previewed setup, activation, migration, repair, disconnect, or removal operations | Installation inventory and health reports |
 | Operational evidence | Receipts, recovery metadata, locks, metrics, and quarantine material | The exact operation that owns the artifact | Status and doctor summaries |
@@ -34,6 +34,14 @@ For sessions specifically, Markdown is canonical evidence and
 the Markdown durably before its index entry becomes visible, reconcile must
 recover orphans without deleting evidence, and delete must prove ownership of
 the exact canonical file before changing either representation.
+
+For event and signal memory, an archive shard is canonical cold storage once
+maintenance removes those records from the live file. It is not a disposable
+index or cache: search must include it, crash recovery must preserve exact
+record multiplicity, and maintenance may delete or replace it only through the
+documented ownership-checked archive protocol. Rotation markers, transaction
+envelopes, and format witnesses remain operational evidence; they prove or
+recover a state transition but are not user memory themselves.
 
 Rejected alternatives:
 

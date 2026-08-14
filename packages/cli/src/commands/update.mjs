@@ -1,5 +1,6 @@
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+import crypto from "node:crypto";
 import path from "node:path";
 import { hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
@@ -54,8 +55,16 @@ export async function updateCommand(args) {
   const attribution = project
     ? { project: project.slug, ...(project.id ? { project_id: project.id } : {}) }
     : {};
-  await appendSignal(signalsDir, { type: "update", summary: note.trim(), source: "dotaios update", ...attribution });
-  await appendEvent(eventsPath, { type: "update", summary: note.trim(), source: "dotaios update", ...attribution });
+  const recordId = crypto.randomUUID();
+  const record = {
+    type: "update",
+    summary: note.trim(),
+    source: "dotaios update",
+    record_id: recordId,
+    ...attribution
+  };
+  await appendSignal(signalsDir, record);
+  await appendEvent(eventsPath, record);
 
   console.log("Saved.");
 }

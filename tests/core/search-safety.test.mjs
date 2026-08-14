@@ -103,13 +103,182 @@ test("search rejects invalid UTF-8 without replacing bytes", async () => {
   assert.deepEqual(fs.readFileSync(filePath), bytes);
 });
 
+test("memory search rejects a rotation that changes the observed archive generation", async () => {
+  const root = tmpDir();
+  const memoryDir = path.join(root, "memory");
+  fs.mkdirSync(memoryDir);
+  fs.writeFileSync(
+    path.join(memoryDir, "events-archive.000001.jsonl"),
+    `${JSON.stringify({ ts: "2026-05-01T12:00:00.000Z", type: "note", summary: "ARCHIVE_RACE_CANARY" })}\n`,
+    { mode: 0o600 }
+  );
+  fs.writeFileSync(path.join(memoryDir, "events-archive.jsonl"), "", { mode: 0o600 });
+  const baseReader = createEvidenceReader({ roots: [root] });
+  let oldGenerationResult = null;
+  const reader = {
+    ...baseReader,
+    withScopePreflight(scopes, inspect, discover, execute, callback) {
+      return baseReader.withScopePreflight(scopes, inspect, discover, execute, async (transaction) => {
+        const result = await callback(transaction);
+        oldGenerationResult = result;
+        fs.writeFileSync(
+          path.join(memoryDir, "events-archive.000002.jsonl"),
+          `${JSON.stringify({ ts: "2026-05-02T12:00:00.000Z", type: "note", summary: "late shard" })}\n`,
+          { mode: 0o600 }
+        );
+        return result;
+      });
+    }
+  };
+
+  await assert.rejects(
+    () => searchAios({ aiosPath: root, query: "ARCHIVE_RACE_CANARY", scope: "memory", evidenceReader: reader }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+  assert.match(JSON.stringify(oldGenerationResult), /ARCHIVE_RACE_CANARY/);
+});
+
+test("memory search revalidates retained JSONL after ranking and before publishing", async () => {
+  const root = tmpDir();
+  const memoryDir = path.join(root, "memory");
+  const eventsPath = path.join(memoryDir, "events.jsonl");
+  fs.mkdirSync(memoryDir);
+  fs.writeFileSync(eventsPath, '{"summary":"RETAINED_JSONL_CANARY"}\n');
+  const baseReader = createEvidenceReader({ roots: [root] });
+  const reader = {
+    ...baseReader,
+    withScopePreflight(scopes, inspect, discover, execute, callback) {
+      return baseReader.withScopePreflight(scopes, inspect, discover, execute, async (transaction) => {
+        const result = await callback(transaction);
+        fs.writeFileSync(eventsPath, '{"summary":"RETAINED_JSONL_CHANGED"}\n');
+        return result;
+      });
+    }
+  };
+
+  await assert.rejects(
+    () => searchAios({
+      aiosPath: root,
+      query: "RETAINED_JSONL_CANARY",
+      scope: "memory",
+      evidenceReader: reader
+    }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("memory search fails closed on a linked numbered archive shard", async () => {
+  const parent = tmpDir();
+  const root = path.join(parent, "aios");
+  const memoryDir = path.join(root, "memory");
+  const outside = path.join(parent, "outside.jsonl");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  fs.writeFileSync(outside, '{"summary":"LINKED_ARCHIVE_CANARY"}\n');
+  fs.symlinkSync(outside, path.join(memoryDir, "events-archive.000001.jsonl"));
+
+  await assert.rejects(
+    () => searchAios({ aiosPath: root, query: "LINKED_ARCHIVE_CANARY", scope: "memory" }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_PATH_UNSAFE"
+  );
+});
+
+test("search ranks inside the corpus transaction and publishes only after final validation", async () => {
+  const root = tmpDir();
+  fs.writeFileSync(path.join(root, "b-body.md"), "# Body\n\nTRANSACTION_SEARCH_CANARY\n");
+  fs.writeFileSync(path.join(root, "a-heading.md"), "# TRANSACTION_SEARCH_CANARY\n\nPlain body.\n");
+  const baseReader = createEvidenceReader({ roots: [root] });
+  let transactionCalls = 0;
+  let callbackResult;
+  let releaseFinalValidation;
+  const finalValidationGate = new Promise((resolve) => {
+    releaseFinalValidation = resolve;
+  });
+  let reportCallbackComplete;
+  const callbackComplete = new Promise((resolve) => {
+    reportCallbackComplete = resolve;
+  });
+  const reader = {
+    ...baseReader,
+    async withTextCorpus(transactionRoot, directoryPath, options, callback) {
+      transactionCalls += 1;
+      return baseReader.withTextCorpus(transactionRoot, directoryPath, options, async (transaction) => {
+        callbackResult = await callback(transaction);
+        reportCallbackComplete();
+        await finalValidationGate;
+        return callbackResult;
+      });
+    }
+  };
+
+  const pending = searchMarkdownDir(root, "TRANSACTION_SEARCH_CANARY", { reader, root });
+  const firstCompleted = await Promise.race([
+    callbackComplete.then(() => "callback"),
+    pending.then(() => "search")
+  ]);
+
+  assert.equal(firstCompleted, "callback", "ranking must complete inside the transaction callback");
+  assert.deepEqual(callbackResult.map(({ file }) => file), ["a-heading.md", "b-body.md"]);
+  let published = false;
+  pending.then(() => {
+    published = true;
+  });
+  await Promise.resolve();
+  assert.equal(published, false, "callback results must remain private until final validation completes");
+
+  releaseFinalValidation();
+  const results = await pending;
+
+  assert.deepEqual(results, callbackResult);
+  assert.equal(transactionCalls, 1);
+});
+
+test("search rejects ranked results when final corpus validation observes a changed generation", async () => {
+  const root = tmpDir();
+  fs.writeFileSync(path.join(root, "note.md"), "# Existing\n\nFINAL_VALIDATION_CANARY\n");
+  const baseReader = createEvidenceReader({ roots: [root] });
+  let rankedInsideCallback = null;
+  const reader = {
+    ...baseReader,
+    withTextCorpus(transactionRoot, directoryPath, options, callback) {
+      return baseReader.withTextCorpus(transactionRoot, directoryPath, options, async (transaction) => {
+        rankedInsideCallback = await callback(transaction);
+        fs.writeFileSync(path.join(root, "late.md"), "# Late generation\n");
+        return rankedInsideCallback;
+      });
+    }
+  };
+
+  await assert.rejects(
+    () => searchMarkdownDir(root, "FINAL_VALIDATION_CANARY", { reader, root }),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+  assert.deepEqual(rankedInsideCallback.map(({ file }) => file), ["note.md"]);
+});
+
+test("request-scoped search observes added, modified, and deleted files on the next request", async () => {
+  const root = tmpDir();
+  const firstPath = path.join(root, "first.md");
+  const secondPath = path.join(root, "second.md");
+  fs.writeFileSync(firstPath, "# First\n\nNEXT_REQUEST_CANARY\n");
+  const reader = createEvidenceReader({ roots: [root] });
+  const search = () => searchMarkdownDir(root, "NEXT_REQUEST_CANARY", { reader, root });
+
+  assert.deepEqual((await search()).map(({ file }) => file), ["first.md"]);
+  fs.writeFileSync(secondPath, "# Second\n\nNEXT_REQUEST_CANARY\n");
+  assert.deepEqual((await search()).map(({ file }) => file), ["first.md", "second.md"]);
+  fs.writeFileSync(firstPath, "# First\n\nChanged content.\n");
+  assert.deepEqual((await search()).map(({ file }) => file), ["second.md"]);
+  fs.unlinkSync(secondPath);
+  assert.deepEqual(await search(), []);
+});
+
 // This asserted the budget by its number — "the 513th file" — so it passed only
 // while the default was the bounded projection's 512, which made every search on
 // a real folder fail closed. The property worth keeping is that an exhausted
 // budget still refuses rather than quietly returning a partial corpus; the
 // number it happens to be set to is not that property. The default's real size
 // is covered in tests/core/search_corpus_scale.test.mjs.
-test("search fails closed when its read budget is genuinely exhausted", async () => {
+test("scope search reports its whole corpus omitted when its read budget is exhausted", async () => {
   const root = tmpDir();
   const context = path.join(root, "context");
   fs.mkdirSync(context);
@@ -121,10 +290,282 @@ test("search fails closed when its read budget is genuinely exhausted", async ()
     limits: { maxBytes: 4096, maxFiles: 2, maxEntries: 4, maxFileBytes: 4096 }
   });
 
-  await assert.rejects(
-    () => searchAios({ aiosPath: root, query: "needle", scope: "context", evidenceReader: reader }),
-    (error) => error?.code === "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED"
-  );
+  const groups = await searchAios({ aiosPath: root, query: "needle", scope: "context", evidenceReader: reader });
+
+  assert.deepEqual([...groups], []);
+  assert.equal(groups.omissions.length, 1);
+  assert.equal(groups.omissions[0].scope, "context");
+  assert.ok(["file_count_exceeded", "entry_count_exceeded"].includes(groups.omissions[0].reason));
+});
+
+test("all-scope search returns unaffected results with a frozen path-free ceiling omission", async () => {
+  const parent = tmpDir();
+  const root = path.join(parent, "aios");
+  const vault = path.join(parent, "vault");
+  fs.mkdirSync(path.join(root, "context"), { recursive: true });
+  fs.mkdirSync(vault);
+  fs.writeFileSync(path.join(root, "context", "safe.md"), "# Safe\n\nSAFE_PARTIAL_SEARCH_CANARY\n");
+  fs.writeFileSync(path.join(vault, "oversized.md"), "x".repeat(65));
+  const reader = createEvidenceReader({
+    roots: [root, vault],
+    limits: { maxBytes: 1024, maxFiles: 100, maxEntries: 100, maxFileBytes: 64, maxDirectoryEntries: 100 }
+  });
+
+  const groups = await searchAios({
+    aiosPath: root,
+    vaultPath: vault,
+    query: "SAFE_PARTIAL_SEARCH_CANARY",
+    scope: "all",
+    evidenceReader: reader
+  });
+
+  assert.match(JSON.stringify(groups), /SAFE_PARTIAL_SEARCH_CANARY/);
+  assert.deepEqual(groups.omissions, [{
+    scope: "vault",
+    reason: "file_too_large",
+    observed: { files: 0, bytes: 0, entries: 1 },
+    inspection: "not_searched",
+    recovery: {
+      code: "split_or_move_file",
+      message: "Split the oversized file, or move it outside this search scope."
+    }
+  }]);
+  assert.equal(Object.isFrozen(groups.omissions), true);
+  assert.equal(Object.isFrozen(groups.omissions[0]), true);
+  assert.equal(Object.isFrozen(groups.omissions[0].observed), true);
+  assert.equal(Object.isFrozen(groups.omissions[0].recovery), true);
+  assert.doesNotMatch(JSON.stringify(groups.omissions), new RegExp(parent.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("all-scope preflight keeps aggregate physical work inside one request budget", async () => {
+  const root = tmpDir();
+  const context = path.join(root, "context");
+  const vault = path.join(root, "vault");
+  fs.mkdirSync(context);
+  fs.mkdirSync(vault);
+  for (const directory of [context, vault]) {
+    fs.writeFileSync(path.join(directory, "one.md"), "needle!\n");
+    fs.writeFileSync(path.join(directory, "two.md"), "needle!\n");
+  }
+  const measuredDirectories = new Set([path.resolve(context), path.resolve(vault)]);
+  const limits = {
+    maxBytes: 16,
+    maxFiles: 2,
+    maxEntries: 2,
+    maxFileBytes: 8,
+    maxDirectoryEntries: 10
+  };
+
+  for (const delayedDirectory of measuredDirectories) {
+    const physical = { bytes: 0, files: 0, entries: 0 };
+    const filesystem = new Proxy(fsp, {
+      get(target, property) {
+        if (property === "open") {
+          return async (filePath, ...args) => {
+            const resolved = path.resolve(String(filePath));
+            if (path.dirname(resolved) === delayedDirectory) {
+              await new Promise((resolve) => setTimeout(resolve, 5));
+            }
+            const handle = await fsp.open(filePath, ...args);
+            if (!measuredDirectories.has(path.dirname(resolved))) return handle;
+            physical.files += 1;
+            return Object.create(handle, {
+              read: { value: async (...readArgs) => {
+                const result = await handle.read(...readArgs);
+                physical.bytes += result.bytesRead;
+                return result;
+              } }
+            });
+          };
+        }
+        if (property === "opendir") {
+          return async (directoryPath, ...args) => {
+            const directory = await fsp.opendir(directoryPath, ...args);
+            if (!measuredDirectories.has(path.resolve(String(directoryPath)))) return directory;
+            return new Proxy(directory, {
+              get(dirTarget, dirProperty) {
+                if (dirProperty === "read") {
+                  return async (...readArgs) => {
+                    const entry = await directory.read(...readArgs);
+                    if (entry) physical.entries += 1;
+                    return entry;
+                  };
+                }
+                const value = Reflect.get(dirTarget, dirProperty, dirTarget);
+                return typeof value === "function" ? value.bind(dirTarget) : value;
+              }
+            });
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+
+    const groups = await searchAios({
+      aiosPath: root,
+      query: "needle",
+      evidenceReader: createEvidenceReader({ roots: [root], filesystem, limits })
+    });
+
+    assert.ok(groups.some(({ results }) => results.length > 0));
+    assert.ok(physical.files > 0 && physical.bytes > 0, JSON.stringify({ delayedDirectory, physical }));
+    assert.ok(physical.bytes <= limits.maxBytes, JSON.stringify({ delayedDirectory, physical }));
+    assert.ok(physical.files <= limits.maxFiles, JSON.stringify({ delayedDirectory, physical }));
+    assert.ok(physical.entries <= limits.maxEntries, JSON.stringify({ delayedDirectory, physical }));
+  }
+});
+
+test("session discovery retains catalog and body bytes without rereading before ranking", async () => {
+  const root = tmpDir();
+  const sessionsDir = path.join(root, "memory", "sessions");
+  const datedDir = path.join(sessionsDir, "2026-08-13");
+  const bodyPath = path.join(datedDir, "session.md");
+  const indexPath = path.join(sessionsDir, "index.jsonl");
+  fs.mkdirSync(datedDir, { recursive: true });
+  fs.writeFileSync(bodyPath, "---\ntitle: Session\n---\n\nSESSION_DISCOVERY_CANARY\n");
+  fs.writeFileSync(indexPath, `${JSON.stringify({
+    session_id: "session-001",
+    agent: "codex",
+    captured_at: "2026-08-13T10:00:00.000Z",
+    title: "Unrelated title",
+    path: "memory/sessions/2026-08-13/session.md"
+  })}\n`);
+  const opens = new Map();
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (filePath, ...args) => {
+    const resolved = path.resolve(String(filePath));
+    opens.set(resolved, (opens.get(resolved) || 0) + 1);
+    return fsp.open(filePath, ...args);
+  };
+
+  const [group] = await searchAios({
+    aiosPath: root,
+    query: "SESSION_DISCOVERY_CANARY",
+    scope: "sessions",
+    evidenceReader: createEvidenceReader({ roots: [root], filesystem })
+  });
+
+  assert.equal(group.results[0].session_id, "session-001");
+  assert.equal(opens.get(path.resolve(indexPath)), 1);
+  assert.equal(opens.get(path.resolve(bodyPath)), 1);
+});
+
+test("session body planning mirrors reverse query limit behavior and charges unique paths", async (t) => {
+  await t.test("a title hit does not plan an unnecessary body", async () => {
+    const root = tmpDir();
+    const sessionsDir = path.join(root, "memory", "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionsDir, "body.md"), "body does not match\n");
+    fs.writeFileSync(path.join(sessionsDir, "index.jsonl"), `${JSON.stringify({
+      session_id: "title-hit",
+      agent: "codex",
+      captured_at: "2026-08-13T10:00:00.000Z",
+      title: "EXACT_TITLE_CANARY",
+      path: "memory/sessions/body.md"
+    })}\n`);
+
+    const [group] = await searchAios({
+      aiosPath: root,
+      query: "EXACT_TITLE_CANARY",
+      scope: "sessions",
+      evidenceReader: createEvidenceReader({
+        roots: [root],
+        limits: { maxBytes: 4096, maxFiles: 1, maxEntries: 10, maxFileBytes: 4096, maxDirectoryEntries: 10 }
+      })
+    });
+
+    assert.equal(group.results[0].session_id, "title-hit");
+  });
+
+  await t.test("duplicate index rows plan and read their shared body once", async () => {
+    const root = tmpDir();
+    const sessionsDir = path.join(root, "memory", "sessions");
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    const bodyPath = path.join(sessionsDir, "body.md");
+    fs.writeFileSync(bodyPath, "UNIQUE_BODY_CANARY\n");
+    const rows = ["older", "newer"].map((sessionId, index) => JSON.stringify({
+      session_id: sessionId,
+      agent: "codex",
+      captured_at: `2026-08-13T1${index}:00:00.000Z`,
+      title: "unrelated",
+      path: "memory/sessions/body.md"
+    }));
+    fs.writeFileSync(path.join(sessionsDir, "index.jsonl"), `${rows.join("\n")}\n`);
+    const opens = new Map();
+    const filesystem = Object.create(fsp);
+    filesystem.open = async (filePath, ...args) => {
+      const resolved = path.resolve(String(filePath));
+      opens.set(resolved, (opens.get(resolved) || 0) + 1);
+      return fsp.open(filePath, ...args);
+    };
+
+    const [group] = await searchAios({
+      aiosPath: root,
+      query: "UNIQUE_BODY_CANARY",
+      scope: "sessions",
+      limit: 1,
+      evidenceReader: createEvidenceReader({
+        roots: [root],
+        filesystem,
+        limits: { maxBytes: 4096, maxFiles: 2, maxEntries: 10, maxFileBytes: 4096, maxDirectoryEntries: 10 }
+      })
+    });
+
+    assert.equal(group.results[0].session_id, "newer");
+    assert.equal(opens.get(path.resolve(bodyPath)), 1);
+  });
+});
+
+test("scope search distinguishes every skippable ceiling without catching integrity failures", async (t) => {
+  const cases = [
+    {
+      name: "directory entries",
+      reason: "directory_entries_exceeded",
+      limits: { maxBytes: 1024, maxFiles: 10, maxEntries: 10, maxFileBytes: 1024, maxDirectoryEntries: 1 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    },
+    {
+      name: "aggregate bytes",
+      reason: "aggregate_bytes_exceeded",
+      limits: { maxBytes: 7, maxFiles: 10, maxEntries: 10, maxFileBytes: 10, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    },
+    {
+      name: "file count",
+      reason: "file_count_exceeded",
+      limits: { maxBytes: 1024, maxFiles: 1, maxEntries: 10, maxFileBytes: 1024, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    },
+    {
+      name: "entry count",
+      reason: "entry_count_exceeded",
+      limits: { maxBytes: 1024, maxFiles: 10, maxEntries: 1, maxFileBytes: 1024, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]]
+    }
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, async () => {
+      const root = tmpDir();
+      const context = path.join(root, "context");
+      fs.mkdirSync(context);
+      for (const [name, content] of fixture.files) fs.writeFileSync(path.join(context, name), content);
+      const groups = await searchAios({
+        aiosPath: root,
+        query: "missing",
+        scope: "context",
+        evidenceReader: createEvidenceReader({ roots: [root], limits: fixture.limits })
+      });
+
+      assert.deepEqual([...groups], []);
+      assert.equal(groups.omissions[0].reason, fixture.reason);
+      assert.equal(
+        groups.omissions[0].inspection,
+        fixture.reason === "directory_entries_exceeded" ? "partially_enumerated" : "not_searched"
+      );
+    });
+  }
 });
 
 test("search rejects a special eligible file before opening it", {

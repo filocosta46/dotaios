@@ -11,6 +11,7 @@ const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 const server = path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
+const SEARCH_RESULT_BUDGET_FLOOR = 3530;
 
 test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   const { aiosPath } = setupAios();
@@ -55,7 +56,7 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
       jsonrpc: "2.0",
       id: 4,
       method: "tools/call",
-      params: { name: "search_aios", arguments: { query: "gateway", scope: "projects", project: "demo-id", budget: 1000 } },
+      params: { name: "search_aios", arguments: { query: "gateway", scope: "projects", project: "demo-id", budget: SEARCH_RESULT_BUDGET_FLOOR } },
     },
     {
       jsonrpc: "2.0",
@@ -100,6 +101,28 @@ test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   assert.equal(fs.readFileSync(eventsPath, "utf8"), eventsBefore);
 });
 
+test("read_working_context preserves visible identity and priorities but omits frontmatter without mutation", () => {
+  const { aiosPath } = setupAios();
+  const identityPath = path.join(aiosPath, "context", "identity.md");
+  const prioritiesPath = path.join(aiosPath, "context", "priorities.md");
+  fs.writeFileSync(identityPath, "---\nsource: private-import\nkind: context\n---\n# Identity\n\nI lead the launch.\n");
+  fs.writeFileSync(prioritiesPath, "---\nupdated_at: 2026-08-13\n---\n# Priorities\n\nShip the trust release.\n");
+  const before = [fs.readFileSync(identityPath), fs.readFileSync(prioritiesPath)];
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: "read_working_context", arguments: { budget: 1000 } }
+  }]);
+  const markdown = JSON.parse(toolText(response)).markdown;
+
+  assert.match(markdown, /I lead the launch/);
+  assert.match(markdown, /Ship the trust release/);
+  assert.doesNotMatch(markdown, /private-import|updated_at|kind: context|^---$/m);
+  assert.deepEqual([fs.readFileSync(identityPath), fs.readFileSync(prioritiesPath)], before);
+});
+
 test("search_aios matches CLI project selection by slug and stable id without widening the tool allowlist", () => {
   const { aiosPath } = setupAios();
   for (const [slug, id, canary] of [
@@ -119,13 +142,13 @@ test("search_aios matches CLI project selection by slug and stable id without wi
       jsonrpc: "2.0",
       id: 2,
       method: "tools/call",
-      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "acme-campaign", budget: 2000 } }
+      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "acme-campaign", budget: SEARCH_RESULT_BUDGET_FLOOR } }
     },
     {
       jsonrpc: "2.0",
       id: 3,
       method: "tools/call",
-      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "project-acme-001", budget: 2000 } }
+      params: { name: "search_aios", arguments: { query: "campaign assets", scope: "projects", project: "project-acme-001", budget: SEARCH_RESULT_BUDGET_FLOOR } }
     }
   ]);
 
@@ -162,7 +185,7 @@ test("search_aios preserves the exact raw project selector like CLI and core sea
           query: "RAW_SELECTOR_MCP_CANARY",
           scope: "projects",
           project: " acme-campaign ",
-          budget: 2000,
+          budget: SEARCH_RESULT_BUDGET_FLOOR,
         },
       },
     },
@@ -176,7 +199,7 @@ test("search_aios preserves the exact raw project selector like CLI and core sea
           query: "RAW_SELECTOR_MCP_CANARY",
           scope: "projects",
           project: "acme-campaign",
-          budget: 2000,
+          budget: SEARCH_RESULT_BUDGET_FLOOR,
         },
       },
     },
@@ -218,7 +241,7 @@ test("search_aios refuses a selected catalog identity outside the selector contr
         query: "INVALID_ID_PRIVATE_CANARY",
         scope: "projects",
         project: "acme-campaign",
-        budget: 2000,
+        budget: SEARCH_RESULT_BUDGET_FLOOR,
       },
     },
   }]);
@@ -236,7 +259,7 @@ test("mcp search budgets bound the exact serialized response at minimum, default
     `# Work\n\n${"bounded memory ".repeat(200)}\n`,
   );
   const query = `bounded ${"context ".repeat(55)}`.slice(0, 500);
-  for (const requestedBudget of [256, undefined, 32000]) {
+  for (const requestedBudget of [SEARCH_RESULT_BUDGET_FLOOR, undefined, 32000]) {
     const argumentsValue = { query };
     if (requestedBudget !== undefined) argumentsValue.budget = requestedBudget;
     const [response] = runMcp(aiosPath, [{
@@ -252,8 +275,52 @@ test("mcp search budgets bound the exact serialized response at minimum, default
     assert.ok(text.length <= expectedBudget);
     assert.equal(payload.budget.used, text.length);
     assert.equal(payload.budget.limit, expectedBudget);
-    if (requestedBudget === 256) assert.equal(payload.budget.truncated, true);
+    if (requestedBudget === SEARCH_RESULT_BUDGET_FLOOR) assert.equal(payload.budget.truncated, true);
   }
+});
+
+test("search_aios stabilizes budget metadata across the pretty-to-compact boundary", () => {
+  const { aiosPath } = setupAios();
+  for (let index = 0; index < 20; index += 1) {
+    fs.writeFileSync(
+      path.join(aiosPath, "context", `boundary-${index}.md`),
+      `# Boundary ${index}\n\nserialization-boundary ${"x".repeat(193)}\n`,
+    );
+  }
+
+  const request = {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "serialization-boundary", scope: "context", limit: 20, budget: 32000 },
+    },
+  };
+  const [fullResponse] = runMcp(aiosPath, [request]);
+  const fullPayload = JSON.parse(toolText(fullResponse));
+  const boundarySeed = {
+    ...fullPayload,
+    budget: { ...fullPayload.budget, limit: 10000, used: 0 },
+  };
+  const boundaryBudget = JSON.stringify(boundarySeed, null, 2).length + 3;
+
+  assert.ok(boundaryBudget >= 10000 && boundaryBudget <= 32000);
+  assert.ok(JSON.stringify(boundarySeed).length < 10000);
+
+  request.id = 2;
+  request.params.arguments.budget = boundaryBudget;
+  const [boundaryResponse] = runMcp(aiosPath, [request]);
+
+  assert.equal(boundaryResponse.error, undefined);
+  const text = toolText(boundaryResponse);
+  const payload = JSON.parse(text);
+  assert.equal(payload.results.length, 20);
+  assert.equal(payload.budget.limit, boundaryBudget);
+  assert.equal(payload.budget.used, text.length);
+  assert.equal(payload.budget.truncated, false);
+  assert.equal(text, JSON.stringify(payload));
+  assert.notEqual(text, JSON.stringify(payload, null, 2));
 });
 
 test("mcp skill budgets bound every returned field at minimum, default, and maximum", () => {
@@ -293,7 +360,7 @@ test("mcp response budgets remain exact for astral Unicode inputs", () => {
       jsonrpc: "2.0",
       id: 1,
       method: "tools/call",
-      params: { name: "search_aios", arguments: { query: astral, scope: "context", budget: 256 } },
+      params: { name: "search_aios", arguments: { query: astral, scope: "context", budget: SEARCH_RESULT_BUDGET_FLOOR } },
     },
     {
       jsonrpc: "2.0",
@@ -303,14 +370,17 @@ test("mcp response budgets remain exact for astral Unicode inputs", () => {
     },
   ]);
 
-  for (const response of responses) {
+  for (const [response, expectedBudget] of responses.map((response, index) => [
+    response,
+    index === 0 ? SEARCH_RESULT_BUDGET_FLOOR : 256,
+  ])) {
     assert.equal(response.error, undefined);
     const text = toolText(response);
     const payload = JSON.parse(text);
-    assert.ok(text.length <= 256);
-    assert.equal(payload.budget.limit, 256);
+    assert.ok(text.length <= expectedBudget);
+    assert.equal(payload.budget.limit, expectedBudget);
     assert.equal(payload.budget.used, text.length);
-    assert.equal(payload.budget.truncated, true);
+    assert.equal(payload.budget.truncated, expectedBudget === 256);
   }
 });
 
@@ -550,7 +620,7 @@ test("search_aios fails closed on linked evidence without exposing a path", () =
   }
 });
 
-test("search_aios enforces its per-file source-work bound on JSONL", () => {
+test("search_aios returns an incomplete successful envelope for a per-file ceiling", () => {
   const { aiosPath } = setupAios();
   const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
   // Sized from the shipped limit, not a copy of it. Hardcoding 1 MiB meant this
@@ -569,13 +639,175 @@ test("search_aios enforces its per-file source-work bound on JSONL", () => {
   }]);
   const [response] = result.stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line));
 
-  assert.equal(response.error.code, -32603);
-  assert.equal(response.error.message, "DotAIOS request failed safely.");
+  assert.equal(response.error, undefined);
+  assert.equal(response.result.isError, false);
+  const payload = JSON.parse(toolText(response));
+  assert.equal(payload.complete, false);
+  assert.deepEqual(payload.results, []);
+  assert.equal(payload.omissions[0].scope, "memory");
+  assert.equal(payload.omissions[0].reason, "file_too_large");
+  assert.equal(payload.budget.truncated, false);
   assert.deepEqual(snapshotTree(aiosPath), before);
   assert.doesNotMatch(
     `${result.stdout}\n${result.stderr}`,
     new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
   );
+});
+
+test("search_aios succeeds at its advertised budget floor with one complete omission", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    Buffer.alloc(DEFAULT_EVIDENCE_READ_LIMITS.maxFileBytes + 1, 0x61),
+  );
+
+  const [listed] = runMcp(aiosPath, [
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+  ]);
+  const budgetSchema = listed.result.tools
+    .find((tool) => tool.name === "search_aios")
+    .inputSchema.properties.budget;
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 2,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "missing", scope: "memory", budget: budgetSchema.minimum },
+    },
+  }]);
+
+  assert.equal(budgetSchema.minimum, SEARCH_RESULT_BUDGET_FLOOR);
+  assert.equal(response.error, undefined);
+  assert.equal(response.result.isError, false);
+  const text = toolText(response);
+  const payload = JSON.parse(text);
+  assert.equal(payload.complete, false);
+  assert.deepEqual(payload.results, []);
+  assert.deepEqual(Object.keys(payload.omissions[0]), [
+    "scope",
+    "reason",
+    "observed",
+    "inspection",
+    "recovery",
+  ]);
+  assert.equal(payload.omissions[0].reason, "file_too_large");
+  assert.equal(payload.omissions[0].recovery.code, "split_or_move_file");
+  assert.match(payload.omissions[0].recovery.message, /split|move/i);
+  assert.equal(payload.budget.limit, budgetSchema.minimum);
+  assert.equal(payload.budget.used, text.length);
+  assert.ok(text.length <= budgetSchema.minimum);
+});
+
+test("search_aios fits its maximum selectable omission set at the exact budget floor", () => {
+  const { aiosPath } = setupAios();
+  const projectSlug = "ceiling-project";
+  const projectPath = path.join(aiosPath, "projects", projectSlug);
+  fs.mkdirSync(projectPath, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectPath, "README.md"),
+    `---\nid: ceiling-project-id\nproject: ${projectSlug}\n---\n# Ceiling project\n`,
+  );
+  for (const filePath of [
+    path.join(aiosPath, "memory", "sessions", "index.jsonl"),
+    path.join(aiosPath, "context", "oversized.md"),
+    path.join(aiosPath, "memory", "events.jsonl"),
+    path.join(aiosPath, "vault", "oversized.md"),
+    path.join(projectPath, "oversized.md"),
+    path.join(aiosPath, "decisions", "oversized.md"),
+    path.join(aiosPath, "skills", "oversized", "SKILL.md"),
+    path.join(aiosPath, "references", "oversized.md"),
+    path.join(aiosPath, "plugins", "oversized", "manifest.json"),
+  ]) {
+    writeOversizedEvidenceFile(filePath);
+  }
+
+  const responses = runMcp(aiosPath, [
+    {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "search_aios",
+        arguments: {
+          query: "missing",
+          scope: "all",
+          project: projectSlug,
+          budget: SEARCH_RESULT_BUDGET_FLOOR - 1,
+        },
+      },
+    },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "search_aios",
+        arguments: {
+          query: "missing",
+          scope: "all",
+          project: projectSlug,
+          budget: SEARCH_RESULT_BUDGET_FLOOR,
+        },
+      },
+    },
+  ]);
+
+  assert.equal(responses[0].error.code, -32602);
+  assert.match(responses[0].error.message, new RegExp(`${SEARCH_RESULT_BUDGET_FLOOR} to 32000`));
+  assert.equal(responses[1].error, undefined);
+  assert.equal(responses[1].result.isError, false);
+  const text = toolText(responses[1]);
+  const payload = JSON.parse(text);
+  assert.equal(payload.complete, false);
+  assert.deepEqual(payload.results, []);
+  assert.deepEqual(
+    payload.omissions.map((omission) => omission.scope),
+    ["sessions", "context", "memory", "vault", "projects", "decisions", "skills", "references", "plugins"],
+  );
+  assert.equal(payload.omissions.length, 9);
+  for (const omission of payload.omissions) {
+    assert.equal(omission.reason, "file_too_large");
+    assert.deepEqual(Object.keys(omission.observed), ["files", "bytes", "entries"]);
+    assert.equal(omission.inspection, "not_searched");
+    assert.equal(omission.recovery.code, "split_or_move_file");
+    assert.match(omission.recovery.message, /split|move/i);
+  }
+  assert.equal(payload.budget.limit, SEARCH_RESULT_BUDGET_FLOOR);
+  assert.equal(payload.budget.used, text.length);
+  assert.ok(text.length <= SEARCH_RESULT_BUDGET_FLOOR);
+  assert.doesNotMatch(JSON.stringify(payload.omissions), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("search_aios keeps completion metadata when result transport truncates", () => {
+  const { aiosPath } = setupAios();
+  fs.writeFileSync(
+    path.join(aiosPath, "memory", "events.jsonl"),
+    Buffer.alloc(DEFAULT_EVIDENCE_READ_LIMITS.maxFileBytes + 1, 0x61)
+  );
+  for (let index = 0; index < 8; index += 1) {
+    fs.writeFileSync(
+      path.join(aiosPath, "context", `partial-${index}.md`),
+      `# Work ${index}\n\n${"MCP_PARTIAL_TRANSPORT_CANARY ".repeat(100)}\n`,
+    );
+  }
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "search_aios",
+      arguments: { query: "MCP_PARTIAL_TRANSPORT_CANARY", scope: "all", budget: SEARCH_RESULT_BUDGET_FLOOR }
+    }
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.equal(response.result.isError, false);
+  assert.equal(payload.complete, false);
+  assert.equal(payload.budget.truncated, true);
+  assert.equal(payload.omissions[0].scope, "memory");
+  assert.equal(payload.omissions[0].reason, "file_too_large");
 });
 
 test("search_aios rejects a session index path that escapes the AIOS root", () => {
@@ -1150,6 +1382,16 @@ function setupAios() {
   });
   if (result.status !== 0) throw new Error(`init failed\n${result.stdout}\n${result.stderr}`);
   return { aiosPath, tempRoot };
+}
+
+function writeOversizedEvidenceFile(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const descriptor = fs.openSync(filePath, "w");
+  try {
+    fs.ftruncateSync(descriptor, DEFAULT_EVIDENCE_READ_LIMITS.maxFileBytes + 1);
+  } finally {
+    fs.closeSync(descriptor);
+  }
 }
 
 function runMcp(aiosPath, messages) {

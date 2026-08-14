@@ -9,7 +9,10 @@ import {
   WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT,
   buildWorkingContextEnvelope
 } from "../../core/src/working-context-envelope.mjs";
-import { createEvidenceReader } from "../../core/src/evidence-reader.mjs";
+import {
+  DEFAULT_EVIDENCE_READ_LIMITS,
+  createEvidenceReader,
+} from "../../core/src/evidence-reader.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
 import { validateProjectSelector } from "../../core/src/projects.mjs";
@@ -22,6 +25,8 @@ const SERVER_VERSION = JSON.parse(
 ).version;
 const DEFAULT_RESULT_BUDGET = 6000;
 const MAX_SEARCH_CONFIG_BYTES = 1024 * 1024;
+const SEARCH_QUERY_TRUNCATION_MARKER = "[query truncated]";
+const MIN_SEARCH_RESULT_BUDGET = deriveMinimumSearchResultBudget();
 
 async function main(argv = process.argv.slice(2)) {
   if (argv.includes("--help") || argv.includes("-h")) {
@@ -209,7 +214,7 @@ class DotaiosMcpServer {
     const limit = args.limit === undefined ? 10 : boundedInteger(args.limit, "limit", 1, 20);
     const budget = args.budget === undefined
       ? DEFAULT_RESULT_BUDGET
-      : boundedInteger(args.budget, "budget", 256, 32000);
+      : boundedInteger(args.budget, "budget", MIN_SEARCH_RESULT_BUDGET, 32000);
     const scope = optionalString(args.scope) || "all";
     if (!SEARCH_SCOPES.includes(scope)) {
       throw protocolError(-32602, `scope must be one of: ${SEARCH_SCOPES.join(", ")}`);
@@ -254,6 +259,7 @@ class DotaiosMcpServer {
           ? { projects: "omitted" }
           : null,
       groups,
+      omissions: groups.omissions,
       limit: budget
     });
   }
@@ -307,7 +313,13 @@ function tools() {
             description: "Optional canonical project slug or stable id. Required for project-only scope."
           },
           limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
-          budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000 },
+          budget: {
+            type: "integer",
+            minimum: MIN_SEARCH_RESULT_BUDGET,
+            maximum: 32000,
+            default: DEFAULT_RESULT_BUDGET,
+            description: "Character budget for the complete serialized search response, including full omission metadata.",
+          },
         },
         required: ["query"],
       },
@@ -330,14 +342,17 @@ function tools() {
   ];
 }
 
-function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, limit }) {
+function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omissions = [], limit }) {
+  const complete = omissions.length === 0;
   const selected = [];
   let truncated = false;
   outer: for (const group of groups) {
     for (const rawResult of group.results || []) {
       const result = sanitizeResultValue(rawResult);
       const candidate = [...selected, { scope: group.scope, ...result }];
-      const candidateText = serializeSearchEnvelope({ query, scope, scopeDetail, results: candidate, limit, truncated: false });
+      const candidateText = serializeSearchEnvelope({
+        query, scope, scopeDetail, results: candidate, complete, omissions, limit, truncated: false
+      });
       if (candidateText.length > limit) {
         truncated = true;
         break outer;
@@ -347,25 +362,30 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, limi
   }
 
   let boundedQuery = query;
-  let serialized = serializeSearchEnvelope({ query: boundedQuery, scope, scopeDetail, results: selected, limit, truncated });
+  let serialized = serializeSearchEnvelope({
+    query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, limit, truncated
+  });
   while (serialized.length > limit && selected.length > 0) {
     selected.pop();
     truncated = true;
-    serialized = serializeSearchEnvelope({ query: boundedQuery, scope, scopeDetail, results: selected, limit, truncated });
+    serialized = serializeSearchEnvelope({
+      query: boundedQuery, scope, scopeDetail, results: selected, complete, omissions, limit, truncated
+    });
   }
 
   if (serialized.length > limit) {
-    const marker = "[query truncated]";
     truncated = true;
     const fitted = fitSerializedString({
       value: boundedQuery,
-      marker,
+      marker: SEARCH_QUERY_TRUNCATION_MARKER,
       limit,
       serialize: (candidate) => serializeSearchEnvelope({
         query: candidate,
         scope,
         scopeDetail,
         results: selected,
+        complete,
+        omissions,
         limit,
         truncated
       })
@@ -443,20 +463,62 @@ function serializeSkillEnvelope({ intent, matches, limit, truncated }) {
   throw new Error("Could not stabilize skill response budget metadata");
 }
 
-function serializeSearchEnvelope({ query, scope, scopeDetail, results, limit, truncated }) {
+function serializeSearchEnvelope({ query, scope, scopeDetail, results, complete, omissions, limit, truncated }) {
+  const envelope = (used) => ({
+    query,
+    scope,
+    ...(scopeDetail ? { scope_selection: scopeDetail } : {}),
+    results,
+    complete,
+    omissions,
+    budget: { limit, used, truncated },
+  });
+  // Keep the representation fixed so changing `used` cannot oscillate across the limit.
+  const usePretty = JSON.stringify(envelope(limit), null, 2).length <= limit;
   let used = 0;
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const serialized = JSON.stringify({
-      query,
-      scope,
-      ...(scopeDetail ? { scope_selection: scopeDetail } : {}),
-      results,
-      budget: { limit, used, truncated },
-    }, null, 2);
+    const value = envelope(used);
+    const serialized = usePretty ? JSON.stringify(value, null, 2) : JSON.stringify(value);
     if (serialized.length === used) return serialized;
     used = serialized.length;
   }
   throw new Error("Could not stabilize search response budget metadata");
+}
+
+function deriveMinimumSearchResultBudget() {
+  const maximumSelector = "\u{10400}".repeat(200);
+  const maximumOmissions = SEARCH_SCOPES
+    .filter((scope) => scope !== "all")
+    .map((scope) => ({
+      scope,
+      reason: "directory_entries_exceeded",
+      observed: {
+        files: DEFAULT_EVIDENCE_READ_LIMITS.maxFiles + 1,
+        bytes: DEFAULT_EVIDENCE_READ_LIMITS.maxBytes + 1,
+        entries: DEFAULT_EVIDENCE_READ_LIMITS.maxEntries + 1,
+      },
+      inspection: "partially_enumerated",
+      recovery: {
+        code: "reduce_directory_entries",
+        message: "Move some directory entries elsewhere, then retry the same search.",
+      },
+    }));
+  let candidate = 0;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const serialized = serializeSearchEnvelope({
+      query: SEARCH_QUERY_TRUNCATION_MARKER,
+      scope: "all",
+      scopeDetail: { project: maximumSelector, project_id: maximumSelector },
+      results: [],
+      complete: false,
+      omissions: maximumOmissions,
+      limit: candidate,
+      truncated: true,
+    });
+    if (serialized.length === candidate) return candidate;
+    candidate = serialized.length;
+  }
+  throw new Error("Could not derive the minimum search response budget");
 }
 
 function fitSerializedString({ value, marker, limit, serialize }) {

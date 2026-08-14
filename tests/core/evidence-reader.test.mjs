@@ -5,11 +5,48 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
+import { createEvidenceReader, EvidenceReadError } from "../../packages/core/src/evidence-reader.mjs";
+import { readContainedSnapshotFile } from "../../packages/core/src/contained-read.mjs";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-evidence-reader-"));
 }
+
+test("snapshot file reads fail closed before open when no no-follow capability exists", async () => {
+  const root = tmpDir();
+  const filePath = path.join(root, "note.md");
+  fs.writeFileSync(filePath, "bounded evidence\n");
+  let openCalls = 0;
+  const filesystem = new Proxy(fsp, {
+    get(target, property) {
+      if (property === "open") {
+        return async (...args) => {
+          openCalls += 1;
+          return target.open(...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+
+  await assert.rejects(
+    () => readContainedSnapshotFile(root, filePath, {
+      filesystem,
+      parentPath: root,
+      parentSnapshot: { stats: fs.lstatSync(root, { bigint: true }), ancestors: [] },
+      expectedSnapshot: {
+        type: "regular-file",
+        stats: fs.lstatSync(filePath),
+        ancestors: []
+      },
+      noFollowFlag: 0,
+      encoding: "utf8"
+    }),
+    (error) => error?.code === "DOTAIOS_BOUNDED_FILE_READ_UNAVAILABLE"
+  );
+  assert.equal(openCalls, 0, "an unsupported platform must be refused before pathname open");
+});
 
 test("evidence reader lists one directory deterministically without traversing it", async () => {
   const root = tmpDir();
@@ -158,4 +195,990 @@ test("evidence reader rejects a real directory replacement after enumeration", a
     () => reader.readText(root, listed),
     (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
   );
+});
+
+test("evidence reader maps a shallow and nested text corpus inside one validated transaction", async () => {
+  const root = tmpDir();
+  const corpus = path.join(root, "vault");
+  const nested = path.join(corpus, "nested");
+  fs.mkdirSync(nested, { recursive: true });
+  fs.writeFileSync(path.join(corpus, "alpha.md"), "# Alpha\n\nALPHA_CANARY\n");
+  fs.writeFileSync(path.join(nested, "beta.md"), "# Beta\n\nBETA_CANARY\n");
+  fs.writeFileSync(path.join(nested, "ignored.txt"), "IGNORED_CANARY\n");
+  const reader = createEvidenceReader({ roots: [root] });
+
+  const observed = await reader.withTextCorpus(
+    root,
+    corpus,
+    { extensions: [".md"] },
+    (transaction) => transaction.mapFiles(({ filePath, content }) => ({ filePath, content }))
+  );
+
+  assert.deepEqual(observed, [
+    { filePath: path.join(corpus, "alpha.md"), content: "# Alpha\n\nALPHA_CANARY\n" },
+    { filePath: path.join(nested, "beta.md"), content: "# Beta\n\nBETA_CANARY\n" }
+  ]);
+});
+
+test("evidence corpus transactions revalidate the authorized root even when the corpus is missing", async () => {
+  const parent = tmpDir();
+  const root = path.join(parent, "authorized");
+  const parked = path.join(parent, "authorized-parked");
+  fs.mkdirSync(root);
+  const reader = createEvidenceReader({ roots: [root] });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      path.join(root, "missing"),
+      { extensions: [".md"] },
+      async (transaction) => {
+        assert.deepEqual(await transaction.mapFiles(({ content }) => content), []);
+        fs.renameSync(root, parked);
+        fs.mkdirSync(root);
+        return "must not escape";
+      }
+    ),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("evidence corpus revalidation accepts an unchanged symlinked authorized root", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink creation requires elevated Windows privileges");
+  const parent = tmpDir();
+  const realRoot = path.join(parent, "real-authorized");
+  const linkedRoot = path.join(parent, "linked-authorized");
+  fs.mkdirSync(realRoot);
+  fs.writeFileSync(path.join(realRoot, "note.md"), "SYMLINKED_ROOT_CORPUS_CANARY\n");
+  fs.symlinkSync(realRoot, linkedRoot, "dir");
+  const reader = createEvidenceReader({ roots: [linkedRoot] });
+
+  const observed = await reader.withTextCorpus(
+    linkedRoot,
+    linkedRoot,
+    { extensions: [".md"] },
+    (transaction) => transaction.mapFiles(({ content }) => content)
+  );
+
+  assert.deepEqual(observed, ["SYMLINKED_ROOT_CORPUS_CANARY\n"]);
+});
+
+test("evidence corpus transactions revalidate the nearest observed ancestor of a nested missing corpus", async () => {
+  const root = tmpDir();
+  const existing = path.join(root, "existing");
+  const missing = path.join(existing, "future", "corpus");
+  fs.mkdirSync(existing);
+  const reader = createEvidenceReader({ roots: [root] });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      missing,
+      { extensions: [".md"] },
+      async (transaction) => {
+        assert.deepEqual(await transaction.mapFiles(({ content }) => content), []);
+        fs.mkdirSync(missing, { recursive: true });
+        fs.writeFileSync(path.join(missing, "inserted.md"), "# Inserted\n");
+        return "must not escape";
+      }
+    ),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("evidence corpus transactions support an external authorized root and selector predicate", async () => {
+  const parent = tmpDir();
+  const aiosRoot = path.join(parent, "aios");
+  const externalRoot = path.join(parent, "external-vault");
+  fs.mkdirSync(aiosRoot);
+  fs.mkdirSync(path.join(externalRoot, "plugin"), { recursive: true });
+  fs.writeFileSync(path.join(externalRoot, "plugin", "manifest.json"), '{"name":"selected"}\n');
+  fs.writeFileSync(path.join(externalRoot, "plugin", "private.json"), '{"name":"private"}\n');
+  fs.writeFileSync(path.join(externalRoot, "note.md"), "# Not selected\n");
+  const reader = createEvidenceReader({ roots: [aiosRoot, externalRoot] });
+
+  const observed = await reader.withTextCorpus(
+    externalRoot,
+    externalRoot,
+    { includeFile: (filePath) => path.basename(filePath) === "manifest.json" },
+    (transaction) => transaction.mapFiles((file) => file)
+  );
+
+  assert.deepEqual(observed, [{
+    filePath: path.join(externalRoot, "plugin", "manifest.json"),
+    content: '{"name":"selected"}\n',
+    mtimeMs: fs.statSync(path.join(externalRoot, "plugin", "manifest.json")).mtimeMs
+  }]);
+});
+
+test("evidence corpus transactions preserve ordinary contained-read semantics for in-root hard links", async () => {
+  const root = tmpDir();
+  const original = path.join(root, "original.txt");
+  const linked = path.join(root, "linked.md");
+  fs.writeFileSync(original, "# Shared inode\n\nHARD_LINK_CANARY\n");
+  fs.linkSync(original, linked);
+  const ordinaryReader = createEvidenceReader({ roots: [root] });
+  const expected = await ordinaryReader.readText(root, linked);
+  const transactionReader = createEvidenceReader({ roots: [root] });
+
+  const observed = await transactionReader.withTextCorpus(
+    root,
+    root,
+    { extensions: [".md"] },
+    (transaction) => transaction.mapFiles(({ filePath, content }) => ({ filePath, content }))
+  );
+
+  assert.deepEqual(observed, [{ filePath: linked, content: expected }]);
+});
+
+test("evidence corpus transaction capabilities close before successful results escape", async () => {
+  const root = tmpDir();
+  const source = path.join(root, "note.md");
+  fs.writeFileSync(source, "# Note\n");
+  let finalValidationArmed = false;
+  let releaseValidation;
+  let validationEntered;
+  const entered = new Promise((resolve) => { validationEntered = resolve; });
+  const released = new Promise((resolve) => { releaseValidation = resolve; });
+  const filesystem = Object.create(fsp);
+  filesystem.lstat = async (targetPath, options) => {
+    if (
+      finalValidationArmed
+      && path.resolve(String(targetPath)) === path.resolve(root)
+      && options?.bigint === true
+    ) {
+      finalValidationArmed = false;
+      validationEntered();
+      await released;
+    }
+    return fsp.lstat(targetPath, options);
+  };
+  const reader = createEvidenceReader({ roots: [root], filesystem });
+  let capturedTransaction;
+  let settled = false;
+  const pending = reader.withTextCorpus(
+    root,
+    root,
+    { extensions: [".md"] },
+    async (transaction) => {
+      capturedTransaction = transaction;
+      const mapped = await transaction.mapFiles(({ content }) => content);
+      finalValidationArmed = true;
+      return mapped;
+    }
+  );
+  pending.finally(() => { settled = true; }).catch(() => {});
+
+  await entered;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false);
+  releaseValidation();
+  assert.deepEqual(await pending, ["# Note\n"]);
+  assert.throws(
+    () => capturedTransaction.mapFiles(({ content }) => content),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_TRANSACTION_CLOSED"
+  );
+});
+
+test("evidence corpus transactions preserve caller-work failures", async () => {
+  const root = tmpDir();
+  fs.writeFileSync(path.join(root, "note.md"), "# Note\n");
+  const reader = createEvidenceReader({ roots: [root] });
+  const failure = new Error("ranking failed");
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      root,
+      { extensions: [".md"] },
+      async (transaction) => {
+        await transaction.mapFiles(({ content }) => content);
+        throw failure;
+      }
+    ),
+    (error) => error === failure
+  );
+});
+
+test("evidence corpus transactions reject root, ancestor, and enumerated-directory swaps", async (t) => {
+  for (const kind of ["root", "ancestor", "directory"]) {
+    await t.test(kind, async () => {
+      const parent = tmpDir();
+      const root = path.join(parent, "authorized");
+      const ancestor = path.join(root, "nested");
+      const corpus = path.join(ancestor, "corpus");
+      fs.mkdirSync(corpus, { recursive: true });
+      fs.writeFileSync(path.join(corpus, "note.md"), "# Original\n");
+      const target = { root, ancestor, directory: corpus }[kind];
+      const parked = `${target}-parked`;
+      const reader = createEvidenceReader({ roots: [root] });
+
+      await assert.rejects(
+        () => reader.withTextCorpus(
+          root,
+          corpus,
+          { extensions: [".md"] },
+          async (transaction) => {
+            await transaction.mapFiles(({ content }) => content);
+            fs.renameSync(target, parked);
+            fs.mkdirSync(target, { recursive: true });
+            return `${kind} result must not escape`;
+          }
+        ),
+        (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+      );
+    });
+  }
+});
+
+test("evidence corpus transactions reject a directory replacement at the enumeration-open barrier", async () => {
+  const root = tmpDir();
+  const corpus = path.join(root, "corpus");
+  const parked = path.join(root, "corpus-parked");
+  fs.mkdirSync(corpus);
+  fs.writeFileSync(path.join(corpus, "note.md"), "# Original\n");
+  let swapped = false;
+  const filesystem = Object.create(fsp);
+  filesystem.opendir = async (targetPath, options) => {
+    if (!swapped && path.resolve(String(targetPath)) === path.resolve(corpus)) {
+      swapped = true;
+      await fsp.rename(corpus, parked);
+      await fsp.mkdir(corpus);
+      await fsp.writeFile(path.join(corpus, "note.md"), "# Replacement\n");
+    }
+    return fsp.opendir(targetPath, options);
+  };
+  const reader = createEvidenceReader({ roots: [root], filesystem });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      corpus,
+      { extensions: [".md"] },
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (error) => swapped && error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("evidence corpus transactions bind every opened file to its enumerated parent identity", async () => {
+  const root = tmpDir();
+  const corpus = path.join(root, "corpus");
+  const parked = path.join(root, "corpus-parked");
+  const source = path.join(corpus, "note.md");
+  fs.mkdirSync(corpus);
+  fs.writeFileSync(source, "# Original\n\nORIGINAL_CANARY\n");
+  let swapped = false;
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (targetPath, flags) => {
+    if (!swapped && path.resolve(String(targetPath)) === path.resolve(source)) {
+      swapped = true;
+      await fsp.rename(corpus, parked);
+      await fsp.mkdir(corpus);
+      await fsp.writeFile(source, "# Replacement\n\nREPLACEMENT_CANARY\n");
+    }
+    return fsp.open(targetPath, flags);
+  };
+  const reader = createEvidenceReader({ roots: [root], filesystem });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      corpus,
+      { extensions: [".md"] },
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (error) => swapped && error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("evidence corpus transactions reject a final-component file swap before bytes are read", async () => {
+  const root = tmpDir();
+  const source = path.join(root, "note.md");
+  const parked = path.join(root, "note-parked.md");
+  fs.writeFileSync(source, "# Original\n\nORIGINAL_CANARY\n");
+  let swapped = false;
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (targetPath, flags) => {
+    if (!swapped && path.resolve(String(targetPath)) === path.resolve(source)) {
+      swapped = true;
+      await fsp.rename(source, parked);
+      await fsp.writeFile(source, "# Replacement\n\nREPLACEMENT_CANARY\n");
+    }
+    return fsp.open(targetPath, flags);
+  };
+  const reader = createEvidenceReader({ roots: [root], filesystem });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      root,
+      { extensions: [".md"] },
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (error) => swapped && error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("evidence corpus transactions reject in-place file mutation during a handle read", async () => {
+  const root = tmpDir();
+  const source = path.join(root, "note.md");
+  fs.writeFileSync(source, "# Original\n\nORIGINAL_CANARY\n");
+  let mutated = false;
+  const filesystem = Object.create(fsp);
+  filesystem.open = async (targetPath, ...args) => {
+    const handle = await fsp.open(targetPath, ...args);
+    if (path.resolve(String(targetPath)) !== path.resolve(source)) return handle;
+    return new Proxy(handle, {
+      get(target, property) {
+        if (property === "read") {
+          return async (...readArgs) => {
+            const result = await target.read(...readArgs);
+            if (!mutated && result.bytesRead > 0) {
+              mutated = true;
+              await fsp.writeFile(source, "# Mutated!\n\nMUTATION_CANARY\n");
+            }
+            return result;
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+  };
+  const reader = createEvidenceReader({ roots: [root], filesystem });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      root,
+      { extensions: [".md"] },
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (error) => mutated && error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("evidence corpus transactions catch a synchronized swap and restore spanning final validation", async () => {
+  const root = tmpDir();
+  const corpus = path.join(root, "corpus");
+  const parked = path.join(root, "corpus-parked");
+  fs.mkdirSync(corpus);
+  fs.writeFileSync(path.join(corpus, "note.md"), "# Stable bytes\n");
+  let armed = false;
+  let intercepted = false;
+  const filesystem = Object.create(fsp);
+  filesystem.lstat = async (targetPath, options) => {
+    if (
+      armed
+      && !intercepted
+      && path.resolve(String(targetPath)) === path.resolve(corpus)
+      && options?.bigint === true
+    ) {
+      intercepted = true;
+      await fsp.rename(corpus, parked);
+      await fsp.mkdir(corpus);
+      const replacement = await fsp.lstat(corpus, options);
+      await fsp.rmdir(corpus);
+      await fsp.rename(parked, corpus);
+      return replacement;
+    }
+    return fsp.lstat(targetPath, options);
+  };
+  const reader = createEvidenceReader({ roots: [root], filesystem });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      corpus,
+      { extensions: [".md"] },
+      async (transaction) => {
+        await transaction.mapFiles(({ content }) => content);
+        armed = true;
+        return "must not escape";
+      }
+    ),
+    (error) => intercepted && error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+  // Portable Node can detect swaps that span an observation barrier. As in the
+  // repository threat model, this does not claim immunity to an entirely
+  // unobserved same-user ABA completed between barriers.
+  assert.equal(fs.readFileSync(path.join(corpus, "note.md"), "utf8"), "# Stable bytes\n");
+});
+
+test("evidence corpus transactions reject eligible symlinks and non-regular files", {
+  skip: process.platform === "win32" ? "mkfifo is unavailable on Windows" : false
+}, async (t) => {
+  await t.test("symbolic link", async () => {
+    const root = tmpDir();
+    const outside = path.join(root, "outside.txt");
+    fs.writeFileSync(outside, "OUTSIDE_CANARY\n");
+    fs.symlinkSync(outside, path.join(root, "linked.md"));
+    const reader = createEvidenceReader({ roots: [root] });
+    await assert.rejects(
+      () => reader.withTextCorpus(
+        root,
+        root,
+        { extensions: [".md"] },
+        (transaction) => transaction.mapFiles(({ content }) => content)
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_PATH_UNSAFE"
+    );
+  });
+
+  await t.test("fifo", async () => {
+    const root = tmpDir();
+    const fifoPath = path.join(root, "blocked.md");
+    const { spawnSync } = await import("node:child_process");
+    assert.equal(spawnSync("mkfifo", [fifoPath]).status, 0);
+    const reader = createEvidenceReader({ roots: [root] });
+    await assert.rejects(
+      () => reader.withTextCorpus(
+        root,
+        root,
+        { extensions: [".md"] },
+        (transaction) => transaction.mapFiles(({ content }) => content)
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_NOT_REGULAR_FILE"
+    );
+  });
+});
+
+test("evidence corpus transactions reject invalid UTF-8 without changing source bytes", async () => {
+  const root = tmpDir();
+  const source = path.join(root, "invalid.md");
+  const bytes = Buffer.from([0x23, 0x20, 0x58, 0x0a, 0xff, 0x0a]);
+  fs.writeFileSync(source, bytes);
+  const reader = createEvidenceReader({ roots: [root] });
+
+  await assert.rejects(
+    () => reader.withTextCorpus(
+      root,
+      root,
+      { extensions: [".md"] },
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_INVALID_UTF8"
+  );
+  assert.deepEqual(fs.readFileSync(source), bytes);
+});
+
+test("evidence corpus transactions retain every configured collection and byte ceiling", async (t) => {
+  const cases = [
+    {
+      name: "file count",
+      limits: { maxFiles: 1, maxBytes: 100, maxEntries: 10, maxFileBytes: 100, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]],
+      code: "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED"
+    },
+    {
+      name: "aggregate bytes",
+      limits: { maxFiles: 2, maxBytes: 5, maxEntries: 10, maxFileBytes: 100, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]],
+      code: "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED"
+    },
+    {
+      name: "per-file bytes",
+      limits: { maxFiles: 1, maxBytes: 100, maxEntries: 10, maxFileBytes: 3, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"]],
+      code: "DOTAIOS_EVIDENCE_FILE_TOO_LARGE"
+    },
+    {
+      name: "aggregate entries",
+      limits: { maxFiles: 2, maxBytes: 100, maxEntries: 1, maxFileBytes: 100, maxDirectoryEntries: 10 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]],
+      code: "DOTAIOS_EVIDENCE_BUDGET_EXCEEDED"
+    },
+    {
+      name: "directory entries",
+      limits: { maxFiles: 2, maxBytes: 100, maxEntries: 10, maxFileBytes: 100, maxDirectoryEntries: 1 },
+      files: [["one.md", "one\n"], ["two.md", "two\n"]],
+      code: "DOTAIOS_EVIDENCE_DIRECTORY_TOO_LARGE"
+    }
+  ];
+
+  for (const fixture of cases) {
+    await t.test(fixture.name, async () => {
+      const root = tmpDir();
+      for (const [name, content] of fixture.files) fs.writeFileSync(path.join(root, name), content);
+      const reader = createEvidenceReader({ roots: [root], limits: fixture.limits });
+      await assert.rejects(
+        () => reader.withTextCorpus(
+          root,
+          root,
+          { extensions: [".md"] },
+          (transaction) => transaction.mapFiles(({ content }) => content)
+        ),
+        (error) => error?.code === fixture.code
+      );
+    });
+  }
+});
+
+test("scope preflight protects later scopes deterministically before redistributing capacity", async () => {
+  const root = tmpDir();
+  const counts = { large: 5, small: 1, later: 1 };
+  for (const [scope, count] of Object.entries(counts)) {
+    const directory = path.join(root, scope);
+    fs.mkdirSync(directory);
+    for (let index = 0; index < count; index += 1) {
+      fs.writeFileSync(path.join(directory, `${index}.md`), `${scope}-${index}\n`);
+    }
+  }
+  const reader = createEvidenceReader({
+    roots: [root],
+    limits: { maxBytes: 1024, maxFiles: 6, maxEntries: 100, maxFileBytes: 100, maxDirectoryEntries: 100 }
+  });
+
+  const result = await reader.withScopePreflight(
+    ["large", "small", "later"],
+    async (scope, scopeReader) => {
+      const prepared = await scopeReader.prepareTextCorpus(
+        root,
+        path.join(root, scope),
+        { extensions: [".md"] }
+      );
+      if (scope === "large") await new Promise((resolve) => setTimeout(resolve, 10));
+      return prepared;
+    },
+    (_scope, _scopeReader, prepared) => prepared,
+    (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+      prepared,
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (transaction) => ({
+      admitted: ["large", "small", "later"].filter((scope) => transaction.has(scope)),
+      omissions: transaction.omissions
+    })
+  );
+
+  assert.deepEqual(result.admitted, ["small", "later"]);
+  assert.equal(result.omissions[0].scope, "large");
+  assert.equal(result.omissions[0].reason, "file_count_exceeded");
+});
+
+test("scope preflight admits and revalidates a corpus through a symlinked authorized root", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink creation requires elevated Windows privileges");
+  const parent = tmpDir();
+  const realRoot = path.join(parent, "real-authorized");
+  const linkedRoot = path.join(parent, "linked-authorized");
+  const corpus = path.join(linkedRoot, "context");
+  fs.mkdirSync(path.join(realRoot, "context"), { recursive: true });
+  fs.writeFileSync(path.join(realRoot, "context", "note.md"), "SYMLINKED_ROOT_PREFLIGHT_CANARY\n");
+  fs.symlinkSync(realRoot, linkedRoot, "dir");
+  const reader = createEvidenceReader({ roots: [linkedRoot] });
+
+  const result = await reader.withScopePreflight(
+    ["context"],
+    (_scope, scopeReader) => scopeReader.prepareTextCorpus(
+      linkedRoot,
+      corpus,
+      { extensions: [".md"] }
+    ),
+    (_scope, _scopeReader, prepared) => prepared,
+    (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+      prepared,
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (transaction) => transaction.get("context")
+  );
+
+  assert.deepEqual(result, ["SYMLINKED_ROOT_PREFLIGHT_CANARY\n"]);
+});
+
+test("scope preflight protects later scopes before metadata and JSONL discovery spend entries", async (t) => {
+  await t.test("metadata inspection", async () => {
+    const root = tmpDir();
+    for (const [scope, count] of [["large", 4], ["later", 1]]) {
+      const directory = path.join(root, scope);
+      fs.mkdirSync(directory);
+      for (let index = 0; index < count; index += 1) {
+        fs.writeFileSync(path.join(directory, `${index}.md`), `${scope}-${index}\n`);
+      }
+    }
+    const reader = createEvidenceReader({
+      roots: [root],
+      limits: { maxBytes: 1024, maxFiles: 20, maxEntries: 4, maxFileBytes: 100, maxDirectoryEntries: 100 }
+    });
+
+    const admitted = await reader.withScopePreflight(
+      ["large", "later"],
+      (scope, scopeReader) => scopeReader.prepareTextCorpus(
+        root,
+        path.join(root, scope),
+        { extensions: [".md"] }
+      ),
+      (_scope, _scopeReader, prepared) => prepared,
+      (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+        prepared,
+        (transaction) => transaction.mapFiles(({ content }) => content)
+      ),
+      (transaction) => ["large", "later"].filter((scope) => transaction.has(scope))
+    );
+
+    assert.deepEqual(admitted, ["later"]);
+  });
+
+  await t.test("JSONL discovery", async () => {
+    const root = tmpDir();
+    fs.writeFileSync(
+      path.join(root, "large.jsonl"),
+      Array.from({ length: 4 }, (_, index) => JSON.stringify({ index })).join("\n") + "\n"
+    );
+    fs.writeFileSync(path.join(root, "later.jsonl"), '{"index":0}\n');
+    const reader = createEvidenceReader({
+      roots: [root],
+      limits: { maxBytes: 1024, maxFiles: 20, maxEntries: 4, maxFileBytes: 100, maxDirectoryEntries: 100 }
+    });
+
+    const admitted = await reader.withScopePreflight(
+      ["large", "later"],
+      (scope, scopeReader) => scopeReader.prepareJsonlMetadata(
+        root,
+        path.join(root, `${scope}.jsonl`)
+      ),
+      (_scope, scopeReader, prepared) => scopeReader.materializePreparedJsonl(prepared),
+      (_scope, scopeReader, prepared) => scopeReader.readPreparedJsonl(prepared),
+      (transaction) => ["large", "later"].filter((scope) => transaction.has(scope))
+    );
+
+    assert.deepEqual(admitted, ["later"]);
+  });
+});
+
+test("scope preflight revalidates a partially enumerated omitted directory before publishing results", async () => {
+  const root = tmpDir();
+  const oversized = path.join(root, "oversized");
+  const safe = path.join(root, "safe");
+  fs.mkdirSync(oversized);
+  fs.mkdirSync(safe);
+  fs.writeFileSync(path.join(oversized, "one.md"), "one\n");
+  fs.writeFileSync(path.join(oversized, "two.md"), "two\n");
+  fs.writeFileSync(path.join(safe, "safe.md"), "safe\n");
+  const reader = createEvidenceReader({
+    roots: [root],
+    limits: { maxBytes: 100, maxFiles: 10, maxEntries: 10, maxFileBytes: 100, maxDirectoryEntries: 1 }
+  });
+
+  await assert.rejects(
+    () => reader.withScopePreflight(
+      ["oversized", "safe"],
+      (scope, scopeReader) => scopeReader.prepareTextCorpus(
+        root,
+        path.join(root, scope),
+        { extensions: [".md"] }
+      ),
+      (_scope, _scopeReader, prepared) => prepared,
+      (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+        prepared,
+        (transaction) => transaction.mapFiles(({ content }) => content)
+      ),
+      (transaction) => {
+        assert.equal(transaction.has("safe"), true);
+        assert.equal(transaction.has("oversized"), false);
+        fs.writeFileSync(path.join(oversized, "late.md"), "late\n");
+        return "must not escape";
+      }
+    ),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("scope preflight final-revalidates every inspected file before publishing", async (t) => {
+  await t.test("admitted corpus file", async () => {
+    const root = tmpDir();
+    const corpus = path.join(root, "corpus");
+    const filePath = path.join(corpus, "note.md");
+    fs.mkdirSync(corpus);
+    fs.writeFileSync(filePath, "ORIGINAL\n");
+    const reader = createEvidenceReader({ roots: [root] });
+
+    await assert.rejects(
+      () => reader.withScopePreflight(
+        ["corpus"],
+        (_scope, scopeReader) => scopeReader.prepareTextCorpus(
+          root,
+          corpus,
+          { extensions: [".md"] }
+        ),
+        (_scope, _scopeReader, prepared) => prepared,
+        (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+          prepared,
+          (transaction) => transaction.mapFiles(({ content }) => content)
+        ),
+        (transaction) => {
+          assert.deepEqual(transaction.get("corpus"), ["ORIGINAL\n"]);
+          fs.writeFileSync(filePath, "CHANGED!\n");
+          return "must not escape";
+        }
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+    );
+  });
+
+  await t.test("omission evidence", async () => {
+    const root = tmpDir();
+    const filePath = path.join(root, "oversized.jsonl");
+    fs.writeFileSync(filePath, "xx");
+    const reader = createEvidenceReader({
+      roots: [root],
+      limits: { maxBytes: 100, maxFiles: 10, maxEntries: 10, maxFileBytes: 1, maxDirectoryEntries: 10 }
+    });
+
+    await assert.rejects(
+      () => reader.withScopePreflight(
+        ["oversized"],
+        (_scope, scopeReader) => scopeReader.prepareJsonlMetadata(root, filePath),
+        (_scope, _scopeReader, prepared) => prepared,
+        () => "must not execute",
+        (transaction) => {
+          assert.equal(transaction.has("oversized"), false);
+          fs.writeFileSync(filePath, "yy");
+          return "must not escape";
+        }
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+    );
+  });
+});
+
+test("scope preflight closes retained phase readers and prepared capabilities on every exit", async (t) => {
+  async function exercise({ failureStage = null }) {
+    const root = tmpDir();
+    fs.writeFileSync(path.join(root, "note.md"), "retained\n");
+    const reader = createEvidenceReader({ roots: [root] });
+    let retainedReader;
+    let retainedPrepared;
+    const operation = reader.withScopePreflight(
+      ["scope"],
+      async (_scope, scopeReader) => {
+        retainedReader = scopeReader;
+        retainedPrepared = await scopeReader.prepareTextCorpus(
+          root,
+          root,
+          { extensions: [".md"] }
+        );
+        return retainedPrepared;
+      },
+      (_scope, _scopeReader, prepared) => {
+        if (failureStage === "discovery") throw new Error("discovery failed");
+        return prepared;
+      },
+      (_scope, scopeReader, prepared) => {
+        if (failureStage === "execution") throw new Error("execution failed");
+        return scopeReader.withPreparedTextCorpus(
+          prepared,
+          (transaction) => transaction.mapFiles(({ content }) => content)
+        );
+      },
+      (transaction) => {
+        if (failureStage === "callback") throw new Error("callback failed");
+        return transaction.get("scope");
+      }
+    );
+
+    if (failureStage) await assert.rejects(() => operation);
+    else assert.deepEqual(await operation, ["retained\n"]);
+    assert.throws(
+      () => retainedReader.withPreparedTextCorpus(
+        retainedPrepared,
+        (transaction) => transaction.mapFiles(({ content }) => content)
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_TRANSACTION_CLOSED"
+    );
+  }
+
+  await t.test("success", () => exercise({}));
+  await t.test("discovery failure", () => exercise({ failureStage: "discovery" }));
+  await t.test("execution failure", () => exercise({ failureStage: "execution" }));
+  await t.test("callback failure", () => exercise({ failureStage: "callback" }));
+});
+
+test("scope preflight caps omissions exactly once at 32 plus the full aggregate remainder", async () => {
+  const root = tmpDir();
+  const scopes = Array.from({ length: 40 }, (_, index) => `scope-${String(index).padStart(2, "0")}`);
+  for (const scope of scopes) {
+    const directory = path.join(root, scope);
+    fs.mkdirSync(directory);
+    fs.writeFileSync(path.join(directory, "oversized.md"), "xx");
+  }
+  const reader = createEvidenceReader({
+    roots: [root],
+    limits: { maxBytes: 100, maxFiles: 100, maxEntries: 100, maxFileBytes: 1, maxDirectoryEntries: 10 }
+  });
+
+  const omissions = await reader.withScopePreflight(
+    scopes,
+    (scope, scopeReader) => scopeReader.prepareTextCorpus(
+      root,
+      path.join(root, scope),
+      { extensions: [".md"] }
+    ),
+    (_scope, _scopeReader, prepared) => prepared,
+    (_scope, scopeReader, prepared) => scopeReader.withPreparedTextCorpus(
+      prepared,
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    ),
+    (transaction) => transaction.omissions
+  );
+
+  assert.equal(omissions.length, 33);
+  assert.equal(omissions[31].scope, "scope-31");
+  assert.deepEqual(omissions[32], {
+    scope: "all",
+    reason: "omissions_truncated",
+    observed: { files: 0, bytes: 0, entries: 8 },
+    inspection: "not_searched",
+    recovery: {
+      code: "narrow_scope",
+      message: "Search one logical scope at a time to inspect every omission."
+    }
+  });
+  assert.equal(Object.isFrozen(omissions), true);
+  assert.equal(Object.isFrozen(omissions[32]), true);
+});
+
+test("scope preflight converts only skippable execution ceilings into whole-scope omissions", async (t) => {
+  await t.test("preserves successful scopes and reports a bounded omission", async () => {
+    const root = tmpDir();
+    const reader = createEvidenceReader({ roots: [root] });
+
+    const result = await reader.withScopePreflight(
+      ["oversized", "safe"],
+      () => null,
+      (_scope, _scopeReader, prepared) => prepared,
+      (scope) => {
+        if (scope === "oversized") {
+          throw new EvidenceReadError("DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED");
+        }
+        return "safe-result";
+      },
+      (transaction) => ({
+        safe: transaction.get("safe"),
+        oversized: transaction.has("oversized"),
+        omissions: transaction.omissions
+      })
+    );
+
+    assert.equal(result.safe, "safe-result");
+    assert.equal(result.oversized, false);
+    assert.equal(result.omissions.length, 1);
+    assert.equal(result.omissions[0].scope, "oversized");
+    assert.equal(result.omissions[0].reason, "file_count_exceeded");
+    assert.equal(Object.isFrozen(result.omissions), true);
+  });
+
+  await t.test("keeps integrity failures request-fatal", async () => {
+    const root = tmpDir();
+    const reader = createEvidenceReader({ roots: [root] });
+
+    await assert.rejects(
+      () => reader.withScopePreflight(
+        ["changed", "safe"],
+        () => null,
+        (_scope, _scopeReader, prepared) => prepared,
+        (scope) => {
+          if (scope === "changed") throw new EvidenceReadError("DOTAIOS_EVIDENCE_CHANGED");
+          return "must not escape";
+        },
+        () => "must not publish"
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+    );
+  });
+
+  await t.test("retains final validation for successful scopes", async () => {
+    const root = tmpDir();
+    const safeFile = path.join(root, "safe.md");
+    fs.writeFileSync(safeFile, "safe\n");
+    const reader = createEvidenceReader({ roots: [root] });
+
+    await assert.rejects(
+      () => reader.withScopePreflight(
+        ["oversized", "safe"],
+        (scope, scopeReader) => scope === "safe"
+          ? scopeReader.prepareTextCorpus(root, root, { extensions: [".md"] })
+          : null,
+        (_scope, _scopeReader, prepared) => prepared,
+        (scope, scopeReader, prepared) => {
+          if (scope === "oversized") {
+            throw new EvidenceReadError("DOTAIOS_EVIDENCE_FILE_COUNT_EXCEEDED");
+          }
+          return scopeReader.withPreparedTextCorpus(
+            prepared,
+            (transaction) => transaction.mapFiles(({ content }) => content)
+          );
+        },
+        (transaction) => {
+          assert.deepEqual(transaction.get("safe"), ["safe\n"]);
+          assert.equal(transaction.has("oversized"), false);
+          fs.writeFileSync(safeFile, "late\n");
+          return "must not escape";
+        }
+      ),
+      (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+    );
+  });
+});
+
+test("scope preflight fails closed when one scope observes conflicting generations of the same directory", async () => {
+  const root = tmpDir();
+  fs.writeFileSync(path.join(root, "events.jsonl"), '{"summary":"safe"}\n');
+  const reader = createEvidenceReader({ roots: [root] });
+
+  await assert.rejects(
+    () => reader.withScopePreflight(
+      ["memory"],
+      (_scope, scopeReader) => scopeReader.prepareJsonlMetadata(
+        root,
+        path.join(root, "events.jsonl")
+      ),
+      async (_scope, scopeReader, prepared) => {
+        await scopeReader.materializePreparedJsonl(prepared);
+        fs.writeFileSync(path.join(root, "late.md"), "late\n");
+        return scopeReader.materializePreparedJsonl(prepared);
+      },
+      () => "must not execute",
+      () => "must not escape"
+    ),
+    (error) => error?.code === "DOTAIOS_EVIDENCE_CHANGED"
+  );
+});
+
+test("evidence corpus file-operation growth stays constant per accepted file at fixed topology", async () => {
+  async function measure(fileCount) {
+    const root = tmpDir();
+    for (let index = 0; index < fileCount; index += 1) {
+      fs.writeFileSync(path.join(root, `${index}.md`), `# ${index}\n`);
+    }
+    const operations = { lstat: 0, realpath: 0, open: 0 };
+    const filesystem = new Proxy(fsp, {
+      get(target, property) {
+        if (Object.hasOwn(operations, property)) {
+          return async (...args) => {
+            operations[property] += 1;
+            return fsp[property](...args);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+    });
+    const reader = createEvidenceReader({ roots: [root], filesystem });
+    const observed = await reader.withTextCorpus(
+      root,
+      root,
+      { extensions: [".md"] },
+      (transaction) => transaction.mapFiles(({ content }) => content)
+    );
+    assert.equal(observed.length, fileCount);
+    assert.equal(operations.open, fileCount);
+    return operations;
+  }
+
+  const one = await measure(1);
+  const eight = await measure(8);
+  assert.ok(eight.lstat - one.lstat <= 4 * 7, JSON.stringify({ one, eight }));
+  assert.ok(eight.realpath - one.realpath <= 2 * 7, JSON.stringify({ one, eight }));
+  assert.equal(eight.open - one.open, 7);
 });

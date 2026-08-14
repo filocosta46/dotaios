@@ -1,0 +1,489 @@
+{
+  "schemaVersion": "dotaios-search-benchmark-result/v1",
+  "benchmarkId": "search-baseline-2026-08-13",
+  "manifestSha256": "b6c38cb5920f91b0a84c66be8181f6c14f7a1c73360fa4f07993b32a7704d55a",
+  "inventorySha256": "db6ab0454118d7cd1e2c54c3519db2018fddcba75e124105f13f1345dc525306",
+  "selection": {
+    "fileCount": 500,
+    "layout": "shallow",
+    "distribution": "prose"
+  },
+  "runtime": {
+    "node": "22.22.3",
+    "platform": "darwin",
+    "architecture": "arm64"
+  },
+  "protocol": {
+    "coldSamples": 3,
+    "warmupSamples": 3,
+    "measuredSamples": 20,
+    "concurrency": 32,
+    "resultLimit": 20,
+    "rssPollIntervalMs": 5,
+    "coldDefinition": "fresh request-scoped reader before harness warm-up; operating-system file cache is uncontrolled",
+    "warmDefinition": "fresh request-scoped reader after warm-up in the same Node process",
+    "rawReadControl": {
+      "enabled": true,
+      "method": "open-handle-read-all",
+      "validation": "exact file count and byte total",
+      "concurrency": 32
+    }
+  },
+  "searches": [
+    {
+      "id": "no-hit",
+      "cold": {
+        "samples": 3,
+        "medianMs": 41.55975,
+        "p95Ms": 45.727542,
+        "peakRssBytes": 82378752,
+        "operations": {
+          "lstat": 1032,
+          "realpath": 510,
+          "open": 500
+        },
+        "readBudget": {
+          "bytes": 543978,
+          "files": 500,
+          "entries": 502
+        },
+        "operationBreakdown": {
+          "acceptedFilePaths": {
+            "lstat": 500,
+            "realpath": 500,
+            "open": 500
+          },
+          "containmentPaths": {
+            "lstat": 532,
+            "realpath": 10,
+            "open": 0
+          }
+        }
+      },
+      "warm": {
+        "samples": 20,
+        "medianMs": 27.861084,
+        "p95Ms": 33.004708,
+        "peakRssBytes": 117702656,
+        "operations": {
+          "lstat": 1032,
+          "realpath": 510,
+          "open": 500
+        },
+        "readBudget": {
+          "bytes": 543978,
+          "files": 500,
+          "entries": 502
+        },
+        "operationBreakdown": {
+          "acceptedFilePaths": {
+            "lstat": 500,
+            "realpath": 500,
+            "open": 500
+          },
+          "containmentPaths": {
+            "lstat": 532,
+            "realpath": 10,
+            "open": 0
+          }
+        }
+      },
+      "exactResults": [],
+      "outputSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "id": "low-hit",
+      "cold": {
+        "samples": 3,
+        "medianMs": 29.559917,
+        "p95Ms": 30.090417,
+        "peakRssBytes": 117915648,
+        "operations": {
+          "lstat": 1032,
+          "realpath": 510,
+          "open": 500
+        },
+        "readBudget": {
+          "bytes": 543978,
+          "files": 500,
+          "entries": 502
+        },
+        "operationBreakdown": {
+          "acceptedFilePaths": {
+            "lstat": 500,
+            "realpath": 500,
+            "open": 500
+          },
+          "containmentPaths": {
+            "lstat": 532,
+            "realpath": 10,
+            "open": 0
+          }
+        }
+      },
+      "warm": {
+        "samples": 20,
+        "medianMs": 27.242,
+        "p95Ms": 32.689542,
+        "peakRssBytes": 123682816,
+        "operations": {
+          "lstat": 1032,
+          "realpath": 510,
+          "open": 500
+        },
+        "readBudget": {
+          "bytes": 543978,
+          "files": 500,
+          "entries": 502
+        },
+        "operationBreakdown": {
+          "acceptedFilePaths": {
+            "lstat": 500,
+            "realpath": 500,
+            "open": 500
+          },
+          "containmentPaths": {
+            "lstat": 532,
+            "realpath": 10,
+            "open": 0
+          }
+        }
+      },
+      "exactResults": [
+        "vault/bucket-01/note-00003.md",
+        "vault/bucket-01/note-00017.md",
+        "vault/bucket-01/note-00101.md",
+        "vault/bucket-01/note-00307.md"
+      ],
+      "outputSha256": "6bc96a7e535089d0f1232a6aa21cf6cf2b255f9d1ddccfe2dea5b098ff0c98b5"
+    },
+    {
+      "id": "high-hit",
+      "cold": {
+        "samples": 3,
+        "medianMs": 28.539375,
+        "p95Ms": 29.099709,
+        "peakRssBytes": 123699200,
+        "operations": {
+          "lstat": 1032,
+          "realpath": 510,
+          "open": 500
+        },
+        "readBudget": {
+          "bytes": 543978,
+          "files": 500,
+          "entries": 502
+        },
+        "operationBreakdown": {
+          "acceptedFilePaths": {
+            "lstat": 500,
+            "realpath": 500,
+            "open": 500
+          },
+          "containmentPaths": {
+            "lstat": 532,
+            "realpath": 10,
+            "open": 0
+          }
+        }
+      },
+      "warm": {
+        "samples": 20,
+        "medianMs": 27.905167,
+        "p95Ms": 29.8005,
+        "peakRssBytes": 144064512,
+        "operations": {
+          "lstat": 1032,
+          "realpath": 510,
+          "open": 500
+        },
+        "readBudget": {
+          "bytes": 543978,
+          "files": 500,
+          "entries": 502
+        },
+        "operationBreakdown": {
+          "acceptedFilePaths": {
+            "lstat": 500,
+            "realpath": 500,
+            "open": 500
+          },
+          "containmentPaths": {
+            "lstat": 532,
+            "realpath": 10,
+            "open": 0
+          }
+        }
+      },
+      "exactResults": [
+        "vault/bucket-00/note-00000.md",
+        "vault/bucket-00/note-00050.md",
+        "vault/bucket-00/note-00100.md",
+        "vault/bucket-00/note-00150.md",
+        "vault/bucket-00/note-00200.md",
+        "vault/bucket-00/note-00250.md",
+        "vault/bucket-00/note-00300.md",
+        "vault/bucket-00/note-00350.md",
+        "vault/bucket-00/note-00400.md",
+        "vault/bucket-00/note-00450.md",
+        "vault/bucket-01/note-00025.md",
+        "vault/bucket-01/note-00075.md",
+        "vault/bucket-01/note-00125.md",
+        "vault/bucket-01/note-00175.md",
+        "vault/bucket-01/note-00225.md",
+        "vault/bucket-01/note-00275.md",
+        "vault/bucket-01/note-00325.md",
+        "vault/bucket-01/note-00375.md",
+        "vault/bucket-01/note-00425.md",
+        "vault/bucket-01/note-00475.md"
+      ],
+      "outputSha256": "0c51d10ccea2f49c756db6a66d988559b5db90ccb4843048ebc80b01444a5fca"
+    }
+  ],
+  "rawSearchControl": [
+    {
+      "safety": "unsafe-benchmark-only",
+      "id": "no-hit",
+      "cold": {
+        "samples": 3,
+        "medianMs": 19.646166,
+        "p95Ms": 19.99575,
+        "peakRssBytes": 146374656,
+        "operations": {
+          "lstat": 0,
+          "realpath": 0,
+          "open": 500
+        },
+        "readBudget": {
+          "files": 500,
+          "bytes": 543978,
+          "entries": 0
+        }
+      },
+      "warm": {
+        "samples": 20,
+        "medianMs": 18.608333,
+        "p95Ms": 19.932583,
+        "peakRssBytes": 154861568,
+        "operations": {
+          "lstat": 0,
+          "realpath": 0,
+          "open": 500
+        },
+        "readBudget": {
+          "files": 500,
+          "bytes": 543978,
+          "entries": 0
+        }
+      },
+      "exactResults": [],
+      "outputSha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    {
+      "safety": "unsafe-benchmark-only",
+      "id": "low-hit",
+      "cold": {
+        "samples": 3,
+        "medianMs": 18.857459,
+        "p95Ms": 19.675417,
+        "peakRssBytes": 154943488,
+        "operations": {
+          "lstat": 0,
+          "realpath": 0,
+          "open": 500
+        },
+        "readBudget": {
+          "files": 500,
+          "bytes": 543978,
+          "entries": 0
+        }
+      },
+      "warm": {
+        "samples": 20,
+        "medianMs": 19.500625,
+        "p95Ms": 20.110708,
+        "peakRssBytes": 155189248,
+        "operations": {
+          "lstat": 0,
+          "realpath": 0,
+          "open": 500
+        },
+        "readBudget": {
+          "files": 500,
+          "bytes": 543978,
+          "entries": 0
+        }
+      },
+      "exactResults": [
+        "vault/bucket-01/note-00003.md",
+        "vault/bucket-01/note-00017.md",
+        "vault/bucket-01/note-00101.md",
+        "vault/bucket-01/note-00307.md"
+      ],
+      "outputSha256": "6bc96a7e535089d0f1232a6aa21cf6cf2b255f9d1ddccfe2dea5b098ff0c98b5"
+    },
+    {
+      "safety": "unsafe-benchmark-only",
+      "id": "high-hit",
+      "cold": {
+        "samples": 3,
+        "medianMs": 19.561958,
+        "p95Ms": 19.694208,
+        "peakRssBytes": 155385856,
+        "operations": {
+          "lstat": 0,
+          "realpath": 0,
+          "open": 500
+        },
+        "readBudget": {
+          "files": 500,
+          "bytes": 543978,
+          "entries": 0
+        }
+      },
+      "warm": {
+        "samples": 20,
+        "medianMs": 19.790416,
+        "p95Ms": 20.481792,
+        "peakRssBytes": 155320320,
+        "operations": {
+          "lstat": 0,
+          "realpath": 0,
+          "open": 500
+        },
+        "readBudget": {
+          "files": 500,
+          "bytes": 543978,
+          "entries": 0
+        }
+      },
+      "exactResults": [
+        "vault/bucket-00/note-00000.md",
+        "vault/bucket-00/note-00050.md",
+        "vault/bucket-00/note-00100.md",
+        "vault/bucket-00/note-00150.md",
+        "vault/bucket-00/note-00200.md",
+        "vault/bucket-00/note-00250.md",
+        "vault/bucket-00/note-00300.md",
+        "vault/bucket-00/note-00350.md",
+        "vault/bucket-00/note-00400.md",
+        "vault/bucket-00/note-00450.md",
+        "vault/bucket-01/note-00025.md",
+        "vault/bucket-01/note-00075.md",
+        "vault/bucket-01/note-00125.md",
+        "vault/bucket-01/note-00175.md",
+        "vault/bucket-01/note-00225.md",
+        "vault/bucket-01/note-00275.md",
+        "vault/bucket-01/note-00325.md",
+        "vault/bucket-01/note-00375.md",
+        "vault/bucket-01/note-00425.md",
+        "vault/bucket-01/note-00475.md"
+      ],
+      "outputSha256": "0c51d10ccea2f49c756db6a66d988559b5db90ccb4843048ebc80b01444a5fca"
+    }
+  ],
+  "rawReadControl": {
+    "id": "raw-read-control",
+    "cold": {
+      "samples": 3,
+      "medianMs": 7.413458,
+      "p95Ms": 7.416625,
+      "peakRssBytes": 157777920,
+      "operations": {
+        "lstat": 0,
+        "realpath": 0,
+        "open": 500
+      },
+      "readBudget": {
+        "files": 500,
+        "bytes": 543978,
+        "entries": 0
+      }
+    },
+    "warm": {
+      "samples": 20,
+      "medianMs": 6.996583,
+      "p95Ms": 8.004792,
+      "peakRssBytes": 158007296,
+      "operations": {
+        "lstat": 0,
+        "realpath": 0,
+        "open": 500
+      },
+      "readBudget": {
+        "files": 500,
+        "bytes": 543978,
+        "entries": 0
+      }
+    },
+    "exactResults": {
+      "fileCount": 500,
+      "totalBytes": 543978
+    },
+    "outputSha256": "0a60b34e49b0085aac50f5362f1cb3b84efd580fdf3e5b53b05934b8f57a962a"
+  },
+  "safeCorpusReadControl": {
+    "id": "safe-corpus-read-control",
+    "cold": {
+      "samples": 3,
+      "medianMs": 20.05875,
+      "p95Ms": 21.098667,
+      "peakRssBytes": 158433280,
+      "operations": {
+        "lstat": 1032,
+        "realpath": 510,
+        "open": 500
+      },
+      "readBudget": {
+        "bytes": 543978,
+        "files": 500,
+        "entries": 502
+      },
+      "operationBreakdown": {
+        "acceptedFilePaths": {
+          "lstat": 500,
+          "realpath": 500,
+          "open": 500
+        },
+        "containmentPaths": {
+          "lstat": 532,
+          "realpath": 10,
+          "open": 0
+        }
+      }
+    },
+    "warm": {
+      "samples": 20,
+      "medianMs": 18.600583,
+      "p95Ms": 21.432917,
+      "peakRssBytes": 158564352,
+      "operations": {
+        "lstat": 1032,
+        "realpath": 510,
+        "open": 500
+      },
+      "readBudget": {
+        "bytes": 543978,
+        "files": 500,
+        "entries": 502
+      },
+      "operationBreakdown": {
+        "acceptedFilePaths": {
+          "lstat": 500,
+          "realpath": 500,
+          "open": 500
+        },
+        "containmentPaths": {
+          "lstat": 532,
+          "realpath": 10,
+          "open": 0
+        }
+      }
+    },
+    "exactResults": {
+      "fileCount": 500,
+      "totalBytes": 543978
+    },
+    "outputSha256": "0a60b34e49b0085aac50f5362f1cb3b84efd580fdf3e5b53b05934b8f57a962a"
+  }
+}

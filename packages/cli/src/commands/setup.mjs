@@ -28,7 +28,11 @@ import {
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
-import { activateCommand, plannedActivationConfigPatch } from "./activate.mjs";
+import {
+  activateCommand,
+  BRIDGE_COLLISION_REMEDY,
+  plannedActivationConfigPatch
+} from "./activate.mjs";
 import { revealCommand } from "./reveal.mjs";
 import {
   emitReliabilityMetric,
@@ -47,6 +51,7 @@ Options:
   --vault-path <dir>  Use an external vault for long-term knowledge
   --yes, -y           Use placeholder answers for non-interactive setup
   --dry-run           Preview files, trust boundaries, and removal without changes
+  --verbose           Show paths and operator-level setup details
   --skip-reveal       Do not open the folder when finished
   --install-lightpanda
                       Install the optional verified browser helper
@@ -62,15 +67,17 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     return;
   }
 
+  validateSetupOptions(args);
   assertUniqueOptions(args, ["--path", "--vault-path"]);
 
-  const passthrough = args.filter((arg) => !["--dry-run", "--skip-reveal", "--install-lightpanda"].includes(arg));
+  const verbose = args.includes("--verbose");
+  const passthrough = args.filter((arg) => !["--dry-run", "--skip-reveal", "--install-lightpanda", "--verbose"].includes(arg));
   const skipReveal = args.includes("--skip-reveal");
   const installLightpandaRequested = args.includes("--install-lightpanda");
   const nonInteractive = args.includes("--yes") || args.includes("-y");
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
   if (args.includes("--dry-run")) {
-    await printSetupPreview(aiosPath, args);
+    await printSetupPreview(aiosPath, args, { verbose });
     return;
   }
   const startedAt = Date.now();
@@ -97,7 +104,9 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   try {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
-    setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle);
+    setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle, {
+      quiet: !verbose
+    });
     await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
     if (setupTransactionActive) {
       await assertCompletedSetupTransactionTree(aiosPath, setupTransactionActive.transaction, passthrough);
@@ -142,21 +151,26 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   let detectedClientCount = 0;
   let blockedContextCount = 0;
   let blockedCatalogCount = 0;
+  let blockedContextNeedsMerge = false;
+  let configuredClientNames = [];
   console.log("");
   console.log("DotAIOS setup — step 2 of 3: connect your AI tools");
   console.log("");
   await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "activate", run_id: runId });
   try {
     const activation = await activateCommand(passthrough, {
+      quiet: !verbose,
       lifecycle: {
         ...lifecycle.activation,
         skillsIndexWriteMode: passthrough.includes("--overwrite") ? "overwrite" : "preserve"
       }
     });
     detectedClientCount = activation.detectedClientCount;
+    configuredClientNames = activation.configuredClientNames || [];
     configuredContextCount = activation.configuredContextCount;
     blockedContextCount = activation.blockedContextCount;
     blockedCatalogCount = activation.blockedCatalogCount;
+    blockedContextNeedsMerge = activation.results?.some((entry) => entry.action === "kept") || false;
     if (blockedContextCount > 0 || blockedCatalogCount > 0) {
       activateOk = false;
       process.exitCode = 1;
@@ -173,16 +187,13 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   if (!activateOk) {
     console.log("");
     console.log("Folder created. Tool connection needs attention; setup stopped before optional features.");
-    // Never send them back to `dotaios setup`: the folder now exists, so setup
-    // has nothing left to do and will only report that. `activate` is the one
-    // command that can still finish the job, and for a preserved collision the
-    // non-destructive form is the one activate already named above.
-    // activate has already named what is blocked and how to fix each one.
-    // Restating it here is how setup came to call a permission error a
-    // "collision" the user could not find anywhere on screen.
+    // The folder now exists; activation is the recovery command for this phase.
     if (blockedCatalogCount > 0) {
-      console.log(`Preserved ${blockedCatalogCount} skill catalog collision(s).`);
+      console.log(verbose
+        ? `Preserved ${blockedCatalogCount} skill catalog collision(s).`
+        : `Preserved ${blockedCatalogCount} existing app configuration conflict(s).`);
     }
+    if (blockedContextNeedsMerge) console.log(BRIDGE_COLLISION_REMEDY);
     if (blockedContextCount === 0 && blockedCatalogCount === 0) {
       console.log("Fix the problem reported above, then run `dotaios activate`.");
     }
@@ -272,19 +283,16 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     }
     console.log("To explore the folder now:");
   } else {
-    console.log(`Folder ready. Connected context for ${configuredContextCount} local AI app${configuredContextCount === 1 ? "" : "s"}.`);
+    const clients = formatClientNames(configuredClientNames);
+    console.log(`Folder ready. ${clients || `${configuredContextCount} local AI app${configuredContextCount === 1 ? "" : "s"}`} can now use your context.`);
     console.log("To get started:");
   }
   console.log("  1. Open your AI agent — Claude Code, Codex, Gemini CLI, Cursor, or any other.");
-  console.log("  2. Open the ~/aios folder or make it your working directory.");
+  console.log(`  2. Open the ${displayHomePath(aiosPath, os.homedir())} folder or make it your working directory.`);
   console.log('  3. Ask: "Read my context and tell me what I am working on."');
   console.log("  4. Update context any time: dotaios interview --review");
 
-  // Opening Finder pulls the foreground away from this terminal, so it has to be
-  // the very last thing that happens. It used to run before four optional y/N
-  // prompts, which meant the window appeared while the terminal was still
-  // waiting behind it — people reasonably concluded setup had finished and never
-  // saw the instructions above.
+  // Reveal last so optional prompts retain terminal focus.
   // Step 3: reveal (best-effort, never blocks)
   await emitReliabilityMetric(aiosPath, { type: "setup_phase_start", phase: "reveal", run_id: runId });
   if (!skipReveal) {
@@ -340,7 +348,7 @@ async function isCompletedInstall(aiosPath) {
   return true;
 }
 
-async function printSetupPreview(aiosPath, args) {
+async function printSetupPreview(aiosPath, args, { verbose = false } = {}) {
   const unsupported = [
     "--all",
     "--force",
@@ -362,11 +370,15 @@ async function printSetupPreview(aiosPath, args) {
   const homePath = path.resolve(expandHome(extractOption(args, "--home") || os.homedir()));
   const target = await previewSetupTarget(aiosPath);
 
-  console.log("DotAIOS Setup preview - no DotAIOS-managed changes made");
-  console.log("Scope: AIOS target, detected global bridge files, and managed skill-link directories.");
+  console.log(verbose
+    ? "DotAIOS Setup preview - no DotAIOS-managed changes made"
+    : "DotAIOS Setup preview - no changes made");
+  console.log(verbose
+    ? "Scope: AIOS target, detected global bridge files, and managed skill-link directories."
+    : `Your context stays in ${displayHomePath(aiosPath, homePath)}. Existing app instructions are preserved.`);
   console.log("");
   console.log("Target:");
-  console.log(`${target.action} ${aiosPath}${target.note ? ` (${target.note})` : ""}`);
+  console.log(`${target.action} ${displayHomePath(aiosPath, homePath)}${target.note ? ` (${target.note})` : ""}`);
 
   console.log("");
   console.log("Detected client actions:");
@@ -374,26 +386,35 @@ async function printSetupPreview(aiosPath, args) {
     console.log("[would skip] activation because setup would stop at the target check above");
     process.exitCode = 1;
   } else {
-    await printClientPreview(aiosPath, homePath);
+    const detectedClientCount = await printClientPreview(aiosPath, homePath, { verbose });
+    if (!verbose && detectedClientCount === 0) {
+      console.log("No supported local AI app was detected. Install Claude Code, Codex, or Gemini CLI, then run setup again.");
+    }
   }
 
   console.log("");
   console.log("Safety boundaries:");
-  console.log("- Setup preserves unmanaged files; bridge collisions are reported instead of replaced.");
+  console.log(verbose
+    ? "- Setup preserves unmanaged files; bridge collisions are reported instead of replaced."
+    : "- Your existing app instructions are preserved; conflicts stop for review.");
   console.log("- Private GitHub sync stays off unless you explicitly run `dotaios sync setup` later.");
   console.log("- DotAIOS does not copy credentials into the AIOS folder or a Git remote URL.");
   console.log("- DotAIOS does not start a hosted account or upload context to a DotAIOS service.");
-  console.log("- This command does not create the AIOS folder or change client configuration or sync.");
+  console.log("- This preview does not create the AIOS folder or change app settings or sync.");
   console.log("- When invoked through npx, npm may download and cache the named package.");
   console.log("");
   console.log("Optional prompts after core setup (all default No):");
   console.log("- Private GitHub sync: creates and connects a private mirror you control.");
   console.log("- Daily brief: enables the bundled local schedule entry.");
-  console.log("- Conversation saving: may add a managed client hook; 30-day backfill reads local history into ~/aios.");
+  console.log(verbose
+    ? "- Conversation saving: may add a managed client hook; 30-day backfill reads local history into ~/aios."
+    : "- Conversation saving: can connect supported apps; 30-day backfill reads local history into ~/aios.");
   console.log(`- Lightpanda ${LIGHTPANDA_VERSION}: downloads an optional SHA-256-verified local browser binary.`);
   console.log("");
   console.log("After setup, verify with: dotaios doctor");
-  console.log("To remove it, first disable capture and sync, then remove only DotAIOS-managed bridges and archive or delete the AIOS folder. Unmanaged client configuration is left alone.");
+  if (verbose) {
+    console.log("To remove it, first disable capture and sync, then remove only DotAIOS-managed bridges and archive or delete the AIOS folder. Unmanaged client configuration is left alone.");
+  }
 }
 
 async function previewSetupTarget(aiosPath) {
@@ -419,29 +440,41 @@ async function previewSetupTarget(aiosPath) {
   };
 }
 
-async function printClientPreview(aiosPath, homePath) {
+async function printClientPreview(aiosPath, homePath, { verbose = false } = {}) {
   const registry = await loadAgentRegistry(null);
   // The writer projects skills into every symlink target regardless of what is
   // detected. The preview must read the same set, or it promises less than the
   // run delivers.
   const skillDirs = symlinkTargets(registry).map((target) => target.dir);
+  let detectedClientCount = 0;
 
   for (const agent of registry) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
     const installed = await isAgentInstalled(homePath, agent);
     if (!installed) {
-      console.log(`[would skip] ${destination} (${agent.name} not detected${skillLinkCaveat(agent, homePath, skillDirs)})`);
+      if (verbose) console.log(`[would skip] ${destination} (${agent.name} not detected${skillLinkCaveat(agent, homePath, skillDirs)})`);
+      continue;
+    }
+    detectedClientCount += 1;
+
+    if (!agent.bridge) {
+      if (verbose) {
+        console.log(`[detected] ${destination} (${agent.name} uses native or project-specific configuration; external config is outside this preview)`);
+      } else {
+        console.log(`[detected] ${agent.name} — needs native or project-specific setup before it can use your context.`);
+      }
       continue;
     }
 
-    if (!agent.bridge) {
-      console.log(`[detected] ${destination} (${agent.name} uses native or project-specific configuration; external config is outside this preview)`);
+    if (!verbose) {
+      console.log(`[detected] ${agent.name} — setup will connect it to your context.`);
       continue;
     }
 
     console.log(await previewManagedBridge(destination));
   }
 
+  if (!verbose) return detectedClientCount;
   for (const relativeDir of skillDirs) {
     const targetDir = path.join(homePath, relativeDir);
     const stats = await lstatIfPresent(targetDir);
@@ -452,6 +485,43 @@ async function printClientPreview(aiosPath, homePath) {
     } else {
       console.log(`[would add missing managed skill links] ${targetDir} (existing unmanaged entries preserved)`);
     }
+  }
+  return detectedClientCount;
+}
+
+function displayHomePath(value, homePath) {
+  const resolved = path.resolve(value);
+  const resolvedHome = path.resolve(homePath);
+  const relative = path.relative(resolvedHome, resolved);
+  return relative === "" ? "~" : relative && !relative.startsWith("..") && !path.isAbsolute(relative)
+    ? `~/${relative.split(path.sep).join("/")}`
+    : resolved;
+}
+
+function formatClientNames(names) {
+  const values = [...new Set(names || [])];
+  if (values.length < 2) return values[0] || "";
+  if (values.length === 2) return values.join(" and ");
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function validateSetupOptions(args) {
+  const valued = new Set(["--path", "--home", "--vault-path", "--project"]);
+  const flags = new Set([
+    "--all", "--dry-run", "--force", "--install-lightpanda", "--merge",
+    "--no-skills-first", "--overwrite", "--prune-aliases", "--skip-reveal",
+    "--skills-first", "--verbose", "--yes", "-y"
+  ]);
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (valued.has(arg)) {
+      if (!args[index + 1] || args[index + 1].startsWith("--")) {
+        throw new Error(`${arg} requires a value`);
+      }
+      index += 1;
+      continue;
+    }
+    if (!flags.has(arg)) throw new Error(`Unknown option: ${arg}`);
   }
 }
 
@@ -497,7 +567,7 @@ async function lstatIfPresent(target) {
 // recorded the complete expected tree before createBaseTree, and every path
 // left behind still matches that record. Only that narrow case gets an internal
 // --force retry. The metrics-only recognizer below remains for 1.27.1 upgrades.
-async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
+async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quiet = false } = {}) {
   if (await hasSetupTransaction(aiosPath)) {
     if (passthrough.includes("--force") || passthrough.includes("--overwrite")) {
       throw new Error(
@@ -508,6 +578,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
   let transactionStarted = null;
   try {
     await initCommand(passthrough, {
+      quiet,
       beforeScaffold: async (plan) => {
         transactionStarted = await beginSetupTransaction(aiosPath, passthrough, plan, lifecycle);
       },
@@ -524,6 +595,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
     const transaction = await readRecoverableSetupTransaction(aiosPath, passthrough);
     if (transaction) {
       await initCommand([...passthrough, "--force"], {
+        quiet,
         plan: transaction.transaction.plan,
         allowSetupTransactionRecovery: true
       });
@@ -532,7 +604,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}) {
       return { markerStats: transaction.markerStats, transaction: transaction.transaction };
     }
     if (!(await isFailedSetupResidue(aiosPath))) throw error;
-    await initCommand([...passthrough, "--force"]);
+    await initCommand([...passthrough, "--force"], { quiet });
     console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
     return false;
   }

@@ -27,6 +27,7 @@ test("setup --dry-run previews concrete actions without DotAIOS-managed changes"
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {
@@ -81,7 +82,7 @@ test("setup --dry-run promises every skill-link directory the real run creates",
   const target = ["--path", aiosPath, "--home", homePath];
 
   try {
-    const preview = spawnSync(process.execPath, [cli, "setup", "--dry-run", ...target], {
+    const preview = spawnSync(process.execPath, [cli, "setup", "--dry-run", "--verbose", ...target], {
       encoding: "utf8",
       env
     });
@@ -122,6 +123,7 @@ test("setup --dry-run reports an unmanaged bridge collision without changing it"
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {
@@ -154,6 +156,7 @@ test("setup --dry-run preserves a bridge whose managed markers are reversed", ()
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {
@@ -192,6 +195,7 @@ test("setup --dry-run preserves a bridge with duplicate managed markers", () => 
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
     "setup",
     "--dry-run",
+    "--verbose",
     "--path", aiosPath,
     "--home", homePath
   ], {
@@ -397,6 +401,10 @@ test("non-interactive setup does not download the optional web browsing engine b
     env: { ...process.env, HOME: processHomePath, PATH: "/usr/bin:/bin" }
   });
   assert.equal(result.status, 0, result.stderr);
+  assert.ok(
+    result.stdout.includes(`  2. Open the ${aiosPath} folder or make it your working directory.`),
+    `setup guidance must name the resolved --path target, got:\n${result.stdout}`
+  );
   assert.match(result.stdout, /Web browsing engine: not installed.*plain fetch remains available/);
   assert.equal(fsSync.existsSync(path.join(homePath, ".dotaios", "bin", "lightpanda")), false);
   assert.doesNotMatch(result.stdout, /All set\./);

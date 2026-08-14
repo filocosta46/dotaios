@@ -50,6 +50,13 @@ describe("activateCommand — symlinks", () => {
     ]);
     assert.ok(activation.configuredContextCount > 0);
     assert.ok(activation.detectedClientCount > 0);
+    assert.deepEqual(
+      activation.configuredClientNames,
+      ["Claude Code", "Codex", "Gemini"],
+      "only clients with configured context bridges belong in the configured-name list"
+    );
+    assert.ok(activation.detectedClientNames.includes("Cursor"), "bridge-less apps remain visible as detected");
+    assert.equal(activation.configuredClientNames.includes("Cursor"), false);
 
     const symlinkPath = path.join(dirs.homePath, ".claude", "skills", "test-skill");
     const stat = await fs.lstat(symlinkPath);
@@ -62,6 +69,27 @@ describe("activateCommand — symlinks", () => {
     const skillFile = path.join(symlinkPath, "SKILL.md");
     const content = await fs.readFile(skillFile, "utf8");
     assert.ok(content.includes("Test Skill"), "symlink should resolve to skill content");
+  });
+
+  it("returns the full stable activation result shape for a catalog conflict", async () => {
+    const { catalogConflictActivationResult } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+    const results = [{ action: "kept", path: "skills/INDEX.md" }];
+
+    assert.deepEqual(
+      catalogConflictActivationResult({ conflicts: [{ path: "skills/INDEX.md" }], results }),
+      {
+        detectedClientCount: 0,
+        configuredContextCount: 0,
+        detectedClientNames: [],
+        configuredClientNames: [],
+        blockedContextCount: 0,
+        blockedHermesCount: 0,
+        blockedCatalogCount: 1,
+        results
+      }
+    );
   });
 
   it("refuses to connect a temporary AIOS into the real home", async () => {

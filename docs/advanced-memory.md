@@ -32,6 +32,30 @@ The audit never deletes memory. By default it follows DotAIOS memory routing:
 the last 50 `memory/events.jsonl` entries plus today/yesterday signal files. Use
 `--all-memory` only when you want a deeper forensic pass over older history.
 
+Older events and trimmed signals remain canonical JSONL. DotAIOS keeps each
+active archive below 2 MiB, rotating complete records into immutable numbered
+files (`events-archive.000001.jsonl`, for example). Search reads those shards
+automatically; there is no index to rebuild and no archived record becomes
+write-only. A single record may occupy its own shard up to the 4 MiB safe-read
+ceiling. Anything larger stops maintenance before the source is removed.
+Rotation uses a durable format witness and crash marker. An ambiguous archive
+created by the older markerless rotator is left byte-for-byte unchanged and
+reports `DOTAIOS_ARCHIVE_LEGACY_RECOVERY_REQUIRED` for explicit inspection;
+DotAIOS never guesses whether an identical shard prefix is a retry or a
+legitimate duplicate. A restart also repairs the narrowly proven two-name
+hard-link state left when a process dies during exclusive publication, while
+rejecting unrelated links.
+
+Execution-time runway check (2026-08-13): the live AIOS event archive is
+199,021 bytes / 725 lines and the signal archive is 66,177 bytes / 203 lines.
+At the observed Git-visible rates of roughly 30 event lines/day and 10 signal
+lines/day since 2026-07-27, the coarse per-file runways were about 480 and
+1,240 days under the former 4 MiB single-file limit, or about 230 and 620 days
+to the new 2 MiB rotation point from this snapshot. Rotation is therefore a
+durability bound, not a reason to add a database or persistent search index.
+The existing signal archive was an eligible legacy 0644 file; the next locked
+maintenance run narrows that exact safe case to 0600 before publication.
+
 `--write-queue` writes proposed skill patches to
 `memory/skill-patches/queue.md` with stable IDs, so cleanup or compaction does
 not duplicate the same lesson. If the queue is intentionally capped, the report

@@ -328,8 +328,8 @@ test("doctor stays green after connect gemini", () => {
       env: { ...process.env, HOME: base, DOTAIOS_NO_UPDATE_CHECK: "1" }
     });
 
-    assert.match(doctor.stdout, /\[ok\] Gemini bridge/);
-    assert.doesNotMatch(doctor.stdout, /Bridge points to a different AIOS folder/);
+    assert.match(doctor.stdout, /\[ok\] Gemini\n/);
+    assert.doesNotMatch(doctor.stdout, /Connection points to a different AIOS folder/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

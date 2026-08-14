@@ -122,6 +122,101 @@ a bounded `operational.migration` sibling;
 selection, and `resolve_skill` routes
 workflow intent. There are no compatibility aliases.
 
+### On-demand search
+
+Markdown search is a request-scoped safe corpus transaction. The evidence
+reader enumerates eligible regular files and returns transaction-owned
+`filePath`, UTF-8 `content`, and `mtimeMs` observations to one callback.
+Canonical matching, snippet construction, whole-corpus IDF statistics, recency
+ranking, stable ordering, and the result limit all run inside that callback.
+The search promise cannot resolve until the evidence reader has performed its
+final root, ancestor, and observed-directory generation validation; a changed
+generation rejects the request without publishing a partial result.
+
+The transaction preserves each logical corpus boundary and its source policy:
+daily and inbox notes remain separate from memory streams, plugin search accepts
+Markdown plus `manifest.json`, project search reads only the resolved selector,
+and an external vault remains its own explicitly authorized root. Hidden and
+secret-like entries remain ineligible. Linked, non-regular, changed, invalid
+UTF-8, unauthorized, misconfigured, or unexpectedly unreadable observed
+evidence rejects the whole request.
+
+Resource ceilings are different. One request-owned discovery transaction uses
+phase-local fair ledgers before metadata inspection or catalog reads can spend
+the shared, non-releasable physical ledger. Half of each currently available
+byte, file, and entry ceiling is reserved as equal protected shares; unused
+capacity is redistributed in declared order. The same rule is applied to the
+bounded catalog discovery needed for exact JSONL entry counts or session
+membership. Session discovery replays the public reverse-order filters, query,
+and limit, so it retains each body at most once and never charges a body that a
+title, agent, or project hit makes unnecessary. Retained catalog/body bytes are
+never reread. Only scopes whose remaining work fits have their ordinary content
+read and are tokenized and ranked. Otherwise the whole scope is omitted so
+partial-corpus IDF and ranking are never presented as complete. Every inspected
+file plus each directory, ancestor, and root observation remains
+transaction-owned and is revalidated before results resolve; all phase readers
+and prepared capabilities close on success or failure.
+
+Successful search arrays retain their iterable group shape and expose frozen,
+non-enumerable `scope` and `omissions` metadata. Omissions use the five primary
+closed reason codes `file_too_large`, `directory_entries_exceeded`,
+`aggregate_bytes_exceeded`, `file_count_exceeded`, and
+`entry_count_exceeded`; the explicit aggregate-remainder reason is
+`omissions_truncated`; contain bounded counts and path-free recovery text; and
+are capped at 32 records plus one defensive aggregate remainder. A directory
+ceiling is `partially_enumerated`; other ceiling omissions are `not_searched`.
+Every observed directory, including a directory stopped at its ceiling, is
+revalidated after ranking and before results resolve. The CLI prints valid
+results to stdout, warnings to stderr, and exits 2 for incomplete searches.
+Exit 0 is complete, including zero hits, while integrity and configuration
+failures remain exit 1.
+
+Search writes no index, cache, manifest, or other derived state. Each request
+enumerates the current canonical files, so additions, edits, and deletions are
+visible on the next request. The optimization amortizes repeated containment
+checks only for the lifetime of that request; the AIOS folder remains the sole
+search authority.
+
+### Bounded memory archives
+
+Event compaction and stale-signal trimming keep the unsuffixed
+`events-archive.jsonl` and `signals-archive.jsonl` files as active append
+targets. Before an append would cross 2 MiB, maintenance publishes complete
+JSONL records into immutable, zero-padded shards such as
+`events-archive.000001.jsonl`. Numbered shards are searched in numeric order,
+then the active archive. Exact retry overlap is deduplicated before corpus
+statistics and ranking, so an interruption cannot turn one event into two
+search results.
+
+One valid record above 2 MiB but no larger than the 4 MiB evidence-file ceiling
+occupies a shard by itself. A larger record stops maintenance before the live
+event generation is replaced or a stale signal source is removed. The pending
+batch remains recovery authority until shard and active-file publication have
+been fsynced. A durable `*.rotation-format` witness separates new
+marker-protocol generations from ambiguous overlap left by the older
+markerless rotator. If the witness is absent and the newest shard is an exact
+prefix of the active archive, maintenance fails before mutation with
+`DOTAIOS_ARCHIVE_LEGACY_RECOVERY_REQUIRED`; an operator can inspect both
+authoritative copies instead of DotAIOS guessing whether equal records are a
+retry or legitimate duplicates. Each shard is created exclusively at mode 0600
+and is never overwritten; active and pending files must be owned, regular,
+single-link files. Maintenance narrowly secures an eligible legacy 0644 active
+archive to 0600, but rejects links, wrong ownership, broader modes, and unsafe
+pre-existing shard targets.
+
+Exclusive publication links an owned UUID temporary into its final name. If a
+real process death leaves those two names on the same inode, restart recovery
+removes only the single proven temporary, fsyncs the directory, and revalidates
+the final file as the same owned, mode-0600, single-link object. Any different
+hard-link state remains fatal.
+
+Search observes the memory directory before reading the numbered generation
+and revalidates it before results resolve. A concurrent rotation therefore
+returns the complete old generation, the complete new generation, or a fatal
+source-changed retry—never an accepted mixture. Eventually, many valid shards
+can exhaust the request-wide search ceiling; the resource-ceiling contract
+above then reports the whole memory scope as an explicit omission.
+
 ## Vault
 
 `vault/` is long-term knowledge, loaded on demand. Users may keep it inside `~/aios/vault` or configure an external `vault_path` in `aios.json`, such as an Obsidian vault.
