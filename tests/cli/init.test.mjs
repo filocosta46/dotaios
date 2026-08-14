@@ -42,6 +42,24 @@ test("init creates the vault at a creatable --vault-path", () => {
   assert.equal(fs.existsSync(path.join(target, "aios.json")), true);
 });
 
+test("a new folder teaches the three memory choices and the cross-agent continuity loop", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-session-"));
+  const target = path.join(root, "aios");
+  try {
+    const result = spawnSync(process.execPath, [cli, "init", "--yes", "--path", target], { encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    const guide = fs.readFileSync(path.join(target, "FIRST_SESSION.md"), "utf8");
+    assert.match(guide, /Use my memory/);
+    assert.match(guide, /Only this project/);
+    assert.match(guide, /Private chat/);
+    assert.match(guide, /save.*switch.*agent/is);
+    assert.match(guide, /source|where.*came from/i);
+    assert.match(guide, /AI app may still keep its own/i);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("init rejects duplicate target and vault options before writing files", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-init-duplicates-"));
   const firstTarget = path.join(root, "first-aios");

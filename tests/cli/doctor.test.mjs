@@ -43,6 +43,32 @@ async function runDoctor({ aiosPath, homePath, detection }) {
 // the sandbox home, which is what each of these fixtures is controlling.
 const noAgentBinaries = { env: { PATH: "" } };
 
+describe("doctor secret boundary", () => {
+  it("requires a local .env to be a private regular file without reading it", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-secret-"));
+    const aiosPath = await makeMinimalAios(root);
+    const secretPath = path.join(aiosPath, ".env");
+    const { checkSecretBoundary } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    try {
+      await fs.writeFile(secretPath, "API_KEY=never-read-this\n", { mode: 0o644 });
+      const exposed = await checkSecretBoundary(aiosPath, { platform: "darwin" });
+      assert.equal(exposed.status, "fail");
+      assert.match(exposed.fix, /chmod 600/);
+
+      await fs.chmod(secretPath, 0o600);
+      assert.equal((await checkSecretBoundary(aiosPath, { platform: "darwin" })).status, "ok");
+
+      await fs.unlink(secretPath);
+      await fs.symlink(path.join(root, "outside.env"), secretPath);
+      assert.equal((await checkSecretBoundary(aiosPath, { platform: "darwin" })).status, "fail");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("doctor native-skill runtimes", () => {
   let tmpBase;
 

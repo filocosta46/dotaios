@@ -4,7 +4,9 @@ DotAIOS is local-first, but local files can still contain sensitive data. The sa
 
 ## Secrets
 
-Users should store secrets in:
+DotAIOS is not a password manager. Prefer provider-owned authentication or the
+operating system's password manager. When a local connection requires an API
+key exposed as an environment variable, the supported fallback is:
 
 ```text
 ~/aios/.env
@@ -20,6 +22,10 @@ Generated AIOS folders include a `.gitignore` that ignores:
 - `*.key`
 
 `.env.example` is safe to commit because it contains placeholders only.
+
+Keep `.env` as a single private regular file. On macOS and Linux use mode
+`0600`; `dotaios doctor` checks this without reading its contents. Search, MCP,
+and the private Git mirror exclude these secret filename families.
 
 Agents should never ask users to paste API keys, passwords, tokens, private keys, or OAuth client secrets into chat. They should name the required variable and ask the user to edit `.env` locally.
 

@@ -2,7 +2,10 @@
 
 DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of it as the shared notebook for your AI companion: context, memory, and skills stay on your machine as plain files.
 
-> **Audience.** DotAIOS free core is for people already using local agents and comfortable with Node / `npx`. Setup is run by the user in a system terminal. An agent may inspect or verify it, but should not fetch remote instructions and execute them. See the [README](../README.md) for the product promise and honest limits.
+> **Audience.** DotAIOS is for people moving between AI tools who want one
+> private, readable place for useful context. You do not need to understand
+> Node, npm, Git, or MCP. A local agent can handle the technical setup while
+> previewing every change and leaving the meaningful choices to you.
 
 ```bash
 npx dotaios@2.0.3 setup --dry-run
@@ -16,9 +19,23 @@ are reproducible. Later maintenance examples use `@latest` deliberately when
 you choose to inspect or run the newest published release; no global install is
 needed.
 
-The setup flow asks a few questions, creates starter context and memory files,
+The recommended flow is the one request in [Friend Setup](friend-setup.md). The
+agent checks Node, previews the exact changes, runs the pinned setup, verifies
+it, and shows the one AIOS folder. The setup flow asks a few questions, creates starter context and memory files,
 then adds managed bridge blocks or links for detected Claude Code, Codex, and
 Gemini installations. Private sync remains off unless you explicitly opt in.
+
+## Choose what this session may remember
+
+- `Use my memory` selects **Memory: Shared** for personal continuity.
+- `Only this project` selects **Memory: This project** and excludes personal,
+  unscoped, and other-project memory.
+- `Private chat` locks **Memory: Off**: DotAIOS does not read, search, save, or
+  capture in that session. Your AI app may still retain its own chat history.
+
+The receipt is visible in agent instructions, CLI output, and MCP responses.
+Agent instruction files and MCP are bridges into the same AIOS folder, not
+separate memory stores.
 
 For Cursor or project-scoped agents, attach a project folder:
 

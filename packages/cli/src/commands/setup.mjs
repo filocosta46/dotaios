@@ -289,8 +289,9 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   }
   console.log("  1. Open your AI agent — Claude Code, Codex, Gemini CLI, Cursor, or any other.");
   console.log(`  2. Open the ${displayHomePath(aiosPath, os.homedir())} folder or make it your working directory.`);
-  console.log('  3. Ask: "Read my context and tell me what I am working on."');
-  console.log("  4. Update context any time: dotaios interview --review");
+  console.log('  3. Ask: "Use my memory. Read my context and tell me what I am working on."');
+  console.log('  4. Other session choices: "Only this project" or "Private chat".');
+  console.log("  5. Update context any time: dotaios interview --review");
 
   // Reveal last so optional prompts retain terminal focus.
   // Step 3: reveal (best-effort, never blocks)

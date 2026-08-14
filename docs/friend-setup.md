@@ -1,17 +1,32 @@
 # DotAIOS: Friend Setup
 
-You run these commands yourself in Terminal. Do not paste an install prompt into
-an AI chat. An assistant can inspect the source or verify the finished setup.
+The recommended path is to ask a local AI agent that can run commands to guide
+the install. You make the meaningful choices; the agent handles Node, npm, the
+preview, setup, and verification. Running the same commands yourself remains a
+recovery path.
 
 ## You need
 
 - macOS or Linux;
-- Node.js 20 or newer (`node --version`);
 - at least one local AI tool, such as Claude Code or Codex.
+
+DotAIOS needs Node.js 20 or newer, but you do not need to install or understand
+it first. The assisting agent checks and installs the supported LTS release when
+it is missing, following [`../INSTALL.md`](../INSTALL.md).
 
 You do not need a GitHub account, npm account, or paid plan.
 
-## 1. Preview
+## 1. Paste one request
+
+Open a local agent that can run commands and paste:
+
+> Help me install DotAIOS by following the “If an AI assistant is helping you”
+> section of https://github.com/filocosta46/dotaios/blob/main/INSTALL.md. Preview
+> every change first, ask me only about choices I can evaluate, then verify the
+> setup and show me my one AIOS folder.
+
+The agent should then run the pinned preview below. If you are recovering
+manually, run it yourself:
 
 ```sh
 npx dotaios@2.0.3 setup --dry-run
@@ -24,7 +39,7 @@ It shows the selected folder, detected clients, and collisions.
 Want to inspect the package first? Follow the provenance checks in
 [`../INSTALL.md`](../INSTALL.md).
 
-## 2. Set up
+## 2. Approve the preview and set up
 
 ```sh
 npx dotaios@2.0.3 setup
@@ -41,9 +56,13 @@ npx dotaios@2.0.3 doctor
 npx dotaios@2.0.3 skills doctor
 ```
 
-Then open the AI tool you use and ask:
+Then open a connected local agent in the printed AIOS folder and ask:
 
-> Read my DotAIOS context and tell me what I am working on.
+> Use my memory. Read my DotAIOS context and tell me what I am working on.
+
+At the start of a session you can instead say `Only this project` or `Private
+chat`. The agent should visibly reply with `Memory: Shared`, `Memory: This
+project`, or `Memory: Off`.
 
 If the tool was already open during setup, restart it first so it reloads its
 managed configuration.
@@ -56,8 +75,8 @@ managed configuration.
   collision before deciding whether to change anything.
 - `npx: command not found`: install the Node.js LTS release from
   [nodejs.org](https://nodejs.org), then check `node --version` again.
-- Agent refusal: expected if the assistant was asked to execute remote
-  instructions. Run setup yourself, then ask it only to inspect the result.
+- Agent refusal: use another local agent that can review and run commands, or
+  follow the same pinned preview and setup commands yourself.
 
 ## Remove it later
 

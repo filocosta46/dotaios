@@ -72,6 +72,9 @@ test("real setup keeps init detail concise by default and restores it with --ver
       conciseOutput,
       new RegExp(`Open the ${escapeRegExp(conciseAios)} folder or make it your working directory`)
     );
+    assert.match(conciseOutput, /Use my memory/);
+    assert.match(conciseOutput, /Only this project/);
+    assert.match(conciseOutput, /Private chat/);
     assert.doesNotMatch(
       conciseOutput.replaceAll(conciseAios, "<selected-aios-path>"),
       new RegExp(escapeRegExp(tempRoot))

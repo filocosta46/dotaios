@@ -16,11 +16,42 @@ If you use more than one AI assistant, DotAIOS helps you:
 
 The free core is available now.
 
-## Install: preview, then run
+## One folder, three session choices
 
-You need Node.js 20 or newer. You do not need a GitHub or DotAIOS account.
+Your AIOS folder is canonical. `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, search,
+and the optional MCP adapter are bounded bridges into that folder—not competing
+memory databases.
 
-Run these commands yourself in Terminal, PowerShell, or another system shell. The first command previews the selected folder, detected clients, and collisions without creating `~/aios` or changing client configuration or sync. npm may download and cache the named package. The second command runs the same pinned release and guides you through setup:
+Start a connected local-agent session with one of these phrases:
+
+- `Use my memory` — **Memory: Shared** uses your personal continuity.
+- `Only this project` — **Memory: This project** uses only that project's files
+  and explicitly attributed continuity; it excludes personal, unscoped, and
+  other-project memory.
+- `Private chat` — **Memory: Off** performs no DotAIOS read, search, save, or
+  capture for the session. Your AI app may still keep its own chat history.
+
+The selected receipt stays visible. Saving is deliberate: one explicit save
+becomes one conceptual memory result, with its source available when another
+agent retrieves it.
+
+## Install with one request
+
+Open Claude Code, Codex, Cursor, or another local assistant that can run
+commands, and paste:
+
+> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/main/INSTALL.md — the “If an AI assistant is helping you” section. Preview every change, ask me only about choices I can evaluate, verify it, and show me my one AIOS folder.
+
+The assistant checks and, when needed, installs supported Node.js; previews the
+exact folder and app changes; runs setup; and translates the result into plain
+language. You do not need a GitHub or DotAIOS account.
+
+If you prefer to run the technical recovery path yourself, use Terminal,
+PowerShell, or another system shell. DotAIOS requires Node.js 20 or newer. The
+first command previews without creating `~/aios` or changing app configuration;
+the second runs the same pinned release:
+
+npm may download and cache the named package.
 
 ```sh
 npx dotaios@2.0.3 setup --dry-run
@@ -28,14 +59,6 @@ npx dotaios@2.0.3 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
-
-### Prefer to be walked through it?
-
-Open Claude Code, Codex, Cursor, or any assistant that can run commands, and paste:
-
-> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/main/INSTALL.md — the "If an AI assistant is helping you" section.
-
-That section carries the whole journey: it installs Node.js if the machine does not have it, previews what will change, runs setup, and relays setup's own questions to you. Those questions all default to No and are the ones you decide. If the assistant declines, run the two commands above yourself instead.
 
 Afterward, either you or the assistant can verify the local installation with:
 
