@@ -299,12 +299,12 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
   const lines = [
     MANAGED_START,
     pointerLine,
-    "Choose memory access for this session before opening AIOS:",
-    "- `Private chat` locks `Memory: Off`: no DotAIOS read, search, save, or capture. Say once that the host may keep its own history.",
-    "- In an attached working directory, or when the user asks `Only this project`, use `Memory: This project`; require its exact identity and exclude personal, unscoped, and other-project memory. If the directory is not registered, stay closed in This project mode, say so, and offer `dotaios activate`; never fall back to Shared.",
-    "- When the user asks `Use my memory`, use `Memory: Shared`; this is the default elsewhere.",
+    "Choose memory access for this session before any AIOS read:",
+    "- `Private chat` locks `Memory: Off`: keep AIOS closed — no DotAIOS read, search, save, or capture. Say once that the host may keep its history.",
+    "- In an attached working directory, or after `Only this project`, use `Memory: This project` and exclude all other memory. If not registered, keep AIOS closed, say so, offer `dotaios activate`, and never fall back to Shared. Only after registration and exact identity are verified, read AGENTS.md and run `dotaios brief --compact --memory project --project <slug-or-id>`.",
+    "- When the user asks `Use my memory`, use `Memory: Shared`; this is the default elsewhere. Only in Shared, read AGENTS.md and run `dotaios brief --compact --memory shared`.",
     "Lead every response with the selected receipt: `Memory: Shared`, `Memory: This project`, or `Memory: Off`.",
-    `Leave the AIOS folder closed for Off. Otherwise read ${AGENT_ENTRYPOINT} first, then run \`dotaios brief --compact --memory shared\` or \`dotaios brief --compact --memory project --project <slug-or-id>\`; route events, signals, and saved sessions only through the canonical bounded projection.`
+    "Route events, signals, and saved sessions only through the canonical bounded projection."
   ];
 
   if (skillsFirst) {

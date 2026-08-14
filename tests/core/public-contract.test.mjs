@@ -60,6 +60,7 @@ test("README leads with the nondeveloper continuity outcome before technical ref
   const who = readme.indexOf("## Who this is for");
   const install = readme.indexOf("## Install with one request");
   const choices = readme.indexOf("## Choose what your AI can remember");
+  const afterward = readme.indexOf("## What you have afterward");
   const technical = readme.indexOf("## Technical reference");
 
   assert.match(opening, /stop (?:repeating|retelling)|start(?:ing)? from zero/i);
@@ -73,10 +74,14 @@ test("README leads with the nondeveloper continuity outcome before technical ref
   );
   assert.ok(install > who, "customer fit must come before installation");
   assert.ok(choices > install, "privacy choices must follow the primary activation path");
-  assert.ok(technical > choices, "operator material must stay behind a technical-reference boundary");
+  assert.ok(afterward > choices, "the memory-choice section must end before the product outcome resumes");
+  assert.ok(technical > afterward, "operator material must stay behind a technical-reference boundary");
   assert.match(readme, /install[\s\S]{0,300}personalize[\s\S]{0,300}save[\s\S]{0,300}switch[\s\S]{0,300}privacy/i);
-  assert.match(readme, /Codex and Claude Code[\s\S]{0,240}forward[\s\S]{0,120}Off/i);
-  assert.match(readme, /cannot undo|cannot erase|may already have loaded/i);
+  const memoryChoices = readme.slice(choices, afterward);
+  assert.match(memoryChoices, /Codex and Claude Code[\s\S]{0,240}forward[\s\S]{0,120}Off/i);
+  assert.match(memoryChoices, /instructions or context.*may already have loaded/i);
+  assert.match(memoryChoices, /Off.*cannot (?:undo|erase)/i);
+  assert.match(memoryChoices, /AI app may still keep its own chat history/i);
 });
 
 test("Hermes claims a global adapter without inventing a project-local selector", async () => {

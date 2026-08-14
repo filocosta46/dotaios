@@ -332,6 +332,10 @@ test("Gemini generated hook closes memory before npx for invalid or oversized st
     assert.match(output.systemMessage, /^Memory: Closed\b/);
     assert.equal(output.hookSpecificOutput.hookEventName, "BeforeAgent");
     assert.equal(output.hookSpecificOutput.additionalContext, "");
+    assert.deepEqual(output.dotaiosMemory, {
+      mode: "closed",
+      project: null
+    });
   }
 
   assert.equal(fs.existsSync(missingAios), false);

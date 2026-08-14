@@ -86,8 +86,10 @@ test("managed bridges route working memory through the canonical projection", as
   assert.match(content, /^.*Private chat.*Memory: Off.*$/im);
   assert.match(content, /^.*Only this project.*Memory: This project.*$/im);
   assert.match(content, /^.*Use my memory.*Memory: Shared.*$/im);
-  assert.match(content, /not registered.*stay closed.*dotaios activate.*never fall back to Shared/is);
-  assert.match(content, /choose.*memory access.*before opening.*AIOS/is);
+  assert.match(content, /^Choose memory access for this session before any AIOS read:$/m);
+  assert.match(content, /not registered.*keep AIOS closed.*dotaios activate.*never fall back to Shared/is);
+  assert.match(content, /Only after registration and exact identity.*read AGENTS\.md.*memory project/is);
+  assert.match(content, /Only in Shared.*read AGENTS\.md.*memory shared/is);
   assert.match(content, /host.*history/i);
   assert.match(content, /`read_working_context`, `search_aios`, and `resolve_skill`/);
   const retiredToolNames = [
