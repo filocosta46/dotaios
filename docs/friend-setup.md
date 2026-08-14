@@ -57,15 +57,22 @@ npx dotaios@2.0.3 skills doctor
 ```
 
 Then start a connected local agent from your usual folder or an attached
-project—not from inside the printed AIOS storage folder—and ask:
+project—not from inside the printed AIOS storage folder. If the current folder
+resolves to an explicitly registered project with a slug or stable ID, make the
+first message:
+
+> Only this project. Read my DotAIOS context and tell me what I am working on.
+
+Otherwise, make the first message:
 
 > Use my memory. Read my DotAIOS context and tell me what I am working on.
 
-At the start of a session, `Only this project` is available when the current
-folder resolves to an explicitly registered project with a slug or stable ID.
-Without that registration, say `Use my memory` for Shared or `Private chat` for
-Off. The agent should visibly reply with `Memory: Shared`, `Memory: This
-project`, or `Memory: Off`.
+To verify Off, start another new session and make the first message:
+
+> Private chat. Do not use my DotAIOS memory.
+
+The agent should visibly reply with `Memory: This project`, `Memory: Shared`, or
+`Memory: Off`, matching the first message.
 
 If the tool was already open during setup, restart it first so it reloads its
 managed configuration.

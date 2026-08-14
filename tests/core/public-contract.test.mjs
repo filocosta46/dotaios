@@ -8,6 +8,15 @@ import { promisify } from "node:util";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const run = promisify(execFile);
 
+function extractAssistantInstallRefs(markdown) {
+  return Array.from(
+    markdown.matchAll(
+      /https:\/\/github\.com\/filocosta46\/dotaios\/blob\/((?:[^/\s]+\/)*[^/\s]+)\/INSTALL\.md/g
+    ),
+    (match) => match[1]
+  );
+}
+
 async function npmPackDryRun() {
   const { stdout } = await run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
     cwd: repoRoot,
@@ -111,13 +120,16 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
     assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must retain a pinned manual recovery path`);
   }
   assert.match(documents["README.md"], /open .*assistant.*paste/is, "README must lead with one assistant request");
+  assert.deepEqual(
+    extractAssistantInstallRefs([
+      `https://github.com/filocosta46/dotaios/blob/v${pkg.version}/INSTALL.md`,
+      "https://github.com/filocosta46/dotaios/blob/feature/privacy/INSTALL.md"
+    ].join("\n")),
+    [`v${pkg.version}`, "feature/privacy"],
+    "assistant handoff extraction must include slash-containing mutable refs"
+  );
   for (const relativePath of ["README.md", "docs/friend-setup.md"]) {
-    const handoffRefs = Array.from(
-      documents[relativePath].matchAll(
-        /https:\/\/github\.com\/filocosta46\/dotaios\/blob\/([^/\s]+)\/INSTALL\.md/g
-      ),
-      (match) => match[1]
-    );
+    const handoffRefs = extractAssistantInstallRefs(documents[relativePath]);
     assert.deepEqual(
       handoffRefs,
       [`v${pkg.version}`],
@@ -127,6 +139,9 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(documents["README.md"], /_npmUser\.name/, "README provenance must request the publisher it claims to display");
   assert.match(documents["INSTALL.md"], /If an AI assistant is helping you/i, "INSTALL must carry the assistant through setup");
   assert.match(documents["docs/friend-setup.md"], /recommended path is to ask a local AI agent/i, "friend setup must recommend the nontechnical path");
+  assert.match(documents["docs/friend-setup.md"], /registered project[\s\S]{0,200}> Only this project\./i, "friend setup must verify project mode with a project first message");
+  assert.match(documents["docs/friend-setup.md"], /otherwise[\s\S]{0,200}> Use my memory\./i, "friend setup must verify Shared with a Shared first message");
+  assert.match(documents["docs/friend-setup.md"], /verify Off[\s\S]{0,200}> Private chat\./i, "friend setup must retain a separate Off verification message");
   assert.match(documents["docs/getting-started.md"], /You do not need to understand[\s>]*Node, npm, Git, or MCP/i, "getting started must not assume developer knowledge");
   assert.match(corpus, /preview every change|previewing every change/i, "assistant-led setup must remain preview-first");
   assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
