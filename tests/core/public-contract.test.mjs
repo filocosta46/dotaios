@@ -139,7 +139,18 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(documents["README.md"], /_npmUser\.name/, "README provenance must request the publisher it claims to display");
   assert.match(documents["INSTALL.md"], /If an AI assistant is helping you/i, "INSTALL must carry the assistant through setup");
   assert.match(documents["docs/friend-setup.md"], /recommended path is to ask a local AI agent/i, "friend setup must recommend the nontechnical path");
-  assert.match(documents["docs/friend-setup.md"], /registered project[\s\S]{0,200}> Only this project\./i, "friend setup must verify project mode with a project first message");
+  const projectVerificationContract = /explicitly registered project(?=[\s\S]{0,100}\bslug\b)(?=[\s\S]{0,100}\bstable ID\b)[\s\S]{0,200}> Only this project\./i;
+  for (const incompletePrerequisite of [
+    "registered project with a slug or stable ID\n\n> Only this project.",
+    "explicitly registered project\n\n> Only this project."
+  ]) {
+    assert.doesNotMatch(
+      incompletePrerequisite,
+      projectVerificationContract,
+      "project verification must require explicit registration plus a slug or stable ID"
+    );
+  }
+  assert.match(documents["docs/friend-setup.md"], projectVerificationContract, "friend setup must verify project mode with a project first message");
   assert.match(documents["docs/friend-setup.md"], /otherwise[\s\S]{0,200}> Use my memory\./i, "friend setup must verify Shared with a Shared first message");
   assert.match(documents["docs/friend-setup.md"], /verify Off[\s\S]{0,200}> Private chat\./i, "friend setup must retain a separate Off verification message");
   assert.match(documents["docs/getting-started.md"], /You do not need to understand[\s>]*Node, npm, Git, or MCP/i, "getting started must not assume developer knowledge");
