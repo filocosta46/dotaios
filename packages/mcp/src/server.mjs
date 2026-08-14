@@ -18,6 +18,7 @@ import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
 import { validateProjectSelector } from "../../core/src/projects.mjs";
 import { rankSkills } from "../../core/src/skill-resolver.mjs";
 import { collectSkills } from "../../core/src/skills.mjs";
+import { MEMORY_MODES, resolveMemoryPolicy } from "../../core/src/memory-policy.mjs";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_VERSION = JSON.parse(
@@ -111,17 +112,19 @@ class DotaiosMcpServer {
   }
 
   async callTool(name, args) {
+    const memoryPolicy = resolveMcpMemoryPolicy(args);
+    if (memoryPolicy.mode === "off") return serializeOffToolResult(name, args, memoryPolicy);
     await this.assertAios();
     if (name === "read_working_context") {
-      assertAllowedArguments(args, ["project", "limit", "budget"]);
-      return this.readWorkingContext(args);
+      assertAllowedArguments(args, ["memory", "project", "limit", "budget"]);
+      return this.readWorkingContext(args, memoryPolicy);
     }
     if (name === "search_aios") {
-      assertAllowedArguments(args, ["query", "scope", "project", "limit", "budget"]);
-      return this.searchAios(args);
+      assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+      return this.searchAios(args, memoryPolicy);
     }
     if (name === "resolve_skill") {
-      assertAllowedArguments(args, ["intent", "limit", "budget"]);
+      assertAllowedArguments(args, ["memory", "intent", "limit", "budget"]);
       return this.resolveSkill(args);
     }
     throw protocolError(-32602, `Unknown tool: ${name}`);
@@ -146,7 +149,7 @@ class DotaiosMcpServer {
     );
   }
 
-  async readWorkingContext(args) {
+  async readWorkingContext(args, memoryPolicy) {
     const project = optionalString(args.project, "project", 200);
     if (project && /\p{Cc}/u.test(project)) {
       throw protocolError(-32602, "project must be a project slug or stable id");
@@ -158,7 +161,8 @@ class DotaiosMcpServer {
     let envelope;
     try {
       envelope = await buildWorkingContextEnvelope(this.aiosPath, {
-        project,
+        memoryPolicy,
+        project: memoryPolicy.projectSelector || project,
         limit,
         visibleCharacterBudget,
       });
@@ -206,7 +210,7 @@ class DotaiosMcpServer {
     return serializeBoundedSkillResults({ intent, matches, limit: budget });
   }
 
-  async searchAios(args) {
+  async searchAios(args, memoryPolicy) {
     const query = requireString(args.query, "query", 500);
     const project = args.project === undefined
       ? undefined
@@ -241,7 +245,8 @@ class DotaiosMcpServer {
         query,
         scope,
         limit,
-        projectSelector: project,
+        memoryPolicy,
+        projectSelector: memoryPolicy.projectSelector || project,
         evidenceReader: reader
       });
     } catch (error) {
@@ -283,6 +288,7 @@ function tools() {
         type: "object",
         additionalProperties: false,
         properties: {
+          memory: memoryModeSchema(),
           project: {
             type: "string",
             minLength: 1,
@@ -303,6 +309,7 @@ function tools() {
         type: "object",
         additionalProperties: false,
         properties: {
+          memory: memoryModeSchema(),
           query: { type: "string", minLength: 1, maxLength: 500 },
           scope: { type: "string", enum: SEARCH_SCOPES, default: "all" },
           project: {
@@ -332,6 +339,7 @@ function tools() {
         type: "object",
         additionalProperties: false,
         properties: {
+          memory: memoryModeSchema(),
           intent: { type: "string", minLength: 1, maxLength: 500 },
           limit: { type: "integer", minimum: 1, maximum: 10, default: 1 },
           budget: { type: "integer", minimum: 256, maximum: 32000, default: 6000 },
@@ -340,6 +348,62 @@ function tools() {
       },
     },
   ];
+}
+
+function memoryModeSchema() {
+  return {
+    type: "string",
+    enum: MEMORY_MODES,
+    default: "shared",
+    description: "Shared uses personal continuity, project requires a project selector, and off performs no DotAIOS read, search, save, or capture."
+  };
+}
+
+function resolveMcpMemoryPolicy(args) {
+  try {
+    return resolveMemoryPolicy({ mode: args.memory, project: args.project });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_MEMORY_POLICY_INVALID") {
+      throw protocolError(-32602, error.message);
+    }
+    throw error;
+  }
+}
+
+function serializeOffToolResult(name, args, policy) {
+  const shared = {
+    memory: policy.mode,
+    receipt: policy.receipt,
+    notice: policy.notice,
+    complete: true
+  };
+  if (name === "read_working_context") {
+    assertAllowedArguments(args, ["memory", "project", "limit", "budget"]);
+    return JSON.stringify({
+      markdown: `${policy.receipt}\n\n${policy.notice}`,
+      scope: { project: null },
+      ...shared
+    }, null, 2);
+  }
+  if (name === "search_aios") {
+    assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+    return JSON.stringify({
+      query: typeof args.query === "string" ? args.query : "",
+      scope: typeof args.scope === "string" ? args.scope : "all",
+      results: [],
+      omissions: [],
+      ...shared
+    }, null, 2);
+  }
+  if (name === "resolve_skill") {
+    assertAllowedArguments(args, ["memory", "intent", "limit", "budget"]);
+    return JSON.stringify({
+      intent: typeof args.intent === "string" ? args.intent : "",
+      matches: [],
+      ...shared
+    }, null, 2);
+  }
+  throw protocolError(-32602, `Unknown tool: ${name}`);
 }
 
 function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omissions = [], limit }) {

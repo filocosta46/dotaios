@@ -13,6 +13,46 @@ const server = path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 const SEARCH_RESULT_BUDGET_FLOOR = 3530;
 
+test("MCP Off mode returns before inspecting a missing AIOS folder", () => {
+  const missingAios = path.join(os.tmpdir(), `dotaios-mcp-off-${process.pid}-${Date.now()}`);
+  const responses = runMcp(missingAios, [
+    { jsonrpc: "2.0", id: 1, method: "tools/list" },
+    {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "read_working_context", arguments: { memory: "off" } }
+    },
+    {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "search_aios", arguments: { query: "private", memory: "off" } }
+    },
+    {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: "resolve_skill", arguments: { intent: "plan privately", memory: "off" } }
+    }
+  ]);
+
+  for (const tool of responses[0].result.tools) {
+    assert.deepEqual(tool.inputSchema.properties.memory.enum, ["shared", "project", "off"]);
+  }
+  for (const response of responses.slice(1)) {
+    assert.equal(response.error, undefined);
+    assert.match(toolText(response), /Memory: Off/);
+    assert.match(toolText(response), /AI app may still keep its own conversation history/i);
+    assert.doesNotMatch(toolText(response), new RegExp(missingAios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  const search = JSON.parse(toolText(responses[2]));
+  assert.deepEqual(search.results, []);
+  assert.equal(search.complete, true);
+  const skills = JSON.parse(toolText(responses[3]));
+  assert.deepEqual(skills.matches, []);
+});
+
 test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   const { aiosPath } = setupAios();
   fs.writeFileSync(path.join(aiosPath, "context", "work.md"), "# Work\n\nBuilding the DotAIOS context gateway.\n");
