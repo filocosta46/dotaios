@@ -54,6 +54,31 @@ test("public claims stay inside the verified product boundary", async () => {
   assert.doesNotMatch(corpus, /every AI reads|no cloud memory|native in every tool/i);
 });
 
+test("README leads with the nondeveloper continuity outcome before technical reference", async () => {
+  const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
+  const opening = readme.slice(0, 1200);
+  const who = readme.indexOf("## Who this is for");
+  const install = readme.indexOf("## Install with one request");
+  const choices = readme.indexOf("## Choose what your AI can remember");
+  const technical = readme.indexOf("## Technical reference");
+
+  assert.match(opening, /stop (?:repeating|retelling)|start(?:ing)? from zero/i);
+  assert.match(opening, /one (?:readable |local )?folder/i);
+  assert.doesNotMatch(opening, /\bMCP\b|package manager|npm provenance|adapter configuration/i);
+  assert.ok(who > 0, "README must name the first customer explicitly");
+  assert.match(
+    readme.slice(who, install),
+    /independent consultant|freelancer/i,
+    "README must identify the first buyer before installation"
+  );
+  assert.ok(install > who, "customer fit must come before installation");
+  assert.ok(choices > install, "privacy choices must follow the primary activation path");
+  assert.ok(technical > choices, "operator material must stay behind a technical-reference boundary");
+  assert.match(readme, /install[\s\S]{0,300}personalize[\s\S]{0,300}save[\s\S]{0,300}switch[\s\S]{0,300}privacy/i);
+  assert.match(readme, /Codex and Claude Code[\s\S]{0,240}forward[\s\S]{0,120}Off/i);
+  assert.match(readme, /cannot undo|cannot erase|may already have loaded/i);
+});
+
 test("Hermes claims a global adapter without inventing a project-local selector", async () => {
   const relativeFiles = [
     "docs/adapters.md",
