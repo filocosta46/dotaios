@@ -10,7 +10,10 @@ import { spawnSync } from "node:child_process";
 import {
   buildGeminiHookScript
 } from "../../packages/cli/src/adapters/gemini.mjs";
-import { readGeminiFirstUserMessage } from "../../packages/cli/src/lib/gemini-memory-hook.mjs";
+import {
+  HOOK_INPUT_MAX_BYTES,
+  readGeminiFirstUserMessage
+} from "../../packages/cli/src/lib/gemini-memory-hook.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cliPath = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -295,6 +298,42 @@ test("Gemini hook keeps a Private chat session Off without opening DotAIOS", () 
   assert.match(output.hookSpecificOutput.additionalContext, /AI app may still keep its own conversation history/i);
   assert.match(output.systemMessage, /^Memory: Off\b/);
   assert.equal(output.hookSpecificOutput.hookEventName, "BeforeAgent");
+  assert.equal(fs.existsSync(missingAios), false);
+  assert.equal(fs.existsSync(npxSentinel), false);
+});
+
+test("Gemini generated hook closes memory before npx for invalid or oversized stdin", () => {
+  const root = tmp();
+  const missingAios = path.join(root, "must-stay-missing");
+  const scriptPath = path.join(root, "dotaios-context-hook.sh");
+  const npxSentinel = path.join(root, "npx-was-called");
+  const binDir = path.join(root, "bin");
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(
+    path.join(binDir, "npx"),
+    `#!/usr/bin/env bash\ntouch ${JSON.stringify(npxSentinel)}\n`,
+    { mode: 0o700 }
+  );
+  fs.writeFileSync(scriptPath, buildGeminiHookScript(missingAios), { mode: 0o700 });
+
+  const invalidInputs = [
+    Buffer.from("{broken", "utf8"),
+    Buffer.from([0xc3, 0x28]),
+    Buffer.alloc(HOOK_INPUT_MAX_BYTES + 1, 0x78)
+  ];
+  for (const input of invalidInputs) {
+    const result = spawnSync(scriptPath, [], {
+      input,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${binDir}${path.delimiter}${process.env.PATH}` }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const output = JSON.parse(result.stdout);
+    assert.match(output.systemMessage, /^Memory: Closed\b/);
+    assert.equal(output.hookSpecificOutput.hookEventName, "BeforeAgent");
+    assert.equal(output.hookSpecificOutput.additionalContext, "");
+  }
+
   assert.equal(fs.existsSync(missingAios), false);
   assert.equal(fs.existsSync(npxSentinel), false);
 });

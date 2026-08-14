@@ -7,10 +7,11 @@ import {
   writeFileSafe
 } from "../../../core/src/files.mjs";
 import { DOTAIOS_PACKAGE_VERSION } from "../lib/mcp-launcher.mjs";
+import { HOOK_INPUT_MAX_BYTES } from "../lib/gemini-memory-hook.mjs";
 
 const GEMINI_HOOK_MARKER = "# dotaios-managed: gemini-context-hook/v2";
 const GEMINI_HOOK_DESCRIPTION = "# DotAIOS context selection for Gemini CLI BeforeAgent";
-const GEMINI_HOOK_DETAIL = "# Selects session memory from the first user prompt before loading context.";
+const GEMINI_HOOK_DETAIL = "# Selects memory access for this session from the first user prompt before loading context.";
 const GEMINI_LEGACY_HOOK_MARKER = "# dotaios-managed: gemini-context-hook/v1";
 const GEMINI_LEGACY_HOOK_DESCRIPTION = "# DotAIOS context injection for Gemini CLI SessionStart";
 const GEMINI_LEGACY_HOOK_DETAIL = "# Injects working memory digest as the first context turn.";
@@ -160,7 +161,11 @@ ${GEMINI_HOOK_DESCRIPTION}
 ${GEMINI_HOOK_DETAIL}
 ${GEMINI_HOOK_PATH_PREFIX}${encodedPath}
 ${GEMINI_HOOK_MODULE_PREFIX}${encodedModule}
-input="$(cat)"
+input=""
+if LC_ALL=C IFS= read -r -d '' -n ${HOOK_INPUT_MAX_BYTES + 1} input; then
+  printf '%s\\n' ${shSingleQuote(fallback)}
+  exit 0
+fi
 private_output="$(printf '%s' "$input" | node --input-type=module -e ${shSingleQuote(privateClassifier)})"
 private_status=$?
 if [ "$private_status" -eq 0 ]; then

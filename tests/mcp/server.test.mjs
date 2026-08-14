@@ -84,6 +84,32 @@ test("MCP Off mode validates every tool schema before its zero-AIOS response", (
   assert.equal(fs.existsSync(missingAios), false);
 });
 
+test("MCP Off skill resolution respects the requested response budget", () => {
+  const missingAios = path.join(os.tmpdir(), `dotaios-mcp-off-budget-${process.pid}-${Date.now()}`);
+  const responses = runMcp(missingAios, [256, 512].map((budget, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: { memory: "off", intent: "x".repeat(500), budget }
+    }
+  })));
+  assert.equal(responses[0].error.code, -32602);
+  assert.match(responses[0].error.message, /budget 256 is too small/i);
+
+  const text = toolText(responses[1]);
+  const payload = JSON.parse(text);
+
+  assert.ok(text.length <= 512);
+  assert.equal(payload.memory, "off");
+  assert.equal(payload.receipt, "Memory: Off");
+  assert.deepEqual(payload.matches, []);
+  assert.equal(payload.budget.limit, 512);
+  assert.equal(payload.budget.used, text.length);
+  assert.equal(fs.existsSync(missingAios), false);
+});
+
 test("mcp exposes one bounded read-only DotAIOS gateway", () => {
   const { aiosPath } = setupAios();
   fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nMCP_SHARED_IDENTITY_CANARY\n");
@@ -1273,6 +1299,58 @@ test("read_working_context reports an ambiguous project selector as a safe input
   assert.equal(response.error.code, -32602);
   assert.match(response.error.message, /ambiguous.*stable id/i);
   assert.doesNotMatch(response.error.message, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+});
+
+test("MCP project receipts reject unknown project selectors as safe input errors", () => {
+  const { aiosPath } = setupAios();
+  const responses = runMcp(aiosPath, ["read_working_context", "resolve_skill"].map((name, index) => ({
+    jsonrpc: "2.0",
+    id: index + 1,
+    method: "tools/call",
+    params: {
+      name,
+      arguments: name === "read_working_context"
+        ? { memory: "project", project: "missing-project", budget: 256 }
+        : { memory: "project", project: "missing-project", intent: "plan this work", budget: 6000 }
+    }
+  })));
+
+  for (const response of responses) {
+    assert.equal(response.error.code, -32602);
+    assert.match(response.error.message, /project.*not registered|unknown project/i);
+    assert.doesNotMatch(response.error.message, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+});
+
+test("MCP skill resolution accepts an explicitly registered project identity", () => {
+  const { aiosPath } = setupAios();
+  const projectDir = path.join(aiosPath, "projects", "client-work");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectDir, "README.md"),
+    "---\nid: client-work-001\nproject: client-work\n---\n# Client Work\n",
+  );
+
+  const [response] = runMcp(aiosPath, [{
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: {
+      name: "resolve_skill",
+      arguments: {
+        memory: "project",
+        project: "client-work-001",
+        intent: "plan this work",
+        budget: 6000
+      }
+    }
+  }]);
+  const payload = JSON.parse(toolText(response));
+
+  assert.equal(payload.memory, "project");
+  assert.equal(payload.receipt, "Memory: This project");
+  assert.equal(payload.complete, true);
+  assert.ok(payload.matches.length > 0);
 });
 
 test("read_working_context preserves opaque stable project identifiers", () => {

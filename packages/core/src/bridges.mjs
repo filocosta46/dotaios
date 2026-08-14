@@ -299,7 +299,7 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
   const lines = [
     MANAGED_START,
     pointerLine,
-    "Decide session memory before opening AIOS or calling its tools:",
+    "Choose memory access for this session before opening AIOS:",
     "- `Private chat` locks `Memory: Off`: no DotAIOS read, search, save, or capture. Say once that the host may keep its own history.",
     "- In an attached working directory, or when the user asks `Only this project`, use `Memory: This project`; require its exact identity and exclude personal, unscoped, and other-project memory. If the directory is not registered, stay closed in This project mode, say so, and offer `dotaios activate`; never fall back to Shared.",
     "- When the user asks `Use my memory`, use `Memory: Shared`; this is the default elsewhere.",

@@ -15,7 +15,10 @@ import {
 } from "../../core/src/evidence-reader.mjs";
 import { defaultAiosPath, expandHome, resolveVaultPath } from "../../core/src/paths.mjs";
 import { SEARCH_SCOPES, searchAios } from "../../core/src/search.mjs";
-import { validateProjectSelector } from "../../core/src/projects.mjs";
+import {
+  resolvePortableProjectIdentity,
+  validateProjectSelector
+} from "../../core/src/projects.mjs";
 import { rankSkills } from "../../core/src/skill-resolver.mjs";
 import { collectSkills } from "../../core/src/skills.mjs";
 import { MEMORY_MODES, resolveMemoryPolicy } from "../../core/src/memory-policy.mjs";
@@ -178,6 +181,12 @@ class DotaiosMcpServer {
       ) {
         throw protocolError(-32602, "project selector is ambiguous; use its stable id");
       }
+      if (
+        error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+        || error?.cause?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+      ) {
+        throw protocolError(-32602, "project is not registered; choose a registered slug or stable id");
+      }
       throw error;
     }
     const { digest, budget, generatedAt, projectFilter, operational, memoryMode, memoryReceipt } = envelope;
@@ -203,8 +212,11 @@ class DotaiosMcpServer {
     const budget = args.budget === undefined
       ? DEFAULT_RESULT_BUDGET
       : boundedInteger(args.budget, "budget", 256, 32000);
-    const skillsDir = path.join(this.aiosPath, "skills");
     const reader = createEvidenceReader({ roots: [this.aiosPath] });
+    if (memoryPolicy.mode === "project") {
+      await assertRegisteredProjectSelector(this.aiosPath, memoryPolicy.projectSelector, reader);
+    }
+    const skillsDir = path.join(this.aiosPath, "skills");
     const skills = await collectSkills(this.aiosPath, { reader, root: this.aiosPath });
     const matches = rankSkills(intent, skills, { skillsDir })
       .slice(0, limit)
@@ -358,6 +370,7 @@ function tools() {
             type: "string",
             minLength: 1,
             maxLength: 200,
+            pattern: "^[^\\s\\u0000-\\u001F\\u007F-\\u009F/\\\\]+$",
             description: "Required only when memory is project. Skills remain capabilities rather than memory."
           },
           intent: { type: "string", minLength: 1, maxLength: 500 },
@@ -415,7 +428,14 @@ function validateMcpToolArguments(name, args) {
   }
   if (name === "resolve_skill") {
     assertAllowedArguments(args, ["memory", "project", "intent", "limit", "budget"]);
-    optionalString(args.project, "project", 200);
+    const project = optionalString(args.project, "project", 200);
+    if (project) {
+      try {
+        validateProjectSelector(project);
+      } catch (error) {
+        throw protocolError(-32602, error.message);
+      }
+    }
     requireString(args.intent, "intent", 500);
     if (args.limit !== undefined) boundedInteger(args.limit, "limit", 1, 10);
     if (args.budget !== undefined) boundedInteger(args.budget, "budget", 256, 32000);
@@ -461,14 +481,39 @@ function serializeOffToolResult(name, args, policy) {
     }, null, 2);
   }
   if (name === "resolve_skill") {
-    assertAllowedArguments(args, ["memory", "project", "intent", "limit", "budget"]);
-    return JSON.stringify({
-      intent: typeof args.intent === "string" ? args.intent : "",
+    const intent = requireString(args.intent, "intent", 500);
+    const limit = args.budget === undefined
+      ? DEFAULT_RESULT_BUDGET
+      : boundedInteger(args.budget, "budget", 256, 32000);
+    return serializeBoundedSkillResults({
+      intent,
       matches: [],
-      ...shared
-    }, null, 2);
+      memoryPolicy: policy,
+      limit
+    });
   }
   throw protocolError(-32602, `Unknown tool: ${name}`);
+}
+
+async function assertRegisteredProjectSelector(aiosPath, selector, evidenceReader) {
+  try {
+    await resolvePortableProjectIdentity({
+      aiosPath,
+      projectSelector: selector,
+      evidenceReader
+    });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN") {
+      throw protocolError(-32602, "project is not registered; choose a registered slug or stable id");
+    }
+    if (error?.code === "DOTAIOS_PROJECT_SELECTOR_AMBIGUOUS") {
+      throw protocolError(-32602, "project selector is ambiguous; use its stable id");
+    }
+    if (error?.code === "DOTAIOS_PROJECT_SELECTOR_INVALID") {
+      throw protocolError(-32602, error.message);
+    }
+    throw error;
+  }
 }
 
 function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omissions = [], memoryPolicy, limit }) {

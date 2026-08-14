@@ -81,7 +81,7 @@ test("connect gemini creates the bridge when none exists", () => {
     // and carries the rule for when to open it. Asserting connect's own older
     // wording here is what let the two bodies drift apart in the first place.
     assert.match(after, new RegExp(`personal context in a folder at ${aios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-    assert.match(after, /Decide session memory before opening AIOS/i);
+    assert.match(after, /Choose memory access for this session before opening AIOS/i);
     assert.match(after, /Leave the AIOS folder closed for Off/i);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
@@ -312,7 +312,7 @@ test("activate and connect gemini agree on the managed block", () => {
 
     assert.equal(afterConnect, afterActivate, "connect must not rewrite the block activate owns");
     // The rule this release exists to add has to survive the second command.
-    assert.match(afterConnect, /Decide session memory before opening AIOS/i);
+    assert.match(afterConnect, /Choose memory access for this session before opening AIOS/i);
     assert.match(afterConnect, /Leave the AIOS folder closed for Off/i);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });

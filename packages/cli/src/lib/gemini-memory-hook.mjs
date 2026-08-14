@@ -7,7 +7,7 @@ import {
 } from "../../../core/src/memory-policy.mjs";
 
 const DEFAULT_TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
-const HOOK_INPUT_MAX_BYTES = 1024 * 1024;
+export const HOOK_INPUT_MAX_BYTES = 1024 * 1024;
 
 export async function readGeminiHookInput(stream = process.stdin) {
   const chunks = [];
