@@ -55,6 +55,14 @@ test("a new folder teaches the three memory choices and the cross-agent continui
     assert.match(guide, /save.*switch.*agent/is);
     assert.match(guide, /source|where.*came from/i);
     assert.match(guide, /AI app may still keep its own/i);
+    assert.match(guide, /start.*outside.*AIOS|neutral folder|usual folder/i);
+    assert.match(guide, /opening.*AIOS.*before.*first prompt|preload.*router/i);
+    assert.doesNotMatch(guide, /Open a connected local agent in this folder/i);
+
+    const router = fs.readFileSync(path.join(target, "AGENTS.md"), "utf8");
+    assert.match(router, /already opened this AIOS router/i);
+    assert.match(router, /cannot[\s\S]{0,20}truthfully claim zero AIOS reads/i);
+    assert.doesNotMatch(router, /At session start, run `dotaios brief --compact`/i);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

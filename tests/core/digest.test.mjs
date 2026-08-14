@@ -17,6 +17,12 @@ function tmpAios() {
   return dir;
 }
 
+function registerProject(aiosPath, slug) {
+  const directory = path.join(aiosPath, "projects", slug);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "README.md"), `---\nid: ${slug}-id\nproject: ${slug}\n---\n# ${slug}\n`);
+}
+
 function today() {
   const d = new Date();
   const y = d.getFullYear();
@@ -84,6 +90,7 @@ test("buildSessionDigest includes recent sessions and returns their ids", async 
 
 test("buildSessionDigest project filter scopes sessions", async () => {
   const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
   const sessionA = {
     agent: "claude-code",
     session_id: generateSessionId(),
@@ -114,6 +121,7 @@ test("buildSessionDigest project filter scopes sessions", async () => {
 
 test("buildSessionDigest project filter also scopes signals and events", async () => {
   const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
   const date = today();
   fs.writeFileSync(
     path.join(aiosPath, "memory", "signals", `${date}.jsonl`),

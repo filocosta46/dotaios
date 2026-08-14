@@ -206,7 +206,7 @@ Those commands stop managed capture and private sync. The last step is deliberat
 
 ## Docs
 
-- [INSTALL.md](INSTALL.md) — human-run install and removal
+- [INSTALL.md](INSTALL.md) — assistant-guided install, manual recovery, and removal
 - [Getting started](docs/getting-started.md) — product walkthrough
 - [Architecture](docs/architecture.md) · [Projects](docs/projects.md) · [Client support](docs/client-support.md) · [Security](docs/security.md) · [all guides](docs/)
 

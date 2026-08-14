@@ -287,8 +287,9 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     console.log(`Folder ready. ${clients || `${configuredContextCount} local AI app${configuredContextCount === 1 ? "" : "s"}`} can now use your context.`);
     console.log("To get started:");
   }
-  console.log("  1. Open your AI agent — Claude Code, Codex, Gemini CLI, Cursor, or any other.");
-  console.log(`  2. Open the ${displayHomePath(aiosPath, os.homedir())} folder or make it your working directory.`);
+  console.log("  1. Start the agent from your usual folder or an attached project — not from inside AIOS.");
+  console.log(`  2. Your one AIOS folder: ${displayHomePath(aiosPath, os.homedir())}`);
+  console.log("     Opening the AIOS folder itself may let the app read its router before your first prompt.");
   console.log('  3. Ask: "Use my memory. Read my context and tell me what I am working on."');
   console.log('  4. Other session choices: "Only this project" or "Private chat".');
   console.log("  5. Update context any time: dotaios interview --review");

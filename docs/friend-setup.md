@@ -56,7 +56,8 @@ npx dotaios@2.0.3 doctor
 npx dotaios@2.0.3 skills doctor
 ```
 
-Then open a connected local agent in the printed AIOS folder and ask:
+Then start a connected local agent from your usual folder or an attached
+project—not from inside the printed AIOS storage folder—and ask:
 
 > Use my memory. Read my DotAIOS context and tell me what I am working on.
 

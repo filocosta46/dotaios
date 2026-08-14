@@ -87,7 +87,7 @@ test("Hermes claims a global adapter without inventing a project-local selector"
   assert.match(documentato, /Project attachment no longer writes `<project>\/\.hermes\/config\.yaml`/i);
 });
 
-test("first-time onboarding stays human-run, pinned, and free of install lifecycle scripts", async () => {
+test("first-time onboarding stays assistant-guided, consent-first, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
   assert.equal(pkg.version, "2.0.3", "the public onboarding contract must target the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
@@ -108,9 +108,14 @@ test("first-time onboarding stays human-run, pinned, and free of install lifecyc
 
   for (const relativePath of relativeFiles) {
     assert.match(documents[relativePath], new RegExp(`${pinnedPattern} --dry-run`), `${relativePath} must pin the preview`);
-    assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must pin human-run setup`);
+    assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must retain a pinned manual recovery path`);
   }
-  assert.doesNotMatch(corpus, /Please set up DotAIOS for me|agent-led setup|you are on the agent path/i);
+  assert.match(documents["README.md"], /open .*assistant.*paste/is, "README must lead with one assistant request");
+  assert.match(documents["INSTALL.md"], /If an AI assistant is helping you/i, "INSTALL must carry the assistant through setup");
+  assert.match(documents["docs/friend-setup.md"], /recommended path is to ask a local AI agent/i, "friend setup must recommend the nontechnical path");
+  assert.match(documents["docs/getting-started.md"], /You do not need to understand[\s>]*Node, npm, Git, or MCP/i, "getting started must not assume developer knowledge");
+  assert.match(corpus, /preview every change|previewing every change/i, "assistant-led setup must remain preview-first");
+  assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
   assert.doesNotMatch(documents["docs/friend-setup.md"], /dotaios@latest (?:init|activate|setup)/, "friend setup must not switch first-time commands back to @latest");

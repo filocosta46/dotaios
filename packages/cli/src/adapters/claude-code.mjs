@@ -5,7 +5,7 @@ import path from "node:path";
 import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
 import { writeSession, readSessionIndex } from "../../../core/src/sessions.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
-import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
+import { detectMemoryModeFromFirstMessage, resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
 
 export const name = "claude-code";
 export const level = ADAPTER_LEVELS.FULL_AUTO;
@@ -170,8 +170,7 @@ export async function handleHookPayload(aiosPath, { cwd = process.cwd() } = {}) 
   // project lookup, AIOS read, session write, or capture side effect.
   const unscopedSession = parseTranscript(lines, { sourcePath: transcriptPath });
   const firstUserMessage = unscopedSession?.turns.find((turn) => turn.role === "user")?.content;
-  const memoryPolicy = resolveMemoryPolicy({ firstUserMessage });
-  if (memoryPolicy.mode === "off") {
+  if (detectMemoryModeFromFirstMessage(firstUserMessage) === "off") {
     process.exitCode = 0;
     return;
   }

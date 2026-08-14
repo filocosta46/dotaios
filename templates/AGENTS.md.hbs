@@ -37,9 +37,15 @@ Long-term knowledge is configured at `vault/`.
 
 ## Memory Routing
 
-At session start, run `dotaios brief --compact`. For project work, add
-`--project <slug-or-id>`. This is the canonical bounded working-context
-projection.
+The host has already opened this AIOS router. If the user's first message says
+`Private chat`, stop before any further file or tool access: you cannot
+truthfully claim zero AIOS reads in a workspace that already opened this file.
+Explain that limitation and offer a new session started outside AIOS.
+
+Otherwise, use `dotaios brief --compact --memory shared` for Shared memory. For
+project-only work, require an explicit registered project and run `dotaios brief
+--compact --memory project --project <slug-or-id>`. This is the canonical
+bounded working-context projection.
 
 Do not preload `memory/events.jsonl`, `memory/signals/`, or `memory/sessions/`,
 and do not invent another recency window. Use `dotaios search` for explicit

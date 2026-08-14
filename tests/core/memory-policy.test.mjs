@@ -48,6 +48,11 @@ test("private chat is anchored, case-insensitive, and always wins", () => {
   );
 });
 
+test("explicit Off cannot be re-enabled by a forwarded first-message phrase", () => {
+  assert.equal(resolveMemoryPolicy({ mode: "off", firstUserMessage: "Use my memory now" }).mode, "off");
+  assert.equal(resolveMemoryPolicy({ mode: "off", firstUserMessage: "Only this project", project: "alpha" }).mode, "off");
+});
+
 test("the first-message phrases select shared and project behavior", () => {
   assert.equal(resolveMemoryPolicy({
     project: "project-acme-001",
@@ -74,4 +79,3 @@ test("memory policy rejects unknown modes and exposes only the three product cho
   assert.deepEqual(MEMORY_MODES, ["shared", "project", "off"]);
   assert.throws(() => resolveMemoryPolicy({ mode: "automatic" }), /memory mode/i);
 });
-

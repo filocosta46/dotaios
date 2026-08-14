@@ -28,12 +28,22 @@ function writeJsonl(filePath, entries) {
   fs.writeFileSync(filePath, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
 }
 
+function registerProject(aiosPath, slug, id = `${slug}-id`) {
+  const directory = path.join(aiosPath, "projects", slug);
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(
+    path.join(directory, "README.md"),
+    `---\nid: ${id}\nproject: ${slug}\nstatus: active\n---\n# ${slug}\n`,
+  );
+}
+
 function fixedClock() {
   return new Date(FIXED_NOW.getTime());
 }
 
 test("project filter scopes sessions, namespaced signals, and events with stable ordering", async () => {
   const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
   writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
     {
       session_id: "project-b",
@@ -175,8 +185,21 @@ test("Off returns its fixed receipt without consulting the AIOS folder or clock"
   );
 });
 
+test("This project memory rejects an unregistered selector instead of trusting matching row text", async () => {
+  const aiosPath = tmpAios();
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", project: "ghost", summary: "UNREGISTERED_PROJECT_CANARY" },
+  ]);
+  await assert.rejects(
+    () => selectWorkingContext(aiosPath, { memory: "project", project: "ghost" }, { clock: fixedClock }),
+    (error) => error?.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+  );
+});
+
 test("This project views exclude unattributed evidence and other projects", async () => {
   const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
+  registerProject(aiosPath, "project-b");
   writeJsonl(path.join(aiosPath, "memory", "sessions", "index.jsonl"), [
     { session_id: "a", project: "project-a", captured_at: "2026-07-15T09:00:00.000Z", title: "A fact" },
     { session_id: "b", project: "project-b", captured_at: "2026-07-15T08:00:00.000Z", title: "B fact" },
@@ -303,6 +326,7 @@ test("an ambiguous project alias requires a matching unique project_id", async (
 
 test("scoped views dedupe update channels like unscoped views", async () => {
   const aiosPath = tmpAios();
+  registerProject(aiosPath, "project-a");
   writeJsonl(path.join(aiosPath, "memory", "signals", "2026-07-15.jsonl"), [
     { ts: "2026-07-15T09:00:00.000Z", type: "update", source: "dotaios update", project: "project-a", summary: "A update" },
   ]);
@@ -463,13 +487,14 @@ test("supplied project selectors reject blank, non-string, oversized, and contro
 test("project selector character limits count Unicode code points", async () => {
   const aiosPath = tmpAios();
   const maximum = "🚀".repeat(200);
+  registerProject(aiosPath, "maximum-selector", maximum);
 
   const accepted = await selectWorkingContext(
     aiosPath,
     { project: maximum },
     { clock: fixedClock }
   );
-  assert.equal(accepted.projectFilter, maximum);
+  assert.equal(accepted.projectFilter, "maximum-selector");
   await assert.rejects(
     selectWorkingContext(aiosPath, { project: `${maximum}🚀` }, { clock: fixedClock }),
     TypeError

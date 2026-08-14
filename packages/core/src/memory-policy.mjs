@@ -18,11 +18,11 @@ export function resolveMemoryPolicy({
   firstUserMessage
 } = {}) {
   const projectSelector = normalizeProjectSelector(project);
-  const firstMessageMode = detectFirstMessageMode(firstUserMessage);
+  const firstMessageMode = detectMemoryModeFromFirstMessage(firstUserMessage);
   const explicitMode = normalizeMode(mode);
-  const selectedMode = firstMessageMode
-    || explicitMode
-    || (projectSelector ? "project" : "shared");
+  const selectedMode = explicitMode === "off"
+    ? "off"
+    : firstMessageMode || explicitMode || (projectSelector ? "project" : "shared");
 
   if (
     !firstMessageMode
@@ -72,7 +72,7 @@ function normalizeProjectSelector(project) {
   return project;
 }
 
-function detectFirstMessageMode(firstUserMessage) {
+export function detectMemoryModeFromFirstMessage(firstUserMessage) {
   if (firstUserMessage === undefined || firstUserMessage === null) return null;
   if (typeof firstUserMessage !== "string") {
     throw memoryPolicyError("First user message must be a string.");

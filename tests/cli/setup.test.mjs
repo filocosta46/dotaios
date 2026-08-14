@@ -402,9 +402,11 @@ test("non-interactive setup does not download the optional web browsing engine b
   });
   assert.equal(result.status, 0, result.stderr);
   assert.ok(
-    result.stdout.includes(`  2. Open the ${aiosPath} folder or make it your working directory.`),
+    result.stdout.includes(`  2. Your one AIOS folder: ${aiosPath}`),
     `setup guidance must name the resolved --path target, got:\n${result.stdout}`
   );
+  assert.match(result.stdout, /Start the agent from your usual folder or an attached project/i);
+  assert.doesNotMatch(result.stdout, /make it your working directory/i);
   assert.match(result.stdout, /Web browsing engine: not installed.*plain fetch remains available/);
   assert.equal(fsSync.existsSync(path.join(homePath, ".dotaios", "bin", "lightpanda")), false);
   assert.doesNotMatch(result.stdout, /All set\./);

@@ -28,7 +28,7 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   // The packed source resolves its normal dependencies through the checkout's
   // installed node_modules. The package files themselves remain untouched.
   fs.symlinkSync(
-    path.join(repoRoot, "node_modules"),
+    dependencyNodeModules(repoRoot),
     path.join(packageRoot, "node_modules"),
     process.platform === "win32" ? "junction" : "dir"
   );
@@ -84,6 +84,17 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   assert.equal(receipt.machine_local.results[0].destination, path.join(aiosPath, "workspaces", "packed-project"));
   assert.equal(fs.readFileSync(ignorePath, "utf8"), ignoreBeforeRestore, "restore must not rewrite the boundary");
 });
+
+function dependencyNodeModules(start) {
+  let current = start;
+  while (true) {
+    const candidate = path.join(current, "node_modules");
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(current);
+    if (parent === current) throw new Error("Could not locate the checkout dependency tree.");
+    current = parent;
+  }
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {

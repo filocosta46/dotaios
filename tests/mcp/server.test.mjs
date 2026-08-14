@@ -1270,7 +1270,11 @@ test("read_working_context preserves opaque stable project identifiers", () => {
 
 test("maximum project input and operational metadata stay inside the fixed metadata bound", () => {
   const { aiosPath } = setupAios();
-  for (const project of ["x".repeat(200), "🚀".repeat(200)]) {
+  for (const [index, project] of ["x".repeat(200), "🚀".repeat(200)].entries()) {
+    const slug = `maximum-project-${index}`;
+    const directory = path.join(aiosPath, "projects", slug);
+    fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(path.join(directory, "README.md"), `---\nid: ${project}\nproject: ${slug}\n---\n# Maximum Project\n`);
     const [response] = runMcp(aiosPath, [{
       jsonrpc: "2.0",
       id: 1,
@@ -1280,7 +1284,7 @@ test("maximum project input and operational metadata stay inside the fixed metad
     const text = toolText(response);
     const payload = JSON.parse(text);
 
-    assert.equal(Array.from(payload.scope.project).length, 200);
+    assert.equal(payload.scope.project, slug);
     assert.ok(payload.markdown.length <= 256);
     assert.ok(workingContextMetadataText(payload).length <= 1024);
   }

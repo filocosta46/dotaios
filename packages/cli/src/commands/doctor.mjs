@@ -112,12 +112,16 @@ function tag(status) {
   return STATUS_TAGS[status] || "[fail]";
 }
 
-export async function checkSecretBoundary(target, { platform = process.platform } = {}) {
+export async function checkSecretBoundary(target, {
+  platform = process.platform,
+  currentUid = typeof process.getuid === "function" ? process.getuid() : null,
+  fileSystem = fs
+} = {}) {
   const name = "Local secret file is private and outside memory";
   const secretPath = path.join(target, ".env");
   let stats;
   try {
-    stats = await fs.lstat(secretPath);
+    stats = await fileSystem.lstat(secretPath);
   } catch (error) {
     if (error?.code === "ENOENT") {
       return { name, status: "ok", detail: "No local .env file is present." };
@@ -144,6 +148,22 @@ export async function checkSecretBoundary(target, { platform = process.platform 
       status: "fail",
       detail: ".env can be read or changed by another local account.",
       fix: "Run `chmod 600 <aios-folder>/.env`, then run `dotaios doctor` again."
+    };
+  }
+  if (platform !== "win32" && currentUid !== null && stats.uid !== currentUid) {
+    return {
+      name,
+      status: "fail",
+      detail: ".env is owned by another local account.",
+      fix: "Replace .env with a private file owned by your current account, then run `dotaios doctor` again."
+    };
+  }
+  if (platform === "win32") {
+    return {
+      name,
+      status: "warn",
+      detail: ".env is a local regular file and is excluded from memory, but DotAIOS did not verify its Windows ACL privacy.",
+      fix: "Review the file's Windows Security permissions so only your account can read it, or keep credentials in provider-owned auth or Windows Credential Manager."
     };
   }
   return {

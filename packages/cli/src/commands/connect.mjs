@@ -137,7 +137,7 @@ function printConnectHelp() {
 
 Services:
   google      Connect optional Google Workspace reads via gws
-  gemini      Connect Gemini CLI with GEMINI.md and a SessionStart hook
+  gemini      Connect Gemini CLI with GEMINI.md and a prompt-aware BeforeAgent hook
   opencode    Connect OpenCode MCP
 
 Options:
@@ -297,7 +297,7 @@ async function connectGemini(aiosPath, options) {
   if (options.dryRun) {
     console.log("\nWould write:");
     console.log("  ~/.gemini/GEMINI.md  — DotAIOS context bridge");
-    console.log("  ~/.gemini/settings.json: SessionStart hook");
+    console.log("  ~/.gemini/settings.json: prompt-aware BeforeAgent hook");
     console.log("  ~/.gemini/dotaios-context-hook.sh  — pinned context command");
     return;
   }
@@ -333,11 +333,11 @@ async function connectGemini(aiosPath, options) {
   console.log("[ok] ~/.gemini/GEMINI.md");
 
   await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath, { boundaryRoot: os.homedir() });
-  console.log("[ok] ~/.gemini/settings.json (SessionStart hook)");
+  console.log("[ok] ~/.gemini/settings.json (BeforeAgent hook)");
 
   await appendEvent(path.join(aiosPath, "memory", "events.jsonl"), {
     type: "connection",
-    summary: "Configured Gemini CLI SessionStart hook; invocation unverified",
+    summary: "Configured Gemini CLI prompt-aware BeforeAgent hook; invocation unverified",
     source: "dotaios connect gemini",
     connection: "gemini-cli"
   });
@@ -347,8 +347,8 @@ async function connectGemini(aiosPath, options) {
   // invocation receipt in the bounded probe. Writing a hook file proves the
   // configuration, never that the client runs it — claiming otherwise is the
   // exact overclaim this project refuses to make about every other client.
-  console.log("A SessionStart hook is installed. Whether your Gemini version runs it is client-side behaviour —");
-  console.log("check the start of your next session to confirm your context arrives.");
+  console.log("A BeforeAgent hook is installed. Whether your Gemini version runs it is client-side behaviour —");
+  console.log("check your next prompt for a visible Memory receipt before treating invocation as verified.");
 }
 
 // --- OpenCode ---

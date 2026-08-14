@@ -538,10 +538,13 @@ search results are bounded views of it; they are not a second memory.
 
 ## Try the continuity loop
 
-1. Open a connected local agent in this folder.
-2. Start with: \`Use my memory. Tell me what you know about how I work.\`
-3. Tell it one useful preference or decision and explicitly ask it to save it.
-4. Switch to a second connected agent and ask it to find that item and show the
+1. Start a connected local agent outside the AIOS folder: use your usual folder
+   for Shared memory, or an attached project for project-only memory.
+2. Keep this AIOS folder as the storage you own; do not make it the agent's
+   working directory when you want a zero-read private session.
+3. Start with: \`Use my memory. Tell me what you know about how I work.\`
+4. Tell it one useful preference or decision and explicitly ask it to save it.
+5. Switch to a second connected agent and ask it to find that item and show the
    source it came from.
 
 DotAIOS saves deliberately; it does not treat every chat sentence as a durable fact.
@@ -556,6 +559,10 @@ DotAIOS saves deliberately; it does not treat every chat sentence as a durable f
 
 The agent should show \`Memory: Shared\`, \`Memory: This project\`, or
 \`Memory: Off\` so the choice is visible.
+
+Opening the AIOS folder itself can make your app preload its router before your
+first prompt. \`Private chat\` cannot undo that earlier host read; start the agent
+outside AIOS when you need the zero-read Off guarantee.
 
 ## Keep it useful
 

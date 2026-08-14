@@ -259,6 +259,30 @@ test("Claude live hook attributes a session through the checkout path", () => {
   assert.equal(typeof entries[0].project_id, "string");
 });
 
+test("Claude live hook honors Only this project in an attached checkout", () => {
+  const { aiosPath, tempRoot } = setupAios();
+  const alphaPath = registerProject(aiosPath, tempRoot, "alpha");
+  const transcriptPath = path.join(tempRoot, "claude-project-transcript.jsonl");
+  fs.writeFileSync(transcriptPath, [
+    { type: "user", sessionId: "project-hook-session", timestamp: "2026-08-14T10:00:00.000Z", message: { role: "user", content: "Only this project\nKeep this with alpha." } },
+    { type: "assistant", sessionId: "project-hook-session", timestamp: "2026-08-14T10:01:00.000Z", message: { role: "assistant", content: "Kept with alpha." } }
+  ].map((line) => JSON.stringify(line)).join("\n") + "\n");
+
+  run(["capture", "hook", "claude-code", "--path", aiosPath], {
+    cwd: alphaPath,
+    env: { ...process.env, HOME: path.join(tempRoot, "home") },
+    input: `${JSON.stringify({ transcript_path: transcriptPath, cwd: alphaPath })}\n`
+  });
+
+  const entries = fs.readFileSync(path.join(aiosPath, "memory", "sessions", "index.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].project, "alpha");
+  assert.equal(typeof entries[0].project_id, "string");
+});
+
 test("Claude live hook keeps Private chat outside DotAIOS", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-private-hook-test-"));
   const missingAiosPath = path.join(tempRoot, "must-not-be-opened");

@@ -4,7 +4,31 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
-## [2.0.3] - 2026-08-13
+## [2.0.3] - 2026-08-14
+
+**You can now decide what DotAIOS may remember in each session.** `Use my
+memory` selects **Memory: Shared**. `Only this project` selects **Memory: This
+project** and excludes personal, unscoped, and other-project material before it
+is searched or rendered. `Private chat` selects **Memory: Off** before DotAIOS
+opens, searches, saves, or captures anything in the AIOS folder. The receipt is
+visible, and DotAIOS says plainly that the AI app may still keep its own chat
+history.
+
+**One AIOS folder is the memory.** Agent instruction files, MCP responses,
+search data, and client hooks are bounded views of that user-owned folder, not
+new memory stores. One explicit save appears as one conceptual result when a
+second agent finds it; two separate saves remain two memories.
+
+**Setup now starts with one request to a local assistant.** The assistant checks
+Node.js, previews the exact folder and app changes, leaves the meaningful
+privacy choices to the person, verifies the result, and shows the one AIOS
+folder. The pinned Terminal commands remain available as the recovery path.
+
+**Private material has a clearer boundary.** DotAIOS is not a password manager.
+Provider credentials belong in the provider or operating-system credential
+store; `.env` remains an ignored, local fallback. `doctor` checks its ownership
+and permissions without reading its contents, while search, context, MCP, and
+sync continue to exclude it.
 
 **Search worked again.** On a folder with real material in it, every search had
 been failing — not returning nothing, but refusing outright with "could not read
@@ -142,9 +166,10 @@ changed, which is why this is a 2 and not a 1.29.
   `inspection_failed`,
   and never inventories protected memory shelves.
 - `dotaios connect gemini` now preflights all three managed artifacts and writes
-  `settings.json` last as the SessionStart activation point. Its generated hook
-  invokes the exact shipped DotAIOS package version instead of allowing an
-  opened project's local `dotaios` binary to shadow the command.
+  `settings.json` last as the BeforeAgent activation point. Its generated hook
+  selects memory from Gemini's first prompt, invokes the exact shipped DotAIOS
+  package version, and does not allow an opened project's local `dotaios` binary
+  to shadow the command.
 - Project attachment no longer writes `<project>/.hermes/config.yaml`. Hermes
   loads the config selected through `HERMES_HOME`, and DotAIOS does not own that
   selector, so the earlier project target could look configured while remaining

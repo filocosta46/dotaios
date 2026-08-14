@@ -71,6 +71,18 @@ test("compact Off returns the fixed text and hook envelope without opening or cr
   }
 });
 
+test("explicit compact Off stays closed when a host also forwards Use my memory", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-brief-explicit-off-"));
+  const missing = path.join(root, "must-stay-missing");
+  try {
+    const result = run(["brief", "--compact", "--memory", "off", "--first-message", "Use my memory", "--path", missing]);
+    assert.match(result.stdout, /^Memory: Off\b/);
+    assert.equal(fs.existsSync(missing), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("explicit Off never writes the daily brief", () => {
   const { aiosPath } = setupAios();
   const result = run(["brief", "--memory", "off", "--path", aiosPath]);

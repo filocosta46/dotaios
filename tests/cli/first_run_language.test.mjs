@@ -68,10 +68,10 @@ test("real setup keeps init detail concise by default and restores it with --ver
     assert.equal(concise.status, 0, `${concise.stdout}\n${concise.stderr}`);
     const conciseOutput = `${concise.stdout}\n${concise.stderr}`;
     assert.match(conciseOutput, /Folder ready\. Claude Code can now use your context\./);
-    assert.match(
-      conciseOutput,
-      new RegExp(`Open the ${escapeRegExp(conciseAios)} folder or make it your working directory`)
-    );
+    assert.match(conciseOutput, new RegExp(`Your one AIOS folder: ${escapeRegExp(conciseAios)}`));
+    assert.match(conciseOutput, /Start the agent from your usual folder or an attached project/i);
+    assert.doesNotMatch(conciseOutput, /make it your working directory/i);
+    assert.match(conciseOutput, /Opening the AIOS folder itself may let the app read its router before your first prompt/i);
     assert.match(conciseOutput, /Use my memory/);
     assert.match(conciseOutput, /Only this project/);
     assert.match(conciseOutput, /Private chat/);

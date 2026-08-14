@@ -599,12 +599,17 @@ function resolveProjectScope(reference, projects) {
     error.code = "DOTAIOS_AMBIGUOUS_PROJECT";
     throw error;
   }
-  const selected = matches[0] || null;
-  const filter = selected?.slug || reference;
-  const aliases = selected ? projectAliases(selected) : new Set([reference]);
-  const uniqueAliases = selected
-    ? new Set([...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1))
-    : new Set([reference]);
+  if (matches.length === 0) {
+    const error = new TypeError("Project selector is unknown.");
+    error.code = "DOTAIOS_PROJECT_SELECTOR_UNKNOWN";
+    throw error;
+  }
+  const selected = matches[0];
+  const filter = selected.slug;
+  const aliases = projectAliases(selected);
+  const uniqueAliases = new Set(
+    [...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1)
+  );
   const selectedId = typeof selected?.id === "string" && selected.id.length > 0 ? selected.id : null;
   const id = selectedId && projects.filter((project) => project.id === selectedId).length === 1
     ? selectedId

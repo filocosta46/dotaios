@@ -4,6 +4,16 @@ import { isSyncEnabled } from "../../../core/src/sync-config.mjs";
 export function skipsPortableMirrorSync(command, args = []) {
   if (command === "brief" && (args.includes("--compact") || args.includes("--lean"))) return true;
   if (command === "search") return true;
+  if (command === "update") {
+    let memory = null;
+    for (let index = 0; index < args.length; index += 1) {
+      if (args[index] === "--memory") memory = args[index + 1] ?? null;
+    }
+    if (memory === "off") return true;
+  }
+  // A host capture hook makes its privacy decision from stdin, after dispatch.
+  // Never let the generic post-command wrapper wake sync behind a Private chat.
+  if (command === "capture" && args[0] === "hook") return true;
   if (command === "skills") {
     if (args[0] === "install") return false;
     if (["adopt", "reconcile", "remove"].includes(args[0]) && args.includes("--apply")) return false;

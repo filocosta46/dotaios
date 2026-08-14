@@ -189,7 +189,11 @@ Skills live in `~/aios/skills/<name>/SKILL.md`. Open any skill folder to see wha
 
 `init` will stop if the target folder already contains files. Use `--force` to add missing generated files while preserving existing files. Use `--overwrite` only when you intentionally want to replace generated files.
 
-Store secrets in `~/aios/.env`, not in chat or memory files. The generated `.gitignore` ignores `.env`, token files, credentials, and private keys.
+Never put passwords, private keys, or tokens in chat, context, memory, or vault
+files. Prefer provider-owned authentication or the operating system password
+manager. If a connection requires a local environment variable, `~/aios/.env`
+is the ignored fallback; `doctor` checks that it is a private ordinary file
+without reading its contents.
 
 ## Optional Connections
 
