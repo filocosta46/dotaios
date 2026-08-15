@@ -27,8 +27,8 @@ import {
   lightpandaPlatformBinary,
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
-import { initCommand, readAllStdin } from "./init.mjs";
-import { parseAnswers, readAnswersFile } from "../../../core/src/answers.mjs";
+import { initCommand } from "./init.mjs";
+import { assertOneAnswerSource, parseAnswers, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
 import {
   activateCommand,
   BRIDGE_COLLISION_REMEDY,
@@ -87,7 +87,14 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   // what makes that true of --answers too: a file the real run would reject
   // now fails during the preview, where nothing has been created yet. Reading
   // once also serves the retries below, since stdin only drains one time.
+  //
+  // The flag contradiction has to be checked here as well, for the same reason
+  // and not for a different one: init owns the rule, but --dry-run returns
+  // below without ever reaching init, so the preview used to accept the one
+  // combination the real run refuses. It is checked before the read because a
+  // command that is already contradictory has no reason to drain stdin.
   const answersSource = extractOption(args, "--answers");
+  assertOneAnswerSource({ answers: answersSource, yes: nonInteractive });
   const answersRaw = answersSource
     ? (answersSource === "-" ? await readAllStdin() : await readAnswersFile(answersSource))
     : null;

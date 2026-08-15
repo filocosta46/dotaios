@@ -17,7 +17,7 @@ import {
   isPathWithinLexically,
   resolveVaultPath
 } from "../../../core/src/paths.mjs";
-import { assertAnswersSize, parseAnswers, readAnswersFile } from "../../../core/src/answers.mjs";
+import { assertOneAnswerSource, parseAnswers, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
 import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -203,11 +203,7 @@ function parseOptions(args = []) {
     }
   }
 
-  if (options.answers && options.yes) {
-    throw new Error(
-      "--answers and --yes contradict each other: one supplies real context, the other writes placeholders. Pass only one."
-    );
-  }
+  assertOneAnswerSource(options);
 
   return options;
 }
@@ -250,25 +246,6 @@ async function resolveAnswers(options, lifecycle) {
   }
   if (options.yes) return defaultAnswers();
   return promptAnswers();
-}
-
-export async function readAllStdin(stream = input) {
-  if (stream.isTTY) {
-    throw new Error(
-      "--answers - reads the answers from stdin, and stdin is this terminal, so it would wait forever.\n" +
-      "Pipe the JSON in, or pass --answers <file> instead."
-    );
-  }
-  const chunks = [];
-  let bytes = 0;
-  for await (const chunk of stream) {
-    bytes += chunk.length;
-    // Bail while reading rather than after buffering, so an accidental pipe
-    // from a huge file cannot be pulled fully into memory first.
-    assertAnswersSize(bytes, "--answers -");
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function promptAnswers() {
