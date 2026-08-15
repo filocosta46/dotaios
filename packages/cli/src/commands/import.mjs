@@ -57,9 +57,17 @@ export async function importCommand(args) {
     if (sensitive.length > 0) {
       console.log("\nSensitive-looking terms found. Review before applying; secrets belong in ~/aios/.env, not memory files.");
     }
-    console.log(resolved.some((item) => item.decision !== "unchanged" && item.decision !== "refuse")
-      ? "\nDry run only. Re-run with --apply to write these changes."
-      : "\nDry run only. Nothing to write: every imported block is already in place.");
+    const refused = resolved.filter((item) => item.decision === "refuse");
+    if (resolved.some((item) => item.decision !== "unchanged" && item.decision !== "refuse")) {
+      console.log("\nDry run only. Re-run with --apply to write these changes.");
+    } else if (refused.length > 0) {
+      // The preview has to state the decision the apply will take, exit code
+      // included, or it is a gate that passes what the next command refuses.
+      console.log("\nDry run only. Nothing can be written: resolve the notes above, then re-run.");
+      process.exitCode = 1;
+    } else {
+      console.log("\nDry run only. Nothing to write: every imported block is already in place.");
+    }
     return;
   }
 
@@ -260,6 +268,15 @@ function eventAppend(destination, entry) {
 // already owns a block in it, and whether that block still says the same thing.
 async function resolveImportItem(item) {
   if (item.kind !== "markdown") return { ...item, decision: "append" };
+
+  // Content carrying our own markers would be written inside the block and make
+  // the file unownable on the next run — the same permanent refusal a
+  // hand-mangled destination earns, except this command created it. An export
+  // of an AIOS that already holds an import block is the ordinary way to get
+  // here, so refuse the payload rather than the file it would have ruined.
+  if (item.content.includes(IMPORT_START) || item.content.includes(IMPORT_END)) {
+    return { ...item, decision: "refuse", note: "imported content carries DotAIOS import markers; nothing was written" };
+  }
 
   const stats = await lstatIfPresent(item.path);
   if (!stats) return { ...item, decision: "create" };

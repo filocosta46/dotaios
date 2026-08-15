@@ -214,3 +214,46 @@ test("malformed import markers are not ownership proof, so the file is left alon
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+test("content carrying import markers is refused instead of making the file unownable", async () => {
+  const { aiosPath, identityPath, sourcePath, contextDir } = await setupContextImport("marker-payload");
+
+  // An export of an AIOS whose context already holds an import block carries
+  // these markers in its body. Writing them inside a new block leaves two start
+  // markers, which findManagedBlock reads as "not mine" — so every later import
+  // refuses this file forever, and only hand-editing recovers it.
+  const nested = `Line one.\n\n${IMPORT_START}\nnested\n${IMPORT_END}\n\nLine two.`;
+  await writeImportFile(sourcePath, nested);
+
+  const before = await fs.readFile(identityPath, "utf8");
+  const output = await runQuietly([sourcePath, "--apply", "--path", aiosPath]);
+
+  assert.match(output, /imported content carries DotAIOS import markers/);
+  assert.equal(await fs.readFile(identityPath, "utf8"), before, "the destination must be untouched");
+  assert.deepEqual(await backupsIn(contextDir), [], "a refusal writes nothing, so it takes no backup");
+
+  // And the file is still ownable: the refusal protected it rather than
+  // spending it.
+  await writeImportFile(sourcePath, "Clean content.");
+  await runQuietly([sourcePath, "--apply", "--path", aiosPath]);
+  const after = await fs.readFile(identityPath, "utf8");
+  assert.equal(occurrences(after, IMPORT_START), 1);
+  assert.match(after, /Clean content\./);
+});
+
+test("the preview exits the way the apply it previews would exit", async () => {
+  const { aiosPath, identityPath, sourcePath } = await setupContextImport("preview-exit");
+
+  // INSTALL.md calls the preview the gate to inspect before the real run. A
+  // gate that reports success over a plan the next command refuses is not one.
+  await fs.writeFile(identityPath, `# Identity\n\n${IMPORT_START}\nmangled, no end marker\n`);
+  await writeImportFile(sourcePath, "Anything.");
+
+  process.exitCode = 0;
+  const output = await runQuietly([sourcePath, "--path", aiosPath]);
+  const previewExit = process.exitCode;
+  process.exitCode = 0;
+
+  assert.match(output, /Nothing can be written/);
+  assert.equal(previewExit, 1, "the preview must not report success over a plan that refuses");
+});
