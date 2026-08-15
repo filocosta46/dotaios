@@ -17,6 +17,11 @@ Do not hand them a technical decision they cannot evaluate; carry the install to
 a working state and tell them what you did. The questions that are genuinely
 theirs come at step 4.
 
+You are almost certainly running commands through a pipe rather than a real
+terminal. That is expected and supported. Step 3 is the part built for it: the
+interview questions come to you, so the person answers them in the conversation
+instead of at a shell prompt.
+
 1. Check whether Node.js 20 or newer is available (`node --version`). If it is
    not, install it, and say what you are installing as you go. Use the machine's
    normal route: `brew install node` on macOS, `winget install OpenJS.NodeJS.LTS`
@@ -26,12 +31,46 @@ theirs come at step 4.
 2. Run `npx dotaios@2.0.3 setup --dry-run` and show what it reports. It writes
    nothing, and it is the record of what the next command is about to change:
    it creates `~/aios` and connects the AI apps already on that machine.
-3. Run `npx dotaios@2.0.3 setup`.
-4. Setup asks its own questions (private sync, a daily brief, saving
-   conversations, an optional browser helper). Every one of them defaults to No.
-   These are the person's to answer: relay each one and wait. Never answer on
-   their behalf — this is the part they can evaluate, and the part that decides
-   what leaves their machine.
+3. Ask these five questions in the conversation, one at a time, and wait for
+   each answer. They become the person's starting context, and they are the
+   reason the folder is worth having:
+
+   - What is your name?
+   - What do you do?
+   - What are you working on right now?
+   - What matters most this week?
+   - Which AI tools do you use? (default: claude-code, codex, cursor)
+
+   Pipe their answers straight into setup. Their name and their work never
+   touch the disk this way, which matters more than the keystrokes it saves:
+
+   ```sh
+   npx dotaios@2.0.3 setup --answers - <<'JSON'
+   {
+     "name": "...",
+     "role": "...",
+     "work": "...",
+     "priorities": "...",
+     "ai_tools": ["claude-code", "codex", "cursor"]
+   }
+   JSON
+   ```
+
+   `--answers <file>` accepts the same JSON if you would rather keep a file,
+   but write it somewhere only they can read, such as their home directory
+   rather than a shared temporary folder, and delete it when setup finishes.
+   Do not substitute `--yes`: it installs
+   placeholder context and quietly leaves the person with an empty folder,
+   which is the outcome this whole path exists to avoid. If they would rather
+   not answer yet, say so plainly and let them choose `--yes` themselves.
+4. Four optional capabilities decide what can leave their machine: private
+   sync, a daily brief, saving conversations, and an optional browser helper.
+   Each stays off unless it is turned on by name. Setup asks about them only
+   when a person is at a terminal, so on your path it will not ask at all, and
+   silence here means off rather than agreed. Name the four in plain language,
+   say they are all currently off, and turn on only the ones they ask for.
+   Never decide any of them on their behalf: this is the part they can
+   evaluate, and it is the reason the rest can be automatic.
 5. If a file already exists that DotAIOS does not own, stop and let them choose.
    Never replace something they wrote on your own initiative.
 6. Verify with `npx dotaios@2.0.3 doctor` and read the result back in plain
@@ -157,10 +196,33 @@ daily brief, conversation saving and optional 30-day backfill, and the optional
 Lightpanda browser helper. Every optional capability defaults to No and requires
 an explicit Yes.
 
-### Advanced: automated test hosts
+### Non-interactive: assistants, scripts, and test hosts
 
-Do not use this for your personal installation; it creates placeholder context
-and skips setup questions. For a disposable non-interactive test host, use:
+Setup does not need a terminal. It needs the interview answers, and there are
+two ways to supply them without one.
+
+To install for a real person — the assistant path — collect their answers in
+conversation and pass them through. This is the recommended non-interactive
+route, because the resulting folder is actually theirs:
+
+```sh
+npx dotaios@2.0.3 setup --answers -            # JSON on stdin, nothing written to disk
+npx dotaios@2.0.3 setup --answers ./answers.json
+```
+
+The accepted keys are `name`, `role`, `work`, `priorities`, and `ai_tools`; all
+are optional, but at least one of the first four must carry content. Anything
+the run cannot honour exactly stops it instead: an unrecognised key, two names
+for the same field, a value of the wrong type, or an `ai_tools` list that names
+no tools. `setup --dry-run --answers ...` validates the answers too, so the
+preview refuses what the real run would refuse. The four
+privacy options stay off in this mode exactly as they do interactively, so
+sync, the daily brief, conversation capture, and the browser helper each still
+need a separate, explicit request.
+
+For a disposable test host where nobody is there to answer, `--yes` fills the
+context files with placeholders and skips the questions.
+Do not use this for your personal installation:
 
 ```sh
 npx -y dotaios@2.0.3 setup --yes --skip-reveal
@@ -310,9 +372,15 @@ downloaded package artifacts in its own cache, outside DotAIOS.
   [nodejs.org](https://nodejs.org), then run `node --version` again.
 - Existing `~/aios`: do not delete it blindly. Run
   `npx dotaios@2.0.3 doctor` and inspect the folder first.
-- Agent refusal: this is expected when an assistant is asked to execute remote
-  instructions. Run the preview and setup yourself, then ask the assistant only
-  to inspect the completed local installation.
+- `interactive terminal required`: setup could not find a terminal, which is
+  normal when an assistant is driving it. Supply the interview answers with
+  `--answers <file>` as described in the assistant section above. `--yes` also
+  clears the error, but it writes placeholder context rather than yours.
+- Agent hesitation: an assistant may pause before running instructions it
+  fetched from the internet, and it is right to check with you first. Confirm
+  that you asked for this, and it can continue. If you would rather run the
+  preview and setup yourself, that path is equally supported — ask the
+  assistant to inspect the finished installation afterwards.
 - Other failures: run `npx dotaios@2.0.3 status` and keep the exact output. If
   you cannot recover, open a
   [GitHub issue](https://github.com/filocosta46/dotaios/issues) with the failed

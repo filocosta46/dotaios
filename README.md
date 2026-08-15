@@ -34,8 +34,10 @@ commands, and paste:
 The assistant checks whether Node.js 20 or newer is available. If it is missing,
 the assistant explains the documented installation for that computer and asks
 before using a supported host installation path. It then previews the exact
-folder and app changes, runs setup, verifies the result, and translates it into
-plain language. You do not need a GitHub or DotAIOS account.
+folder and app changes, asks you the five questions that become your starting
+context, runs setup, verifies the result, and translates it into plain
+language. The questions reach you in the conversation rather than at a shell
+prompt. You do not need a GitHub or DotAIOS account.
 
 If you prefer to run the technical recovery path yourself, use Terminal,
 PowerShell, or another system shell. DotAIOS requires Node.js 20 or newer. The

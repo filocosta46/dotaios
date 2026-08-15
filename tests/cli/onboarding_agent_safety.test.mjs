@@ -81,6 +81,53 @@ test("the install guidance tells an assistant to ask before it writes", async ()
   );
 });
 
+// The narrow pattern below caught the contradiction it was written for and
+// missed the next one. INSTALL.md offered assistants a path in one section and
+// called their failure "expected" in another, and both sentences passed. These
+// two tests check the property instead of the phrasing: if a document invites an
+// assistant to install, the install must actually be reachable from where an
+// assistant stands, which is a pipe rather than a terminal.
+test("INSTALL.md does not describe the assistant path as expected to fail", async () => {
+  const install = await readIfPresent("INSTALL.md");
+  assert.ok(install);
+
+  const defeatist = [
+    /agent refusal:\s*this is expected/i,
+    /assistants? cannot install/i,
+    /run (?:the preview and )?setup yourself,? then ask the assistant only/i
+  ];
+  const offences = install
+    .split("\n")
+    .flatMap((line, index) => (defeatist.some((p) => p.test(line)) ? [`INSTALL.md:${index + 1}: ${line.trim()}`] : []));
+
+  assert.deepEqual(
+    offences,
+    [],
+    `INSTALL.md offers an assistant-led install and elsewhere treats it as a known dead end:\n${offences.join("\n")}`
+  );
+});
+
+test("the assistant section documents how to install without a terminal", async () => {
+  const install = await readIfPresent("INSTALL.md");
+  assert.ok(install);
+
+  const assistantSection = install.split(/^## /m).find((section) => /^If an AI assistant is helping you/.test(section));
+  assert.ok(assistantSection, "INSTALL.md must keep a section addressed to assistants");
+
+  // Without this, the section is an instruction to do something the CLI refuses:
+  // every assistant runs setup through a pipe, and the interview needs a TTY.
+  assert.match(
+    assistantSection,
+    /--answers/,
+    "the assistant section must name the flag that supplies interview answers without a terminal"
+  );
+  assert.doesNotMatch(
+    assistantSection,
+    /use `?--yes`? (?:instead|for this)/i,
+    "--yes installs placeholder context and must not be the assistant's recommended route"
+  );
+});
+
 test("README and INSTALL.md agree about who runs setup", async () => {
   const [readme, install] = await Promise.all([
     readIfPresent("README.md"),
