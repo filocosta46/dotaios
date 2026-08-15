@@ -16,17 +16,22 @@ export const MANAGED_END = "<!-- dotaios-managed:end -->";
 
 // Locate one complete managed block. Malformed or reversed markers are not
 // ownership proof, so callers must preserve the file instead of editing it.
-export function findManagedBlock(text) {
-  const start = text.indexOf(MANAGED_START);
-  const endStart = text.indexOf(MANAGED_END);
+//
+// The marker pair is a parameter because the bridges are not the only writer
+// that owns a delimited block inside a file it does not own: `dotaios import`
+// owns one in the user's own context, project, and vault markdown. The rule for
+// "do I own this?" must be answered in exactly one place, so both use this.
+export function findManagedBlock(text, startMarker = MANAGED_START, endMarker = MANAGED_END) {
+  const start = text.indexOf(startMarker);
+  const endStart = text.indexOf(endMarker);
   if (
     start < 0
     || endStart < 0
-    || start !== text.lastIndexOf(MANAGED_START)
-    || endStart !== text.lastIndexOf(MANAGED_END)
+    || start !== text.lastIndexOf(startMarker)
+    || endStart !== text.lastIndexOf(endMarker)
     || start >= endStart
   ) return null;
-  const end = endStart + MANAGED_END.length;
+  const end = endStart + endMarker.length;
   return { start, end, text: text.slice(start, end) };
 }
 

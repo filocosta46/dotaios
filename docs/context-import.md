@@ -88,3 +88,30 @@ npx dotaios@latest import ./import.json --apply
 ```
 
 If the import contains secret-like terms, DotAIOS blocks apply by default. Move real secrets to `~/aios/.env`; use `--allow-sensitive` only after manual review.
+
+## Re-importing
+
+Imported markdown lives in one DotAIOS-managed block per destination file,
+delimited by `<!-- dotaios-import:start -->` and `<!-- dotaios-import:end -->`.
+Anything you write outside those markers is never read or rewritten.
+
+Running the same import again is safe:
+
+| Destination state | What `--apply` does |
+|---|---|
+| No file yet | Creates it with the block |
+| File exists, no block | Appends the block below your text |
+| Block present, same content | Skips it, reports `unchanged`, writes nothing |
+| Block present, content changed | Replaces the block and preserves the pre-edit file at `<file>.dotaios-backup-<token>` |
+| Import markers present but malformed | Refuses that file, reports `refused`, exits non-zero |
+
+A replacement overwrites anything hand-edited *inside* the markers, which is why
+the pre-edit file is preserved and named in the output. Edit imported material
+outside the block, or promote it into your own prose, if you want it to survive
+the next import.
+
+`--dry-run` states the same decision (`would create`, `would append`,
+`would replace`, `would skip`, `would refuse`) without writing.
+
+Signals and events are append-only journals, so re-importing the same file
+appends those lines again.

@@ -1,9 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEventRecord, formatJsonlEntry } from "../../../core/src/memory.mjs";
+import { findManagedBlock } from "../../../core/src/bridges.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
-import { pathExists, readJson, writeFileSafe } from "../../../core/src/files.mjs";
+import { readJson, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+
+// Import owns exactly one delimited block per destination file, on the same
+// ownership rule the agent bridges use: one well-formed pair or nothing. A
+// bare append made a retry — the most ordinary thing a user does — silently
+// duplicate every imported section.
+const IMPORT_START = "<!-- dotaios-import:start -->";
+const IMPORT_END = "<!-- dotaios-import:end -->";
+const IMPORT_STAMP = "<!-- dotaios-import:at ";
 
 const sensitivePattern = /api[_-]?key|client[_-]?secret|private[_-]?key|secret|password|token|bearer\s+[A-Za-z0-9._-]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ya29\.[A-Za-z0-9_-]+|xox[abpros]-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{20,}|-----BEGIN [A-Z ]+PRIVATE KEY-----/i;
 const contextTargets = {
@@ -35,13 +44,22 @@ export async function importCommand(args) {
   const plan = buildImportPlan(target, resolveVaultPath(config, target), imported, sourcePath);
   const sensitive = plan.filter((item) => sensitivePattern.test(item.content));
 
-  printImportPlan(plan, options.apply ? "apply" : "dry-run");
+  // Resolve every destination against what is already on disk, so the preview
+  // states the same decision the apply will take.
+  const resolved = [];
+  for (const item of plan) {
+    resolved.push(await resolveImportItem(item));
+  }
+
+  printImportPlan(resolved, options.apply ? "apply" : "dry-run");
 
   if (!options.apply) {
     if (sensitive.length > 0) {
       console.log("\nSensitive-looking terms found. Review before applying; secrets belong in ~/aios/.env, not memory files.");
     }
-    console.log("\nDry run only. Re-run with --apply to write these changes.");
+    console.log(resolved.some((item) => item.decision !== "unchanged" && item.decision !== "refuse")
+      ? "\nDry run only. Re-run with --apply to write these changes."
+      : "\nDry run only. Nothing to write: every imported block is already in place.");
     return;
   }
 
@@ -50,13 +68,19 @@ export async function importCommand(args) {
   }
 
   const results = [];
-  for (const item of plan) {
+  for (const item of resolved) {
     results.push(await applyImportItem(item));
   }
 
   console.log("\nImport applied");
   for (const result of results) {
     console.log(`[${result.action}] ${result.path}`);
+    if (result.note) console.log(`  ${result.note}`);
+  }
+
+  if (results.some((result) => result.action === "refused" || result.action === "conflict")) {
+    console.log("\nSome files were left untouched. Resolve the notes above, then re-run.");
+    process.exitCode = 1;
   }
 }
 
@@ -94,6 +118,12 @@ Options:
 
 Input:
   JSON using the DotAIOS import format. See docs/context-import.md.
+
+Re-importing:
+  Imported markdown lives in one DotAIOS-managed block per file. Importing the
+  same content again changes nothing; changed content replaces that block and
+  keeps a timestamped backup of the file beside it. Text outside the block is
+  never touched.
 `);
 }
 
@@ -112,32 +142,49 @@ async function readImportFile(sourcePath) {
 function buildImportPlan(target, vaultPath, imported, sourcePath) {
   const plan = [];
   const importedAt = new Date().toISOString();
+  // One destination file holds one managed block, so every section bound for
+  // the same file has to be collected before the block is rendered. Two plan
+  // items for one path would otherwise overwrite each other inside one run.
+  const markdown = new Map();
+
+  const addSection = (destination, heading, content, bucket) => {
+    const entry = markdown.get(destination) || { bucket, sections: [] };
+    const section = { heading, content: String(content).trim() };
+    if (!entry.sections.some((existing) => existing.heading === section.heading && existing.content === section.content)) {
+      entry.sections.push(section);
+    }
+    markdown.set(destination, entry);
+  };
 
   for (const [key, relativePath] of Object.entries(contextTargets)) {
     if (imported.context?.[key]) {
-      plan.push(markdownAppend(path.join(target, relativePath), `Imported Context - ${importedAt}`, imported.context[key], "context"));
+      addSection(path.join(target, relativePath), "Imported Context", imported.context[key], "context");
     }
   }
 
   for (const project of asArray(imported.projects)) {
     const slug = safeSlug(project.slug || project.name, "project");
     const content = project.content || project.readme || `# ${project.name || slug}\n\n${project.summary || ""}\n`;
-    plan.push(markdownAppend(path.join(target, "projects", slug, "README.md"), `Imported Project Context - ${importedAt}`, content, "project"));
+    addSection(path.join(target, "projects", slug, "README.md"), "Imported Project Context", content, "project");
   }
 
   for (const item of asArray(imported.wiki)) {
     const slug = safeSlug(item.slug || item.topic || item.title, "wiki");
-    plan.push(markdownAppend(path.join(vaultPath, "wiki", slug, "_index.md"), `Imported Knowledge - ${importedAt}`, item.content || item.summary || "", "vault/wiki"));
+    addSection(path.join(vaultPath, "wiki", slug, "_index.md"), "Imported Knowledge", item.content || item.summary || "", "vault/wiki");
   }
 
   for (const company of asArray(imported.companies)) {
     const slug = safeSlug(company.slug || company.name, "company");
-    plan.push(markdownAppend(path.join(vaultPath, "org", "companies", `${slug}.md`), `Imported Company Context - ${importedAt}`, company.content || company.summary || "", "vault/org"));
+    addSection(path.join(vaultPath, "org", "companies", `${slug}.md`), "Imported Company Context", company.content || company.summary || "", "vault/org");
   }
 
   for (const person of asArray(imported.people)) {
     const slug = safeSlug(person.slug || person.name, "person");
-    plan.push(markdownAppend(path.join(vaultPath, "org", "people", `${slug}.md`), `Imported Person Context - ${importedAt}`, person.content || person.summary || "", "vault/org"));
+    addSection(path.join(vaultPath, "org", "people", `${slug}.md`), "Imported Person Context", person.content || person.summary || "", "vault/org");
+  }
+
+  for (const [destination, entry] of markdown) {
+    plan.push(markdownBlock(destination, entry.sections, entry.bucket, importedAt));
   }
 
   for (const signal of asArray(imported.signals)) {
@@ -171,20 +218,27 @@ function buildImportPlan(target, vaultPath, imported, sourcePath) {
   return plan;
 }
 
-function markdownAppend(destination, heading, content, bucket) {
+function markdownBlock(destination, sections, bucket, importedAt) {
+  const body = sections.map(({ heading, content }) => `## ${heading}\n\n${content}\n`).join("\n");
   return {
     kind: "markdown",
-    action: "append",
     bucket,
     path: destination,
-    content: `\n\n## ${heading}\n\n${String(content).trim()}\n`
+    content: body,
+    block: [IMPORT_START, `${IMPORT_STAMP}${importedAt} -->`, "", body.trimEnd(), "", IMPORT_END].join("\n")
   };
+}
+
+// The stamp records when a block was written, not what it says. Two imports of
+// the same export differ only by that line, so block identity ignores it —
+// otherwise every rerun would look changed and rewrite a file for nothing.
+function importBlockBody(block) {
+  return block.split("\n").filter((line) => !line.startsWith(IMPORT_STAMP)).join("\n");
 }
 
 function jsonlAppend(destination, entry, bucket) {
   return {
     kind: "jsonl",
-    action: "append",
     bucket,
     path: destination,
     content: formatJsonlEntry(entry)
@@ -194,7 +248,6 @@ function jsonlAppend(destination, entry, bucket) {
 function eventAppend(destination, entry) {
   return {
     kind: "event",
-    action: "append",
     bucket: "memory/events",
     path: destination,
     entry,
@@ -202,11 +255,41 @@ function eventAppend(destination, entry) {
   };
 }
 
-async function applyImportItem(item) {
-  if (item.kind === "markdown" && !await pathExists(item.path)) {
-    const title = path.basename(item.path, ".md") === "README" ? path.basename(path.dirname(item.path)) : path.basename(item.path, ".md");
-    return writeFileSafe(item.path, `# ${title}\n${item.content}`, "preserve");
+// Decide what this destination needs before anything is written. A journal
+// line is always an append; a markdown file is answered by whether DotAIOS
+// already owns a block in it, and whether that block still says the same thing.
+async function resolveImportItem(item) {
+  if (item.kind !== "markdown") return { ...item, decision: "append" };
+
+  const stats = await lstatIfPresent(item.path);
+  if (!stats) return { ...item, decision: "create" };
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    return { ...item, decision: "refuse", note: "destination is not a regular file; nothing was written" };
   }
+
+  const current = await fs.readFile(item.path, "utf8");
+  const existing = findManagedBlock(current, IMPORT_START, IMPORT_END);
+  if (!existing) {
+    // Markers that do not form one clean pair are not ownership proof. Appending
+    // beside them would leave a second start marker and make the file
+    // permanently unownable, so leave it exactly as the user has it.
+    if (current.includes(IMPORT_START) || current.includes(IMPORT_END)) {
+      return { ...item, decision: "refuse", note: "import markers are malformed; nothing was written" };
+    }
+    return { ...item, decision: "append", current, stats };
+  }
+
+  return {
+    ...item,
+    decision: importBlockBody(existing.text) === importBlockBody(item.block) ? "unchanged" : "replace",
+    current,
+    existing,
+    stats
+  };
+}
+
+async function applyImportItem(item) {
+  if (item.kind === "markdown") return applyMarkdownItem(item);
 
   if (item.kind === "event") {
     await appendEventRecord(item.path, item.entry);
@@ -218,10 +301,65 @@ async function applyImportItem(item) {
   return { action: "updated", path: item.path };
 }
 
+async function applyMarkdownItem(item) {
+  if (item.decision === "refuse") {
+    return { action: "refused", path: item.path, note: item.note };
+  }
+
+  if (item.decision === "unchanged") {
+    return { action: "unchanged", path: item.path, note: "this import is already in place" };
+  }
+
+  if (item.decision === "create") {
+    const title = path.basename(item.path, ".md") === "README" ? path.basename(path.dirname(item.path)) : path.basename(item.path, ".md");
+    return writeFileSafe(item.path, `# ${title}\n\n${item.block}\n`, "preserve");
+  }
+
+  if (item.decision === "append") {
+    await fs.mkdir(path.dirname(item.path), { recursive: true });
+    await fs.appendFile(item.path, `\n\n${item.block}\n`);
+    return { action: "updated", path: item.path };
+  }
+
+  // Replacing is the only destructive path, so it goes through the guarded
+  // rewrite: the pre-edit file is preserved byte for byte beside itself, and a
+  // file that changed since the preview is left alone rather than clobbered.
+  const next = `${item.current.slice(0, item.existing.start)}${item.block}${item.current.slice(item.existing.end)}`;
+  const replacement = await replaceFileIfUnchanged(item.path, item.current, next, {
+    expectedStats: item.stats,
+    mode: item.stats.mode & 0o777
+  });
+  const preserved = replacement.preservedPath
+    ? ` Previous file preserved at ${path.basename(replacement.preservedPath)}.`
+    : "";
+  return replacement.replaced
+    ? { action: "replaced", path: item.path, note: `replaced the previous import block.${preserved}` }
+    : { action: "conflict", path: item.path, note: `the file changed during import; left it untouched.${preserved}` };
+}
+
+const planVerbs = {
+  create: "create",
+  append: "append",
+  replace: "replace the previous import block",
+  unchanged: "skip (already imported)",
+  refuse: "refuse"
+};
+
 function printImportPlan(plan, mode) {
   console.log(`DotAIOS import plan (${mode})`);
   for (const item of plan) {
-    console.log(`[${item.bucket}] append -> ${item.path}`);
+    const verb = planVerbs[item.decision] || "append";
+    console.log(`[${item.bucket}] ${mode === "dry-run" ? `would ${verb}` : verb} -> ${item.path}`);
+    if (item.note) console.log(`  ${item.note}`);
+  }
+}
+
+async function lstatIfPresent(destination) {
+  try {
+    return await fs.lstat(destination);
+  } catch (error) {
+    if (error?.code === "ENOENT") return null;
+    throw error;
   }
 }
 

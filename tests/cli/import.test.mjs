@@ -5,6 +5,49 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { importCommand } from "../../packages/cli/src/commands/import.mjs";
 
+const IMPORT_START = "<!-- dotaios-import:start -->";
+const IMPORT_END = "<!-- dotaios-import:end -->";
+
+async function setupContextImport(label) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), `dotaios-import-${label}-`));
+  const aiosPath = path.join(root, "aios");
+  const contextDir = path.join(aiosPath, "context");
+  await fs.mkdir(contextDir, { recursive: true });
+  await fs.writeFile(path.join(aiosPath, "aios.json"), "{}\n");
+  await fs.writeFile(path.join(contextDir, "identity.md"), "# Identity\n\nHand-written line.\n");
+  return {
+    root,
+    aiosPath,
+    contextDir,
+    identityPath: path.join(contextDir, "identity.md"),
+    sourcePath: path.join(root, "import.json")
+  };
+}
+
+async function writeImportFile(sourcePath, identity) {
+  await fs.writeFile(sourcePath, `${JSON.stringify({ context: { identity } })}\n`);
+}
+
+async function backupsIn(directory) {
+  return (await fs.readdir(directory)).filter((name) => name.includes(".dotaios-backup-"));
+}
+
+function occurrences(text, needle) {
+  return text.split(needle).length - 1;
+}
+
+async function runQuietly(args) {
+  const logs = [];
+  const originalLog = console.log;
+  console.log = (...values) => logs.push(values.join(" "));
+  try {
+    await importCommand(args);
+  } finally {
+    console.log = originalLog;
+  }
+  return logs.join("\n");
+}
+
 test("event import fails loudly after the shared memory writer lock retry budget", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-import-event-"));
   const aiosPath = path.join(root, "aios");
@@ -52,6 +95,122 @@ test("event import fails loudly after the shared memory writer lock retry budget
     assert.equal(events[1].type, "imported-decision");
     assert.equal(events[1].ts, imported.ts, "imports retain their existing ts-based schema");
   } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a first apply writes one managed block below the user's own text", async () => {
+  const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("first");
+
+  try {
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
+
+    const identity = await fs.readFile(identityPath, "utf8");
+    assert.equal(occurrences(identity, IMPORT_START), 1);
+    assert.equal(occurrences(identity, IMPORT_END), 1);
+    assert.equal(occurrences(identity, "## Imported Context"), 1);
+    assert.match(identity, /^# Identity\n\nHand-written line\.\n/, "text above the block survives");
+    assert.match(identity, /Filippo builds DotAIOS\./);
+    assert.deepEqual(await backupsIn(contextDir), [], "a first import destroys nothing, so it preserves nothing");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a second apply of identical content leaves the file byte-for-byte alone", async () => {
+  const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("repeat");
+
+  try {
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
+    const afterFirst = await fs.readFile(identityPath, "utf8");
+
+    const logs = await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
+
+    assert.equal(await fs.readFile(identityPath, "utf8"), afterFirst, "a retry must not rewrite the file");
+    assert.equal(occurrences(afterFirst, "## Imported Context"), 1, "a retry must not duplicate the block");
+    assert.match(logs, /skip \(already imported\)/);
+    assert.match(logs, /\[unchanged\]/);
+    assert.deepEqual(await backupsIn(contextDir), [], "nothing was rewritten, so nothing is preserved");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a second apply of changed content replaces the block and preserves the pre-edit file", async () => {
+  const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("changed");
+
+  try {
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
+    const beforeEdit = await fs.readFile(identityPath, "utf8");
+
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS and Hermes.");
+    const logs = await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
+
+    const identity = await fs.readFile(identityPath, "utf8");
+    assert.equal(occurrences(identity, "## Imported Context"), 1, "a changed re-import replaces, never stacks");
+    assert.match(identity, /Filippo builds DotAIOS and Hermes\./);
+    assert.doesNotMatch(identity, /Filippo builds DotAIOS\.\n/, "the superseded body is gone from the live file");
+    assert.match(identity, /^# Identity\n\nHand-written line\.\n/, "text outside the block is untouched");
+    assert.match(logs, /\[replaced\]/);
+
+    const backups = await backupsIn(contextDir);
+    assert.equal(backups.length, 1, "a destructive rewrite preserves exactly one backup");
+    assert.equal(
+      await fs.readFile(path.join(contextDir, backups[0]), "utf8"),
+      beforeEdit,
+      "the backup is the pre-edit file, byte for byte"
+    );
+    assert.match(logs, new RegExp(`preserved at ${backups[0].replace(/\./g, "\\.")}`), "the command names the backup it kept");
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("a dry run previews the replacement and writes nothing", async () => {
+  const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("dry-run");
+
+  try {
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
+    const beforeDryRun = await fs.readFile(identityPath, "utf8");
+
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS and Hermes.");
+    const changedLogs = await runQuietly([sourcePath, "--path", aiosPath, "--dry-run"]);
+    assert.match(changedLogs, /would replace the previous import block/);
+    assert.equal(await fs.readFile(identityPath, "utf8"), beforeDryRun, "a dry run writes nothing");
+    assert.deepEqual(await backupsIn(contextDir), [], "a dry run preserves nothing either");
+
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    const unchangedLogs = await runQuietly([sourcePath, "--path", aiosPath, "--dry-run"]);
+    assert.match(unchangedLogs, /would skip \(already imported\)/);
+    assert.match(unchangedLogs, /every imported block is already in place/);
+    assert.equal(await fs.readFile(identityPath, "utf8"), beforeDryRun);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("malformed import markers are not ownership proof, so the file is left alone", async () => {
+  const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("markers");
+  const originalExitCode = process.exitCode;
+
+  try {
+    const mangled = `# Identity\n\n${IMPORT_START}\n\n## Imported Context\n\nHalf a block.\n`;
+    await fs.writeFile(identityPath, mangled);
+    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+
+    const logs = await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
+
+    assert.equal(await fs.readFile(identityPath, "utf8"), mangled, "an unownable file is never edited");
+    assert.match(logs, /\[refused\]/);
+    assert.match(logs, /import markers are malformed/);
+    assert.equal(process.exitCode, 1, "a refusal must not report success");
+    assert.deepEqual(await backupsIn(contextDir), []);
+  } finally {
+    process.exitCode = originalExitCode;
     await fs.rm(root, { recursive: true, force: true });
   }
 });
