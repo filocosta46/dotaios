@@ -4,10 +4,19 @@
 // v1.23 while `npx dotaios@latest` still resolved 1.22). A fresh user's
 // `npx dotaios@latest` must never serve an older CLI than the repo has released.
 //
+// Also fails on the inverse hole: npm AHEAD of every released tag. A published
+// version that no tag points at is just as broken — every release-pinned doc
+// link (README's `blob/v<version>/INSTALL.md` install path) 404s until the tag
+// is on origin — but a "not behind" check reports it as OK.
+//
 // Runs the resolution in a throwaway HOME so no local cache masks what a real
 // first-time user would download. Intended for the release-freshness workflow
 // (scheduled + on release tags), NOT every PR: a pre-publish version bump on a
 // feature branch is expected to be ahead of npm and must not fail here.
+//
+// No grace period for the publish-then-tag window: the verdict is a function of
+// repo + registry state only, never of the clock. Publish AFTER pushing the tag
+// and the window never exists.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, mkdtempSync } from "node:fs";
@@ -29,16 +38,27 @@ function compareSemver(a, b) {
   return 0;
 }
 
+// The commit npm published, so the failure below can name the exact tag target.
+function publishedGitHead(version) {
+  try {
+    const out = execFileSync("npm", ["view", `dotaios@${version}`, "gitHead"], { encoding: "utf8" }).trim();
+    return /^[0-9a-f]{7,40}$/.test(out) ? out : null;
+  } catch {
+    return null;
+  }
+}
+
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 const localVersion = pkg.version;
 
 let tagVersion = null;
+let tagNames = [];
 try {
-  const tags = execFileSync("git", ["tag", "--list", "v*", "--sort=-v:refname"], { encoding: "utf8" })
+  tagNames = execFileSync("git", ["tag", "--list", "v*", "--sort=-v:refname"], { encoding: "utf8" })
     .trim()
     .split("\n")
     .filter(Boolean);
-  if (tags[0]) tagVersion = tags[0].replace(/^v/, "");
+  if (tagNames[0]) tagVersion = tagNames[0].replace(/^v/, "");
 } catch {
   // No git / no tags — fall back to package.json version below.
 }
@@ -73,6 +93,48 @@ if (cmp < 0) {
     "Publish the release to npm, or fix npm auth/ownership, before announcing."
   );
   process.exit(1);
+}
+
+// The inverse: npm ahead of every tag, or ahead of its own. Assert the exact ref
+// the docs pin — `v<npm latest>` — not merely "some tag >= npm", because that is
+// the property README's install link depends on. Skipped when there is no tag
+// information at all (no git, no tags): that is unknown, not broken.
+const expectedTag = `v${npmVersion}`;
+if (tagVersion && !tagNames.includes(expectedTag)) {
+  const gitHead = publishedGitHead(npmVersion);
+  console.error(
+    `FAIL: untagged npm release. \`npx dotaios@latest\` serves ${npmVersion} but no ${expectedTag} tag exists ` +
+    `(newest released tag is v${tagVersion}). Tag the published commit and push it to origin:\n` +
+    `  git tag -a ${expectedTag} ${gitHead || "<gitHead>"} -m "${expectedTag}"\n` +
+    `  git push origin ${expectedTag}\n` +
+    (gitHead
+      ? `${gitHead} is npm's recorded gitHead for ${npmVersion} — the commit that was published.`
+      : `Find the published commit with: npm view dotaios@${npmVersion} gitHead.`) +
+    ` Until that tag is on origin, every release-pinned link 404s — including README's ` +
+    `blob/${expectedTag}/INSTALL.md install path and releases/tag/${expectedTag}.`
+  );
+  process.exit(1);
+}
+
+// A tag that exists only locally still 404s on github.com. This may add a
+// failure, never mask one: if origin is unreachable the check degrades to a note
+// rather than passing something it did not verify.
+if (tagVersion) {
+  let remoteTag = null;
+  try {
+    remoteTag = execFileSync("git", ["ls-remote", "--tags", "origin", `refs/tags/${expectedTag}`], {
+      encoding: "utf8"
+    }).trim();
+  } catch {
+    console.log(`(note: could not reach origin to confirm ${expectedTag} is pushed.)`);
+  }
+  if (remoteTag === "") {
+    console.error(
+      `FAIL: unpushed release tag. ${expectedTag} exists locally but not on origin, so release-pinned ` +
+      `links like blob/${expectedTag}/INSTALL.md still 404 for everyone else. Run: git push origin ${expectedTag}.`
+    );
+    process.exit(1);
+  }
 }
 
 console.log(
