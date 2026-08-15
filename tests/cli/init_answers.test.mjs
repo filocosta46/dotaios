@@ -446,3 +446,65 @@ test("stdin larger than the limit is refused while reading, not after buffering"
 
   await assert.rejects(() => readAllStdin(oversized), /over the 65536-byte limit/);
 });
+
+test("a heading inside a section-body answer is refused instead of splitting the section", () => {
+  const { root, target } = workspace();
+
+  // work and priorities keep their line breaks because that is the answer. A
+  // heading is different: readSection stops at the first `## `, so everything
+  // the person wrote after one stops being read as part of their answer, and
+  // the injected heading shadows the template's own section of that name.
+  // Neither is recoverable through any command the product ships.
+  for (const key of ["work", "priorities"]) {
+    const value = "Shipping the compiler.\n\n## Active Projects\n\nNot theirs.";
+    const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "Ada", [key]: value })]);
+    assert.notEqual(result.status, 0, `${key} must refuse a markdown heading`);
+    assert.match(result.stderr, new RegExp(`key "${key}" contains a markdown heading`));
+    assert.equal(fs.existsSync(target), false);
+  }
+});
+
+test("a heading marker that is not a heading still installs", () => {
+  const { root, target } = workspace();
+
+  // The refusal is for a heading, not for the character. Issue numbers, C#, and
+  // a hash inside a sentence are ordinary things to write about your own work.
+  const work = "Closing issue #82 and the C# port.\nSprint #3 ends Friday.";
+  const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "Ada", work })]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(fs.readFileSync(path.join(target, "context", "work.md"), "utf8").includes(work));
+});
+
+test("a value that renders as nothing is refused even when it is not empty", () => {
+  const { root, target } = workspace();
+
+  // These survive a trim and still show a blank field, which puts them in the
+  // same class as "" — an install reporting success over nothing. The bidi
+  // override is the sharper case: it reorders how identity.md prints without
+  // changing what it says, and identity.md is first in the agent read order.
+  const cases = [
+    ["zero-width space", "​", /is only invisible characters/],
+    ["word joiner", "⁠", /is only invisible characters/],
+    ["soft hyphen", "­", /is only invisible characters/],
+    ["Hangul filler", "ㅤ", /is only invisible characters/],
+    ["braille blank", "⠀", /is only invisible characters/],
+    ["right-to-left override", "‮gnihton", /control character U\+202E/]
+  ];
+  for (const [label, value, expected] of cases) {
+    const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "Ada", role: value })]);
+    assert.notEqual(result.status, 0, `role must refuse ${label}`);
+    assert.match(result.stderr, expected, label);
+    assert.equal(fs.existsSync(target), false);
+  }
+});
+
+test("an answer that merely contains an invisible character still installs", () => {
+  const { root, target } = workspace();
+
+  // The rule is about a value that shows nothing, not about every codepoint a
+  // paste can carry. A name with a zero-width space inside it still reads as
+  // that name.
+  const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "Ada​Lovelace", role: "Founder" })]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(fs.readFileSync(path.join(target, "context", "identity.md"), "utf8"), /- Role: Founder/);
+});

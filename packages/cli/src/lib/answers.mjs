@@ -13,13 +13,13 @@ import { isHtmlComment } from "../../../core/src/render.mjs";
 // no shared vocabulary between them to hoist.
 
 // Only these five are documented, in INSTALL.md and `dotaios init --help`.
-export const DOCUMENTED_ANSWER_KEYS = ["name", "role", "work", "priorities", "ai_tools"];
+const DOCUMENTED_ANSWER_KEYS = ["name", "role", "work", "priorities", "ai_tools"];
 
 // The internal field names are accepted too, so a caller who read the rendered
 // templates instead of the docs still works. They are deliberately absent from
 // DOCUMENTED_ANSWER_KEYS: advertising two spellings for one field doubles what
 // any future rename has to keep working.
-export const ANSWER_KEYS = new Map([
+const ANSWER_KEYS = new Map([
   ["name", "user_name"],
   ["user_name", "user_name"],
   ["role", "user_role"],
@@ -48,6 +48,24 @@ const MULTILINE_FIELDS = new Set(["current_work", "priorities"]);
 const CONTROL_CHARACTERS = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/;
 const CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029]/;
 
+// A bidirectional override reorders how a line prints without changing what it
+// says. That is the carriage return's harm in a stronger form, and it lands in
+// context/identity.md, the first file in the agent read order.
+const BIDI_OVERRIDES = /\p{Bidi_Control}/u;
+
+// Format characters, plus the few blanks that are not formally invisible but
+// render as nothing anyway: Hangul fillers, the braille blank, the Mongolian
+// vowel separator. A value made only of these passes the empty-string check and
+// still renders an empty field, so it belongs in the same class as "".
+const INVISIBLE_ONLY = /^[\p{Cf}\p{Zs}ㅤᅟᅠ⠀᠎\s]*$/u;
+
+// A section body is the whole field, so there is no sibling field to escape
+// into — but a heading inside one is not something a person said. readSection
+// stops at the first `## `, so everything written after an injected heading
+// becomes invisible to interview, context, and brief, while the forged heading
+// shadows the template's own section of that name. Bullets and prose are fine.
+const MARKDOWN_HEADING = /^[^\S\r\n]*#{1,6}[^\S\r\n]/m;
+
 // A value that is present but says nothing installs a folder that looks
 // finished and reports success — the exact failure --answers was added to end,
 // arriving through the one door the type checks leave open. These are literal
@@ -61,9 +79,9 @@ const CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB = /[\u0000-\u0008\u000B-\u001F\u
 // command to run pipes it in unedited.
 const ELLIPSES = new Set(["...", "…"]);
 
-export const MAX_ANSWERS_BYTES = 64 * 1024;
+const MAX_ANSWERS_BYTES = 64 * 1024;
 
-export function assertAnswersSize(bytes, origin) {
+function assertAnswersSize(bytes, origin) {
   if (bytes > MAX_ANSWERS_BYTES) {
     throw new Error(
       `${origin} is ${bytes} bytes, over the ${MAX_ANSWERS_BYTES}-byte limit. It holds a few sentences, not a transcript.`
@@ -189,6 +207,7 @@ function normalizeText(value, key, field) {
 
   if (MULTILINE_FIELDS.has(field)) {
     assertPlainText(text, key, CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB);
+    assertNoHeading(text, key);
     return text;
   }
   assertOneLine(text, key, BULLET_IS_ONE_LINE);
@@ -214,15 +233,35 @@ function normalizeAiTools(value, key) {
     assertPlainText(tool, key, CONTROL_CHARACTERS);
     tools.push(tool);
   }
-  // Silently falling back to the three defaults here would hand someone bridge
-  // files and skill links for clients they explicitly did not name.
+  // An empty list is an answer — "none of them" — and quietly restoring the
+  // three defaults would record the opposite in aios.json, where status,
+  // doctor, and context all read it back and show it to the person as theirs.
+  // (It does not decide bridges: activate detects installed clients.)
   if (tools.length === 0) {
     throw new Error(`--answers key "${key}" named no tools. Omit the key to keep the default, or list at least one.`);
   }
   return tools.join(",");
 }
 
+function assertNoHeading(text, key) {
+  if (!MARKDOWN_HEADING.test(text)) return;
+  throw new Error(
+    `--answers key "${key}" contains a markdown heading. This answer becomes the body of one section, and a ` +
+    "heading inside it splits that section: everything after it stops being read as part of the answer, and it " +
+    "shadows the template's own section of that name. Use a list or a blank line between threads instead."
+  );
+}
+
 function assertCarriesAnAnswer(text, key) {
+  // Checked after the empty case below, so a plain "" keeps the message written
+  // for it; this one is for the values that survive a trim and still show
+  // nothing.
+  if (text !== "" && INVISIBLE_ONLY.test(text)) {
+    throw new Error(
+      `--answers key "${key}" is only invisible characters. It renders as a blank field, so the install would ` +
+      "report success over nothing. Omit the key to leave that field unanswered."
+    );
+  }
   if (text !== "" && !ELLIPSES.has(text) && !isHtmlComment(text)) return;
   throw new Error(
     `--answers key "${key}" carries no answer. Omit the key to leave that field unanswered, or supply what the ` +
@@ -245,7 +284,7 @@ const BULLET_IS_ONE_LINE =
 const TOOL_NAME_IS_ONE_LINE = "It names one AI tool, and a tool name is a single word on a single line.";
 
 function assertPlainText(text, key, pattern) {
-  const found = text.match(pattern);
+  const found = text.match(pattern) || text.match(BIDI_OVERRIDES);
   if (!found) return;
   const code = found[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
   throw new Error(
