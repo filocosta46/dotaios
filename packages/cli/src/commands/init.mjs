@@ -17,6 +17,7 @@ import {
   isPathWithinLexically,
   resolveVaultPath
 } from "../../../core/src/paths.mjs";
+import { assertAnswersSize, parseAnswers, readAnswersFile } from "../../../core/src/answers.mjs";
 import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -117,7 +118,7 @@ export async function initCommand(args, lifecycle = {}) {
   }
 
   const planned = lifecycle.plan;
-  const answers = planned ? null : await resolveAnswers(options);
+  const answers = planned ? null : await resolveAnswers(options, lifecycle);
   const config = planned?.config || createAiosConfig({
     aiTools: splitCsv(answers.ai_tools),
     vaultPath: options.vaultPath || null
@@ -237,101 +238,37 @@ all optional, but at least one must carry content:
 // JSON by whoever is driving the install, or waived with --yes. Only the first
 // two produce real context, and the JSON path exists because the people this is
 // built for are talking to an assistant, not standing at a shell prompt.
-async function resolveAnswers(options) {
-  if (options.answers) return readAnswersFrom(options.answers);
+//
+// setup retries init (--force, transaction recovery) and stdin only drains
+// once, so setup reads it and hands the text down through `lifecycle.answersRaw`
+// rather than this module holding it for the life of the process.
+async function resolveAnswers(options, lifecycle) {
+  if (options.answers) {
+    const raw = lifecycle.answersRaw
+      ?? (options.answers === "-" ? await readAllStdin() : await readAnswersFile(options.answers));
+    return parseAnswers(raw, defaultAnswers());
+  }
   if (options.yes) return defaultAnswers();
   return promptAnswers();
 }
 
-const ANSWER_KEYS = new Map([
-  ["name", "user_name"],
-  ["user_name", "user_name"],
-  ["role", "user_role"],
-  ["user_role", "user_role"],
-  ["work", "current_work"],
-  ["current_work", "current_work"],
-  ["priorities", "priorities"],
-  ["ai_tools", "ai_tools"]
-]);
-const MAX_ANSWERS_BYTES = 64 * 1024;
-
-async function readAnswersFrom(source) {
-  const raw = source === "-" ? await readAllStdin() : await readAnswersFile(source);
-  if (raw.length > MAX_ANSWERS_BYTES) {
-    throw new Error(`--answers is larger than ${MAX_ANSWERS_BYTES} bytes. It holds a few sentences, not a transcript.`);
-  }
-
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`--answers is not valid JSON (${error.message}). Expected an object like {"name": "...", "role": "..."}.`);
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error('--answers must be a JSON object, for example {"name": "Ada", "role": "Founder"}.');
-  }
-
-  const answers = defaultAnswers();
-  const provided = [];
-  for (const [key, value] of Object.entries(parsed)) {
-    const field = ANSWER_KEYS.get(key);
-    if (!field) {
-      throw new Error(
-        `--answers has an unknown key "${key}". Accepted keys: ${[...ANSWER_KEYS.keys()].join(", ")}.\n` +
-        "A misspelled key would quietly install placeholder context, so this stops instead."
-      );
-    }
-    const text = field === "ai_tools" ? normalizeAiTools(value) : normalizeText(value, key);
-    if (!text) continue;
-    answers[field] = text;
-    if (field !== "ai_tools") provided.push(field);
-  }
-
-  // --yes already exists for people who genuinely want placeholders. Arriving
-  // here with nothing in it means the answers were meant to be real and got
-  // lost on the way, which is exactly the failure this flag was added to end.
-  if (provided.length === 0) {
+export async function readAllStdin(stream = input) {
+  if (stream.isTTY) {
     throw new Error(
-      "--answers supplied no context. Fill in at least one of name, role, work, or priorities, " +
-      "or pass --yes if you deliberately want placeholder context."
+      "--answers - reads the answers from stdin, and stdin is this terminal, so it would wait forever.\n" +
+      "Pipe the JSON in, or pass --answers <file> instead."
     );
   }
-
-  return answers;
-}
-
-async function readAnswersFile(source) {
-  const resolved = path.resolve(expandHome(source));
-  try {
-    return await fs.readFile(resolved, "utf8");
-  } catch (error) {
-    if (error?.code === "ENOENT") throw new Error(`--answers file not found: ${resolved}`);
-    throw error;
-  }
-}
-
-// setup retries init (--force, transaction recovery), and stdin can only be
-// drained once. Without this cache the retry reads an empty stream and reports
-// invalid JSON for answers the caller wrote correctly.
-let stdinAnswers = null;
-
-async function readAllStdin() {
-  if (stdinAnswers !== null) return stdinAnswers;
   const chunks = [];
-  for await (const chunk of input) chunks.push(chunk);
-  stdinAnswers = Buffer.concat(chunks).toString("utf8");
-  return stdinAnswers;
-}
-
-function normalizeText(value, key) {
-  if (value === null || value === undefined) return "";
-  if (typeof value !== "string") throw new Error(`--answers key "${key}" must be a string.`);
-  return value.trim();
-}
-
-function normalizeAiTools(value) {
-  const list = Array.isArray(value) ? value : String(value ?? "").split(",");
-  return list.map((tool) => String(tool).trim()).filter(Boolean).join(",");
+  let bytes = 0;
+  for await (const chunk of stream) {
+    bytes += chunk.length;
+    // Bail while reading rather than after buffering, so an accidental pipe
+    // from a huge file cannot be pulled fully into memory first.
+    assertAnswersSize(bytes, "--answers -");
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function promptAnswers() {

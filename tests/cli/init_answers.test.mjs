@@ -2,8 +2,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { Readable } from "node:stream";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readAllStdin } from "../../packages/cli/src/commands/init.mjs";
 
 // The advertised install path is "ask your assistant to install DotAIOS". An
 // assistant runs commands through a pipe, never a TTY, so the interview at
@@ -134,14 +136,102 @@ test("the no-TTY error points an assistant at --answers, not just at Terminal", 
   );
 });
 
-test("setup accepts --answers and passes it through to init", () => {
+test("setup hands the answers to init, end to end", () => {
   const { root, target } = workspace();
+  const home = path.join(root, "home");
+  fs.mkdirSync(home);
+
+  // The whole flow, in the shell an assistant actually has: no TTY, real
+  // answers, and a sandboxed home so client bridges land somewhere disposable.
   const result = spawnSync(
     process.execPath,
-    [cli, "setup", "--dry-run", "--path", target, "--answers", writeAnswers(root, ANSWERS)],
+    [cli, "setup", "--path", target, "--home", home, "--answers", writeAnswers(root, ANSWERS), "--skip-reveal"],
     { encoding: "utf8" }
   );
 
-  assert.equal(result.status, 0, result.stderr);
-  assert.doesNotMatch(result.stderr, /Unknown option/);
+  assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+  assert.match(fs.readFileSync(path.join(target, "context", "identity.md"), "utf8"), /- Name: Ada Lovelace/);
+
+  // The privacy opt-ins are the reason this mode is safe to recommend, so
+  // check the artefact rather than trusting the guards that skip the prompts.
+  assert.doesNotMatch(
+    fs.readFileSync(path.join(target, "schedules.yml"), "utf8"),
+    /enabled: true/,
+    "the daily brief must stay off in a non-interactive install"
+  );
+});
+
+test("the preview refuses answers the real run would refuse", () => {
+  const { root, target } = workspace();
+  const result = spawnSync(
+    process.execPath,
+    [cli, "setup", "--dry-run", "--path", target, "--answers", writeAnswers(root, { nmae: "Ada" })],
+    { encoding: "utf8" }
+  );
+
+  // INSTALL.md calls the preview the gate before the real run. A gate that
+  // passes the exact input the next command rejects is worse than no gate.
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /unknown key "nmae"/);
+  assert.equal(fs.existsSync(target), false);
+});
+
+test("two names for one field stop the run instead of one quietly winning", () => {
+  const { root, target } = workspace();
+  const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "First", user_name: "Second" })]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /two names for the same field/);
+  assert.equal(fs.existsSync(target), false);
+});
+
+test("a non-string answer is refused rather than coerced", () => {
+  const { root, target } = workspace();
+
+  const nested = runInit(["--path", target, "--answers", writeAnswers(root, { name: "A", ai_tools: { x: 1 } })]);
+  assert.notEqual(nested.status, 0);
+  assert.match(nested.stderr, /must be a string or an array of strings/);
+
+  // null is how an assistant naturally serialises "they did not answer this",
+  // and silently dropping it is how a placeholder install used to happen.
+  const nulled = runInit(["--path", target, "--answers", writeAnswers(root, { name: null, role: "Founder" })]);
+  assert.notEqual(nulled.status, 0);
+  assert.match(nulled.stderr, /must be a string/);
+
+  assert.equal(fs.existsSync(target), false);
+});
+
+test("an ai_tools list that names nothing does not silently restore the defaults", () => {
+  const { root, target } = workspace();
+  const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "A", ai_tools: [] })]);
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /named no tools/);
+  assert.equal(fs.existsSync(target), false);
+});
+
+test("the unknown-key error advertises only the documented keys", () => {
+  const { root, target } = workspace();
+  const result = runInit(["--path", target, "--answers", writeAnswers(root, { nmae: "Ada" })]);
+
+  assert.match(result.stderr, /Accepted keys: name, role, work, priorities, ai_tools\./);
+  // The internal spellings still work, but naming them here would give the
+  // caller two vocabularies and every later rename two surfaces to keep alive.
+  assert.doesNotMatch(result.stderr, /Accepted keys:.*user_name/);
+});
+
+test("--answers - refuses a terminal instead of hanging on it", async () => {
+  // spawnSync cannot hand the child a real TTY, so the guard is exercised
+  // directly. Without it this call never returns, which is the one failure in
+  // this file that would print nothing at all.
+  const terminal = new Readable({ read() {} });
+  terminal.isTTY = true;
+
+  await assert.rejects(() => readAllStdin(terminal), /would wait forever/);
+});
+
+test("stdin larger than the limit is refused while reading, not after buffering", async () => {
+  const oversized = Readable.from([Buffer.alloc(40 * 1024), Buffer.alloc(40 * 1024), Buffer.alloc(40 * 1024)]);
+
+  await assert.rejects(() => readAllStdin(oversized), /over the 65536-byte limit/);
 });

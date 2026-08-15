@@ -41,10 +41,11 @@ instead of at a shell prompt.
    - What matters most this week?
    - Which AI tools do you use? (default: claude-code, codex, cursor)
 
-   Write their answers to a JSON file and pass it to setup:
+   Pipe their answers straight into setup. Their name and their work never
+   touch the disk this way, which matters more than the keystrokes it saves:
 
    ```sh
-   cat > /tmp/dotaios-answers.json <<'JSON'
+   npx dotaios@2.0.3 setup --answers - <<'JSON'
    {
      "name": "...",
      "role": "...",
@@ -53,18 +54,23 @@ instead of at a shell prompt.
      "ai_tools": ["claude-code", "codex", "cursor"]
    }
    JSON
-   npx dotaios@2.0.3 setup --answers /tmp/dotaios-answers.json
    ```
 
-   Delete that file afterwards. Do not substitute `--yes`: it installs
+   `--answers <file>` accepts the same JSON if you would rather keep a file,
+   but write it somewhere only they can read, such as their home directory
+   rather than a shared temporary folder, and delete it when setup finishes.
+   Do not substitute `--yes`: it installs
    placeholder context and quietly leaves the person with an empty folder,
    which is the outcome this whole path exists to avoid. If they would rather
    not answer yet, say so plainly and let them choose `--yes` themselves.
-4. Setup asks its own questions (private sync, a daily brief, saving
-   conversations, an optional browser helper). Every one of them defaults to No.
-   These are the person's to answer: relay each one and wait. Never answer on
-   their behalf — this is the part they can evaluate, and the part that decides
-   what leaves their machine.
+4. Four optional capabilities decide what can leave their machine: private
+   sync, a daily brief, saving conversations, and an optional browser helper.
+   Each stays off unless it is turned on by name. Setup asks about them only
+   when a person is at a terminal, so on your path it will not ask at all, and
+   silence here means off rather than agreed. Name the four in plain language,
+   say they are all currently off, and turn on only the ones they ask for.
+   Never decide any of them on their behalf: this is the part they can
+   evaluate, and it is the reason the rest can be automatic.
 5. If a file already exists that DotAIOS does not own, stop and let them choose.
    Never replace something they wrote on your own initiative.
 6. Verify with `npx dotaios@2.0.3 doctor` and read the result back in plain
@@ -200,20 +206,23 @@ conversation and pass them through. This is the recommended non-interactive
 route, because the resulting folder is actually theirs:
 
 ```sh
+npx dotaios@2.0.3 setup --answers -            # JSON on stdin, nothing written to disk
 npx dotaios@2.0.3 setup --answers ./answers.json
-npx dotaios@2.0.3 setup --answers -    # same JSON on stdin
 ```
 
 The accepted keys are `name`, `role`, `work`, `priorities`, and `ai_tools`; all
-are optional, but at least one must carry content. An unrecognised key stops
-the run rather than silently installing a placeholder in its place. The four
+are optional, but at least one of the first four must carry content. Anything
+the run cannot honour exactly stops it instead: an unrecognised key, two names
+for the same field, a value of the wrong type, or an `ai_tools` list that names
+no tools. `setup --dry-run --answers ...` validates the answers too, so the
+preview refuses what the real run would refuse. The four
 privacy options stay off in this mode exactly as they do interactively, so
 sync, the daily brief, conversation capture, and the browser helper each still
 need a separate, explicit request.
 
 For a disposable test host where nobody is there to answer, `--yes` fills the
-context files with placeholders and skips the questions. Do not use it for a
-personal installation:
+context files with placeholders and skips the questions.
+Do not use this for your personal installation:
 
 ```sh
 npx -y dotaios@2.0.3 setup --yes --skip-reveal

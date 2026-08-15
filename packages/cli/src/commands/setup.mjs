@@ -27,7 +27,8 @@ import {
   lightpandaPlatformBinary,
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
-import { initCommand } from "./init.mjs";
+import { initCommand, readAllStdin } from "./init.mjs";
+import { parseAnswers, readAnswersFile } from "../../../core/src/answers.mjs";
 import {
   activateCommand,
   BRIDGE_COLLISION_REMEDY,
@@ -80,6 +81,18 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   const installLightpandaRequested = args.includes("--install-lightpanda");
   const nonInteractive = args.includes("--yes") || args.includes("-y");
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
+
+  // INSTALL.md calls the preview the gate to inspect before running setup for
+  // real. Reading and validating the answers here rather than inside init is
+  // what makes that true of --answers too: a file the real run would reject
+  // now fails during the preview, where nothing has been created yet. Reading
+  // once also serves the retries below, since stdin only drains one time.
+  const answersSource = extractOption(args, "--answers");
+  const answersRaw = answersSource
+    ? (answersSource === "-" ? await readAllStdin() : await readAnswersFile(answersSource))
+    : null;
+  if (answersRaw !== null) parseAnswers(answersRaw, {});
+
   if (args.includes("--dry-run")) {
     await printSetupPreview(aiosPath, args, { verbose });
     return;
@@ -109,7 +122,8 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
     setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle, {
-      quiet: !verbose
+      quiet: !verbose,
+      answersRaw
     });
     await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
     if (setupTransactionActive) {
@@ -573,7 +587,7 @@ async function lstatIfPresent(target) {
 // recorded the complete expected tree before createBaseTree, and every path
 // left behind still matches that record. Only that narrow case gets an internal
 // --force retry. The metrics-only recognizer below remains for 1.27.1 upgrades.
-async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quiet = false } = {}) {
+async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quiet = false, answersRaw = null } = {}) {
   if (await hasSetupTransaction(aiosPath)) {
     if (passthrough.includes("--force") || passthrough.includes("--overwrite")) {
       throw new Error(
@@ -585,6 +599,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quie
   try {
     await initCommand(passthrough, {
       quiet,
+      answersRaw,
       beforeScaffold: async (plan) => {
         transactionStarted = await beginSetupTransaction(aiosPath, passthrough, plan, lifecycle);
       },
@@ -610,7 +625,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quie
       return { markerStats: transaction.markerStats, transaction: transaction.transaction };
     }
     if (!(await isFailedSetupResidue(aiosPath))) throw error;
-    await initCommand([...passthrough, "--force"], { quiet });
+    await initCommand([...passthrough, "--force"], { quiet, answersRaw });
     console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
     return false;
   }
