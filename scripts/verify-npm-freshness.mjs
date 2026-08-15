@@ -137,6 +137,32 @@ if (tagVersion) {
   }
 }
 
+// The tag existing is not the property the docs depend on — the tag pointing at
+// the published commit is. A v<x> on the wrong commit passes every check above
+// while blob/v<x>/INSTALL.md serves source that was never published, which is
+// worse than the 404: it looks verified. Degrades to a note when npm records no
+// gitHead (2.0.1 has none) or the tag is unreadable, rather than guessing.
+if (tagVersion && tagNames.includes(expectedTag)) {
+  const gitHead = publishedGitHead(npmVersion);
+  let tagCommit = null;
+  try {
+    tagCommit = execFileSync("git", ["rev-parse", `${expectedTag}^{commit}`], { encoding: "utf8" }).trim();
+  } catch {
+    tagCommit = null;
+  }
+  if (gitHead && tagCommit && gitHead !== tagCommit) {
+    console.error(
+      `FAIL: ${expectedTag} points at ${tagCommit}, but npm published ${npmVersion} from ${gitHead}. ` +
+      `Anyone following INSTALL.md's "compare gitHead with the source tag" step reads different source than ` +
+      "they installed. Move the tag to the published commit, or publish the tagged commit."
+    );
+    process.exit(1);
+  }
+  if (!gitHead) {
+    console.log(`(note: npm records no gitHead for ${npmVersion}; could not confirm ${expectedTag} points at it.)`);
+  }
+}
+
 console.log(
   `OK: npm latest = ${npmVersion}; latest released tag = ${tagVersion || "(none)"}; local = ${localVersion}.` +
   (compareSemver(npmVersion, localVersion) !== 0

@@ -16,7 +16,7 @@ const FAKE_GIT_HEAD = "0123456789abcdef0123456789abcdef01234567";
 const WINDOWS = process.platform === "win32";
 
 // A git repo with the given tags, plus `npx`/`npm` shims that answer offline.
-function fixture(t, { npmVersion, tags = [], origin = false }) {
+function fixture(t, { npmVersion, tags = [], origin = false, gitHead = "tagged" }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-freshness-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -42,9 +42,15 @@ function fixture(t, { npmVersion, tags = [], origin = false }) {
     fs.chmodSync(file, 0o755);
   };
   shim("npx", `echo "${npmVersion}"`);
-  shim("npm", `echo "${FAKE_GIT_HEAD}"`);
+  // `gitHead: "tagged"` is the healthy shape — npm published the commit the tag
+  // points at. "elsewhere" is the release that was tagged on the wrong commit,
+  // which reads as verified while serving source nobody installed.
+  const head = gitHead === "tagged"
+    ? git("rev-parse", "HEAD").trim()
+    : FAKE_GIT_HEAD;
+  shim("npm", `echo "${head}"`);
 
-  return { root, repo, bin };
+  return { root, repo, bin, head };
 }
 
 function run({ repo, bin, root }) {
@@ -61,11 +67,12 @@ function run({ repo, bin, root }) {
 }
 
 test("npm ahead of every tag fails, and says which commit to tag", { skip: WINDOWS }, (t) => {
-  const result = run(fixture(t, { npmVersion: "1.1.0", tags: ["v1.0.0"] }));
+  const environment = fixture(t, { npmVersion: "1.1.0", tags: ["v1.0.0"] });
+  const result = run(environment);
   assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
   assert.match(result.stderr, /FAIL: untagged npm release/);
   assert.match(result.stderr, /serves 1\.1\.0 but no v1\.1\.0 tag exists/);
-  assert.match(result.stderr, new RegExp(`git tag -a v1\\.1\\.0 ${FAKE_GIT_HEAD}`), "must name npm's gitHead");
+  assert.match(result.stderr, new RegExp(`git tag -a v1\\.1\\.0 ${environment.head}`), "must name npm's gitHead");
   assert.match(result.stderr, /git push origin v1\.1\.0/);
   assert.match(result.stderr, /404/, "must say release-pinned doc links are broken until then");
 });
@@ -94,4 +101,15 @@ test("no tag information at all is unknown, not broken", { skip: WINDOWS }, (t) 
   const result = run(fixture(t, { npmVersion: PKG_VERSION, tags: [] }));
   assert.equal(result.status, 0, `expected pass, got: ${result.stdout}${result.stderr}`);
   assert.doesNotMatch(result.stderr, /untagged npm release/);
+});
+
+test("a tag on the wrong commit fails — the tag existing is not the property docs need", { skip: WINDOWS }, (t) => {
+  // INSTALL.md tells the reader to compare npm's gitHead against the source tag
+  // and stop if they differ. A tag that resolves but points somewhere else
+  // passes every other check here while blob/v<x>/INSTALL.md serves source that
+  // was never published — which reads as verified, and is worse than the 404.
+  const result = run(fixture(t, { npmVersion: "1.0.0", tags: ["v1.0.0"], gitHead: "elsewhere" }));
+  assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stderr, /points at .*, but npm published 1\.0\.0 from/);
+  assert.doesNotMatch(result.stderr, /untagged npm release/, "the tag exists; this is a different failure");
 });
