@@ -29,13 +29,15 @@ The free core is available now.
 Open Claude Code, Codex, Cursor, or another local assistant that can run
 commands, and paste:
 
-> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/v2.0.3/INSTALL.md — the “If an AI assistant is helping you” section. Preview every change, ask me only about choices I can evaluate, verify it, and show me my one AIOS folder.
+> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/main/INSTALL.md — the “If an AI assistant is helping you” section. Preview every change, ask me only about choices I can evaluate, verify it, and show me my one AIOS folder.
 
 The assistant checks whether Node.js 20 or newer is available. If it is missing,
 the assistant explains the documented installation for that computer and asks
 before using a supported host installation path. It then previews the exact
-folder and app changes, runs setup, verifies the result, and translates it into
-plain language. You do not need a GitHub or DotAIOS account.
+folder and app changes, asks you the five questions that become your starting
+context, runs setup, verifies the result, and translates it into plain
+language. You never need to open a terminal, and you do not need a GitHub or
+DotAIOS account.
 
 If you prefer to run the technical recovery path yourself, use Terminal,
 PowerShell, or another system shell. DotAIOS requires Node.js 20 or newer. The

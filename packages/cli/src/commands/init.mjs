@@ -117,7 +117,7 @@ export async function initCommand(args, lifecycle = {}) {
   }
 
   const planned = lifecycle.plan;
-  const answers = planned ? null : (options.yes ? defaultAnswers() : await promptAnswers());
+  const answers = planned ? null : await resolveAnswers(options);
   const config = planned?.config || createAiosConfig({
     aiTools: splitCsv(answers.ai_tools),
     vaultPath: options.vaultPath || null
@@ -177,8 +177,8 @@ export async function initCommand(args, lifecycle = {}) {
 }
 
 function parseOptions(args = []) {
-  assertUniqueOptions(args, ["--path", "--vault-path"]);
-  const options = { force: false, overwrite: false, path: null, vaultPath: null, yes: false };
+  assertUniqueOptions(args, ["--path", "--vault-path", "--answers"]);
+  const options = { force: false, overwrite: false, path: null, vaultPath: null, yes: false, answers: null };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -192,10 +192,20 @@ function parseOptions(args = []) {
       options.vaultPath = expandHome(readOptionValue(args, index, "--vault-path"));
       index += 1;
     }
+    if (arg === "--answers") {
+      options.answers = readOptionValue(args, index, "--answers");
+      index += 1;
+    }
     if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
       index += 1;
     }
+  }
+
+  if (options.answers && options.yes) {
+    throw new Error(
+      "--answers and --yes contradict each other: one supplies real context, the other writes placeholders. Pass only one."
+    );
   }
 
   return options;
@@ -208,30 +218,139 @@ function printInitHelp() {
 Options:
   --path <dir>        Create AIOS somewhere other than ~/aios
   --vault-path <dir>  Use an external vault for long-term knowledge
+  --answers <file>    Read the interview answers from a JSON file ("-" for stdin)
   --yes, -y           Use placeholder answers for non-interactive setup
   --force             Add missing files, preserving existing files
   --overwrite         Replace generated files in the target folder
+
+--answers is how an AI assistant installs this for someone who never opens a
+terminal: it asks the same questions in the conversation, where they are far
+easier to answer, and passes the person's own words through. Accepted keys,
+all optional, but at least one must carry content:
+
+  { "name": "...", "role": "...", "work": "...",
+    "priorities": "...", "ai_tools": ["claude-code", "codex"] }
 `);
 }
 
+// The interview answers arrive one of three ways: typed at a TTY, supplied as
+// JSON by whoever is driving the install, or waived with --yes. Only the first
+// two produce real context, and the JSON path exists because the people this is
+// built for are talking to an assistant, not standing at a shell prompt.
+async function resolveAnswers(options) {
+  if (options.answers) return readAnswersFrom(options.answers);
+  if (options.yes) return defaultAnswers();
+  return promptAnswers();
+}
+
+const ANSWER_KEYS = new Map([
+  ["name", "user_name"],
+  ["user_name", "user_name"],
+  ["role", "user_role"],
+  ["user_role", "user_role"],
+  ["work", "current_work"],
+  ["current_work", "current_work"],
+  ["priorities", "priorities"],
+  ["ai_tools", "ai_tools"]
+]);
+const MAX_ANSWERS_BYTES = 64 * 1024;
+
+async function readAnswersFrom(source) {
+  const raw = source === "-" ? await readAllStdin() : await readAnswersFile(source);
+  if (raw.length > MAX_ANSWERS_BYTES) {
+    throw new Error(`--answers is larger than ${MAX_ANSWERS_BYTES} bytes. It holds a few sentences, not a transcript.`);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`--answers is not valid JSON (${error.message}). Expected an object like {"name": "...", "role": "..."}.`);
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error('--answers must be a JSON object, for example {"name": "Ada", "role": "Founder"}.');
+  }
+
+  const answers = defaultAnswers();
+  const provided = [];
+  for (const [key, value] of Object.entries(parsed)) {
+    const field = ANSWER_KEYS.get(key);
+    if (!field) {
+      throw new Error(
+        `--answers has an unknown key "${key}". Accepted keys: ${[...ANSWER_KEYS.keys()].join(", ")}.\n` +
+        "A misspelled key would quietly install placeholder context, so this stops instead."
+      );
+    }
+    const text = field === "ai_tools" ? normalizeAiTools(value) : normalizeText(value, key);
+    if (!text) continue;
+    answers[field] = text;
+    if (field !== "ai_tools") provided.push(field);
+  }
+
+  // --yes already exists for people who genuinely want placeholders. Arriving
+  // here with nothing in it means the answers were meant to be real and got
+  // lost on the way, which is exactly the failure this flag was added to end.
+  if (provided.length === 0) {
+    throw new Error(
+      "--answers supplied no context. Fill in at least one of name, role, work, or priorities, " +
+      "or pass --yes if you deliberately want placeholder context."
+    );
+  }
+
+  return answers;
+}
+
+async function readAnswersFile(source) {
+  const resolved = path.resolve(expandHome(source));
+  try {
+    return await fs.readFile(resolved, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") throw new Error(`--answers file not found: ${resolved}`);
+    throw error;
+  }
+}
+
+// setup retries init (--force, transaction recovery), and stdin can only be
+// drained once. Without this cache the retry reads an empty stream and reports
+// invalid JSON for answers the caller wrote correctly.
+let stdinAnswers = null;
+
+async function readAllStdin() {
+  if (stdinAnswers !== null) return stdinAnswers;
+  const chunks = [];
+  for await (const chunk of input) chunks.push(chunk);
+  stdinAnswers = Buffer.concat(chunks).toString("utf8");
+  return stdinAnswers;
+}
+
+function normalizeText(value, key) {
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "string") throw new Error(`--answers key "${key}" must be a string.`);
+  return value.trim();
+}
+
+function normalizeAiTools(value) {
+  const list = Array.isArray(value) ? value : String(value ?? "").split(",");
+  return list.map((tool) => String(tool).trim()).filter(Boolean).join(",");
+}
 
 async function promptAnswers() {
   if (!process.stdin.isTTY) {
     console.error("");
     console.error("DotAIOS could not find an interactive terminal.");
     console.error("");
-    console.error("This usually means the command was pasted into a chat window");
-    console.error("(like ChatGPT or Gemini on the web) instead of the Terminal app.");
+    console.error("If an AI assistant is running this: ask the five questions in the");
+    console.error("conversation, save the answers as JSON, and re-run with");
+    console.error("--answers <file>. `dotaios init --help` lists the keys.");
+    console.error("Do not reach for --yes instead: it installs placeholder context.");
     console.error("");
-    console.error("How to fix:");
+    console.error("If you are doing this yourself, the command needs a Terminal window:");
     console.error("  Mac:     press cmd+space, type 'Terminal', press Enter.");
     console.error("  Windows: press the Windows key, type 'cmd', press Enter.");
     console.error("  Linux:   open your usual shell.");
     console.error("");
     console.error("Then paste the same command into that Terminal window.");
-    console.error("");
-    console.error("Running this in a script? Re-run with --yes to use defaults.");
-    throw new Error("interactive terminal required (or pass --yes for non-interactive)");
+    throw new Error("interactive terminal required (pass --answers <file> to supply them, or --yes for placeholders)");
   }
 
   const rl = readline.createInterface({ input, output });

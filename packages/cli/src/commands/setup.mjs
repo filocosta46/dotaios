@@ -49,6 +49,10 @@ reveal in sequence and prints what to do next.
 Options:
   --path <dir>        Create AIOS somewhere other than ~/aios
   --vault-path <dir>  Use an external vault for long-term knowledge
+  --answers <file>    Read the interview answers from a JSON file ("-" for stdin).
+                      For an assistant installing this on someone's behalf: ask
+                      the questions in the conversation and pass the answers here
+                      instead of --yes. Run "dotaios init --help" for the keys.
   --yes, -y           Use placeholder answers for non-interactive setup
   --dry-run           Preview files, trust boundaries, and removal without changes
   --verbose           Show paths and operator-level setup details
@@ -68,7 +72,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   }
 
   validateSetupOptions(args);
-  assertUniqueOptions(args, ["--path", "--vault-path"]);
+  assertUniqueOptions(args, ["--path", "--vault-path", "--answers"]);
 
   const verbose = args.includes("--verbose");
   const passthrough = args.filter((arg) => !["--dry-run", "--skip-reveal", "--install-lightpanda", "--verbose"].includes(arg));
@@ -508,7 +512,7 @@ function formatClientNames(names) {
 }
 
 function validateSetupOptions(args) {
-  const valued = new Set(["--path", "--home", "--vault-path", "--project"]);
+  const valued = new Set(["--path", "--home", "--vault-path", "--project", "--answers"]);
   const flags = new Set([
     "--all", "--dry-run", "--force", "--install-lightpanda", "--merge",
     "--no-skills-first", "--overwrite", "--prune-aliases", "--skip-reveal",
