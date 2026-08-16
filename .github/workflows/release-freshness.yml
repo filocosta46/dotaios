@@ -1,8 +1,11 @@
 name: Release freshness
 
-# Guards against the "stale-npm release" regression: the repo/site announcing a
-# version that `npx dotaios@latest` does not actually serve. Runs after a
-# release tag is pushed, on a daily schedule as a safety net, and on demand.
+# Guards the repo and npm against disagreeing in either direction: a version the
+# repo announces that `npx dotaios@latest` does not serve, AND a published
+# version that no pushed tag points at (which 404s every release-pinned doc
+# link). Runs after a release tag is pushed, on a daily schedule as a safety net,
+# and on demand. The schedule is the load-bearing trigger for the untagged case:
+# if the tag is never pushed, the tag trigger never fires.
 # Deliberately NOT on every PR — a pre-publish version bump is expected to be
 # ahead of npm and must not fail CI.
 
@@ -28,5 +31,5 @@ jobs:
         with:
           node-version: 20
 
-      - name: Verify npm latest is not behind the released tag
+      - name: Verify npm and the released tags agree
         run: node scripts/verify-npm-freshness.mjs

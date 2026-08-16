@@ -28,6 +28,7 @@ import {
   resolveLightpanda
 } from "../../../core/src/lightpanda.mjs";
 import { initCommand } from "./init.mjs";
+import { assertOneAnswerSource, parseAnswers, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
 import {
   activateCommand,
   BRIDGE_COLLISION_REMEDY,
@@ -49,6 +50,10 @@ reveal in sequence and prints what to do next.
 Options:
   --path <dir>        Create AIOS somewhere other than ~/aios
   --vault-path <dir>  Use an external vault for long-term knowledge
+  --answers <file>    Read the interview answers from a JSON file ("-" for stdin).
+                      For an assistant installing this on someone's behalf: ask
+                      the questions in the conversation and pass the answers here
+                      instead of --yes. Run "dotaios init --help" for the keys.
   --yes, -y           Use placeholder answers for non-interactive setup
   --dry-run           Preview files, trust boundaries, and removal without changes
   --verbose           Show paths and operator-level setup details
@@ -68,7 +73,7 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   }
 
   validateSetupOptions(args);
-  assertUniqueOptions(args, ["--path", "--vault-path"]);
+  assertUniqueOptions(args, ["--path", "--vault-path", "--answers"]);
 
   const verbose = args.includes("--verbose");
   const passthrough = args.filter((arg) => !["--dry-run", "--skip-reveal", "--install-lightpanda", "--verbose"].includes(arg));
@@ -76,6 +81,25 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   const installLightpandaRequested = args.includes("--install-lightpanda");
   const nonInteractive = args.includes("--yes") || args.includes("-y");
   const aiosPath = path.resolve(expandHome(extractPath(args) || defaultAiosPath()));
+
+  // INSTALL.md calls the preview the gate to inspect before running setup for
+  // real. Reading and validating the answers here rather than inside init is
+  // what makes that true of --answers too: a file the real run would reject
+  // now fails during the preview, where nothing has been created yet. Reading
+  // once also serves the retries below, since stdin only drains one time.
+  //
+  // The flag contradiction has to be checked here as well, for the same reason
+  // and not for a different one: init owns the rule, but --dry-run returns
+  // below without ever reaching init, so the preview used to accept the one
+  // combination the real run refuses. It is checked before the read because a
+  // command that is already contradictory has no reason to drain stdin.
+  const answersSource = extractOption(args, "--answers");
+  assertOneAnswerSource({ answers: answersSource, yes: nonInteractive });
+  const answersRaw = answersSource
+    ? (answersSource === "-" ? await readAllStdin() : await readAnswersFile(answersSource))
+    : null;
+  if (answersRaw !== null) parseAnswers(answersRaw, {});
+
   if (args.includes("--dry-run")) {
     await printSetupPreview(aiosPath, args, { verbose });
     return;
@@ -105,7 +129,8 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
     // init creates the ~/aios folder that holds the metrics store, so the
     // init phase markers can only be written once init has succeeded.
     setupTransactionActive = await runInitWithRecovery(passthrough, aiosPath, lifecycle, {
-      quiet: !verbose
+      quiet: !verbose,
+      answersRaw
     });
     await lifecycle.afterInit?.({ aiosPath, setupTransactionActive });
     if (setupTransactionActive) {
@@ -292,7 +317,20 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log("     Opening the AIOS folder itself may let the app read its router before your first prompt.");
   console.log('  3. Ask: "Use my memory. Read my context and tell me what I am working on."');
   console.log('  4. Choose "Only this project" only inside that registered checkout; "Private chat" works anywhere.');
-  console.log("  5. Update context any time: dotaios interview --review");
+  // `dotaios interview` throws without a TTY (interview.mjs), so on a piped run
+  // this line named the one command the caller who just succeeded cannot run.
+  // That caller is the assistant the whole --answers path exists for, and the
+  // install it just finished is the one INSTALL.md promises a person can get
+  // without opening a terminal — telling them to open one on the next line is
+  // the promise being withdrawn a step later. The files are plain Markdown and
+  // editing them is a first-class route, not a workaround, so say that instead
+  // of naming a command that will fail.
+  if (process.stdin.isTTY) {
+    console.log("  5. Update context any time: dotaios interview --review");
+  } else {
+    console.log(`  5. Update context any time by editing the Markdown in ${displayHomePath(path.join(aiosPath, "context"), os.homedir())},`);
+    console.log("     or run `dotaios interview --review` from a terminal for a guided pass.");
+  }
 
   // Reveal last so optional prompts retain terminal focus.
   // Step 3: reveal (best-effort, never blocks)
@@ -508,7 +546,7 @@ function formatClientNames(names) {
 }
 
 function validateSetupOptions(args) {
-  const valued = new Set(["--path", "--home", "--vault-path", "--project"]);
+  const valued = new Set(["--path", "--home", "--vault-path", "--project", "--answers"]);
   const flags = new Set([
     "--all", "--dry-run", "--force", "--install-lightpanda", "--merge",
     "--no-skills-first", "--overwrite", "--prune-aliases", "--skip-reveal",
@@ -569,7 +607,7 @@ async function lstatIfPresent(target) {
 // recorded the complete expected tree before createBaseTree, and every path
 // left behind still matches that record. Only that narrow case gets an internal
 // --force retry. The metrics-only recognizer below remains for 1.27.1 upgrades.
-async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quiet = false } = {}) {
+async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quiet = false, answersRaw = null } = {}) {
   if (await hasSetupTransaction(aiosPath)) {
     if (passthrough.includes("--force") || passthrough.includes("--overwrite")) {
       throw new Error(
@@ -581,6 +619,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quie
   try {
     await initCommand(passthrough, {
       quiet,
+      answersRaw,
       beforeScaffold: async (plan) => {
         transactionStarted = await beginSetupTransaction(aiosPath, passthrough, plan, lifecycle);
       },
@@ -606,7 +645,7 @@ async function runInitWithRecovery(passthrough, aiosPath, lifecycle = {}, { quie
       return { markerStats: transaction.markerStats, transaction: transaction.transaction };
     }
     if (!(await isFailedSetupResidue(aiosPath))) throw error;
-    await initCommand([...passthrough, "--force"], { quiet });
+    await initCommand([...passthrough, "--force"], { quiet, answersRaw });
     console.log("Recovered an unfinished folder from an earlier run and completed it in place.");
     return false;
   }

@@ -29,13 +29,15 @@ The free core is available now.
 Open Claude Code, Codex, Cursor, or another local assistant that can run
 commands, and paste:
 
-> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/v2.0.3/INSTALL.md — the “If an AI assistant is helping you” section. Preview every change, ask me only about choices I can evaluate, verify it, and show me my one AIOS folder.
+> Please help me install DotAIOS by following https://github.com/filocosta46/dotaios/blob/v2.0.4/INSTALL.md — the “If an AI assistant is helping you” section. Preview every change, ask me only about choices I can evaluate, verify it, and show me my one AIOS folder.
 
 The assistant checks whether Node.js 20 or newer is available. If it is missing,
 the assistant explains the documented installation for that computer and asks
 before using a supported host installation path. It then previews the exact
-folder and app changes, runs setup, verifies the result, and translates it into
-plain language. You do not need a GitHub or DotAIOS account.
+folder and app changes, asks you the five questions that become your starting
+context, runs setup, verifies the result, and translates it into plain
+language. The questions reach you in the conversation rather than at a shell
+prompt. You do not need a GitHub or DotAIOS account.
 
 If you prefer to run the technical recovery path yourself, use Terminal,
 PowerShell, or another system shell. DotAIOS requires Node.js 20 or newer. The
@@ -45,8 +47,8 @@ the second runs the same pinned release:
 npm may download and cache the named package.
 
 ```sh
-npx dotaios@2.0.3 setup --dry-run
-npx dotaios@2.0.3 setup
+npx dotaios@2.0.4 setup --dry-run
+npx dotaios@2.0.4 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
@@ -54,7 +56,7 @@ Setup creates `~/aios`, then connects supported AI apps detected on the machine.
 Afterward, either you or the assistant can verify the local installation with:
 
 ```sh
-npx dotaios@2.0.3 doctor
+npx dotaios@2.0.4 doctor
 ```
 
 ## Choose what your AI can remember
@@ -101,14 +103,14 @@ inspectable.
 
 ### Verify before running
 
-The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `2.0.3` maps to Git tag [`v2.0.3`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.3).
+The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `2.0.4` maps to Git tag [`v2.0.4`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.4).
 
 These commands inspect registry provenance and packaged contents without running DotAIOS setup:
 
 ```sh
-npm view dotaios@2.0.3 version dist.integrity dist.tarball gitHead _npmUser.name
-npm view dotaios@2.0.3 scripts
-npm pack dotaios@2.0.3 --dry-run
+npm view dotaios@2.0.4 version dist.integrity dist.tarball gitHead _npmUser.name
+npm view dotaios@2.0.4 scripts
+npm pack dotaios@2.0.4 --dry-run
 ```
 
 Those three commands show you the registry publisher (`_npmUser.name`), the integrity record, and every file in the package before anything runs. The package defines no `preinstall`, `install`, or `postinstall` script, so nothing executes until you invoke the CLI yourself. The commands above omit `npx -y` on purpose, so npm still asks you to confirm the pinned package — approve it once what you see matches what you expect. Interactive setup then offers private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every one of them defaults to No. [INSTALL.md](INSTALL.md) has the full sequence and [the security model](docs/security.md) has the package and permission boundaries.

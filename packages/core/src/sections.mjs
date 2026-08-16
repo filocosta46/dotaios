@@ -2,15 +2,23 @@ function escapeRegex(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// A bullet value is whatever follows the label on that one line. `\s` matches
+// newlines, so it ran past an empty bullet and swallowed the lines after it;
+// keep the separator horizontal-only. `.*` (not `.+`) so an empty bullet still
+// matches and stays fillable.
+const BULLET_SPACE = "[^\\S\\r\\n]*";
+
 export function readBullet(content, label) {
-  const pattern = new RegExp(`^- ${escapeRegex(label)}:\\s*(.+)$`, "im");
+  const pattern = new RegExp(`^- ${escapeRegex(label)}:${BULLET_SPACE}(.*)$`, "im");
   return content.match(pattern)?.[1]?.trim() || "";
 }
 
 export function replaceBullet(content, label, newValue) {
-  const pattern = new RegExp(`^(- ${escapeRegex(label)}:\\s*).+$`, "im");
+  const pattern = new RegExp(`^(- ${escapeRegex(label)}:)${BULLET_SPACE}.*$`, "im");
   if (!pattern.test(content)) return null;
-  return content.replace(pattern, `$1${newValue}`);
+  // A replacer function, so `$&` or `$1` in someone's own answer stays literal
+  // instead of being read back as a capture reference.
+  return content.replace(pattern, (_match, prefix) => `${prefix} ${newValue}`);
 }
 
 export function readSection(content, heading) {

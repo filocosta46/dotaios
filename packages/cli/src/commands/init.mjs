@@ -17,6 +17,7 @@ import {
   isPathWithinLexically,
   resolveVaultPath
 } from "../../../core/src/paths.mjs";
+import { assertOneAnswerSource, normalizeAnswerText, parseAnswers, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
 import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -117,7 +118,7 @@ export async function initCommand(args, lifecycle = {}) {
   }
 
   const planned = lifecycle.plan;
-  const answers = planned ? null : (options.yes ? defaultAnswers() : await promptAnswers());
+  const answers = planned ? null : await resolveAnswers(options, lifecycle);
   const config = planned?.config || createAiosConfig({
     aiTools: splitCsv(answers.ai_tools),
     vaultPath: options.vaultPath || null
@@ -177,8 +178,8 @@ export async function initCommand(args, lifecycle = {}) {
 }
 
 function parseOptions(args = []) {
-  assertUniqueOptions(args, ["--path", "--vault-path"]);
-  const options = { force: false, overwrite: false, path: null, vaultPath: null, yes: false };
+  assertUniqueOptions(args, ["--path", "--vault-path", "--answers"]);
+  const options = { force: false, overwrite: false, path: null, vaultPath: null, yes: false, answers: null };
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -192,11 +193,17 @@ function parseOptions(args = []) {
       options.vaultPath = expandHome(readOptionValue(args, index, "--vault-path"));
       index += 1;
     }
+    if (arg === "--answers") {
+      options.answers = readOptionValue(args, index, "--answers");
+      index += 1;
+    }
     if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
       index += 1;
     }
   }
+
+  assertOneAnswerSource(options);
 
   return options;
 }
@@ -208,52 +215,122 @@ function printInitHelp() {
 Options:
   --path <dir>        Create AIOS somewhere other than ~/aios
   --vault-path <dir>  Use an external vault for long-term knowledge
+  --answers <file>    Read the interview answers from a JSON file ("-" for stdin)
   --yes, -y           Use placeholder answers for non-interactive setup
   --force             Add missing files, preserving existing files
   --overwrite         Replace generated files in the target folder
+
+--answers is how an AI assistant installs this for someone who never opens a
+terminal: it asks the same questions in the conversation, where they are far
+easier to answer, and passes the person's own words through. Accepted keys,
+all optional, but at least one must carry content:
+
+  { "name": "...", "role": "...", "work": "...",
+    "priorities": "...", "ai_tools": ["claude-code", "codex"] }
 `);
 }
 
+// The interview answers arrive one of three ways: typed at a TTY, supplied as
+// JSON by whoever is driving the install, or waived with --yes. Only the first
+// two produce real context, and the JSON path exists because the people this is
+// built for are talking to an assistant, not standing at a shell prompt.
+//
+// setup retries init (--force, transaction recovery) and stdin only drains
+// once, so setup reads it and hands the text down through `lifecycle.answersRaw`
+// rather than this module holding it for the life of the process.
+async function resolveAnswers(options, lifecycle) {
+  if (options.answers) {
+    const raw = lifecycle.answersRaw
+      ?? (options.answers === "-" ? await readAllStdin() : await readAnswersFile(options.answers));
+    return parseAnswers(raw, defaultAnswers());
+  }
+  if (options.yes) return defaultAnswers();
+  return promptAnswers();
+}
 
 async function promptAnswers() {
   if (!process.stdin.isTTY) {
     console.error("");
     console.error("DotAIOS could not find an interactive terminal.");
     console.error("");
-    console.error("This usually means the command was pasted into a chat window");
-    console.error("(like ChatGPT or Gemini on the web) instead of the Terminal app.");
+    console.error("If an AI assistant is running this: ask the five questions in the");
+    console.error("conversation, save the answers as JSON, and re-run with");
+    console.error("--answers <file>. `dotaios init --help` lists the keys.");
+    console.error("Do not reach for --yes instead: it installs placeholder context.");
     console.error("");
-    console.error("How to fix:");
+    console.error("If you are doing this yourself, the command needs a Terminal window:");
     console.error("  Mac:     press cmd+space, type 'Terminal', press Enter.");
     console.error("  Windows: press the Windows key, type 'cmd', press Enter.");
     console.error("  Linux:   open your usual shell.");
     console.error("");
     console.error("Then paste the same command into that Terminal window.");
-    console.error("");
-    console.error("Running this in a script? Re-run with --yes to use defaults.");
-    throw new Error("interactive terminal required (or pass --yes for non-interactive)");
+    throw new Error("interactive terminal required (pass --answers <file> to supply them, or --yes for placeholders)");
   }
 
   const rl = readline.createInterface({ input, output });
   try {
     console.log("DotAIOS creates local memory files for the AI tools you already use.\n");
     return {
-      user_name: await ask(rl, "Name", "<!-- Your Name -->"),
-      user_role: await ask(rl, "What do you do?", "<!-- Your Role -->"),
-      current_work: await ask(rl, "What are you working on right now?", "<!-- Add the active work threads agents should keep in mind. -->"),
-      priorities: await ask(rl, "What matters most this week?", "<!-- Add the current bets and near-term priorities. -->"),
-      ai_tools: await ask(rl, "AI tools you use", "claude-code,codex,cursor")
+      user_name: await ask(rl, "Name", "<!-- Your Name -->", "user_name"),
+      user_role: await ask(rl, "What do you do?", "<!-- Your Role -->", "user_role"),
+      current_work: await ask(rl, "What are you working on right now?", "<!-- Add the active work threads agents should keep in mind. -->", "current_work"),
+      priorities: await ask(rl, "What matters most this week?", "<!-- Add the current bets and near-term priorities. -->", "priorities"),
+      ai_tools: await ask(rl, "AI tools you use", "claude-code,codex,cursor", "ai_tools")
     };
   } finally {
     rl.close();
   }
 }
 
-async function ask(rl, label, fallback) {
-  // If fallback is an HTML comment, don't show it as the default in the prompt
+// The prompt was the one door that applied none of the answer rules: this was
+// `answer.trim() || fallback`, so an ellipsis, this repo's own
+// `<!-- Your Name -->` placeholder, a zero-width space, a bidi override or a
+// bare carriage return went straight into context/identity.md and the install
+// reported success — a folder byte-identical to a --yes placeholder one, which
+// is the outcome --answers exists to prevent.
+//
+// A failure here means something different than it does for --answers, though.
+// --answers has nobody left to ask, so it stops the run and leaves nothing
+// behind. The person is standing at this prompt, so the answer is to say what
+// was wrong and ask again. Enter still accepts the field as unanswered, which
+// is the one way to reach the placeholder deliberately.
+const MAX_REASKS = 3;
+
+// The rules are shared with --answers, so their messages end by telling the
+// caller to omit the key — correct advice for a JSON file, meaningless to
+// someone standing at a prompt who has no keys to omit. Keep the sentence that
+// says what is wrong, drop the one that names a remedy this reader does not
+// have; the next line offers the remedy they do have.
+function promptReason(message) {
+  return message
+    .split("\n")
+    .flatMap((line) => line.split(/(?<=\.)\s+(?=[A-Z])/))
+    .filter((sentence) => sentence.trim() && !/omit the key/i.test(sentence))
+    .map((sentence) => `  ${sentence.trim()}`)
+    .join("\n");
+}
+
+async function ask(rl, label, fallback, field) {
   const displayFallback = fallback.startsWith("<!--") ? "" : ` [${fallback}]`;
-  const answer = await rl.question(`${label}${displayFallback}: `);
-  return answer.trim() || fallback;
+
+  for (let attempt = 0; ; attempt += 1) {
+    const answer = (await rl.question(`${label}${displayFallback}: `)).trim();
+    if (!answer) return fallback;
+
+    try {
+      return field === "ai_tools" ? answer : normalizeAnswerText(answer, "What you typed", field);
+    } catch (error) {
+      // Three tries, then take them at their word rather than trapping someone
+      // in a loop they cannot leave — a stubborn answer is still better than an
+      // abandoned install, and the field is theirs.
+      if (attempt >= MAX_REASKS - 1) {
+        console.log("  Keeping it as typed.\n");
+        return answer;
+      }
+      console.log(promptReason(error.message));
+      console.log("  Press Enter to leave this blank, or type it again.\n");
+    }
+  }
 }
 
 function defaultAnswers() {

@@ -26,6 +26,52 @@ test("replaceBullet returns null when bullet missing", () => {
   assert.equal(replaceBullet("- Name: A\n", "Role", "B"), null);
 });
 
+test("readBullet returns empty string for an empty bullet", () => {
+  const content = "## Basics\n\n- Name: \n- Role: \n\n## Background\n";
+  assert.equal(readBullet(content, "Name"), "");
+  assert.equal(readBullet(content, "Role"), "");
+});
+
+test("readBullet returns empty string for a whitespace-only bullet", () => {
+  assert.equal(readBullet("- Name:   \t\n- Role: builder\n", "Name"), "");
+});
+
+test("readBullet stops at end of line when bullet is followed by a heading", () => {
+  assert.equal(readBullet("- Role: \n## Background\n", "Role"), "");
+  assert.equal(readBullet("- Role: \n\n## Background\n", "Role"), "");
+});
+
+test("readBullet reads a bullet at end of file without a trailing newline", () => {
+  assert.equal(readBullet("## Basics\n\n- Name: Filippo", "Name"), "Filippo");
+  assert.equal(readBullet("## Basics\n\n- Name:", "Name"), "");
+});
+
+test("replaceBullet fills an empty bullet without touching the next line", () => {
+  const before = "## Basics\n\n- Name: \n- Role: \n\n## Background\n\nkeep\n";
+  const after = replaceBullet(before, "Role", "consultant");
+  assert.equal(after, "## Basics\n\n- Name: \n- Role: consultant\n\n## Background\n\nkeep\n");
+});
+
+test("replaceBullet fills a whitespace-only bullet with a single separator space", () => {
+  assert.equal(replaceBullet("- Name:   \t\n", "Name", "Filippo"), "- Name: Filippo\n");
+  assert.equal(replaceBullet("- Name:\n", "Name", "Filippo"), "- Name: Filippo\n");
+});
+
+test("replaceBullet preserves a heading that immediately follows an empty bullet", () => {
+  assert.equal(replaceBullet("- Role: \n## Background\n", "Role", "builder"), "- Role: builder\n## Background\n");
+  assert.equal(replaceBullet("- Role: \n\n## Background\n", "Role", "builder"), "- Role: builder\n\n## Background\n");
+});
+
+test("replaceBullet fills a bullet at end of file without a trailing newline", () => {
+  assert.equal(replaceBullet("## Basics\n\n- Name:", "Name", "Filippo"), "## Basics\n\n- Name: Filippo");
+});
+
+test("replaceBullet leaves the rest of the document untouched for a non-empty bullet", () => {
+  const before = "# Identity\n\n## Basics\n\n- Name: A\n- Role: B\n\n## Background\n\nsome background\n";
+  const after = replaceBullet(before, "Role", "C");
+  assert.equal(after, "# Identity\n\n## Basics\n\n- Name: A\n- Role: C\n\n## Background\n\nsome background\n");
+});
+
 test("readSection returns body between heading and next ##", () => {
   const content = "# Title\n\n## A\n\nfoo\nbar\n\n## B\n\nbaz\n";
   assert.equal(readSection(content, "A"), "foo\nbar");
@@ -51,4 +97,11 @@ test("replaceSection handles end-of-file heading", () => {
 
 test("replaceSection returns null when heading missing", () => {
   assert.equal(replaceSection("## A\nfoo\n", "B", "x"), null);
+});
+
+test("replaceBullet writes a value containing $ patterns literally", () => {
+  const before = "- Name: Filippo\n- Role: old\n";
+  assert.equal(replaceBullet(before, "Role", "R$&D lead"), "- Name: Filippo\n- Role: R$&D lead\n");
+  assert.equal(replaceBullet(before, "Role", "co$1st"), "- Name: Filippo\n- Role: co$1st\n");
+  assert.equal(replaceBullet(before, "Role", "a $` b $' c"), "- Name: Filippo\n- Role: a $` b $' c\n");
 });

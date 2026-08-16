@@ -39,7 +39,7 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   fs.mkdirSync(homePath);
 
   const version = run(process.execPath, [cli, "--version"], { cwd: packageRoot });
-  assert.equal(version.stdout.trim(), "2.0.3", "the packed CLI must report the release version");
+  assert.equal(version.stdout.trim(), "2.0.4", "the packed CLI must report the release version");
 
   const help = run(process.execPath, [cli, "--help"], { cwd: packageRoot });
   assert.match(help.stdout, /dotaios/i, "the packed CLI entrypoint must load from extracted bytes");

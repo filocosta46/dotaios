@@ -69,6 +69,7 @@ export async function doctorCommand(args, { detection } = {}) {
   checks.push(await checkAiosConfig(target));
   checks.push(await checkSecretBoundary(target));
   checks.push(checkTrackedGitlinks(target));
+  checks.push(checkGitHygiene(target));
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
@@ -211,6 +212,82 @@ export function checkTrackedGitlinks(target, { runGit = readGitIndex } = {}) {
   };
 }
 
+// Sync only ever runs from `main`, and it now refuses outright anywhere else —
+// but nothing told the person they were somewhere else, so a folder could sit
+// on a stray branch for weeks with sync silently skipping every tick. An older
+// release also cut `local-<timestamp>` branches before hard-resetting to
+// origin/main; those are the only surviving copy of whatever it reset, so they
+// are reported as recoverable work rather than as clutter to delete.
+//
+// The ignore defaults matter for the same reason. templates/gitignore.template
+// has covered the three journals since it shipped, but a folder scaffolded
+// before that keeps them tracked, so every archive pass reads as drift and the
+// person cannot tell real changes from routine ones.
+export function checkGitHygiene(target, { runGit = readGitState } = {}) {
+  const name = "AIOS folder is on main with a clean tree";
+  const state = runGit(target);
+  if (state.kind === "not-a-repo") {
+    return { name, status: "ok", detail: "Folder is not a Git repository; nothing to check." };
+  }
+  if (state.kind === "unavailable") {
+    return {
+      name,
+      status: "warn",
+      detail: `Could not read the Git state (${state.reason}); this check did not run.`,
+      fix: "Ensure `git` is installed and the folder is readable, then re-run `dotaios doctor`."
+    };
+  }
+
+  const problems = [];
+  const fixes = [];
+  if (state.branch && state.branch !== "main") {
+    problems.push(`the folder is on branch \`${state.branch}\`, and sync only runs from \`main\``);
+    fixes.push(`Return to main when the branch has served its purpose: \`git -C ${target} checkout main\`.`);
+  }
+  if (state.dirty > 0) {
+    problems.push(`${state.dirty} uncommitted change(s)`);
+  }
+  if (state.localBranches.length > 0) {
+    problems.push(
+      `${state.localBranches.length} \`local-*\` branch(es) from an older sync that reset this folder — they hold the only copy of what it reset`
+    );
+    fixes.push(`Review them before deleting anything: \`git -C ${target} log --oneline ${state.localBranches[0]}\`.`);
+  }
+
+  if (problems.length === 0) return { name, status: "ok" };
+  return {
+    name,
+    status: "warn",
+    detail: `${problems.join("; ")}.`,
+    fix: fixes.length > 0 ? fixes.join(" ") : `Review with \`git -C ${target} status\`.`
+  };
+}
+
+function readGitState(target) {
+  const run = (args) => spawnSync("git", ["-C", target, ...args], { encoding: "utf8", timeout: 15_000, maxBuffer: 8 * 1024 * 1024 });
+
+  const branch = run(["rev-parse", "--abbrev-ref", "HEAD"]);
+  if (branch.error) return { kind: "unavailable", reason: branch.error.code || "git could not be run" };
+  if (branch.status !== 0) {
+    const stderr = String(branch.stderr || "");
+    if (/not a git repository/i.test(stderr)) return { kind: "not-a-repo" };
+    return { kind: "unavailable", reason: stderr.trim().split("\n")[0] || `git exited ${branch.status}` };
+  }
+
+  const status = run(["status", "--porcelain"]);
+  const branches = run(["branch", "--list", "local-*", "--format=%(refname:short)"]);
+  if (status.status !== 0 || branches.status !== 0) {
+    return { kind: "unavailable", reason: "git status or branch listing failed" };
+  }
+
+  return {
+    kind: "state",
+    branch: branch.stdout.trim(),
+    dirty: status.stdout.split("\n").filter((line) => line.trim()).length,
+    localBranches: branches.stdout.split("\n").map((line) => line.trim()).filter(Boolean)
+  };
+}
+
 function readGitIndex(target) {
   // -z turns off git's octal quoting of non-ASCII paths, so a reported path can
   // be pasted straight into the suggested `git rm --cached` fix. The buffer is
@@ -247,14 +324,19 @@ function checkNodeVersion() {
 }
 
 function checkTerminal() {
+  // Both branches used to return the same name, so the warning printed as
+  // "[warn] Running in a real Terminal" — which reads as the opposite of what
+  // it means. The fix line mattered more: INSTALL.md tells an assistant to
+  // relay whatever fix doctor names, so an assistant-run install ended by
+  // telling the person to open a terminal it had just proved they do not need.
   if (process.stdin.isTTY) {
     return { name: "Running in a real Terminal", status: "ok" };
   }
   return {
-    name: "Running in a real Terminal",
+    name: "Not running in a terminal",
     status: "warn",
-    detail: "Some commands need an interactive terminal (init, interview).",
-    fix: "Open the Terminal app on Mac (cmd+space → Terminal) or 'cmd' on Windows, then re-run."
+    detail: "Setup and this check work here; `dotaios interview` still needs a terminal.",
+    fix: "Nothing to do if an assistant is running this. To use `dotaios interview`, run it from a Terminal window yourself."
   };
 }
 
