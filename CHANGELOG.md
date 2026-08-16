@@ -4,6 +4,12 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.6] - 2026-08-16
+
+Thanks to Roberto Tomada, who found and fixed the Node bootstrap route on a new
+Mac (#87), and reported the Antigravity skills path (#88) — the fix that shipped
+here in #89 is his finding.
+
 ### Added
 - OpenCode now gets a context bridge at `~/.config/opencode/AGENTS.md`, the
   global instructions file OpenCode documents. It was reached only through
@@ -15,6 +21,14 @@ All notable changes to DotAIOS will be documented in this file.
   removal contract does not list is one nobody can fully undo.
 
 ### Fixed
+- The Node.js route the assistant was given could not work on a new Mac. It
+  named `brew install node`, but Homebrew is not on a fresh machine, the guide
+  never said how to get it, and where brew does exist that formula installs the
+  current release — several majors ahead of anything tested. `nvm` was no better:
+  it is a shell function rather than a program, so a Node it installs is gone by
+  the assistant's next command. The guide now names the nodejs.org LTS installer,
+  which lands on the default path, and CI tests that release line instead of
+  assuming it.
 - The install command in INSTALL.md could not run as written. It sits inside a
   numbered list, so its heredoc terminator carried three spaces, and a heredoc
   only closes on an unindented delimiter — setup received the terminator and

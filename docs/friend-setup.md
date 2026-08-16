@@ -21,7 +21,7 @@ You do not need a GitHub account, npm account, or paid plan.
 Open a local agent that can run commands and paste:
 
 > Help me install DotAIOS by following the “If an AI assistant is helping you”
-> section of https://github.com/filocosta46/dotaios/blob/v2.0.5/INSTALL.md. Preview
+> section of https://github.com/filocosta46/dotaios/blob/v2.0.6/INSTALL.md. Preview
 > every change first, ask me only about choices I can evaluate, then verify the
 > setup and show me my one AIOS folder.
 
@@ -29,7 +29,7 @@ The agent should then run the pinned preview below. If you are recovering
 manually, run it yourself:
 
 ```sh
-npx dotaios@2.0.5 setup --dry-run
+npx dotaios@2.0.6 setup --dry-run
 ```
 
 npm may ask to download the pinned package. The DotAIOS preview itself does not
@@ -46,7 +46,7 @@ section, one at a time in the conversation, then pipe the answers straight
 into setup so no answers file is left behind:
 
 ```sh
-npx dotaios@2.0.5 setup --answers - <<'JSON'
+npx dotaios@2.0.6 setup --answers - <<'JSON'
 {
   "name": "...",
   "role": "...",
@@ -61,7 +61,7 @@ If you are recovering manually, run it yourself and answer the short
 questions at the terminal prompt:
 
 ```sh
-npx dotaios@2.0.5 setup
+npx dotaios@2.0.6 setup
 ```
 
 Existing unmanaged files are preserved. Private sync, daily scheduling,
@@ -71,8 +71,8 @@ default to No.
 ## 3. Verify
 
 ```sh
-npx dotaios@2.0.5 doctor
-npx dotaios@2.0.5 skills doctor
+npx dotaios@2.0.6 doctor
+npx dotaios@2.0.6 skills doctor
 ```
 
 Then start a connected local agent from your usual folder or an attached
@@ -99,7 +99,7 @@ managed configuration.
 ## If setup stops
 
 - Existing `~/aios`: do not delete it. Run
-  `npx dotaios@2.0.5 doctor` and inspect the folder.
+  `npx dotaios@2.0.6 doctor` and inspect the folder.
 - Existing AI-tool instructions: DotAIOS preserves them. Read the reported
   collision before deciding whether to change anything.
 - `npx: command not found`: install the Node.js LTS release from
