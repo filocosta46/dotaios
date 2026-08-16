@@ -38,8 +38,15 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   const homePath = path.join(root, "home");
   fs.mkdirSync(homePath);
 
+  // Derived, not written down. As a literal this asserted 2.0.5 and failed the
+  // first release that moved past it -- a version bump should be caught by the
+  // public onboarding contract, which pins the docs deliberately, not by a
+  // second copy of the number nobody remembers to update.
+  const expectedVersion = JSON.parse(
+    fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
+  ).version;
   const version = run(process.execPath, [cli, "--version"], { cwd: packageRoot });
-  assert.equal(version.stdout.trim(), "2.0.5", "the packed CLI must report the release version");
+  assert.equal(version.stdout.trim(), expectedVersion, "the packed CLI must report the release version");
 
   const help = run(process.execPath, [cli, "--help"], { cwd: packageRoot });
   assert.match(help.stdout, /dotaios/i, "the packed CLI entrypoint must load from extracted bytes");
