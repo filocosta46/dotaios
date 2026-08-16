@@ -213,6 +213,37 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
     relativeFiles.map((relativePath) => [relativePath, documents[relativePath].replace(/\s+/g, " ")])
   );
   assert.match(unwrapped["INSTALL.md"], /plaintext in `~\/\.dotaios\/sync\.json`/, "INSTALL must disclose that the sync token is stored in plaintext, and where");
+
+  // The Node bootstrap has now regressed twice without a test noticing: #76
+  // removed the ask-before-Node gate and #81 restored it, and the brew/nvm
+  // route outlived both. Assert the shape of the bootstrap against unwrapped
+  // prose, so a reflow cannot drop it and an unrelated docs edit cannot revert
+  // it while CI stays green.
+  assert.doesNotMatch(
+    unwrapped["INSTALL.md"],
+    /normal route: `brew install node`/i,
+    "INSTALL must not send macOS to the unpinned brew formula: it tracks the current release, which CI does not cover"
+  );
+  assert.match(
+    unwrapped["INSTALL.md"],
+    /nodejs\.org/i,
+    "INSTALL must name the official installer, the only route that works on a Mac with no package manager"
+  );
+  assert.match(
+    unwrapped["INSTALL.md"],
+    /`nvm`/,
+    "INSTALL must rule out nvm: it is a shell function, so its Node is absent from the assistant's next command"
+  );
+  assert.match(
+    unwrapped["INSTALL.md"],
+    /confirm it prints 20 or newer/i,
+    "INSTALL must re-check the version after installing, since engines is not enforced at runtime"
+  );
+  assert.match(
+    unwrapped["README.md"],
+    /installs it for you where it can/i,
+    "README must describe the same Node bootstrap INSTALL performs, not an older consent gate"
+  );
   assert.match(unwrapped["INSTALL.md"], /does not use the macOS Keychain or another operating-system credential store/i, "INSTALL must not imply an OS credential store it does not use");
   assert.doesNotMatch(corpus.replace(/\s+/g, " "), /[Cc]redentials stay in the machine credential store/, "no public page may claim an OS credential store");
   assert.match(documents["INSTALL.md"], new RegExp(`${pkg.version.replaceAll(".", "\\.")} removal contract`, "i"), "INSTALL must scope removal instructions to the installed release");
