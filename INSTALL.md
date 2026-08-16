@@ -180,8 +180,10 @@ collisions. It does not create `~/aios` or change client configuration or sync.
 When invoked through `npx`, npm may download and cache the named package.
 
 Treat the preview as a gate: inspect any `[would preserve collision]` path
-before continuing, and do not run setup after `[would stop]`. Other entries
-describe changes or safe skips that setup would make.
+before continuing, and do not run setup after `[would stop]` — unless its own
+note tells you to re-run setup, which is the designed recovery for an
+unfinished setup transaction. Other entries describe changes or safe skips
+that setup would make.
 
 ## Run setup
 

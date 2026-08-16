@@ -7,7 +7,7 @@ recovery path.
 
 ## You need
 
-- macOS or Linux;
+- macOS, Linux, or Windows;
 - at least one local AI tool, such as Claude Code or Codex.
 
 DotAIOS needs Node.js 20 or newer, but you do not need to install or understand
@@ -41,13 +41,32 @@ Want to inspect the package first? Follow the provenance checks in
 
 ## 2. Approve the preview and set up
 
+The agent should ask the same five questions from INSTALL.md's assistant
+section, one at a time in the conversation, then pipe the answers straight
+into setup so no answers file is left behind:
+
+```sh
+npx dotaios@2.0.5 setup --answers - <<'JSON'
+{
+  "name": "...",
+  "role": "...",
+  "work": "...",
+  "priorities": "...",
+  "ai_tools": ["claude-code", "codex", "cursor"]
+}
+JSON
+```
+
+If you are recovering manually, run it yourself and answer the short
+questions at the terminal prompt:
+
 ```sh
 npx dotaios@2.0.5 setup
 ```
 
-Answer the short questions. Existing unmanaged files are preserved. Private
-sync, daily scheduling, conversation saving, history backfill, and the optional
-browser helper all default to No.
+Existing unmanaged files are preserved. Private sync, daily scheduling,
+conversation saving, history backfill, and the optional browser helper all
+default to No.
 
 ## 3. Verify
 

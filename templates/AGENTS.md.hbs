@@ -98,8 +98,10 @@ variable to the agent prompt.
 - Treat `context/` as standing context, `memory/` as recent evidence, and
   `vault/` as on-demand knowledge.
 - Only when the user explicitly asks to install a skill or plugin, follow
-  `docs/security.md#plugins` and `docs/plugin-development.md`, run `--dry-run`
-  first, and review permissions. This takes precedence over ordinary URL ingest.
+  https://github.com/filocosta46/dotaios/blob/v2.0.5/docs/security.md#plugins
+  and https://github.com/filocosta46/dotaios/blob/v2.0.5/docs/plugin-development.md,
+  run `--dry-run` first, and review permissions. This takes precedence over
+  ordinary URL ingest.
 - When the user shares a URL, run `dotaios ingest <url>` to render, read, and
   save it.
 - Never expose secrets. Ask before writing durable identity, CRM, or wiki
