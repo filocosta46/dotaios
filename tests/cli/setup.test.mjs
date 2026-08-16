@@ -212,7 +212,11 @@ test("setup --dry-run preserves a bridge with duplicate managed markers", () => 
   }
 });
 
-test("setup --dry-run reports that a non-empty target would stop", () => {
+// The folder here holds someone else's file, not a DotAIOS install. That is the
+// case this protection is for, and it is unchanged. A healthy DotAIOS folder
+// now previews as `[would keep]` instead — see setup_second_machine.test.mjs,
+// because reporting both the same way halted the second-machine install.
+test("setup --dry-run reports that a non-DotAIOS non-empty target would stop", () => {
   const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-blocked-"));
   const aiosPath = path.join(tmp, "aios");
   fsSync.mkdirSync(aiosPath, { recursive: true });
@@ -231,7 +235,7 @@ test("setup --dry-run reports that a non-empty target would stop", () => {
 
   try {
     assert.equal(result.status, 1);
-    assert.match(result.stdout, /\[would stop\].*already exists and is not empty/);
+    assert.match(result.stdout, /\[would stop\].*already exists and is not a DotAIOS folder/);
     assert.doesNotMatch(result.stdout, /\[would create\].*aios/);
     assert.equal(fsSync.readFileSync(path.join(aiosPath, "keep.txt"), "utf8"), "keep\n");
   } finally {
