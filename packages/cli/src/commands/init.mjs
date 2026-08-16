@@ -17,7 +17,7 @@ import {
   isPathWithinLexically,
   resolveVaultPath
 } from "../../../core/src/paths.mjs";
-import { assertOneAnswerSource, parseAnswers, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
+import { assertOneAnswerSource, normalizeAnswerText, parseAnswers, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
 import { assertUniqueOptions, hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
@@ -271,22 +271,66 @@ async function promptAnswers() {
   try {
     console.log("DotAIOS creates local memory files for the AI tools you already use.\n");
     return {
-      user_name: await ask(rl, "Name", "<!-- Your Name -->"),
-      user_role: await ask(rl, "What do you do?", "<!-- Your Role -->"),
-      current_work: await ask(rl, "What are you working on right now?", "<!-- Add the active work threads agents should keep in mind. -->"),
-      priorities: await ask(rl, "What matters most this week?", "<!-- Add the current bets and near-term priorities. -->"),
-      ai_tools: await ask(rl, "AI tools you use", "claude-code,codex,cursor")
+      user_name: await ask(rl, "Name", "<!-- Your Name -->", "user_name"),
+      user_role: await ask(rl, "What do you do?", "<!-- Your Role -->", "user_role"),
+      current_work: await ask(rl, "What are you working on right now?", "<!-- Add the active work threads agents should keep in mind. -->", "current_work"),
+      priorities: await ask(rl, "What matters most this week?", "<!-- Add the current bets and near-term priorities. -->", "priorities"),
+      ai_tools: await ask(rl, "AI tools you use", "claude-code,codex,cursor", "ai_tools")
     };
   } finally {
     rl.close();
   }
 }
 
-async function ask(rl, label, fallback) {
-  // If fallback is an HTML comment, don't show it as the default in the prompt
+// The prompt was the one door that applied none of the answer rules: this was
+// `answer.trim() || fallback`, so an ellipsis, this repo's own
+// `<!-- Your Name -->` placeholder, a zero-width space, a bidi override or a
+// bare carriage return went straight into context/identity.md and the install
+// reported success — a folder byte-identical to a --yes placeholder one, which
+// is the outcome --answers exists to prevent.
+//
+// A failure here means something different than it does for --answers, though.
+// --answers has nobody left to ask, so it stops the run and leaves nothing
+// behind. The person is standing at this prompt, so the answer is to say what
+// was wrong and ask again. Enter still accepts the field as unanswered, which
+// is the one way to reach the placeholder deliberately.
+const MAX_REASKS = 3;
+
+// The rules are shared with --answers, so their messages end by telling the
+// caller to omit the key — correct advice for a JSON file, meaningless to
+// someone standing at a prompt who has no keys to omit. Keep the sentence that
+// says what is wrong, drop the one that names a remedy this reader does not
+// have; the next line offers the remedy they do have.
+function promptReason(message) {
+  return message
+    .split("\n")
+    .flatMap((line) => line.split(/(?<=\.)\s+(?=[A-Z])/))
+    .filter((sentence) => sentence.trim() && !/omit the key/i.test(sentence))
+    .map((sentence) => `  ${sentence.trim()}`)
+    .join("\n");
+}
+
+async function ask(rl, label, fallback, field) {
   const displayFallback = fallback.startsWith("<!--") ? "" : ` [${fallback}]`;
-  const answer = await rl.question(`${label}${displayFallback}: `);
-  return answer.trim() || fallback;
+
+  for (let attempt = 0; ; attempt += 1) {
+    const answer = (await rl.question(`${label}${displayFallback}: `)).trim();
+    if (!answer) return fallback;
+
+    try {
+      return field === "ai_tools" ? answer : normalizeAnswerText(answer, "What you typed", field);
+    } catch (error) {
+      // Three tries, then take them at their word rather than trapping someone
+      // in a loop they cannot leave — a stubborn answer is still better than an
+      // abandoned install, and the field is theirs.
+      if (attempt >= MAX_REASKS - 1) {
+        console.log("  Keeping it as typed.\n");
+        return answer;
+      }
+      console.log(promptReason(error.message));
+      console.log("  Press Enter to leave this blank, or type it again.\n");
+    }
+  }
 }
 
 function defaultAnswers() {

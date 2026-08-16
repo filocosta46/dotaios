@@ -194,7 +194,9 @@ export function parseAnswers(raw, defaults) {
     }
     claimedBy.set(field, key);
 
-    answers[field] = field === "ai_tools" ? normalizeAiTools(value, key) : normalizeText(value, key, field);
+    answers[field] = field === "ai_tools"
+      ? normalizeAiTools(value, answerSubject(key))
+      : normalizeAnswerText(value, answerSubject(key), field);
     if (field !== "ai_tools") provided.push(field);
   }
 
@@ -215,39 +217,50 @@ function answerSubject(key) {
   return `--answers key "${key}"`;
 }
 
-function normalizeText(value, key, field) {
+// Exported because the terminal prompt needs the same rules. It was the one
+// door that applied none of them: `ask()` was `answer.trim() || fallback`, so a
+// person could type an ellipsis, this repo's own `<!-- Your Name -->`
+// placeholder, a zero-width space, a bidi override or a bare carriage return
+// straight into context/identity.md, and the install reported success over a
+// folder byte-identical to a --yes placeholder one. The argument these rules
+// rest on is about the destination file, and identity.md is the same file
+// whichever door the text came through.
+//
+// The caller decides what a failure means. --answers has nobody to ask, so it
+// stops the run; the prompt has the person right there, so it re-asks.
+export function normalizeAnswerText(value, subject, field) {
   if (typeof value !== "string") {
-    throw new Error(`--answers key "${key}" must be a string. Omit the key entirely to leave that field unanswered.`);
+    throw new Error(`${subject} must be a string. Omit the key entirely to leave that field unanswered.`);
   }
   const text = value.trim();
-  assertCarriesAnAnswer(text, key);
+  assertCarriesAnAnswer(text, subject);
 
   if (MULTILINE_FIELDS.has(field)) {
-    assertPlainText(text, answerSubject(key), CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB);
-    assertNoHeading(text, answerSubject(key));
+    assertPlainText(text, subject, CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB);
+    assertNoHeading(text, subject);
     return text;
   }
-  assertOneLine(text, key, BULLET_IS_ONE_LINE);
-  assertPlainText(text, answerSubject(key), CONTROL_CHARACTERS);
+  assertOneLine(text, subject, BULLET_IS_ONE_LINE);
+  assertPlainText(text, subject, CONTROL_CHARACTERS);
   return text;
 }
 
-function normalizeAiTools(value, key) {
+function normalizeAiTools(value, subject) {
   const list = Array.isArray(value) ? value : typeof value === "string" ? value.split(",") : null;
   if (list === null) {
-    throw new Error(`--answers key "${key}" must be a string or an array of strings.`);
+    throw new Error(`${subject} must be a string or an array of strings.`);
   }
   const tools = [];
   for (const entry of list) {
-    if (typeof entry !== "string") throw new Error(`--answers key "${key}" must contain only strings.`);
+    if (typeof entry !== "string") throw new Error(`${subject} must contain only strings.`);
     const tool = entry.trim();
     // A blank entry here is the ordinary artefact of splitting "a,b," rather
     // than an unanswered field, so it is dropped instead of refused. A
     // placeholder is not: it names a client nobody uses.
     if (!tool) continue;
-    assertCarriesAnAnswer(tool, key);
-    assertOneLine(tool, key, TOOL_NAME_IS_ONE_LINE);
-    assertPlainText(tool, key, CONTROL_CHARACTERS);
+    assertCarriesAnAnswer(tool, subject);
+    assertOneLine(tool, subject, TOOL_NAME_IS_ONE_LINE);
+    assertPlainText(tool, subject, CONTROL_CHARACTERS);
     tools.push(tool);
   }
   // An empty list is an answer — "none of them" — and quietly restoring the
@@ -255,7 +268,7 @@ function normalizeAiTools(value, key) {
   // doctor, and context all read it back and show it to the person as theirs.
   // (It does not decide bridges: activate detects installed clients.)
   if (tools.length === 0) {
-    throw new Error(`--answers key "${key}" named no tools. Omit the key to keep the default, or list at least one.`);
+    throw new Error(`${subject} named no tools. Omit the key to keep the default, or list at least one.`);
   }
   return tools.join(",");
 }
@@ -275,28 +288,28 @@ export function assertNoHeading(text, subject) {
   );
 }
 
-function assertCarriesAnAnswer(text, key) {
+function assertCarriesAnAnswer(text, subject) {
   // Checked after the empty case below, so a plain "" keeps the message written
   // for it; this one is for the values that survive a trim and still show
   // nothing.
   if (text !== "" && INVISIBLE_ONLY.test(text)) {
     throw new Error(
-      `--answers key "${key}" is only invisible characters. It renders as a blank field, so the install would ` +
+      `${subject} is only invisible characters. It renders as a blank field, so the install would ` +
       "report success over nothing. Omit the key to leave that field unanswered."
     );
   }
   if (text !== "" && !ELLIPSES.has(text) && !isHtmlComment(text)) return;
   throw new Error(
-    `--answers key "${key}" carries no answer. Omit the key to leave that field unanswered, or supply what the ` +
+    `${subject} carries no answer. Omit the key to leave that field unanswered, or supply what the ` +
     "person actually said.\n" +
     "An empty value, an ellipsis, and this repo's own <!-- placeholder --> text all render as nothing, so the " +
     "install would report success over a blank field."
   );
 }
 
-function assertOneLine(text, key, because) {
+function assertOneLine(text, subject, because) {
   if (!/[\r\n]/.test(text)) return;
-  throw new Error(`--answers key "${key}" must be one line. ${because}`);
+  throw new Error(`${subject} must be one line. ${because}`);
 }
 
 const BULLET_IS_ONE_LINE =
