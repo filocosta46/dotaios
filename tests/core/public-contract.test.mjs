@@ -128,7 +128,7 @@ test("Hermes claims a global adapter without inventing a project-local selector"
 
 test("first-time onboarding stays assistant-guided, consent-first, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "2.0.6", "the public onboarding contract must target the release candidate");
+  assert.equal(pkg.version, "2.0.7", "the public onboarding contract must target the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
   }
@@ -239,10 +239,20 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
     /confirm it prints 20 or newer/i,
     "INSTALL must re-check the version after installing, since engines is not enforced at runtime"
   );
+  // Two halves, because the first version of this guard pinned one exact
+  // sentence and broke the moment that sentence was legitimately reworded.
+  // What must hold is the claim, not the phrasing: the README says the
+  // assistant installs Node, and never reinstates the gate #76 removed and
+  // #81 accidentally restored.
   assert.match(
     unwrapped["README.md"],
-    /installs it for you where it can/i,
+    /installs it for you/i,
     "README must describe the same Node bootstrap INSTALL performs, not an older consent gate"
+  );
+  assert.doesNotMatch(
+    unwrapped["README.md"],
+    /asks? before using a supported host installation path/i,
+    "README must not reinstate the ask-before-Node gate that #76 deliberately removed"
   );
   assert.match(unwrapped["INSTALL.md"], /does not use the macOS Keychain or another operating-system credential store/i, "INSTALL must not imply an OS credential store it does not use");
   assert.doesNotMatch(corpus.replace(/\s+/g, " "), /[Cc]redentials stay in the machine credential store/, "no public page may claim an OS credential store");

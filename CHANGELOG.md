@@ -4,6 +4,20 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.7] - 2026-08-17
+
+### Fixed
+- The assistant can now install Node on macOS without an administrator
+  password, by extracting the official LTS tarball into the person's own home
+  and prepending it to `PATH` on each command. The previous instruction sent
+  Apple Silicon users to a `.pkg` that nodejs.org does not publish for arm64
+  (#92).
+- The install no longer asks which AI tools you use. The answer configured
+  nothing — clients are connected by detection, not by that list — and asking
+  contradicted the product's own promise that you switch tools freely and your
+  context follows. Four questions instead of five, and the pasted request is
+  one sentence a person would actually say (#91).
+
 ## [2.0.6] - 2026-08-16
 
 Thanks to Roberto Tomada, who found and fixed the Node bootstrap route on a new
