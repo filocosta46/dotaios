@@ -22,12 +22,27 @@ terminal. That is expected and supported. Step 3 is the part built for it: the
 interview questions come to you, so the person answers them in the conversation
 instead of at a shell prompt.
 
-1. Check whether Node.js 20 or newer is available (`node --version`). If it is
-   not, install it, and say what you are installing as you go. Use the machine's
-   normal route: `brew install node` on macOS, `winget install OpenJS.NodeJS.LTS`
-   on Windows, the distribution's package manager on Linux, or `nvm` if none of
-   those is present. If a step needs an administrator password, give them the
-   exact command to paste — you cannot type their password for them.
+1. Check whether Node.js 20 or newer is available (`node --version`). If the
+   command is not found, Node is missing and nothing below runs until it is
+   installed. Say what you are installing as you go, then run `node --version`
+   yourself and confirm it prints 20 or newer before continuing.
+
+   - **macOS** — have them download the LTS installer from
+     <https://nodejs.org/en/download> and open the `.pkg`. This is the one step
+     you cannot carry: it needs their administrator password. Prefer it over
+     Homebrew even where `brew` already exists — `brew install node` tracks the
+     current release, several majors ahead of what DotAIOS tests, and the pinned
+     `node@22` and `node@24` formulae are keg-only, so they install without
+     going on the path and leave `node --version` still failing.
+   - **Windows** — `winget install OpenJS.NodeJS.LTS`, which you can run.
+   - **Linux** — the distribution's package manager, which you can run. If it
+     offers a version older than 20, use the official LTS tarball or NodeSource
+     rather than accepting it; the check above will otherwise stop you here.
+   - **Never `nvm`** — it is a shell function rather than a program, so a Node it
+     installs will not be on the path in your next command.
+
+   Do not install Homebrew in order to install Node. It is a far larger change
+   to their machine than the one they asked you for.
 2. Run `npx dotaios@2.0.5 setup --dry-run` and show what it reports. It writes
    nothing, and it is the record of what the next command is about to change:
    it creates `~/aios` and connects the AI apps already on that machine.

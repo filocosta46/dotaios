@@ -14,7 +14,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: [20, 22]
+        # 24 is the release line INSTALL.md sends a first-time user to; it has
+        # to be tested or the advertised install path lands on an untested Node.
+        node: [20, 22, 24]
 
     steps:
       - name: Checkout
