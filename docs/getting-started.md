@@ -106,6 +106,8 @@ npx dotaios@latest context --refresh --review
 
 Use `interview --review` when your role, active work, priorities, or planning style changes. It asks plain-English questions, previews the files it will update, and creates `context/preferences.md` plus planning prompts for supported skills.
 
+If an assistant is doing this for you, it has no terminal to be asked in: it can ask you the same questions in the conversation and pass the answers with `interview --answers -`. Run `interview --help` for the field names.
+
 Use `context` when you want to inspect the files directly. Use `context --refresh --review` after manual edits when you want to regenerate the agent entrypoints with a preview first.
 
 Import context from old AI chats:
