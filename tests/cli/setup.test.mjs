@@ -102,7 +102,7 @@ test("setup --dry-run promises every skill-link directory the real run creates",
     assert.deepEqual(created, [
       path.join(homePath, ".agents", "skills"),
       path.join(homePath, ".claude", "skills"),
-      path.join(homePath, ".gemini", "antigravity", "skills")
+      path.join(homePath, ".gemini", "config", "skills")
     ].sort(), "all three projection roots are written with nothing detected");
   } finally {
     fsSync.rmSync(tmp, { recursive: true, force: true });

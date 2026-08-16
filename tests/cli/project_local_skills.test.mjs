@@ -196,13 +196,19 @@ test("attach does not create an inert project Hermes config", () => {
 test("attach removes only DotAIOS-owned links from retired Antigravity project target", () => {
   const { tempRoot, aiosPath, projectPath } = setupProject();
   const source = path.join(projectPath, "skills", "project-skill");
-  const retiredDir = path.join(projectPath, ".gemini", "config", "skills");
+  const retiredDir = path.join(projectPath, ".gemini", "antigravity", "skills");
   const managedLink = path.join(retiredDir, "project-skill");
   const foreignDir = path.join(retiredDir, "foreign-skill");
+  // A foreign symlink that happens to point into the AIOS skill tree under a
+  // different name: ownership is unprovable, so cleanup must leave it alone.
+  const foreignLink = path.join(retiredDir, "vendor-project-skill");
+  const foreignFile = path.join(retiredDir, "NOTES.md");
   fs.mkdirSync(retiredDir, { recursive: true });
   fs.symlinkSync(source, managedLink, "dir");
+  fs.symlinkSync(source, foreignLink, "dir");
   fs.mkdirSync(foreignDir, { recursive: true });
   fs.writeFileSync(path.join(foreignDir, "SKILL.md"), "foreign project skill\n");
+  fs.writeFileSync(foreignFile, "hand-written notes\n");
 
   try {
     run(["attach", projectPath, "--path", aiosPath]);
@@ -212,6 +218,8 @@ test("attach removes only DotAIOS-owned links from retired Antigravity project t
       fs.readFileSync(path.join(foreignDir, "SKILL.md"), "utf8"),
       "foreign project skill\n"
     );
+    assert.equal(fs.lstatSync(foreignLink).isSymbolicLink(), true);
+    assert.equal(fs.readFileSync(foreignFile, "utf8"), "hand-written notes\n");
     assert.equal(
       fs.realpathSync(path.join(projectPath, ".agents", "skills", "project-skill")),
       fs.realpathSync(source)

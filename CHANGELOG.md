@@ -4,6 +4,17 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- Global skills were projected to `~/.gemini/antigravity/skills`, which is not
+  a path Antigravity reads. It publishes two discovery paths — the workspace
+  `.agents/skills/` and the global `~/.gemini/config/skills/` — and the latter
+  was on the retired-cleanup list at the same time, so the live target was
+  being cleaned while the dead one was written to. Skills now land where
+  Antigravity looks. `~/.gemini/antigravity/skills` becomes a retired target,
+  which migrates future installs without removing anything already there:
+  retiring a directory never deletes real files, foreign symlinks, or, for
+  global targets, anything at all.
+
 ## [2.0.5] - 2026-08-16
 
 ### Fixed

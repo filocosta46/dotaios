@@ -15,7 +15,7 @@ A successful file write proves only configured. Public support requires a reprod
 | Codex | Global `~/.codex/AGENTS.md` bridge | Native shared Agent Skills links | Configured locally; verify invocation in the client |
 | Gemini CLI | Global `~/.gemini/GEMINI.md` bridge | Native shared Agent Skills links | Configured locally; individual accounts now hit `IneligibleTierError` since Google ended Gemini Code Assist for individuals |
 | Cursor | Project `AGENTS.md` from `dotaios attach` | Project Agent Skills links | Configured locally; project-scoped production is not proven by the bounded probe |
-| Antigravity IDE | No always-on context bridge | Global `.gemini/antigravity/skills`, project `.agents/skills`; optional MCP | Documented adapter; requires an invocation receipt |
+| Antigravity IDE | No always-on context bridge | Global `.gemini/config/skills`, project `.agents/skills`; optional MCP | Documented adapter; requires an invocation receipt |
 | Hermes | No always-on context bridge | Global `skills.external_dirs` in `~/.hermes/config.yaml`; no project-local adapter | Global configuration adapter only; invocation remains unverified |
 | Kimi Code CLI | No Kimi-specific DotAIOS instruction bridge | Native shared `.agents/skills`; optional MCP through `.kimi-code/mcp.json` | Configured and documented; requires an invocation receipt |
 | OpenCode | Global `~/.config/opencode/AGENTS.md`, the instructions file OpenCode documents | Native shared `.agents/skills`; optional MCP through `~/.config/opencode/opencode.json` | Configured and documented; requires an invocation receipt |

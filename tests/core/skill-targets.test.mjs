@@ -10,7 +10,11 @@ test("symlinkTargets includes Claude dir and the shared .agents/skills standard"
   const dirs = symlinkTargets().map((t) => t.dir);
   assert.ok(dirs.includes(".claude/skills"));
   assert.ok(dirs.includes(".agents/skills"));
-  assert.ok(dirs.includes(".gemini/antigravity/skills"));
+  // Antigravity's documented global scope is `~/.gemini/config/skills`
+  // (antigravity.google/docs/skills). `.gemini/antigravity/skills` is not a
+  // discovery path it publishes, so projecting there reached nothing.
+  assert.ok(dirs.includes(".gemini/config/skills"));
+  assert.ok(!dirs.includes(".gemini/antigravity/skills"));
   assert.ok(!dirs.includes(".cursor/skills"));
   assert.ok(!dirs.includes(".gemini/skills"));
 });
@@ -58,7 +62,7 @@ test("registry keeps Antigravity's stable identity while using current IDE paths
 
   assert.equal(byName.get("Cursor").skills.dir, ".agents/skills");
   assert.equal(byName.get("Gemini").skills.dir, ".agents/skills");
-  assert.equal(byName.get("Antigravity").skills.dir, ".gemini/antigravity/skills");
+  assert.equal(byName.get("Antigravity").skills.dir, ".gemini/config/skills");
   assert.equal(byName.get("Antigravity").skills.project.dir, ".agents/skills");
   assert.equal(byName.has("Antigravity IDE"), false);
 });
@@ -67,6 +71,6 @@ test("retired native targets are explicit migration surfaces", () => {
   assert.deepEqual(retiredSymlinkTargets().map((target) => target.dir), [
     ".cursor/skills",
     ".gemini/skills",
-    ".gemini/config/skills"
+    ".gemini/antigravity/skills"
   ]);
 });

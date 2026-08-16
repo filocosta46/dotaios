@@ -185,14 +185,17 @@ describe("doctor native-skill runtimes", () => {
     assert.match(output, /At least one AI tool connected/);
   });
 
-  // activate creates ~/.gemini/antigravity/skills for a client it declared "not
-  // detected" in the same run, and that path is Antigravity's own detect path.
-  // This phantom needs no stray binary at all.
+  // ~/.gemini/antigravity is Antigravity's detect path, so its presence alone
+  // makes the client detected with no stray binary at all. Its skills, though,
+  // are projected to the documented ~/.gemini/config/skills. Create both: the
+  // detect directory to be seen, and an empty projection root to be the
+  // "directory exists but holds no live links" case this test is named for.
   it("warns for a symlink runtime whose skill directory holds no live links", async () => {
     const aiosPath = await makeMinimalAios(path.join(tmpBase, "antigravity"));
     await addSourceSkill(aiosPath);
     const homePath = await makeHome("antigravity");
-    await fs.mkdir(path.join(homePath, ".gemini", "antigravity", "skills"), { recursive: true });
+    await fs.mkdir(path.join(homePath, ".gemini", "antigravity"), { recursive: true });
+    await fs.mkdir(path.join(homePath, ".gemini", "config", "skills"), { recursive: true });
 
     const { output } = await runDoctor({ aiosPath, homePath, detection: noAgentBinaries });
 

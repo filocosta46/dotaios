@@ -80,11 +80,14 @@ Use `dotaios activate` to wire these, see the README. The optional MCP adapter i
 
 - `~/.claude/skills/` for Claude Code, and
 - `~/.agents/skills/` as the single shared Agent Skills path for Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode, and
-- `~/.gemini/antigravity/skills/` for Antigravity IDE's documented global skill path.
+- `~/.gemini/config/skills/` for Antigravity's documented global skill path.
 
-Google documents separate Antigravity IDE, Antigravity CLI, and Antigravity 2.0
-surfaces with different global directories. This adapter names and configures
-the IDE surface specifically.
+Antigravity documents exactly two skill discovery paths: the workspace
+`<workspace-root>/.agents/skills/` and the global `~/.gemini/config/skills/`.
+`~/.gemini/antigravity/` is where the IDE keeps its own state, which is how
+DotAIOS detects it, but it is not a directory Antigravity reads skills from.
+Earlier releases projected there; that path is now a retired target, and
+retiring it never deletes what is already inside it.
 
 For Hermes, DotAIOS adds your `~/aios/skills` folder to
 `skills.external_dirs` in the existing `~/.hermes/config.yaml` and every

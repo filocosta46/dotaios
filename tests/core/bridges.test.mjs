@@ -46,13 +46,27 @@ test("registry preserves non-bridge runtimes such as Hermes", async () => {
   assert.equal(bridgePath("/tmp/home", hermes), null);
 });
 
+// Source: https://antigravity.google/docs/skills publishes exactly two skill
+// discovery paths — workspace `<workspace-root>/.agents/skills/<skill>/` and
+// global `~/.gemini/config/skills/<skill>/`. Detection is a separate question:
+// the IDE owns `~/.gemini/antigravity`, so that directory proves it is
+// installed even though it is not a place the IDE reads skills from. Assert
+// both literals against the documentation, never back against the registry:
+// re-reading the registry's own value would pass for any path we shipped.
+const ANTIGRAVITY_DOCUMENTED_GLOBAL_SKILLS_DIR = ".gemini/config/skills";
+const ANTIGRAVITY_DOCUMENTED_WORKSPACE_SKILLS_DIR = ".agents/skills";
+
 test("Antigravity detection follows its documented Gemini-owned directory", async () => {
   const registry = await loadAgentRegistry();
   const antigravity = registry.find((agent) => agent.name === "Antigravity");
 
   assert.ok(antigravity);
   assert.equal(antigravity.detect, ".gemini/antigravity");
-  assert.equal(antigravity.skills.dir, ".gemini/antigravity/skills");
+  assert.equal(antigravity.skills.dir, ANTIGRAVITY_DOCUMENTED_GLOBAL_SKILLS_DIR);
+  assert.equal(antigravity.skills.project.dir, ANTIGRAVITY_DOCUMENTED_WORKSPACE_SKILLS_DIR);
+  // The detect directory is not a discovery path, so it must never be the
+  // projection target again.
+  assert.notEqual(antigravity.skills.dir, `${antigravity.detect}/skills`);
 });
 
 test("agent detection recognizes a declared command on PATH without a config folder", async () => {

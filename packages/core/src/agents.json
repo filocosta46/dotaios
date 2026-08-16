@@ -49,7 +49,7 @@
       "bridge": null,
       "skills": {
         "mode": "symlink",
-        "dir": ".gemini/antigravity/skills",
+        "dir": ".gemini/config/skills",
         "project": { "mode": "symlink", "dir": ".agents/skills" }
       }
     },
@@ -98,6 +98,6 @@
   "retiredSkillDirs": [
     ".cursor/skills",
     ".gemini/skills",
-    ".gemini/config/skills"
+    ".gemini/antigravity/skills"
   ]
 }

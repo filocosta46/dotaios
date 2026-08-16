@@ -235,7 +235,7 @@ test("activation covers detected native clients and every Hermes profile without
   for (const retiredDir of [
     path.join(homePath, ".cursor", "skills"),
     path.join(homePath, ".gemini", "skills"),
-    path.join(homePath, ".gemini", "config", "skills")
+    path.join(homePath, ".gemini", "antigravity", "skills")
   ]) {
     fs.mkdirSync(retiredDir, { recursive: true });
     fs.symlinkSync(source, path.join(retiredDir, skillName), "dir");
@@ -249,13 +249,21 @@ test("activation covers detected native clients and every Hermes profile without
   for (const targetDir of [
     ".agents/skills",
     ".claude/skills",
-    ".gemini/antigravity/skills"
+    ".gemini/config/skills"
   ]) {
     const link = path.join(homePath, targetDir, skillName);
     assert.equal(fs.readlinkSync(link), source, `${targetDir} should expose the canonical skill`);
   }
   assert.equal(fs.readFileSync(path.join(foreign, "SKILL.md"), "utf8"), "foreign skill\n");
-  for (const retiredDir of [path.join(homePath, ".cursor", "skills"), path.join(homePath, ".gemini", "skills")]) {
+  // Retiring a target must never delete what is already sitting in it. Real
+  // installs have years of entries under `~/.gemini/antigravity/skills`, so the
+  // retired list is a migration marker, not a cleanup instruction: activate
+  // leaves both DotAIOS-owned links and foreign directories in place there.
+  for (const retiredDir of [
+    path.join(homePath, ".cursor", "skills"),
+    path.join(homePath, ".gemini", "skills"),
+    path.join(homePath, ".gemini", "antigravity", "skills")
+  ]) {
     assert.equal(fs.lstatSync(path.join(retiredDir, skillName)).isSymbolicLink(), true);
     assert.equal(fs.readFileSync(path.join(retiredDir, "coding-standards", "SKILL.md"), "utf8"), "foreign skill\n");
   }
