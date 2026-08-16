@@ -261,3 +261,30 @@ test("agent registry loading refuses linked, oversized, and invalid UTF-8 config
     await fs.rm(root, { recursive: true, force: true });
   }
 });
+
+// opencode.ai/docs/rules documents the global instructions file as
+// `~/.config/opencode/AGENTS.md`, and states that "the first matching file wins
+// in each category" -- instruction files are selected, not concatenated. With
+// no bridge of its own, DotAIOS reached OpenCode only through its Claude Code
+// compatibility fallback on `~/.claude/CLAUDE.md`, which a user turns off with
+// OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 and which loses to any nearer
+// AGENTS.md. The vendor-native path is the one that survives both.
+//
+// The bridge is safe to declare because OpenCode carries `command: "opencode"`
+// and a detect directory, and activate only writes a bridge for an agent
+// isAgentInstalled confirms -- so setup never creates `~/.config/opencode` on a
+// machine that does not run OpenCode, which is the trap that made Gemini
+// manufacture the evidence for its own warning.
+test("OpenCode's bridge lands on the instructions file OpenCode documents", async () => {
+  const registry = await loadAgentRegistry();
+  const opencode = registry.find((agent) => agent.name === "OpenCode");
+
+  assert.ok(opencode);
+  assert.equal(opencode.bridge, ".config/opencode/AGENTS.md");
+  assert.equal(opencode.detect, ".config/opencode");
+  assert.equal(opencode.command, "opencode");
+  assert.equal(
+    bridgePath("/tmp/home", opencode),
+    "/tmp/home/.config/opencode/AGENTS.md"
+  );
+});

@@ -122,7 +122,8 @@ Setup does not:
 - create a hosted DotAIOS account, background cloud service, or hosted memory.
 
 The documented global bridge files are `~/.claude/CLAUDE.md`,
-`~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`. The shared
+`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, and
+`~/.config/opencode/AGENTS.md`. The shared
 `~/.agents/skills` directory serves clients that implement the Agent Skills
 convention. These links expose only skills bundled with the reviewed release;
 setup does not install third-party plugins. Cursor is connected per project. See
@@ -337,8 +338,8 @@ the repository in GitHub and revoke the token in GitHub settings.
 
 Run `npx dotaios@2.0.5 doctor --path <aios-path>` first so you have the exact
 configured paths.
-In `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and
-`~/.gemini/GEMINI.md`, remove only content between the
+In `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
+`~/.gemini/GEMINI.md`, and `~/.config/opencode/AGENTS.md`, remove only content between the
 `dotaios-managed:start` and `dotaios-managed:end` markers. In configured skill
 directories, remove only links whose resolved target is inside
 `<aios-path>/skills`;

@@ -18,7 +18,7 @@ A successful file write proves only configured. Public support requires a reprod
 | Antigravity IDE | No always-on context bridge | Global `.gemini/antigravity/skills`, project `.agents/skills`; optional MCP | Documented adapter; requires an invocation receipt |
 | Hermes | No always-on context bridge | Global `skills.external_dirs` in `~/.hermes/config.yaml`; no project-local adapter | Global configuration adapter only; invocation remains unverified |
 | Kimi Code CLI | No Kimi-specific DotAIOS instruction bridge | Native shared `.agents/skills`; optional MCP through `.kimi-code/mcp.json` | Configured and documented; requires an invocation receipt |
-| OpenCode | No always-on context bridge | Native shared `.agents/skills`; optional MCP through `~/.config/opencode/opencode.json` | Configured and documented; requires an invocation receipt |
+| OpenCode | Global `~/.config/opencode/AGENTS.md`, the instructions file OpenCode documents | Native shared `.agents/skills`; optional MCP through `~/.config/opencode/opencode.json` | Configured and documented; requires an invocation receipt |
 | Browser chats | No local filesystem access | No native local skill path | Attach files or paste a bounded brief explicitly |
 | Kimi and Z.ai models | Host-specific | Host-specific | Model-through-host only; name and test the host |
 | Other runtimes | Runtime-specific | Runtime-specific | Optional and experimental until proven |

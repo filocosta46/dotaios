@@ -68,7 +68,7 @@
       "name": "OpenCode",
       "detect": ".config/opencode",
       "command": "opencode",
-      "bridge": null,
+      "bridge": ".config/opencode/AGENTS.md",
       "skills": {
         "mode": "symlink",
         "dir": ".agents/skills",

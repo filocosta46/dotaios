@@ -118,7 +118,8 @@ Those three commands show you the registry publisher (`_npmUser.name`), the inte
 ### What setup connects
 
 Activation may add a DotAIOS-managed block to `~/.claude/CLAUDE.md`,
-`~/.codex/AGENTS.md`, or `~/.gemini/GEMINI.md`, plus documented skill links
+`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, or
+`~/.config/opencode/AGENTS.md`, plus documented skill links
 for detected clients. Cursor connects per project. Machine-local project path
 mappings live in `~/.dotaios/projects.json`, and existing unmanaged content is
 preserved. Claude Code can use managed session capture; other clients use
