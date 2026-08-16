@@ -46,7 +46,7 @@ instead of at a shell prompt.
 2. Run `npx dotaios@2.0.6 setup --dry-run` and show what it reports. It writes
    nothing, and it is the record of what the next command is about to change:
    it creates `~/aios` and connects the AI apps already on that machine.
-3. Ask these five questions in the conversation, one at a time, and wait for
+3. Ask these four questions in the conversation, one at a time, and wait for
    each answer. They become the person's starting context, and they are the
    reason the folder is worth having:
 
@@ -54,7 +54,12 @@ instead of at a shell prompt.
    - What do you do?
    - What are you working on right now?
    - What matters most this week?
-   - Which AI tools do you use? (default: claude-code, codex, cursor)
+
+   Do not ask which AI tools they use. Setup detects the apps already on the
+   machine and connects those; the answer would change nothing, it goes stale
+   the moment they install another one, and naming tools is the opposite of
+   what this product promises — that they can switch freely and their context
+   follows. Omit the key and the default stands.
 
    Pipe their answers straight into setup, so no separate answers file is left
    behind on their machine. What they tell you still reaches disk: in their own
@@ -67,8 +72,7 @@ npx dotaios@2.0.6 setup --answers - <<'JSON'
   "name": "...",
   "role": "...",
   "work": "...",
-  "priorities": "...",
-  "ai_tools": ["claude-code", "codex", "cursor"]
+  "priorities": "..."
 }
 JSON
 ```
