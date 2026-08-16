@@ -64,7 +64,20 @@ const INVISIBLE_ONLY = /^[\p{Cf}\p{Zs}ㅤᅟᅠ⠀᠎\s]*$/u;
 // stops at the first `## `, so everything written after an injected heading
 // becomes invisible to interview, context, and brief, while the forged heading
 // shadows the template's own section of that name. Bullets and prose are fine.
-const MARKDOWN_HEADING = /^[^\S\r\n]*#{1,6}[^\S\r\n]/m;
+// Level two only, and the harm is two different things that both need it.
+// readSection ends a section on `line.startsWith("## ")`, which is exact and
+// unindented, so only a bare `## ` truncates an answer. It finds a section's
+// START with `line.trim() === "## " + heading`, which is NOT indentation
+// sensitive, so an indented `   ## Active Projects` inside one answer is found
+// as that section and shadows the template's own — verified by running both.
+//
+// The first pass refused `#{1,6}`. `#`, `###`, `####`, `#####` and `######` do
+// neither: they are read back as ordinary body text. Refusing them told the
+// person their answer "splits that section" and "shadows the template's own
+// section of that name" when it does not, and `### Side project` is an
+// ordinary thing to write about your own work. The over-refusal reached the
+// import door too once these rules were shared.
+const MARKDOWN_HEADING = /^[^\S\r\n]*##[^\S\r\n]/m;
 
 // A value that is present but says nothing installs a folder that looks
 // finished and reports success — the exact failure --answers was added to end,

@@ -547,3 +547,33 @@ test("a piped setup does not close by naming a command that needs a terminal", (
   );
   assert.match(step5[0], /editing the Markdown/, "the route that works from a pipe is the one to name first");
 });
+
+test("only the heading level that can actually reach a section is refused", () => {
+  // The first pass refused every level from `#` to `######`. readSection ends a
+  // section on `line.startsWith("## ")` and finds its start on
+  // `line.trim() === "## " + heading`, so a bare `## ` truncates an answer and
+  // an indented one shadows a template section — both verified by running
+  // sections.mjs directly. No other level does either, so the refusal was
+  // telling people their answer splits a section when it does not.
+  const refused = ["## Active Projects", "   ## Active Projects", "\t## Active Projects"];
+  const allowed = ["# Heading", "### Side project", "#### Detail", "##### Deep", "###### Deepest"];
+
+  for (const marker of refused) {
+    const { root, target } = workspace();
+    const work = `Shipping the compiler.\n\n${marker}\n\nNot theirs.`;
+    const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "Ada", work })]);
+    assert.notEqual(result.status, 0, `${JSON.stringify(marker)} must be refused`);
+    assert.match(result.stderr, /contains a markdown heading/);
+    assert.equal(fs.existsSync(target), false);
+  }
+
+  for (const marker of allowed) {
+    const { root, target } = workspace();
+    const work = `Shipping the compiler.\n\n${marker}\n\nStill my answer.`;
+    const result = runInit(["--path", target, "--answers", writeAnswers(root, { name: "Ada", work })]);
+    assert.equal(result.status, 0, `${JSON.stringify(marker)} must install: ${result.stderr}`);
+    const written = fs.readFileSync(path.join(target, "context", "work.md"), "utf8");
+    assert.ok(written.includes(marker), `${JSON.stringify(marker)} must survive into the file`);
+    assert.ok(written.includes("Still my answer."), "the rest of the answer must survive too");
+  }
+});
