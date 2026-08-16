@@ -46,17 +46,17 @@ instead of at a shell prompt.
    AIOS folder, which is the whole point, and in this conversation's history
    like anything else they type to an assistant. Pass it through like this:
 
-   ```sh
-   npx dotaios@2.0.5 setup --answers - <<'JSON'
-   {
-     "name": "...",
-     "role": "...",
-     "work": "...",
-     "priorities": "...",
-     "ai_tools": ["claude-code", "codex", "cursor"]
-   }
-   JSON
-   ```
+```sh
+npx dotaios@2.0.5 setup --answers - <<'JSON'
+{
+  "name": "...",
+  "role": "...",
+  "work": "...",
+  "priorities": "...",
+  "ai_tools": ["claude-code", "codex", "cursor"]
+}
+JSON
+```
 
    `--answers <file>` accepts the same JSON if you would rather keep a file,
    but write it somewhere only they can read, such as their home directory
