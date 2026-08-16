@@ -543,9 +543,12 @@ test("a piped setup does not close by naming a command that needs a terminal", (
   assert.doesNotMatch(
     step5[0],
     /^\s*5\.\s*Update context any time: dotaios interview --review\s*$/,
-    "a piped run must not be told to run the one command it cannot run"
+    "a piped run must not be told to run a command in a form it cannot run"
   );
-  assert.match(step5[0], /editing the Markdown/, "the route that works from a pipe is the one to name first");
+  // This first read "editing the Markdown", because that was the only route a
+  // pipe had while interview was TTY-only. interview --answers closed that, so
+  // the next step now names the command rather than the workaround around it.
+  assert.match(step5[0], /interview --answers/, "the route that works from a pipe is the one to name first");
 });
 
 test("only the heading level that can actually reach a section is refused", () => {

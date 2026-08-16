@@ -8,6 +8,7 @@ import { confirmWrites } from "../../../core/src/review.mjs";
 import { readBullet, readSection, replaceBullet, replaceSection } from "../../../core/src/sections.mjs";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { normalizeAnswerText, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios interview [options]
@@ -17,9 +18,16 @@ your work, role, priorities, or planning preferences change. Existing answers
 are shown — press Enter to keep them, or type something new to replace.
 
 Options:
-  --path <dir>  Use an AIOS folder other than ~/aios
-  --review      Show a diff and confirm before writing.
-                Honors DOTAIOS_AUTO_APPROVE=1 for non-interactive runs.
+  --path <dir>          Use an AIOS folder other than ~/aios
+  --review              Show a diff and confirm before writing.
+                        Honors DOTAIOS_AUTO_APPROVE=1 for non-interactive runs.
+  --answers <file|->    Read the answers from a JSON file ("-" for stdin)
+                        instead of asking. This is how an AI assistant keeps
+                        your context current without a terminal.
+
+--answers keys (all optional; anything you leave out keeps its current value):
+  role, work, priorities,
+  planStyle, prioritiesPerDay, timeBlocks, frogDefinition
 
 Files updated:
   context/identity.md           (Role)
@@ -48,22 +56,10 @@ export async function interviewCommand(args) {
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
 
-  if (!input.isTTY) {
-    throw new Error("dotaios interview needs an interactive terminal. Run it from a normal shell.");
-  }
-
   const sources = await loadCurrentContext(target);
-
-  console.log("\nDotAIOS Interview");
-  console.log("Press Enter to keep what's already there, or type to change.\n");
-
-  const rl = readline.createInterface({ input, output });
-  let answers;
-  try {
-    answers = await askAll(rl, sources);
-  } finally {
-    rl.close();
-  }
+  const answers = options.answers
+    ? parseInterviewAnswers(await readAnswerSource(options.answers), sources)
+    : await promptAll(sources);
 
   const plan = buildPlan(target, sources, answers);
 
@@ -133,13 +129,16 @@ export function renderInterviewRecap({ name, role, work, priorities } = {}) {
 }
 
 function parseOptions(args = []) {
-  const options = { path: null, review: false };
+  const options = { path: null, review: false, answers: null };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--review") {
       options.review = true;
     } else if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
+      index += 1;
+    } else if (arg === "--answers") {
+      options.answers = readOptionValue(args, index, "--answers");
       index += 1;
     } else {
       throw new Error(`Unknown option: ${arg}`);
@@ -207,6 +206,97 @@ const FIELDS = [
   { answerKey: "work", currentKey: "currentWork", sourceKey: "work", pathKey: "workPath", replace: replaceSection, label: "Current Work", multiline: true, prompt: "What you're working on right now" },
   { answerKey: "priorities", currentKey: "currentPriorities", sourceKey: "priorities", pathKey: "prioritiesPath", replace: replaceSection, label: "Current Bets", multiline: true, prompt: "What matters most this week" }
 ];
+
+// The TTY wall used to sit at the top of the command, so `interview` was
+// unreachable from an assistant no matter what it passed. That made the
+// product's own advertised follow-up — "Update context any time: dotaios
+// interview --review", printed by setup, by FIRST_SESSION.md and by
+// getting-started.md — a dead end for exactly the person whose install an
+// assistant had just completed without a terminal. It also made the
+// DOTAIOS_AUTO_APPROVE=1 escape that `--help` advertises unreachable, because
+// the throw happened before confirmWrites was ever called.
+//
+// The wall now sits where the terminal is actually needed: at the prompt.
+async function promptAll(sources) {
+  if (!input.isTTY) {
+    throw new Error(
+      "dotaios interview needs an interactive terminal, or the answers up front.\n" +
+      "If an AI assistant is running this: ask the questions in the conversation and re-run with\n" +
+      "--answers <file> (or --answers - to pipe JSON). `dotaios interview --help` lists the keys.\n" +
+      "If you are doing this yourself: run it from a Terminal window."
+    );
+  }
+
+  console.log("\nDotAIOS Interview");
+  console.log("Press Enter to keep what's already there, or type to change.\n");
+
+  const rl = readline.createInterface({ input, output });
+  try {
+    return await askAll(rl, sources);
+  } finally {
+    rl.close();
+  }
+}
+
+async function readAnswerSource(source) {
+  return source === "-" ? readAllStdin() : readAnswersFile(source);
+}
+
+// interview's vocabulary is its own. init asks five questions; this asks seven,
+// shares only three of them, and never asks for a name or the AI tools — so
+// there is no shared map to hoist, only shared rules. Those come from
+// answers.mjs: the same refusal set that protects `init --answers` protects
+// this, because the destination files are the same files.
+//
+// An omitted key keeps what is already there. That is not a shortcut, it is
+// the flag's equivalent of pressing Enter at the prompt, which is how the
+// interactive form has always worked.
+const ANSWER_FIELDS = new Map([
+  ...FIELDS.map((field) => [field.answerKey, { key: field.answerKey, rule: field.multiline ? field.answerKey === "work" ? "current_work" : "priorities" : "user_role" }]),
+  ...PREFERENCE_FIELDS.map((field) => [field.key, { key: field.key, rule: "user_role" }])
+]);
+
+export function parseInterviewAnswers(raw, sources) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `--answers is not valid JSON (${error.message}). Expected an object like ` +
+      `{"role": "...", "work": "...", "priorities": "..."}.`
+    );
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("--answers must be a JSON object of field names to answers.");
+  }
+
+  const answers = {};
+  for (const [key, value] of Object.entries(parsed)) {
+    const field = ANSWER_FIELDS.get(key);
+    if (!field) {
+      throw new Error(
+        `--answers has an unknown key "${key}". Accepted keys: ${[...ANSWER_FIELDS.keys()].join(", ")}.`
+      );
+    }
+    answers[field.key] = normalizeAnswerText(value, `--answers key "${key}"`, field.rule);
+  }
+
+  if (Object.keys(answers).length === 0) {
+    throw new Error(
+      "--answers supplied no answers. Name at least one field, or run interview from a terminal to be asked."
+    );
+  }
+
+  // Everything not named keeps its current value, so buildPlan sees the same
+  // shape it sees after a prompted run and writes nothing for the rest.
+  for (const field of FIELDS) {
+    if (!(field.answerKey in answers)) answers[field.answerKey] = sources[field.currentKey] || "";
+  }
+  for (const field of PREFERENCE_FIELDS) {
+    if (!(field.key in answers)) answers[field.key] = sources[field.currentKey] || field.default;
+  }
+  return answers;
+}
 
 async function askAll(rl, sources) {
   const answers = {};

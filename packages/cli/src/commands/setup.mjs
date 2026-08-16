@@ -328,8 +328,8 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   if (process.stdin.isTTY) {
     console.log("  5. Update context any time: dotaios interview --review");
   } else {
-    console.log(`  5. Update context any time by editing the Markdown in ${displayHomePath(path.join(aiosPath, "context"), os.homedir())},`);
-    console.log("     or run `dotaios interview --review` from a terminal for a guided pass.");
+    console.log("  5. Update context any time: dotaios interview --answers - (ask the questions, pipe the JSON),");
+    console.log(`     or edit the Markdown in ${displayHomePath(path.join(aiosPath, "context"), os.homedir())} directly.`);
   }
 
   // Reveal last so optional prompts retain terminal focus.
