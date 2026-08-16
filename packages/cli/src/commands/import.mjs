@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEventRecord, formatJsonlEntry } from "../../../core/src/memory.mjs";
 import { findManagedBlock } from "../../../core/src/bridges.mjs";
-import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { readJson, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -196,8 +196,8 @@ function buildImportPlan(target, vaultPath, imported, sourcePath) {
   }
 
   for (const signal of asArray(imported.signals)) {
+    const date = signalDate(signal.ts, importedAt);
     const ts = signal.ts || importedAt;
-    const date = ts.slice(0, 10);
     plan.push(jsonlAppend(path.join(target, "memory", "signals", `${date}.jsonl`), {
       ts,
       type: signal.type || "imported-signal",
@@ -221,6 +221,10 @@ function buildImportPlan(target, vaultPath, imported, sourcePath) {
 
   if (plan.length === 0) {
     throw new Error("Import file did not contain any supported context, project, wiki, org, signal, or event entries.");
+  }
+
+  for (const item of plan) {
+    assertContained(item.path, [target, vaultPath]);
   }
 
   return plan;
@@ -388,4 +392,47 @@ function safeSlug(value, label) {
   const slug = String(value || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   if (!slug) throw new Error(`Missing ${label} slug/name in import file`);
   return slug;
+}
+
+// A signal's date names a file. `ts` arrives from the import payload, and the
+// payload is written by whichever assistant read the user's old chat, so it is
+// third-party text rather than something this product produced. Slicing ten
+// characters off it and joining that to a directory turned `../../../x` into a
+// write one level above the AIOS folder: `plan` reported it, `--apply` created
+// the parent directories and appended the record, and nothing in the run looked
+// wrong. The shape is the check — a signal is filed under a calendar day, and
+// anything that is not one is refused rather than coerced, so a malformed
+// export fails loudly instead of filing itself somewhere quiet.
+const SIGNAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function signalDate(ts, importedAt) {
+  if (ts === undefined || ts === null || ts === "") return importedAt.slice(0, 10);
+  if (typeof ts !== "string") {
+    throw new Error(`Import signal "ts" must be a string, received ${typeof ts}.`);
+  }
+  const date = ts.slice(0, 10);
+  if (!SIGNAL_DATE.test(date)) {
+    throw new Error(
+      `Import signal "ts" must start with a YYYY-MM-DD date, received ${JSON.stringify(ts)}. ` +
+        "That value names the signal file, so a date is the only thing it can be."
+    );
+  }
+  return date;
+}
+
+// Every destination this command writes is derived from the import file, and
+// derivation is where containment gets lost: one unvalidated field reached
+// path.join and the result escaped the folder the user pointed at. The rule is
+// checked once, over the finished plan, rather than at each of the six places a
+// path is built — a seventh writer added later inherits it instead of having to
+// remember it. isPathWithinLexically is core's own containment predicate, so
+// this asks the same question the rest of the product asks rather than a second
+// one that can drift from it. The vault is a separate root because vault_path
+// may legitimately point outside the AIOS folder.
+function assertContained(destination, roots) {
+  if (roots.some((root) => isPathWithinLexically(root, destination))) return;
+  throw new Error(
+    `Import refused: ${path.resolve(destination)} is outside the AIOS folder. ` +
+      "An import may only write inside the folder it was pointed at and its vault."
+  );
 }

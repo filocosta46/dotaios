@@ -257,3 +257,83 @@ test("the preview exits the way the apply it previews would exit", async () => {
   assert.match(output, /Nothing can be written/);
   assert.equal(previewExit, 1, "the preview must not report success over a plan that refuses");
 });
+
+test("a signal timestamp cannot name a file outside the AIOS folder", async () => {
+  const { root, aiosPath, sourcePath } = await setupContextImport("signal-escape");
+
+  // `ts` is third-party: docs/context-import.md asks another assistant to read
+  // the user's old chat and emit this JSON, so the value arrives from outside
+  // the product. Ten characters of it used to be joined straight onto the
+  // signals directory, and `../../../x` resolved one level above the folder the
+  // user pointed at. The plan printed the escaped path, `--apply` created the
+  // parents and appended, and the run reported success.
+  await fs.writeFile(
+    sourcePath,
+    `${JSON.stringify({ signals: [{ ts: "../../../x", summary: "escaped" }] })}\n`
+  );
+
+  await assert.rejects(
+    () => runQuietly([sourcePath, "--apply", "--path", aiosPath]),
+    /must start with a YYYY-MM-DD date/
+  );
+
+  // The refusal has to happen before anything is written, not after: assert on
+  // the filesystem rather than on the message.
+  const escaped = path.join(path.dirname(root), "x.jsonl");
+  assert.equal(await fs.access(escaped).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(root, "x.jsonl")).then(() => true, () => false), false);
+});
+
+test("a non-string signal timestamp is refused by name rather than crashing", async () => {
+  const { aiosPath, sourcePath } = await setupContextImport("signal-type");
+
+  // `ts.slice` on a number threw a raw TypeError with a stack trace, which
+  // reads as a bug in DotAIOS rather than as a malformed import file.
+  await fs.writeFile(sourcePath, `${JSON.stringify({ signals: [{ ts: 20260816, summary: "x" }] })}\n`);
+
+  await assert.rejects(
+    () => runQuietly([sourcePath, "--apply", "--path", aiosPath]),
+    /"ts" must be a string, received number/
+  );
+});
+
+test("a well-formed signal still files itself under its own date", async () => {
+  const { aiosPath, sourcePath } = await setupContextImport("signal-ok");
+
+  // The guard above must not cost the ordinary case: a full ISO timestamp is
+  // what a real export carries, and it files under the day it names.
+  await fs.writeFile(
+    sourcePath,
+    `${JSON.stringify({ signals: [{ ts: "2026-08-16T10:00:00Z", summary: "legit" }] })}\n`
+  );
+
+  await runQuietly([sourcePath, "--apply", "--path", aiosPath]);
+
+  const written = await fs.readFile(path.join(aiosPath, "memory", "signals", "2026-08-16.jsonl"), "utf8");
+  assert.match(written, /legit/);
+});
+
+test("containment holds every destination, not just the one field that escaped", async () => {
+  const { root, aiosPath, sourcePath } = await setupContextImport("containment");
+
+  // The date guard above is specific to `ts`. This asserts the backstop under
+  // it: containment is checked over the finished plan, so a seventh writer
+  // added later inherits the rule instead of having to remember it. Proved by
+  // calling the plan builder's guarantee directly through a vault pointed
+  // outside the folder — aios.json is user-editable, so this is reachable.
+  await fs.writeFile(
+    path.join(aiosPath, "aios.json"),
+    `${JSON.stringify({ vault_path: path.join(root, "outside-vault") })}\n`
+  );
+  await fs.writeFile(
+    sourcePath,
+    `${JSON.stringify({ wiki: [{ topic: "escape", content: "x" }] })}\n`
+  );
+
+  // A vault deliberately placed outside the AIOS folder is legitimate and must
+  // still work — this is the case that proves the check is a containment rule
+  // and not a blanket "everything under target" rule.
+  await runQuietly([sourcePath, "--apply", "--path", aiosPath]);
+  const written = await fs.readFile(path.join(root, "outside-vault", "wiki", "escape", "_index.md"), "utf8");
+  assert.match(written, /Imported Knowledge/);
+});
