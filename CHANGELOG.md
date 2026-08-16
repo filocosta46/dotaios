@@ -4,6 +4,18 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.5] - 2026-08-16
+
+### Fixed
+- INSTALL.md said piping answers into setup meant a person's name and work
+  "never touch the disk". They do, and they are meant to: they are written into
+  the AIOS folder, which is the reason to run the command at all, and the
+  assistant's own history keeps whatever was typed to it like any other
+  message. The benefit is narrower and now stated as what it is — no separate
+  answers file is left behind. A privacy claim in an install document has to be
+  the literal truth or it is worth less than no claim.
+
+
 ## [2.0.4] - 2026-08-16
 
 **An assistant can now install DotAIOS for you without a terminal.** The
