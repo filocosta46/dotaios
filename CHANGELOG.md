@@ -4,6 +4,37 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.4] - 2026-08-16
+
+**An assistant can now install DotAIOS for you without a terminal.** The
+advertised path — paste one request into Claude Code, Codex, or another local
+assistant — could not complete: setup needed an interactive terminal, and an
+assistant runs commands through a pipe. `--answers` lets the assistant ask the
+five questions in the conversation and pass your own words through, so the
+folder it creates is yours rather than a placeholder.
+
+The same rules that protect those answers now apply at every door into your
+context files: the terminal prompt, which had none, and `dotaios import`,
+which had none. An imported timestamp can no longer name a file outside your
+AIOS folder, and imported text can no longer carry invisible characters into
+the files agents read first.
+
+### Fixed
+- `dotaios init` and `dotaios setup` accept `--answers <file|->`, so an
+  assistant can complete the install it is told to run.
+- The terminal prompt validates what you type and asks again instead of
+  accepting a value that renders as a blank field.
+- `dotaios import` refuses a signal timestamp that would write outside the
+  AIOS folder, including through a symlink, and refuses payload text carrying
+  control characters or a heading that would shadow a section.
+- Re-running `dotaios import` no longer stacks duplicate blocks, and its
+  preview now exits the way the apply it previews would.
+- An empty bullet no longer swallows the line below it in a context file.
+- A relative or `~`-prefixed `vault_path` resolves against the AIOS folder
+  rather than the current working directory.
+- The release check confirms the tag points at the commit npm published.
+
+
 ## [2.0.3] - 2026-08-14
 
 **You can now decide what DotAIOS may remember in each session.** `Use my
