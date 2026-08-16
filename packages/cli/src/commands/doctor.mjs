@@ -335,8 +335,8 @@ function checkTerminal() {
   return {
     name: "Not running in a terminal",
     status: "warn",
-    detail: "Setup and this check work here; `dotaios interview` still needs a terminal.",
-    fix: "Nothing to do if an assistant is running this. To use `dotaios interview`, run it from a Terminal window yourself."
+    detail: "Setup and this check work here, and so does `dotaios interview` when its answers are passed in rather than typed.",
+    fix: "Nothing to do if an assistant is running this. To update context from here, use `dotaios interview --answers -`."
   };
 }
 
