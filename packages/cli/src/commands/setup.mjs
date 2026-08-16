@@ -473,9 +473,42 @@ async function previewSetupTarget(aiosPath) {
   const entries = await fs.readdir(aiosPath);
   if (entries.length === 0) return { action: "[would populate]", note: "existing empty directory" };
 
+  // "Not empty" is two very different situations, and reporting them the same
+  // way blocked the one that works. INSTALL.md tells an assistant not to run
+  // setup after `[would stop]`, so on a second machine — the exact case sync
+  // exists to serve — the preview halted an install that would have been a
+  // clean no-op. Re-running setup on a healthy folder reconnects the clients
+  // and changes nothing else; it prints "DotAIOS is already set up".
+  //
+  // An arbitrary non-empty directory still stops, because that is someone
+  // else's data and the protection is real. So does a folder mid-migration or
+  // holding an unfinished setup marker: init refuses both, and a preview that
+  // promised otherwise would be lying about the run that follows it.
+  if (await pathExists(path.join(aiosPath, "aios.json"))) {
+    if (await pathExists(path.join(aiosPath, SETUP_TRANSACTION_FILE))) {
+      return {
+        action: "[would stop]",
+        note: "an unfinished setup is in progress here; re-run the identical `dotaios setup` command to recover it",
+        blocked: true
+      };
+    }
+    const migration = await previewMigration({ aiosPath }).catch(() => null);
+    if (migration && (migration.status === "ready" || migration.status === "recovery_required")) {
+      return {
+        action: "[would stop]",
+        note: "this folder needs `dotaios migrate` before setup can touch it",
+        blocked: true
+      };
+    }
+    return {
+      action: "[would keep]",
+      note: "an existing DotAIOS folder; setup would reconnect your AI tools and change nothing in it"
+    };
+  }
+
   return {
     action: "[would stop]",
-    note: "target already exists and is not empty; inspect it with `dotaios doctor`",
+    note: "target already exists and is not a DotAIOS folder; inspect it with `dotaios doctor`",
     blocked: true
   };
 }
