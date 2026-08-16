@@ -24,8 +24,8 @@ Open a local agent that can run commands and paste:
 
 That is the whole message. The agent reading that page is pointed at
 [INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.7/INSTALL.md),
-which asks it to preview every change first, ask you only about choices I can
-evaluate on your behalf, and verify the result before it says it is done.
+which asks it to preview every change first, ask you only about the choices it
+cannot make on your behalf, and verify the result before it says it is done.
 
 The agent should then run the pinned preview below. If you are recovering
 manually, run it yourself:
