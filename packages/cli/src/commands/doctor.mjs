@@ -692,7 +692,7 @@ async function checkAgentBridges(target, homePath, detection = {}, { verbose = f
           name: `${agent.name} bridge`,
           status: "warn",
           detail: `Bridge points at this AIOS folder, but its entrypoint is missing (${entrypoint}).`,
-          fix: `Run \`npx dotaios init${pathOptionFor(target)}\` to restore the missing base files.`
+          fix: `Run \`npx dotaios context --refresh${pathOptionFor(target)}\` to restore the missing entrypoint.`
         });
       } else if (!managedLines.includes(current)) {
         // Ours, and pointing at the right folder, but written by an older
