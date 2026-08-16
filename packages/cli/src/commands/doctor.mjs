@@ -583,7 +583,7 @@ export async function checkContextFreshness(target, { staleDays = CONTEXT_STALE_
     name: "Context freshness",
     status: "warn",
     detail: `Unchanged for over ${staleDays} days: ${stale.map((file) => `${file.relative} (${file.days} day(s))`).join(", ")}.`,
-    fix: "Tell your agent what changed, or run `npx dotaios@latest interview --review`. The `memory-maintenance` skill retires claims that stopped being true."
+    fix: "Tell your agent what changed, or update it directly with `dotaios interview --answers -`. The `memory-maintenance` skill retires claims that stopped being true."
   };
 }
 
