@@ -27,13 +27,34 @@ instead of at a shell prompt.
    installed. Say what you are installing as you go, then run `node --version`
    yourself and confirm it prints 20 or newer before continuing.
 
-   - **macOS** — have them download the LTS installer from
-     <https://nodejs.org/en/download> and open the `.pkg`. This is the one step
-     you cannot carry: it needs their administrator password. Prefer it over
-     Homebrew even where `brew` already exists — `brew install node` tracks the
-     current release, several majors ahead of what DotAIOS tests, and the pinned
-     `node@22` and `node@24` formulae are keg-only, so they install without
-     going on the path and leave `node --version` still failing.
+   - **macOS** — you can carry this yourself, and it needs no password. Set
+     `ARCH` to `arm64` on Apple Silicon or `x64` on Intel (`uname -m` prints
+     `arm64` or `x86_64`), download
+     `https://nodejs.org/dist/latest-v24.x/node-v24.19.0-darwin-$ARCH.tar.gz`
+     with `curl -fsSL`, and extract it into their own home with
+     `tar -xzf <file> -C "$HOME/.local"` after `mkdir -p "$HOME/.local"`.
+     Nothing outside their home directory changes.
+
+     Then run every later command with that prefix in front of PATH **on the
+     same line**, like
+     `PATH="$HOME/.local/node-v24.19.0-darwin-$ARCH/bin:$PATH" npx dotaios@2.0.6 setup --dry-run`.
+     Prepend it inline each time instead of exporting it once: every command you
+     run is a fresh shell, so an exported PATH is gone by the next one — the same
+     reason `nvm` cannot work here. Do not substitute the absolute path to `npx`
+     either; its shebang is `#!/usr/bin/env node`, so it needs `node` on PATH and
+     fails without it. Offer to add the prefix to their shell profile at the end,
+     for their own later use.
+
+     There is no Apple Silicon `.pkg`: nodejs.org publishes `osx-arm64-tar`,
+     `osx-x64-tar`, and an x64 `.pkg`, so on an Apple Silicon Mac the tarball is
+     the only native route. If they would rather use the graphical installer,
+     send them to <https://nodejs.org/en/download> — that one needs their
+     administrator password, which you cannot type for them.
+
+     Do not use Homebrew: `brew install node` tracks the current release, several
+     majors ahead of what DotAIOS tests, and the pinned `node@22` and `node@24`
+     formulae are keg-only, so they install without going on the path and leave
+     `node --version` still failing.
    - **Windows** — `winget install OpenJS.NodeJS.LTS`, which you can run.
    - **Linux** — the distribution's package manager, which you can run. If it
      offers a version older than 20, use the official LTS tarball or NodeSource
