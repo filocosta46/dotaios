@@ -48,7 +48,7 @@ automated invocation coverage as Tier 1.
 | Host | Adapter | Required acceptance evidence |
 |---|---|---|
 | Gemini CLI | `~/.gemini/GEMINI.md`, `.agents/skills` | Google ended Gemini Code Assist for individual accounts, so the CLI exits with `IneligibleTierError` and cannot produce a receipt on such an account. Re-test only on an account that still has access. |
-| Antigravity IDE | Global skills under `~/.gemini/antigravity/skills`, project skills under `.agents/skills`; optional MCP in `~/.gemini/config/mcp_config.json` | Confirm the skill or MCP server appears, then return a unique skill marker or deterministic `read_working_context` value |
+| Antigravity IDE | Global skills under `~/.gemini/config/skills`, project skills under `.agents/skills`; optional MCP in `~/.gemini/config/mcp_config.json` | Confirm the skill or MCP server appears, then return a unique skill marker or deterministic `read_working_context` value |
 | Hermes | Global `skills.external_dirs` in `~/.hermes/config.yaml`; no bundled project target | Invoke a disposable global skill only after a safe bounded host mode exists; until then keep invocation and production unverified |
 | Kimi Code CLI | Shared `~/.agents/skills`; optional MCP in `~/.kimi-code/mcp.json` | Confirm a DotAIOS skill or the `dotaios` MCP server appears, then invoke one and preserve the output |
 | OpenCode | Shared `~/.agents/skills`; optional MCP at `mcp.dotaios` in `~/.config/opencode/opencode.json` | Confirm the skill or MCP server appears, invoke one deterministic DotAIOS capability, and preserve the output |
@@ -68,12 +68,15 @@ only because that entry writes `~/.gemini/GEMINI.md`, which is Antigravity's own
 documented global rules file. Deleting the entry would silently strip
 Antigravity's entire context layer.
 
-Antigravity also has three separately versioned surfaces with three different
-global skills roots: the IDE (`~/.gemini/antigravity/skills`, the one DotAIOS
-writes), Antigravity 2.0 (`~/.gemini/config/skills`), and the CLI
-(`~/.gemini/antigravity-cli/skills`). Promoting it to Tier 1 requires covering
-the roots the installed version actually reads and adding an invocation probe;
-none exists today.
+Antigravity's current documentation publishes exactly two skill discovery
+paths — workspace `<workspace-root>/.agents/skills/` and global
+`~/.gemini/config/skills/` — and DotAIOS writes both. Older notes here claimed
+the IDE read `~/.gemini/antigravity/skills` and treated `~/.gemini/config/skills`
+as an Antigravity 2.0-only root; that was wrong, and skills projected to the
+former reached nothing. Separately versioned surfaces such as the CLI
+(`~/.gemini/antigravity-cli/skills`) are still uncovered. Promoting Antigravity
+to Tier 1 requires confirming the roots the installed version actually reads
+and adding an invocation probe; none exists today.
 
 The MCP path is unresolved for the same reason. `dotaios mcp install --dry-run
 --agent antigravity` prints `~/.gemini/config/mcp_config.json`, which is what
