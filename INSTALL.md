@@ -22,12 +22,23 @@ terminal. That is expected and supported. Step 3 is the part built for it: the
 interview questions come to you, so the person answers them in the conversation
 instead of at a shell prompt.
 
-1. Check whether Node.js 20 or newer is available (`node --version`). If it is
-   not, install it, and say what you are installing as you go. Use the machine's
-   normal route: `brew install node` on macOS, `winget install OpenJS.NodeJS.LTS`
-   on Windows, the distribution's package manager on Linux, or `nvm` if none of
-   those is present. If a step needs an administrator password, give them the
-   exact command to paste — you cannot type their password for them.
+1. Check whether Node.js 20 or newer is available (`node --version`). If the
+   command is not found, Node is missing and nothing below runs until it is
+   installed. Say what you are installing as you go.
+
+   On macOS, do not assume Homebrew: a new Mac does not have it, and where it
+   does exist `brew install node` installs the current release, which is several
+   majors ahead of what DotAIOS tests. Tell them to download the macOS LTS
+   installer from <https://nodejs.org/en/download>, open the `.pkg`, and enter
+   their password when macOS asks. It takes about two minutes and lands in
+   `/usr/local/bin`, which is already on the default path. On Windows, use
+   `winget install OpenJS.NodeJS.LTS`. On Linux, use the distribution's package
+   manager. Do not reach for `nvm`: it is a shell function rather than a
+   program, so a Node it installs will not be on the path in your next command.
+
+   Then run `node --version` yourself and confirm it prints 20 or newer before
+   going on. If a step needs an administrator password, give them the exact
+   command to paste — you cannot type their password for them.
 2. Run `npx dotaios@2.0.5 setup --dry-run` and show what it reports. It writes
    nothing, and it is the record of what the next command is about to change:
    it creates `~/aios` and connects the AI apps already on that machine.
