@@ -337,3 +337,57 @@ test("containment holds every destination, not just the one field that escaped",
   const written = await fs.readFile(path.join(root, "outside-vault", "wiki", "escape", "_index.md"), "utf8");
   assert.match(written, /Imported Knowledge/);
 });
+
+test("imported context is held to the same content rules as a typed answer", async () => {
+  const { aiosPath, identityPath, sourcePath, contextDir } = await setupContextImport("content-rules");
+  const before = await fs.readFile(identityPath, "utf8");
+
+  // --answers refuses a bidi override by name because it reorders how
+  // context/identity.md prints without changing what it says. Import wrote the
+  // same bytes into the same file with no check at all, and import content is
+  // the untrusted one of the two: docs/context-import.md asks another
+  // assistant to produce it from the user's old chat.
+  await writeImportFile(sourcePath, "Role: Founder‮live\rOVERWRITTEN");
+
+  await assert.rejects(
+    () => runQuietly([sourcePath, "--apply", "--path", aiosPath]),
+    /contains the control character U\+/
+  );
+  assert.equal(await fs.readFile(identityPath, "utf8"), before, "a refusal writes nothing");
+  assert.deepEqual(await backupsIn(contextDir), []);
+});
+
+test("an imported heading cannot shadow a context file's own section", async () => {
+  const { aiosPath, identityPath, sourcePath } = await setupContextImport("content-heading");
+  const before = await fs.readFile(identityPath, "utf8");
+
+  await writeImportFile(sourcePath, "Founder.\n\n## Active Projects\n\nInjected by the import file.");
+
+  await assert.rejects(
+    () => runQuietly([sourcePath, "--apply", "--path", aiosPath]),
+    /contains a markdown heading/
+  );
+  assert.equal(await fs.readFile(identityPath, "utf8"), before);
+});
+
+test("a project or wiki document may open with a heading, because the format says it does", async () => {
+  const { root, aiosPath, sourcePath } = await setupContextImport("content-docs");
+
+  // docs/context-import.md documents projects[].content and wiki[].content as
+  // whole markdown documents whose content opens with `# `. The heading rule
+  // is about files something later reads back by section, which those are not
+  // — refusing them would reject the shape this command's own documentation
+  // tells the assistant to emit. Control characters stay refused everywhere.
+  await fs.writeFile(
+    sourcePath,
+    `${JSON.stringify({
+      projects: [{ slug: "acme", name: "Acme", content: "# Acme\n\n## Status\n\nShipping." }],
+      wiki: [{ topic: "pricing", content: "# Pricing\n\n## Tiers\n\nThree." }]
+    })}\n`
+  );
+
+  await runQuietly([sourcePath, "--apply", "--path", aiosPath]);
+
+  assert.match(await fs.readFile(path.join(aiosPath, "projects", "acme", "README.md"), "utf8"), /Shipping\./);
+  assert.match(await fs.readFile(path.join(root, "aios", "vault", "wiki", "pricing", "_index.md"), "utf8"), /Three\./);
+});

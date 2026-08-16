@@ -198,6 +198,10 @@ export function parseAnswers(raw, defaults) {
   return answers;
 }
 
+function answerSubject(key) {
+  return `--answers key "${key}"`;
+}
+
 function normalizeText(value, key, field) {
   if (typeof value !== "string") {
     throw new Error(`--answers key "${key}" must be a string. Omit the key entirely to leave that field unanswered.`);
@@ -206,12 +210,12 @@ function normalizeText(value, key, field) {
   assertCarriesAnAnswer(text, key);
 
   if (MULTILINE_FIELDS.has(field)) {
-    assertPlainText(text, key, CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB);
-    assertNoHeading(text, key);
+    assertPlainText(text, answerSubject(key), CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB);
+    assertNoHeading(text, answerSubject(key));
     return text;
   }
   assertOneLine(text, key, BULLET_IS_ONE_LINE);
-  assertPlainText(text, key, CONTROL_CHARACTERS);
+  assertPlainText(text, answerSubject(key), CONTROL_CHARACTERS);
   return text;
 }
 
@@ -243,10 +247,16 @@ function normalizeAiTools(value, key) {
   return tools.join(",");
 }
 
-function assertNoHeading(text, key) {
+// `subject` is the caller's name for the value, not a key: `dotaios import`
+// runs these same two rules over payloads that arrive from another assistant,
+// and "--answers key" would be a lie in that message. The rules themselves are
+// about the destination file, not about how the text got there — the reasoning
+// at the top of this module argues from context/identity.md and the section
+// bodies, which are the same files whichever door the text came through.
+export function assertNoHeading(text, subject) {
   if (!MARKDOWN_HEADING.test(text)) return;
   throw new Error(
-    `--answers key "${key}" contains a markdown heading. This answer becomes the body of one section, and a ` +
+    `${subject} contains a markdown heading. This text becomes the body of one section, and a ` +
     "heading inside it splits that section: everything after it stops being read as part of the answer, and it " +
     "shadows the template's own section of that name. Use a list or a blank line between threads instead."
   );
@@ -283,16 +293,21 @@ const BULLET_IS_ONE_LINE =
 
 const TOOL_NAME_IS_ONE_LINE = "It names one AI tool, and a tool name is a single word on a single line.";
 
-function assertPlainText(text, key, pattern) {
+export function assertPlainText(text, subject, pattern) {
   const found = text.match(pattern) || text.match(BIDI_OVERRIDES);
   if (!found) return;
   const code = found[0].codePointAt(0).toString(16).toUpperCase().padStart(4, "0");
   throw new Error(
-    `--answers key "${key}" contains the control character U+${code}. An answer is text a person said out loud; ` +
+    `${subject} contains the control character U+${code}. An answer is text a person said out loud; ` +
     "an invisible character in the files agents trust most is not, and a bare carriage return can make the file " +
     "print as something it does not say."
   );
 }
+
+// The two patterns above, named so a caller outside this module does not have
+// to know which one it wants. Imported markdown is a section body, so it keeps
+// its line breaks and tabs for the same reason work and priorities do.
+export const SECTION_BODY_CONTROL_CHARACTERS = CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB;
 
 // JSON.parse collapses {"name":"a","name":"b"} to "b" before Object.entries can
 // see it, so the two-spellings guard above — written because one answer

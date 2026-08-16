@@ -5,6 +5,7 @@ import { findManagedBlock } from "../../../core/src/bridges.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { readJson, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import { assertNoHeading, assertPlainText, SECTION_BODY_CONTROL_CHARACTERS } from "../lib/answers.mjs";
 
 // Import owns exactly one delimited block per destination file, on the same
 // ownership rule the agent bridges use: one well-formed pair or nothing. A
@@ -155,9 +156,27 @@ function buildImportPlan(target, vaultPath, imported, sourcePath) {
   // items for one path would otherwise overwrite each other inside one run.
   const markdown = new Map();
 
-  const addSection = (destination, heading, content, bucket) => {
+  const addSection = (destination, heading, content, bucket, subject, { sectionBody = false } = {}) => {
     const entry = markdown.get(destination) || { bucket, sections: [] };
     const section = { heading, content: String(content).trim() };
+
+    // An answer is something the person typed at their own assistant. This text
+    // was written by whichever assistant read their old chat, so of the two
+    // doors into the same files it is the untrusted one, and it was the one
+    // with no rules: U+202E and a bare carriage return reached
+    // context/identity.md on disk through this path, verbatim, while --answers
+    // refused both by name.
+    //
+    // A control character is never legitimate in any of these destinations, so
+    // that rule applies to all of them. A heading is different: it is only
+    // harmful where something later reads the file back by section, which is
+    // the four context files. docs/context-import.md documents projects and
+    // wiki entries as whole markdown documents whose content opens with `# `,
+    // so refusing headings there would reject the format this command's own
+    // documentation tells people to produce.
+    assertPlainText(section.content, subject, SECTION_BODY_CONTROL_CHARACTERS);
+    if (sectionBody) assertNoHeading(section.content, subject);
+
     if (!entry.sections.some((existing) => existing.heading === section.heading && existing.content === section.content)) {
       entry.sections.push(section);
     }
@@ -166,29 +185,29 @@ function buildImportPlan(target, vaultPath, imported, sourcePath) {
 
   for (const [key, relativePath] of Object.entries(contextTargets)) {
     if (imported.context?.[key]) {
-      addSection(path.join(target, relativePath), "Imported Context", imported.context[key], "context");
+      addSection(path.join(target, relativePath), "Imported Context", imported.context[key], "context", `imported context "${key}"`, { sectionBody: true });
     }
   }
 
   for (const project of asArray(imported.projects)) {
     const slug = safeSlug(project.slug || project.name, "project");
     const content = project.content || project.readme || `# ${project.name || slug}\n\n${project.summary || ""}\n`;
-    addSection(path.join(target, "projects", slug, "README.md"), "Imported Project Context", content, "project");
+    addSection(path.join(target, "projects", slug, "README.md"), "Imported Project Context", content, "project", `imported project "${slug}"`);
   }
 
   for (const item of asArray(imported.wiki)) {
     const slug = safeSlug(item.slug || item.topic || item.title, "wiki");
-    addSection(path.join(vaultPath, "wiki", slug, "_index.md"), "Imported Knowledge", item.content || item.summary || "", "vault/wiki");
+    addSection(path.join(vaultPath, "wiki", slug, "_index.md"), "Imported Knowledge", item.content || item.summary || "", "vault/wiki", `imported wiki topic "${slug}"`);
   }
 
   for (const company of asArray(imported.companies)) {
     const slug = safeSlug(company.slug || company.name, "company");
-    addSection(path.join(vaultPath, "org", "companies", `${slug}.md`), "Imported Company Context", company.content || company.summary || "", "vault/org");
+    addSection(path.join(vaultPath, "org", "companies", `${slug}.md`), "Imported Company Context", company.content || company.summary || "", "vault/org", `imported company "${slug}"`);
   }
 
   for (const person of asArray(imported.people)) {
     const slug = safeSlug(person.slug || person.name, "person");
-    addSection(path.join(vaultPath, "org", "people", `${slug}.md`), "Imported Person Context", person.content || person.summary || "", "vault/org");
+    addSection(path.join(vaultPath, "org", "people", `${slug}.md`), "Imported Person Context", person.content || person.summary || "", "vault/org", `imported person "${slug}"`);
   }
 
   for (const [destination, entry] of markdown) {
