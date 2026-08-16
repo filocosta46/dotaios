@@ -29,7 +29,14 @@ The free core is available now.
 Open Claude Code, Codex, Cursor, or another local assistant that can run
 commands, and paste:
 
-> Please set up DotAIOS on my computer, following https://github.com/filocosta46/dotaios/blob/v2.0.7/INSTALL.md — the “If an AI assistant is helping you” section. Show me what will change before anything changes.
+> Please set up DotAIOS on my computer: https://github.com/filocosta46/dotaios
+
+Nothing else to copy, and nothing to keep up to date — that link is the same
+next year. If you are the assistant reading this page, the instructions are in
+[INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.7/INSTALL.md),
+under “If an AI assistant is helping you”. Follow that file rather than this
+one: it is pinned to the release you are about to install, so the steps and the
+package always match.
 
 The assistant checks whether Node.js 20 or newer is available, and installs it
 for you if it is missing — on a Mac and on Linux without needing your password
