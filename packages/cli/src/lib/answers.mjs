@@ -348,7 +348,7 @@ export const JOURNAL_CONTROL_CHARACTERS = CONTROL_CHARACTERS;
 // top-level keys. This runs only after JSON.parse has already accepted the
 // text, which is what keeps it small: it never has to diagnose malformed JSON,
 // only find the keys in input already proven valid.
-function repeatedTopLevelKey(raw) {
+export function repeatedTopLevelKey(raw) {
   const seen = new Set();
   let depth = 0;
 

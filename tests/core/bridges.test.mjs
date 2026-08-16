@@ -46,13 +46,27 @@ test("registry preserves non-bridge runtimes such as Hermes", async () => {
   assert.equal(bridgePath("/tmp/home", hermes), null);
 });
 
+// Source: https://antigravity.google/docs/skills publishes exactly two skill
+// discovery paths — workspace `<workspace-root>/.agents/skills/<skill>/` and
+// global `~/.gemini/config/skills/<skill>/`. Detection is a separate question:
+// the IDE owns `~/.gemini/antigravity`, so that directory proves it is
+// installed even though it is not a place the IDE reads skills from. Assert
+// both literals against the documentation, never back against the registry:
+// re-reading the registry's own value would pass for any path we shipped.
+const ANTIGRAVITY_DOCUMENTED_GLOBAL_SKILLS_DIR = ".gemini/config/skills";
+const ANTIGRAVITY_DOCUMENTED_WORKSPACE_SKILLS_DIR = ".agents/skills";
+
 test("Antigravity detection follows its documented Gemini-owned directory", async () => {
   const registry = await loadAgentRegistry();
   const antigravity = registry.find((agent) => agent.name === "Antigravity");
 
   assert.ok(antigravity);
   assert.equal(antigravity.detect, ".gemini/antigravity");
-  assert.equal(antigravity.skills.dir, ".gemini/antigravity/skills");
+  assert.equal(antigravity.skills.dir, ANTIGRAVITY_DOCUMENTED_GLOBAL_SKILLS_DIR);
+  assert.equal(antigravity.skills.project.dir, ANTIGRAVITY_DOCUMENTED_WORKSPACE_SKILLS_DIR);
+  // The detect directory is not a discovery path, so it must never be the
+  // projection target again.
+  assert.notEqual(antigravity.skills.dir, `${antigravity.detect}/skills`);
 });
 
 test("agent detection recognizes a declared command on PATH without a config folder", async () => {
@@ -260,4 +274,31 @@ test("agent registry loading refuses linked, oversized, and invalid UTF-8 config
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }
+});
+
+// opencode.ai/docs/rules documents the global instructions file as
+// `~/.config/opencode/AGENTS.md`, and states that "the first matching file wins
+// in each category" -- instruction files are selected, not concatenated. With
+// no bridge of its own, DotAIOS reached OpenCode only through its Claude Code
+// compatibility fallback on `~/.claude/CLAUDE.md`, which a user turns off with
+// OPENCODE_DISABLE_CLAUDE_CODE_PROMPT=1 and which loses to any nearer
+// AGENTS.md. The vendor-native path is the one that survives both.
+//
+// The bridge is safe to declare because OpenCode carries `command: "opencode"`
+// and a detect directory, and activate only writes a bridge for an agent
+// isAgentInstalled confirms -- so setup never creates `~/.config/opencode` on a
+// machine that does not run OpenCode, which is the trap that made Gemini
+// manufacture the evidence for its own warning.
+test("OpenCode's bridge lands on the instructions file OpenCode documents", async () => {
+  const registry = await loadAgentRegistry();
+  const opencode = registry.find((agent) => agent.name === "OpenCode");
+
+  assert.ok(opencode);
+  assert.equal(opencode.bridge, ".config/opencode/AGENTS.md");
+  assert.equal(opencode.detect, ".config/opencode");
+  assert.equal(opencode.command, "opencode");
+  assert.equal(
+    bridgePath("/tmp/home", opencode),
+    "/tmp/home/.config/opencode/AGENTS.md"
+  );
 });

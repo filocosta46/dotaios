@@ -644,7 +644,9 @@ outside AIOS when you need the zero-read Off guarantee.
 ## Keep it useful
 
 - Ask the agent to update your identity, work, priorities, and preferences when
-  they change, or run \`dotaios interview --review\`.
+  they change. An assistant with no terminal passes them in with
+  \`dotaios interview --answers -\`; from a Terminal window,
+  \`dotaios interview --review\` shows the changes before saving.
 - Put durable project context under \`projects/<slug>/README.md\`.
 - Never put passwords, API keys, OAuth tokens, or recovery codes in memory.
 

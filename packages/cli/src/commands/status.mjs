@@ -43,7 +43,12 @@ Options:
   const config = await readConfig(target);
   const pathOption = pathOptionFor(target);
   const activateCommand = `npx dotaios activate${pathOption}`;
-  const initCommand = `npx dotaios init --force${pathOption}`;
+  // Not `init --force`: it refuses against any live AIOS store, so naming it
+  // here sent the reader -- usually an assistant relaying the action -- to a
+  // command that cannot run. `context --refresh` restores the generated
+  // entrypoints; the files under `context/` are the person's own Markdown and
+  // no command rewrites them.
+  const contextCommand = `npx dotaios context --refresh${pathOption}`;
   const migrateCommand = `npx dotaios migrate${pathOption}`;
   let migration = null;
   let migrationError = null;
@@ -138,7 +143,7 @@ Options:
   } else if (migration?.status === "ready") {
     console.log(`[action] Run \`${migrateCommand}\` to preview the safe folder upgrade.`);
   } else if (missingCount > 0 || !config) {
-    console.log(`[action] Run \`${initCommand}\` to add missing base files, or inspect the missing files above.`);
+    console.log(`[action] Run \`${contextCommand}\` to restore the generated entrypoints. Anything still listed above under \`context/\` is your own Markdown -- write it back by hand.`);
   } else if (hasMissingBridge || hasCheckBridge) {
     console.log(`[action] Run \`${activateCommand}\` so Claude Code, Codex, and Gemini can find this AIOS.`);
     if (hasCheckBridge) {

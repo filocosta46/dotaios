@@ -8,7 +8,7 @@ import { confirmWrites } from "../../../core/src/review.mjs";
 import { readBullet, readSection, replaceBullet, replaceSection } from "../../../core/src/sections.mjs";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { normalizeAnswerText, readAllStdin, readAnswersFile } from "../lib/answers.mjs";
+import { normalizeAnswerText, readAllStdin, readAnswersFile, repeatedTopLevelKey } from "../lib/answers.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios interview [options]
@@ -268,6 +268,16 @@ export function parseInterviewAnswers(raw, sources) {
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("--answers must be a JSON object of field names to answers.");
+  }
+
+  // Same rule as `init`/`setup`: two doors write the same context files, so the
+  // weaker one must not accept what the stronger one refuses by name.
+  const repeated = repeatedTopLevelKey(raw);
+  if (repeated) {
+    throw new Error(
+      `--answers sets "${repeated}" twice. JSON keeps only the last one, so the earlier answer would disappear ` +
+      "without a word. Keep one."
+    );
   }
 
   const answers = {};

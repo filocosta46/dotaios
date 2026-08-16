@@ -52,7 +52,7 @@ describe("activateCommand — symlinks", () => {
     assert.ok(activation.detectedClientCount > 0);
     assert.deepEqual(
       activation.configuredClientNames,
-      ["Claude Code", "Codex", "Gemini"],
+      ["Claude Code", "Codex", "Gemini", "OpenCode"],
       "only clients with configured context bridges belong in the configured-name list"
     );
     assert.ok(activation.detectedClientNames.includes("Cursor"), "bridge-less apps remain visible as detected");

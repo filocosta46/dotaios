@@ -4,6 +4,51 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- OpenCode now gets a context bridge at `~/.config/opencode/AGENTS.md`, the
+  global instructions file OpenCode documents. It was reached only through
+  OpenCode's Claude Code compatibility fallback on `~/.claude/CLAUDE.md`, which
+  a person turns off with one environment variable and which loses to any
+  nearer `AGENTS.md`, because the first matching file wins rather than
+  combining. The bridge is written only for a machine that actually runs
+  OpenCode, and the uninstall steps name the new file, because a bridge the
+  removal contract does not list is one nobody can fully undo.
+
+### Fixed
+- The install command in INSTALL.md could not run as written. It sits inside a
+  numbered list, so its heredoc terminator carried three spaces, and a heredoc
+  only closes on an unindented delimiter — setup received the terminator and
+  everything after it as part of the answers, reported invalid JSON, and
+  created nothing. It rendered correctly on github.com, where the indentation
+  is stripped, and failed for every assistant that read the source, which is
+  the audience the section is written for.
+- `dotaios interview --answers` accepted a repeated JSON key that `init` and
+  `setup` both refuse by name. JSON keeps the last value, so the earlier answer
+  disappeared without a word through the one door that did not check.
+- `status` and `doctor` told a person to run `dotaios init` to restore a
+  missing file, and init refuses against any live AIOS folder, so the named
+  action could never run. They now name `dotaios context --refresh`, which
+  restores the generated entrypoints, and say plainly that files under
+  `context/` are your own Markdown that no command rewrites.
+- `doctor` and the FIRST_SESSION.md written into the folder still sent an
+  assistant to `dotaios interview --review`, which needs a terminal, in the
+  same release that gave interview a terminal-free route.
+- Five places where the documentation contradicted the product: the preview
+  gate forbade re-running setup in the one case setup itself asks you to,
+  the friend-setup guide gave an assistant a command that cannot run without a
+  terminal and never mentioned `--answers`, it excluded Windows, the client
+  matrix understated what Cursor receives globally, and the `AGENTS.md` written
+  into the folder pointed at a `docs/` directory that install never creates.
+- Global skills were projected to `~/.gemini/antigravity/skills`, which is not
+  a path Antigravity reads. It publishes two discovery paths — the workspace
+  `.agents/skills/` and the global `~/.gemini/config/skills/` — and the latter
+  was on the retired-cleanup list at the same time, so the live target was
+  being cleaned while the dead one was written to. Skills now land where
+  Antigravity looks. `~/.gemini/antigravity/skills` becomes a retired target,
+  which migrates future installs without removing anything already there:
+  retiring a directory never deletes real files, foreign symlinks, or, for
+  global targets, anything at all.
+
 ## [2.0.5] - 2026-08-16
 
 ### Fixed

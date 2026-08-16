@@ -335,8 +335,8 @@ function checkTerminal() {
   return {
     name: "Not running in a terminal",
     status: "warn",
-    detail: "Setup and this check work here; `dotaios interview` still needs a terminal.",
-    fix: "Nothing to do if an assistant is running this. To use `dotaios interview`, run it from a Terminal window yourself."
+    detail: "Setup and this check work here, and so does `dotaios interview` when its answers are passed in rather than typed.",
+    fix: "Nothing to do if an assistant is running this. To update context from here, use `dotaios interview --answers -`."
   };
 }
 
@@ -583,7 +583,7 @@ export async function checkContextFreshness(target, { staleDays = CONTEXT_STALE_
     name: "Context freshness",
     status: "warn",
     detail: `Unchanged for over ${staleDays} days: ${stale.map((file) => `${file.relative} (${file.days} day(s))`).join(", ")}.`,
-    fix: "Tell your agent what changed, or run `npx dotaios@latest interview --review`. The `memory-maintenance` skill retires claims that stopped being true."
+    fix: "Tell your agent what changed, or update it directly with `dotaios interview --answers -`. The `memory-maintenance` skill retires claims that stopped being true."
   };
 }
 
@@ -692,7 +692,7 @@ async function checkAgentBridges(target, homePath, detection = {}, { verbose = f
           name: `${agent.name} bridge`,
           status: "warn",
           detail: `Bridge points at this AIOS folder, but its entrypoint is missing (${entrypoint}).`,
-          fix: `Run \`npx dotaios init${pathOptionFor(target)}\` to restore the missing base files.`
+          fix: `Run \`npx dotaios context --refresh${pathOptionFor(target)}\` to restore the missing entrypoint.`
         });
       } else if (!managedLines.includes(current)) {
         // Ours, and pointing at the right folder, but written by an older

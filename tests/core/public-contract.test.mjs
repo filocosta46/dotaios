@@ -421,3 +421,49 @@ test("shipped skills route working-memory reads through the bounded projection",
     }
   }
 });
+
+// The assistant is told to follow INSTALL.md at a blob URL, so what it reads is
+// the RAW markdown -- list indentation and all. A heredoc only closes on an
+// unindented delimiter, so a `JSON` terminator carrying the three spaces of its
+// surrounding list item never ends the document: setup receives the terminator
+// and everything after it as part of the payload, reports invalid JSON, and
+// creates nothing. That shipped in 2.0.4 and 2.0.5 -- the block rendered fine on
+// github.com, where the indentation is stripped, and failed for every agent that
+// read the source. Assert the property the shell actually enforces.
+test("every heredoc in the docs closes on an unindented delimiter", async () => {
+  const relativeFiles = ["INSTALL.md", "README.md", "docs/friend-setup.md", "docs/getting-started.md"];
+
+  for (const relative of relativeFiles) {
+    let source;
+    try {
+      source = await fs.readFile(path.join(repoRoot, relative), "utf8");
+    } catch {
+      continue;
+    }
+
+    const lines = source.split("\n");
+    for (let index = 0; index < lines.length; index += 1) {
+      const opener = lines[index].match(/<<-?\s*'?([A-Za-z_][A-Za-z0-9_]*)'?/);
+      if (!opener) continue;
+      const delimiter = opener[1];
+      const dash = /<<-/.test(lines[index]);
+
+      const closing = lines.findIndex(
+        (line, at) => at > index && line.trimEnd().trim() === delimiter
+      );
+      assert.notEqual(closing, -1, `${relative}:${index + 1} opens <<${delimiter} with no closing delimiter`);
+
+      const raw = lines[closing];
+      const leading = raw.slice(0, raw.length - raw.trimStart().length);
+      // `<<-` strips leading TABS only, never spaces, so it does not rescue an
+      // indented terminator inside a markdown list.
+      const allowed = dash ? /^\t*$/ : /^$/;
+      assert.match(
+        leading,
+        allowed,
+        `${relative}:${closing + 1} closes <<${delimiter} with ${JSON.stringify(leading)} before it, ` +
+        "so the heredoc never terminates when the raw markdown is run"
+      );
+    }
+  }
+});

@@ -46,17 +46,17 @@ instead of at a shell prompt.
    AIOS folder, which is the whole point, and in this conversation's history
    like anything else they type to an assistant. Pass it through like this:
 
-   ```sh
-   npx dotaios@2.0.5 setup --answers - <<'JSON'
-   {
-     "name": "...",
-     "role": "...",
-     "work": "...",
-     "priorities": "...",
-     "ai_tools": ["claude-code", "codex", "cursor"]
-   }
-   JSON
-   ```
+```sh
+npx dotaios@2.0.5 setup --answers - <<'JSON'
+{
+  "name": "...",
+  "role": "...",
+  "work": "...",
+  "priorities": "...",
+  "ai_tools": ["claude-code", "codex", "cursor"]
+}
+JSON
+```
 
    `--answers <file>` accepts the same JSON if you would rather keep a file,
    but write it somewhere only they can read, such as their home directory
@@ -122,7 +122,8 @@ Setup does not:
 - create a hosted DotAIOS account, background cloud service, or hosted memory.
 
 The documented global bridge files are `~/.claude/CLAUDE.md`,
-`~/.codex/AGENTS.md`, and `~/.gemini/GEMINI.md`. The shared
+`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, and
+`~/.config/opencode/AGENTS.md`. The shared
 `~/.agents/skills` directory serves clients that implement the Agent Skills
 convention. These links expose only skills bundled with the reviewed release;
 setup does not install third-party plugins. Cursor is connected per project. See
@@ -179,8 +180,10 @@ collisions. It does not create `~/aios` or change client configuration or sync.
 When invoked through `npx`, npm may download and cache the named package.
 
 Treat the preview as a gate: inspect any `[would preserve collision]` path
-before continuing, and do not run setup after `[would stop]`. Other entries
-describe changes or safe skips that setup would make.
+before continuing, and do not run setup after `[would stop]` — unless its own
+note tells you to re-run setup, which is the designed recovery for an
+unfinished setup transaction. Other entries describe changes or safe skips
+that setup would make.
 
 ## Run setup
 
@@ -337,8 +340,8 @@ the repository in GitHub and revoke the token in GitHub settings.
 
 Run `npx dotaios@2.0.5 doctor --path <aios-path>` first so you have the exact
 configured paths.
-In `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`, and
-`~/.gemini/GEMINI.md`, remove only content between the
+In `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
+`~/.gemini/GEMINI.md`, and `~/.config/opencode/AGENTS.md`, remove only content between the
 `dotaios-managed:start` and `dotaios-managed:end` markers. In configured skill
 directories, remove only links whose resolved target is inside
 `<aios-path>/skills`;

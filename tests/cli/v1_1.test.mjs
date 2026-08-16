@@ -29,7 +29,7 @@ test("activate skips absent client bridges while keeping native skill projection
   assert.equal(fs.existsSync(path.join(homePath, ".claude", "CLAUDE.md")), false);
   assert.equal(fs.existsSync(path.join(homePath, ".codex", "AGENTS.md")), false);
   assert.equal(fs.existsSync(path.join(homePath, ".claude", "skills")), true);
-  assert.equal(fs.existsSync(path.join(homePath, ".gemini", "antigravity", "skills")), true);
+  assert.equal(fs.existsSync(path.join(homePath, ".gemini", "config", "skills")), true);
   assert.equal(fs.existsSync(path.join(homePath, ".agents", "skills")), true);
   assert.match(result.stdout, /No known AI tools were detected/);
 });
