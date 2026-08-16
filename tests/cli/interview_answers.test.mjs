@@ -160,3 +160,30 @@ test("--review with DOTAIOS_AUTO_APPROVE=1 is reachable now that the throw moved
   assert.equal(result.status, 0, result.stderr);
   assert.match(fs.readFileSync(path.join(target, "context", "priorities.md"), "utf8"), /write the launch post/);
 });
+
+test("the same key twice stops the run here too, not just in init", () => {
+  const { target } = installed();
+
+  // init and setup both refuse a repeated top-level key by name, because
+  // JSON.parse keeps the last one and the earlier answer would vanish without a
+  // word. interview gained the same --answers door but never got the same
+  // guard, so the weaker of two doors writing the same context files silently
+  // accepted what the stronger one rejected.
+  const before = fs.readFileSync(path.join(target, "context", "identity.md"), "utf8");
+
+  const result = interview(target, '{"role":"FIRST","role":"SECOND"}');
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /sets "role" twice/);
+  assert.equal(
+    fs.readFileSync(path.join(target, "context", "identity.md"), "utf8"),
+    before,
+    "a refused payload must not reach disk"
+  );
+
+  // Escapes are how a duplicate hides from a naive scan; keys are compared
+  // decoded, matching init's guarantee.
+  const escaped = interview(target, '{"role":"FIRST","ro\\u006ce":"SECOND"}');
+  assert.notEqual(escaped.status, 0);
+  assert.match(escaped.stderr, /sets "role" twice/);
+});
