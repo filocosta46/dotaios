@@ -5,7 +5,7 @@ import { findManagedBlock } from "../../../core/src/bridges.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithin, isPathWithinLexically, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { readJson, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
-import { assertNoHeading, assertPlainText, SECTION_BODY_CONTROL_CHARACTERS } from "../lib/answers.mjs";
+import { assertNoHeading, assertPlainText, JOURNAL_CONTROL_CHARACTERS, SECTION_BODY_CONTROL_CHARACTERS } from "../lib/answers.mjs";
 
 // Import owns exactly one delimited block per destination file, on the same
 // ownership rule the agent bridges use: one well-formed pair or nothing. A
@@ -167,8 +167,10 @@ async function buildImportPlan(target, vaultPath, imported, sourcePath) {
     // context/identity.md on disk through this path, verbatim, while --answers
     // refused both by name.
     //
-    // A control character is never legitimate in any of these destinations, so
-    // that rule applies to all of them. A heading is different: it is only
+    // A control character is never legitimate in any markdown destination, so
+    // that rule applies to all of them here — the signal and event journals are
+    // not markdown and do not pass through this function; journalText covers
+    // them. A heading is different: it is only
     // harmful where something later reads the file back by section, which is
     // the four context files. docs/context-import.md documents projects and
     // wiki entries as whole markdown documents whose content opens with `# `,
@@ -219,10 +221,10 @@ async function buildImportPlan(target, vaultPath, imported, sourcePath) {
     const ts = signal.ts || importedAt;
     plan.push(jsonlAppend(path.join(target, "memory", "signals", `${date}.jsonl`), {
       ts,
-      type: signal.type || "imported-signal",
+      type: journalText(signal.type, "imported-signal", `imported signal "type"`),
       project: signal.project || null,
       domain: signal.domain || null,
-      summary: signal.summary || signal.content || "",
+      summary: journalText(signal.summary || signal.content, "", `imported signal "summary"`),
       source: signal.source || sourcePath
     }, "memory/signals"));
   }
@@ -230,10 +232,10 @@ async function buildImportPlan(target, vaultPath, imported, sourcePath) {
   for (const event of asArray(imported.events)) {
     plan.push(eventAppend(path.join(target, "memory", "events.jsonl"), {
       ts: event.ts || importedAt,
-      type: event.type || "import",
+      type: journalText(event.type, "import", `imported event "type"`),
       project: event.project || null,
       domain: event.domain || null,
-      summary: event.summary || event.content || "",
+      summary: journalText(event.summary || event.content, "", `imported event "summary"`),
       source: event.source || sourcePath
     }, "memory/events"));
   }
@@ -423,6 +425,26 @@ function safeSlug(value, label) {
 // anything that is not one is refused rather than coerced, so a malformed
 // export fails loudly instead of filing itself somewhere quiet.
 const SIGNAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+// The markdown rules run inside addSection, so they never covered the two
+// destinations this command writes that are not markdown. A signal and an
+// event carry free text too, and it does not stay in the file: `dotaios brief`
+// renders both into the projection every agent is told to read at session
+// start, one line each. A bidi override, a bare carriage return and a raw ANSI
+// escape all reached that output — the carriage return being the character the
+// answers rule singles out as the sharpest case, because it can make a line
+// print as something it does not say.
+//
+// A JSONL record is one line by construction, so a newline is refused here
+// rather than kept the way a section body keeps it.
+function journalText(value, fallback, subject) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string") {
+    throw new Error(`${subject} must be a string, received ${typeof value}.`);
+  }
+  assertPlainText(value, subject, JOURNAL_CONTROL_CHARACTERS);
+  return value;
+}
 
 function signalDate(ts, importedAt) {
   if (ts === undefined || ts === null || ts === "") return importedAt.slice(0, 10);

@@ -322,6 +322,11 @@ export function assertPlainText(text, subject, pattern) {
 // its line breaks and tabs for the same reason work and priorities do.
 export const SECTION_BODY_CONTROL_CHARACTERS = CONTROL_CHARACTERS_EXCEPT_NEWLINE_AND_TAB;
 
+// A JSONL record is one line by construction, so unlike a section body it
+// keeps neither newlines nor tabs. `dotaios import` uses this for the signal
+// and event text it appends.
+export const JOURNAL_CONTROL_CHARACTERS = CONTROL_CHARACTERS;
+
 // JSON.parse collapses {"name":"a","name":"b"} to "b" before Object.entries can
 // see it, so the two-spellings guard above — written because one answer
 // silently winning by key order was judged unacceptable — never fires on the
