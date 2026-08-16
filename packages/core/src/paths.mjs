@@ -32,8 +32,25 @@ export function expandHome(value) {
   return path.join(os.homedir(), value.slice(1));
 }
 
+// aios.json is a portable record, so vault_path is allowed to be `~/…` or a
+// path relative to the folder that declares it. This returned it verbatim, and
+// every caller then treated it as if it were already resolved. Two consequences,
+// both found by attacking `dotaios import`:
+//
+//   "../vault"  resolved against the process CWD, so the same folder and the
+//               same import file wrote to two different places depending on
+//               where the command was run — and a containment check comparing
+//               that value against an equally unresolved root is a tautology.
+//   "~/vault"   was never expanded, so a literal `~` directory appeared under
+//               the CWD and the vault the user asked for was never touched.
+//
+// Relative means relative to the AIOS folder, which is the only root that
+// travels with the record. An absolute path is returned unchanged, because
+// path.resolve stops at the first absolute segment.
 export function resolveVaultPath(config, aiosPath = defaultAiosPath()) {
-  return config?.vault_path || path.join(aiosPath, "vault");
+  const configured = config?.vault_path;
+  if (!configured) return path.join(aiosPath, "vault");
+  return path.resolve(expandHome(aiosPath), expandHome(configured));
 }
 
 /** Return whether a lexical candidate path is contained by a lexical root. */

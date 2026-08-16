@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { appendEventRecord, formatJsonlEntry } from "../../../core/src/memory.mjs";
 import { findManagedBlock } from "../../../core/src/bridges.mjs";
-import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically, resolveVaultPath } from "../../../core/src/paths.mjs";
+import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithin, isPathWithinLexically, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { readJson, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { assertNoHeading, assertPlainText, SECTION_BODY_CONTROL_CHARACTERS } from "../lib/answers.mjs";
@@ -42,7 +42,7 @@ export async function importCommand(args) {
   const sourcePath = path.resolve(expandHome(sourceFile));
   const imported = await readImportFile(sourcePath);
   const config = await readJson(path.join(target, "aios.json"), {});
-  const plan = buildImportPlan(target, resolveVaultPath(config, target), imported, sourcePath);
+  const plan = await buildImportPlan(target, resolveVaultPath(config, target), imported, sourcePath);
   const sensitive = plan.filter((item) => sensitivePattern.test(item.content));
 
   // Resolve every destination against what is already on disk, so the preview
@@ -148,7 +148,7 @@ async function readImportFile(sourcePath) {
   }
 }
 
-function buildImportPlan(target, vaultPath, imported, sourcePath) {
+async function buildImportPlan(target, vaultPath, imported, sourcePath) {
   const plan = [];
   const importedAt = new Date().toISOString();
   // One destination file holds one managed block, so every section bound for
@@ -243,7 +243,7 @@ function buildImportPlan(target, vaultPath, imported, sourcePath) {
   }
 
   for (const item of plan) {
-    assertContained(item.path, [target, vaultPath]);
+    await assertContained(item.path, [target, vaultPath]);
   }
 
   return plan;
@@ -448,10 +448,27 @@ function signalDate(ts, importedAt) {
 // this asks the same question the rest of the product asks rather than a second
 // one that can drift from it. The vault is a separate root because vault_path
 // may legitimately point outside the AIOS folder.
-function assertContained(destination, roots) {
-  if (roots.some((root) => isPathWithinLexically(root, destination))) return;
+// Lexical containment answers "does this path spell its way out", which is the
+// `../../../x` case. It does not answer "does this path lead out", and three of
+// four planted-symlink routes walked straight through it: a `memory/signals`
+// directory symlink, a `memory/events.jsonl` file symlink, and a
+// `projects/<slug>` directory symlink all wrote outside the folder while the
+// plan printed the in-folder path.
+//
+// That last part is why this is resolved with the async check rather than left
+// as a known limit. The argument for treating the original traversal as a real
+// defect was that the preview named the destination; a preview that names a
+// path the bytes do not go to is worse than one that names an alarming path.
+// init.mjs already runs exactly this lexical-then-symlink pair for
+// --vault-path, so the untrusted door now asks the same question the trusted
+// one does.
+async function assertContained(destination, roots) {
+  for (const root of roots) {
+    if (isPathWithinLexically(root, destination) && await isPathWithin(root, destination)) return;
+  }
   throw new Error(
-    `Import refused: ${path.resolve(destination)} is outside the AIOS folder. ` +
+    `Import refused: ${path.resolve(destination)} is outside the AIOS folder, ` +
+      "or a symlink on the way there leads outside it. " +
       "An import may only write inside the folder it was pointed at and its vault."
   );
 }

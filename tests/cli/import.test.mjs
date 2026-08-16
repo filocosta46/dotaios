@@ -391,3 +391,68 @@ test("a project or wiki document may open with a heading, because the format say
   assert.match(await fs.readFile(path.join(aiosPath, "projects", "acme", "README.md"), "utf8"), /Shipping\./);
   assert.match(await fs.readFile(path.join(root, "aios", "vault", "wiki", "pricing", "_index.md"), "utf8"), /Three\./);
 });
+
+test("a symlink on the way to a destination cannot carry the write outside", async () => {
+  const { root, aiosPath, sourcePath } = await setupContextImport("symlink-escape");
+
+  // Lexical containment answers "does this path spell its way out". It does not
+  // answer "does this path lead out". A planted memory/signals directory
+  // symlink walked straight through the first version of this guard, and the
+  // plan printed the in-folder path while the bytes landed outside — a preview
+  // naming a path the write does not go to is worse than one naming an
+  // alarming path, which was the whole argument for treating the original
+  // traversal as real.
+  const outside = path.join(root, "OUTSIDE");
+  await fs.mkdir(outside, { recursive: true });
+  await fs.mkdir(path.join(aiosPath, "memory"), { recursive: true });
+  await fs.symlink(outside, path.join(aiosPath, "memory", "signals"));
+
+  await fs.writeFile(
+    sourcePath,
+    `${JSON.stringify({ signals: [{ ts: "2026-08-16", summary: "ESCAPED" }] })}\n`
+  );
+
+  await assert.rejects(
+    () => runQuietly([sourcePath, "--apply", "--path", aiosPath]),
+    /symlink on the way there leads outside it/
+  );
+
+  assert.deepEqual(await fs.readdir(outside), [], "nothing may be written through the symlink");
+});
+
+test("a relative vault_path resolves against the AIOS folder, not the working directory", async () => {
+  const { root, aiosPath, sourcePath } = await setupContextImport("relative-vault");
+
+  // aios.json is a portable record, so a relative vault_path is legitimate.
+  // resolveVaultPath returned it verbatim, so it resolved against process.cwd()
+  // — the same folder and the same import file wrote to two different places
+  // depending on where the command was run, and a containment check comparing
+  // two equally unresolved paths was a tautology.
+  await fs.writeFile(
+    path.join(aiosPath, "aios.json"),
+    `${JSON.stringify({ vault_path: "../relvault" })}\n`
+  );
+  await fs.writeFile(
+    sourcePath,
+    `${JSON.stringify({ wiki: [{ topic: "pricing", content: "# Pricing\n\nThree tiers." }] })}\n`
+  );
+
+  const expected = path.join(root, "relvault", "wiki", "pricing", "_index.md");
+  const cwd = process.cwd();
+  const elsewhere = path.join(root, "elsewhere", "deep");
+  await fs.mkdir(elsewhere, { recursive: true });
+
+  try {
+    process.chdir(elsewhere);
+    await runQuietly([sourcePath, "--apply", "--path", aiosPath]);
+  } finally {
+    process.chdir(cwd);
+  }
+
+  assert.match(await fs.readFile(expected, "utf8"), /Three tiers\./);
+  assert.equal(
+    await fs.access(path.join(elsewhere, "..", "relvault")).then(() => true, () => false),
+    false,
+    "the vault must not be created next to whatever directory the command ran in"
+  );
+});
