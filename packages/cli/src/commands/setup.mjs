@@ -317,7 +317,20 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log("     Opening the AIOS folder itself may let the app read its router before your first prompt.");
   console.log('  3. Ask: "Use my memory. Read my context and tell me what I am working on."');
   console.log('  4. Choose "Only this project" only inside that registered checkout; "Private chat" works anywhere.');
-  console.log("  5. Update context any time: dotaios interview --review");
+  // `dotaios interview` throws without a TTY (interview.mjs), so on a piped run
+  // this line named the one command the caller who just succeeded cannot run.
+  // That caller is the assistant the whole --answers path exists for, and the
+  // install it just finished is the one INSTALL.md promises a person can get
+  // without opening a terminal — telling them to open one on the next line is
+  // the promise being withdrawn a step later. The files are plain Markdown and
+  // editing them is a first-class route, not a workaround, so say that instead
+  // of naming a command that will fail.
+  if (process.stdin.isTTY) {
+    console.log("  5. Update context any time: dotaios interview --review");
+  } else {
+    console.log(`  5. Update context any time by editing the Markdown in ${displayHomePath(path.join(aiosPath, "context"), os.homedir())},`);
+    console.log("     or run `dotaios interview --review` from a terminal for a guided pass.");
+  }
 
   // Reveal last so optional prompts retain terminal focus.
   // Step 3: reveal (best-effort, never blocks)

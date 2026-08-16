@@ -508,3 +508,42 @@ test("an answer that merely contains an invisible character still installs", () 
   assert.equal(result.status, 0, result.stderr);
   assert.match(fs.readFileSync(path.join(target, "context", "identity.md"), "utf8"), /- Role: Founder/);
 });
+
+test("a piped setup does not close by naming a command that needs a terminal", () => {
+  const { root, target } = workspace();
+
+  // This is the run --answers exists for: an assistant, through a pipe. Setup
+  // used to finish it by printing "Update context any time: dotaios interview
+  // --review", and interview throws without a TTY. The install INSTALL.md
+  // promises a person can get without opening a terminal ended by telling them
+  // to open one, and the caller who would have run it is the assistant that
+  // just succeeded.
+  const processHome = path.join(root, "process-home");
+  const home = path.join(root, "home");
+  fs.mkdirSync(processHome, { recursive: true });
+  fs.mkdirSync(home, { recursive: true });
+
+  const result = spawnSync(
+    process.execPath,
+    [cli, "setup", "--path", target, "--home", home, "--skip-reveal", "--answers", "-"],
+    {
+      cwd: repoRoot,
+      encoding: "utf8",
+      input: JSON.stringify(ANSWERS),
+      // PATH is trimmed for the same reason setup_recovery.test.mjs trims it:
+      // resolveLightpanda falls back to `which lightpanda`.
+      env: { ...process.env, HOME: processHome, PATH: "/usr/bin:/bin" }
+    }
+  );
+
+  assert.equal(result.status, 0, result.stderr);
+
+  const step5 = result.stdout.split("\n").filter((line) => line.trimStart().startsWith("5."));
+  assert.equal(step5.length, 1, `expected exactly one step 5, got:\n${result.stdout}`);
+  assert.doesNotMatch(
+    step5[0],
+    /^\s*5\.\s*Update context any time: dotaios interview --review\s*$/,
+    "a piped run must not be told to run the one command it cannot run"
+  );
+  assert.match(step5[0], /editing the Markdown/, "the route that works from a pipe is the one to name first");
+});
