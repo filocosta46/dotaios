@@ -32,6 +32,13 @@ The project source code remains in its own repository with its own Git history.
 > Prefer letting the assistant open the folder directly. Use
 > `dotaios project add` for the portable project record.
 
+### Legacy reference
+
+Everything from here to the end of this section documents the deprecated
+commands as they behave today. It is kept so anyone already depending on them
+has an accurate reference — it is **not** current guidance, and a new setup
+should not follow it.
+
 A project may declare the meaning of a local folder without putting its path or
 contents into the portable AIOS. Source declarations live beneath the owning
 project at `projects/<slug>/sources/<source-id>.md`; the absolute binding,
