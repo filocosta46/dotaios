@@ -92,6 +92,18 @@ refuses instead of truncating when any independent bound is exceeded. The
 machine-local append-only receipt line must itself fit within 32,000 UTF-8
 bytes; if receipt publication cannot complete, DotAIOS withholds the result.
 
+The character bound is the one that binds first, so read the 256-file figure as
+a ceiling rather than a capacity. Every reference spends part of the same 32,000
+characters on its path, size, and timestamps, so a flat folder of ordinary files
+refuses at roughly 110 to 130 references — measured at 127 for very short names
+and 112 for names like `Proposta lampade Acme 2026 - rev 12.key`. Longer names
+and deeper paths lower it further. The receipt bound is what makes this
+structural: a receipt records every reference it returns, so a retrieval cannot
+return more files than one receipt line can record.
+
+Connecting a folder is not subject to any of this. A folder of any size connects
+and grants normally; the bounds apply only to what a single retrieval returns.
+
 For search, `--project` selects the portable project corpus by slug or stable
 ID. `--session-project` filters session tags only. Older commands that used
 `--project` as a session attribution filter should migrate to
