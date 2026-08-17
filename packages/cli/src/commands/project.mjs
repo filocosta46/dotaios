@@ -21,12 +21,11 @@ const HELP_TEXT = `Usage:
   dotaios project resolve <slug-or-id> [options]
   dotaios project doctor [options]
   dotaios project context <slug-or-id> [options]
-  dotaios project source add <project> <folder> [options]
-  dotaios project source bind <project> <source-id> <folder> [options]
-  dotaios project source grant <project> <source-id> [options]
-  dotaios project source revoke <project> <source-id> [options]
-  dotaios project source retrieve [project] --task <text>
-  dotaios project source connect <project> <folder> [options]
+
+Deprecated: \`dotaios project source ...\` still runs but is no longer part of
+the supported surface. It lists file metadata only — never contents — for at
+most ~110-120 files, and every connected assistant already reads folders
+natively. See docs/projects.md.
 
 Keep portable project metadata under projects/<slug>/README.md. Existing
 external repositories stay where they are; restored repositories use the

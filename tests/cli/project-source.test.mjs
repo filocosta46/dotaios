@@ -120,9 +120,26 @@ test("advanced grant and revoke output separates portable and machine-local auth
   });
 });
 
-test("project-source help is reachable at every nested boundary and explains search selectors", () => {
+test("the parent help retires project source while its own help stays complete", () => {
+  // `dotaios project --help` no longer enumerates these: the surface is
+  // deprecated (see docs/projects.md). It must still say so out loud rather
+  // than removing them silently, so the author of an existing script finds out
+  // from the tool instead of from a failure.
+  const parent = runCli(["project", "--help"]);
+  assert.equal(parent.status, 0, parent.stderr || parent.stdout);
+  assert.match(parent.stdout, /Deprecated: `dotaios project source \.\.\.`/);
+  assert.match(parent.stdout, /docs\/projects\.md/);
+  for (const subcommand of ["add", "bind", "grant", "revoke", "retrieve", "connect"]) {
+    assert.doesNotMatch(
+      parent.stdout,
+      new RegExp(`project source ${subcommand}\\b`),
+      `project --help must not advertise the retired \`source ${subcommand}\``
+    );
+  }
+
+  // Deprecated is not removed. Anyone already depending on these still gets a
+  // complete, accurate reference at the command's own boundary.
   for (const args of [
-    ["project", "--help"],
     ["project", "source", "--help"],
     ["project", "source", "grant", "--help"],
   ]) {

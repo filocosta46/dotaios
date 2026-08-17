@@ -4,6 +4,18 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Deprecated
+- `dotaios project source ...` is no longer part of the supported surface. It
+  still runs and nothing that already works stops working, but it is gone from
+  `dotaios project --help` and the docs now say why. Three measured reasons: it
+  returns file metadata only and never contents, so it is an `ls -lR` behind a
+  consent ledger over folders every connected assistant already reads natively;
+  its real ceiling is roughly 110-120 files with ordinary filenames, past which
+  a folder connects successfully, issues a grant, and then refuses every
+  retrieval forever; and the append-only receipt ledger it exists to protect
+  exports no read, list, or query function, so the audit trail cannot be
+  audited. To reach a folder, tell the assistant where it is.
+
 ## [2.0.8] - 2026-08-17
 
 Thanks to Roberto Tomada, who ran a genuinely clean first install on a Mac that

@@ -14,6 +14,24 @@ The project source code remains in its own repository with its own Git history.
 
 ## Retrieve references from a local project source
 
+> **Deprecated.** `dotaios project source ...` still runs, and nothing that
+> already works stops working, but it is no longer part of the supported
+> surface and will not receive further development.
+>
+> Three measured reasons. It returns **file metadata only, never contents** —
+> the read budget is created with `maxBytes: 0` — so it is an `ls -lR` behind a
+> consent ledger, over folders every connected assistant already reads
+> natively and without a ceiling. That ceiling is roughly **110-120 files**
+> with realistic filenames: a larger folder connects successfully, issues a
+> grant, and then refuses every retrieval, because three independent bounds
+> (`MAX_FILES`, `MAX_RESULT_CHARACTERS`, and the 32,000-byte receipt) all bind
+> before it. And the append-only receipt ledger it exists to protect has **no
+> reader**: no `read`, `list`, or `query` function is exported anywhere, and no
+> command surfaces one, so the audit trail cannot be audited.
+>
+> Prefer letting the assistant open the folder directly. Use
+> `dotaios project add` for the portable project record.
+
 A project may declare the meaning of a local folder without putting its path or
 contents into the portable AIOS. Source declarations live beneath the owning
 project at `projects/<slug>/sources/<source-id>.md`; the absolute binding,
