@@ -60,9 +60,12 @@ dotaios project source connect acme-campaign /path/to/assets \
   --source-id campaign-assets \
   --label "Campaign assets" \
   --purpose "Launch campaign assets" \
-  --expires-at 2099-01-01T00:00:00.000Z \
   --json
 ```
+
+Read access does not expire unless you ask it to. Pass `--expires-at <UTC>` to
+set an end date; leave it out and the grant runs until `2099-01-01T00:00:00.000Z`.
+The lower-level `grant` command still requires the value explicitly.
 
 The preview writes nothing and names the project, source, read scope, exact
 purpose, approval timing, and UTC expiry. Re-run the same values with `--yes`
