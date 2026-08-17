@@ -92,14 +92,31 @@ refuses instead of truncating when any independent bound is exceeded. The
 machine-local append-only receipt line must itself fit within 32,000 UTF-8
 bytes; if receipt publication cannot complete, DotAIOS withholds the result.
 
-The character bound is the one that binds first, so read the 256-file figure as
-a ceiling rather than a capacity. Every reference spends part of the same 32,000
-characters on its path, size, and timestamps, so a flat folder of ordinary files
-refuses at roughly 110 to 130 references — measured at 127 for very short names
-and 112 for names like `Proposta lampade Acme 2026 - rev 12.key`. Longer names
-and deeper paths lower it further. The receipt bound is what makes this
-structural: a receipt records every reference it returns, so a retrieval cannot
-return more files than one receipt line can record.
+Read the 256-file figure as a ceiling rather than a capacity: a retrieval
+refuses on size long before it reaches 256 files. The two 32,000 limits above
+are independent and measure different things — the serialized result is capped
+at 32,000 characters, while the receipt line is capped at 32,000 UTF-8 bytes —
+and the receipt is the tighter of the two. It carries every reference the result
+carries plus the task, grant, and identity fields, and it is counted in bytes,
+so non-ASCII names cost more there than they do in the result.
+
+Measured on this tree, connecting one flat folder and retrieving once per file
+count, the last accepted retrieval was:
+
+| Filenames | Files | Result characters | Receipt bytes |
+|---|---|---|---|
+| `Proposta lampade Acme 2026 - rev 12.key` | 112 | 31,349 | 31,734 |
+| `a1.key` | 127 | 31,470 | 31,855 |
+
+In both cases the next file refuses, and in both the receipt is the bound that
+runs out first. Names outside ASCII reach it sooner: 90 files named
+`Presentazione café 90 🚀.key` already spend 24,886 receipt bytes against 24,231
+result characters. Deeper paths lower every one of these numbers.
+
+This is why the ceiling is structural rather than a tunable. A receipt records
+every reference it returns, so a retrieval can never return more files than one
+receipt line can hold, and that line is re-validated against the ledger on every
+append.
 
 Connecting a folder is not subject to any of this. A folder of any size connects
 and grants normally; the bounds apply only to what a single retrieval returns.
