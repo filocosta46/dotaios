@@ -23,7 +23,7 @@ Open a local agent that can run commands and paste:
 > Please set up DotAIOS on my computer: https://github.com/filocosta46/dotaios
 
 That is the whole message. The agent reading that page is pointed at
-[INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.7/INSTALL.md),
+[INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.8/INSTALL.md),
 which asks it to preview every change first, ask you only about the choices it
 cannot make on your behalf, and verify the result before it says it is done.
 
@@ -31,7 +31,7 @@ The agent should then run the pinned preview below. If you are recovering
 manually, run it yourself:
 
 ```sh
-npx dotaios@2.0.7 setup --dry-run
+npx dotaios@2.0.8 setup --dry-run
 ```
 
 npm may ask to download the pinned package. The DotAIOS preview itself does not
@@ -43,17 +43,16 @@ Want to inspect the package first? Follow the provenance checks in
 
 ## 2. Approve the preview and set up
 
-The agent should ask the same four questions from INSTALL.md's assistant
+The agent should ask the same three questions from INSTALL.md's assistant
 section, one at a time in the conversation, then pipe the answers straight
 into setup so no answers file is left behind:
 
 ```sh
-npx dotaios@2.0.7 setup --answers - <<'JSON'
+npx dotaios@2.0.8 setup --answers - <<'JSON'
 {
   "name": "...",
   "role": "...",
-  "work": "...",
-  "priorities": "..."
+  "work": "..."
 }
 JSON
 ```
@@ -62,7 +61,7 @@ If you are recovering manually, run it yourself and answer the short
 questions at the terminal prompt:
 
 ```sh
-npx dotaios@2.0.7 setup
+npx dotaios@2.0.8 setup
 ```
 
 Existing unmanaged files are preserved. Private sync, daily scheduling,
@@ -72,8 +71,8 @@ default to No.
 ## 3. Verify
 
 ```sh
-npx dotaios@2.0.7 doctor
-npx dotaios@2.0.7 skills doctor
+npx dotaios@2.0.8 doctor
+npx dotaios@2.0.8 skills doctor
 ```
 
 Then start a connected local agent from your usual folder or an attached
@@ -100,7 +99,7 @@ managed configuration.
 ## If setup stops
 
 - Existing `~/aios`: do not delete it. Run
-  `npx dotaios@2.0.7 doctor` and inspect the folder.
+  `npx dotaios@2.0.8 doctor` and inspect the folder.
 - Existing AI-tool instructions: DotAIOS preserves them. Read the reported
   collision before deciding whether to change anything.
 - `npx: command not found`: install the Node.js LTS release from

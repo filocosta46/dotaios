@@ -4,6 +4,39 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.8] - 2026-08-17
+
+Thanks to Roberto Tomada, who ran a genuinely clean first install on a Mac that
+had never seen DotAIOS and reported both of these from the other side of it
+(#94, #95).
+
+### Fixed
+- The assistant now finishes an install by telling you what you can do, not
+  what it did. It used to close with file paths, version numbers, shell
+  profiles and "not running in a terminal" — its own plumbing, explained to
+  someone who asked for none of it. It now leaves you with three things: where
+  your folder is, what is in it because you said so, and one thing to try next
+  (#94).
+- A `doctor` warning about an app you do not have is no longer handed to you as
+  a task. Setup creates `~/.gemini/config/skills`, which creates `~/.gemini`,
+  which is exactly how Gemini is detected — so the check could tell someone
+  they had software they never installed. The assistant now offers a named fix
+  only when the thing it names is actually there. The detection rule itself is
+  still wrong and is a separate change (#94).
+- The line you paste is one short sentence again, with a link that cannot go
+  stale: `Please set up DotAIOS on my computer:
+  https://github.com/filocosta46/dotaios`. It had become a versioned deep link
+  into a file path — a developer artefact handed to the person least likely to
+  tolerate one, and it pinned anyone who saved it to that release forever. The
+  pin moved into the page, where each release keeps it current, so an assistant
+  still reads instructions that match the package it installs (#95).
+- The install no longer asks what matters most this week. People answered it
+  with the sentence they had just given for what they are working on, so asking
+  read as not having listened — and it was the one answer with an expiry
+  written into it: "this week", landing in a file this product promises is
+  durable, that nothing ever came back to refresh. Three questions instead of
+  four. `dotaios interview` still asks it, at a moment you choose.
+
 ## [2.0.7] - 2026-08-17
 
 ### Fixed
