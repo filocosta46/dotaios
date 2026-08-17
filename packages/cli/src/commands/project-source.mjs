@@ -7,7 +7,8 @@ import {
   connectProjectSource,
   grantProjectSource,
   revokeProjectSource,
-  retrieveProjectSource
+  retrieveProjectSource,
+  resolveProjectSourceLocation
 } from "../../../core/src/project-sources.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -16,6 +17,7 @@ const HELP_TEXT = `Usage:
   dotaios project source bind <project> <source-id> <folder>
   dotaios project source grant <project> <source-id> --purpose <purpose> --expires-at <UTC>
   dotaios project source revoke <project> <source-id> --grant-id <id>
+  dotaios project source locate [project] --task <text>
   dotaios project source retrieve [project] --task <text>
   dotaios project source connect <project> <folder> --source-id <id> --label <label> --purpose <purpose> --expires-at <UTC> [--yes]
 
@@ -68,6 +70,7 @@ async function dispatchSourceCommand(parsed, common) {
   if (parsed.subcommand === "bind") return runBind(parsed, common);
   if (parsed.subcommand === "grant") return runGrant(parsed, common);
   if (parsed.subcommand === "revoke") return runRevoke(parsed, common);
+  if (parsed.subcommand === "locate") return runLocate(parsed, common);
   if (parsed.subcommand === "retrieve") return runRetrieve(parsed, common);
   if (parsed.subcommand === "connect") return runConnect(parsed, common);
   throw new Error(`Unknown project source subcommand: ${parsed.subcommand || "(missing)"}.`);
@@ -127,6 +130,24 @@ function runRevoke(parsed, common) {
     projectSelector: parsed.positionals[0],
     sourceId: parsed.positionals[1],
     grantId: parsed.grantId
+  });
+}
+
+function runLocate(parsed, common) {
+  rejectYes(parsed);
+  if (parsed.positionals.length > 1) {
+    throw new Error("Usage: dotaios project source locate [project] --task <text>");
+  }
+  requireOption(parsed.task, "--task");
+  rejectOptions(parsed, ["sourceId", "label", "purpose", "expiresAt", "grantId"]);
+  if (parsed.apply || parsed.operationId || parsed.planFingerprint) {
+    throw new Error("Locate cannot authorize or apply project source consent.");
+  }
+  return resolveProjectSourceLocation({
+    ...common,
+    apply: false,
+    projectSelector: parsed.positionals[0],
+    task: parsed.task
   });
 }
 
@@ -280,6 +301,17 @@ function safeCliErrorMessage(error) {
 
 function printResult(output, result) {
   if (result.decision === "allowed") {
+    // A located folder is the whole answer: the reader opens it with its own
+    // file tools, so printing a listing here would recreate the ceiling this
+    // command exists to remove.
+    if (result.root_path) {
+      output.log(`${result.label} (${result.project}/${result.source_id})`);
+      output.log(`Folder: ${result.root_path}`);
+      if (result.purpose) output.log(`For: ${result.purpose}`);
+      output.log("Open it directly — read only what the task needs.");
+      output.log(`Receipt: ${result.receipt_id}`);
+      return;
+    }
     output.log(`Retrieved ${result.references.length} reference(s) for ${result.project}/${result.source_id}.`);
     for (const reference of result.references) output.log(`  ${reference.path}`);
     output.log(`Receipt: ${result.receipt_id}`);

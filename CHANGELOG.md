@@ -4,6 +4,21 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- `dotaios project source locate` answers "where is that folder?" instead of
+  "what is in it?", so a connected folder can be reached at any size. Retrieval
+  records every reference it returns in one 32,000-byte receipt line, so it can
+  never return more files than that line holds — about 110-120 ordinary names —
+  and past that a folder that connected successfully refused every retrieval
+  forever. `locate` resolves the connection and stops: same project routing,
+  same grant, same refusals, no listing. It costs the same for four files as for
+  forty thousand (measured: a 7,000-file nested folder resolves in 0.13s, where
+  retrieval refuses at a few hundred). The assistant then opens the folder with
+  its own file tools and reads only what the task needs, so nothing spends
+  tokens on files nobody asked for. The receipt carries no references, which is
+  the shape a refusal already writes, so the closed receipt schema is unchanged
+  and older versions keep reading the ledger.
+
 ## [2.0.8] - 2026-08-17
 
 Thanks to Roberto Tomada, who ran a genuinely clean first install on a Mac that

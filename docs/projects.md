@@ -12,6 +12,38 @@ For each project, three things are stored separately:
 
 The project source code remains in its own repository with its own Git history.
 
+## Reach a connected folder
+
+Connect a folder once, then let the assistant open it:
+
+```bash
+dotaios project source locate acme-campaign --task "the campaign assets for that client"
+```
+
+It answers with the folder, not its contents:
+
+```
+Campaign assets (acme-campaign/campaign-assets)
+Folder: /Users/you/Clients/Acme/assets
+For: Launch campaign assets
+Open it directly — read only what the task needs.
+Receipt: rcpt-...
+```
+
+That is the whole handoff. The assistant already reads local folders natively,
+so once it knows where the folder is it opens only the files the task needs,
+and nothing spends tokens on files nobody asked for.
+
+`locate` costs the same whether the folder holds four files or forty thousand:
+it resolves the connection and stops, so **no folder is too large**. The
+`--task` text routes between your connected folders by matching their label and
+purpose, exactly as retrieval does. Consent is unchanged — an ungranted or
+revoked source refuses, and a refusal never names the folder.
+
+Use `retrieve` below only when you specifically want a recorded listing of file
+metadata. It is bounded, and on any sizeable folder it refuses; see the bounds
+section for why that ceiling is structural.
+
 ## Retrieve references from a local project source
 
 A project may declare the meaning of a local folder without putting its path or
