@@ -33,7 +33,7 @@ commands, and paste:
 
 Nothing else to copy, and nothing to keep up to date — that link is the same
 next year. If you are the assistant reading this page, the instructions are in
-[INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.7/INSTALL.md),
+[INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.8/INSTALL.md),
 under “If an AI assistant is helping you”. Follow that file rather than this
 one: it is pinned to the release you are about to install, so the steps and the
 package always match.
@@ -54,8 +54,8 @@ the second runs the same pinned release:
 npm may download and cache the named package.
 
 ```sh
-npx dotaios@2.0.7 setup --dry-run
-npx dotaios@2.0.7 setup
+npx dotaios@2.0.8 setup --dry-run
+npx dotaios@2.0.8 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
@@ -63,7 +63,7 @@ Setup creates `~/aios`, then connects supported AI apps detected on the machine.
 Afterward, either you or the assistant can verify the local installation with:
 
 ```sh
-npx dotaios@2.0.7 doctor
+npx dotaios@2.0.8 doctor
 ```
 
 ## Choose what your AI can remember
@@ -110,14 +110,14 @@ inspectable.
 
 ### Verify before running
 
-The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `2.0.7` maps to Git tag [`v2.0.7`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.7).
+The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `2.0.8` maps to Git tag [`v2.0.8`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.8).
 
 These commands inspect registry provenance and packaged contents without running DotAIOS setup:
 
 ```sh
-npm view dotaios@2.0.7 version dist.integrity dist.tarball gitHead _npmUser.name
-npm view dotaios@2.0.7 scripts
-npm pack dotaios@2.0.7 --dry-run
+npm view dotaios@2.0.8 version dist.integrity dist.tarball gitHead _npmUser.name
+npm view dotaios@2.0.8 scripts
+npm pack dotaios@2.0.8 --dry-run
 ```
 
 Those three commands show you the registry publisher (`_npmUser.name`), the integrity record, and every file in the package before anything runs. The package defines no `preinstall`, `install`, or `postinstall` script, so nothing executes until you invoke the CLI yourself. The commands above omit `npx -y` on purpose, so npm still asks you to confirm the pinned package — approve it once what you see matches what you expect. Interactive setup then offers private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every one of them defaults to No. [INSTALL.md](INSTALL.md) has the full sequence and [the security model](docs/security.md) has the package and permission boundaries.

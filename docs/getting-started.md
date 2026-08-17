@@ -8,8 +8,8 @@ DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of i
 > previewing every change and leaving the meaningful choices to you.
 
 ```bash
-npx dotaios@2.0.7 setup --dry-run
-npx dotaios@2.0.7 setup
+npx dotaios@2.0.8 setup --dry-run
+npx dotaios@2.0.8 setup
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
@@ -86,7 +86,7 @@ After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Curs
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
 
 ```bash
-npx dotaios@2.0.7 init --vault-path ~/my-vault
+npx dotaios@2.0.8 init --vault-path ~/my-vault
 ```
 
 Check setup health:
