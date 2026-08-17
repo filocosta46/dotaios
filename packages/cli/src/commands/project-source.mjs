@@ -12,12 +12,16 @@ import {
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const HELP_TEXT = `Usage:
+  dotaios project source connect <project> <folder> --source-id <id> --label <label> --purpose <purpose> --expires-at <UTC> [--yes]
+  dotaios project source retrieve [project] --task <text>
+
+Connect wires a folder and its read grant in one confirmed operation. Prefer it.
+
+Lower-level steps, for repairing or auditing a connection one piece at a time:
   dotaios project source add <project> <folder> --source-id <id> --label <label> --purpose <purpose>
   dotaios project source bind <project> <source-id> <folder>
   dotaios project source grant <project> <source-id> --purpose <purpose> --expires-at <UTC>
   dotaios project source revoke <project> <source-id> --grant-id <id>
-  dotaios project source retrieve [project] --task <text>
-  dotaios project source connect <project> <folder> --source-id <id> --label <label> --purpose <purpose> --expires-at <UTC> [--yes]
 
 Source add, bind, grant, and revoke preview by default. Apply an exact preview with:
   --operation-id <id> --plan-fingerprint <sha256> --apply
