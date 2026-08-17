@@ -405,6 +405,21 @@ function sourceRevokeArgs(fixture, grantId, proof = null) {
   ];
 }
 
+test("the lower-level grant no longer demands a deadline either", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    applySourceDeclaration(fixture);
+    const preview = runJson(withoutExpiry(sourceGrantArgs(fixture)));
+    assert.equal(preview.applied, false);
+    assert.equal(preview.expires_at, "2099-01-01T00:00:00.000Z");
+    const applied = runJson(withoutExpiry(sourceGrantArgs(fixture, preview)));
+    assert.equal(applied.applied, true);
+    assert.equal(applied.expires_at, "2099-01-01T00:00:00.000Z");
+  } finally {
+    fixture.cleanup();
+  }
+});
+
 test("spawned guided connect wires a folder without asking for a timestamp", assertConnectWithoutExpiry);
 
 function assertConnectWithoutExpiry() {
@@ -490,13 +505,8 @@ test("spawned CLI refuses incomplete grant and revoke previews without writing l
         "--home", fixture.homePath,
         "--json",
       ]),
-      runCli([
-        "project", "source", "grant", "acme-campaign", "campaign-assets",
-        "--purpose", "Launch campaign assets",
-        "--path", fixture.aiosPath,
-        "--home", fixture.homePath,
-        "--json",
-      ]),
+      // A grant with a purpose and no --expires-at is no longer incomplete: the
+      // expiry now defaults, so that case is covered as a success elsewhere.
       runCli([
         "project", "source", "revoke", "acme-campaign", "campaign-assets",
         "--path", fixture.aiosPath,
@@ -507,11 +517,10 @@ test("spawned CLI refuses incomplete grant and revoke previews without writing l
     assert.ok(failures.every((result) => result.status === 1));
     const errors = failures.map((result) => JSON.parse(result.stderr));
     assert.deepEqual(errors.map((error) => error.error.reason), [
-      "invalid-request", "invalid-request", "invalid-request",
+      "invalid-request", "invalid-request",
     ]);
     assert.match(errors[0].error.message, /--purpose is required/);
-    assert.match(errors[1].error.message, /--expires-at is required/);
-    assert.match(errors[2].error.message, /--grant-id is required/);
+    assert.match(errors[1].error.message, /--grant-id is required/);
     assert.deepEqual(snapshotTree(path.join(fixture.homePath, ".dotaios")), before);
   } finally {
     fixture.cleanup();
