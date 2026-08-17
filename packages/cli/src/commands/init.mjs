@@ -624,52 +624,61 @@ function printSuccess(target, vaultPath, results) {
 }
 
 function firstSessionTemplate() {
-  return `# First Session
+  return `# How this works
 
-Welcome to {{#if user_name}}{{user_name}}'s{{else}}your{{/if}} local AIOS.
+{{#if user_name}}{{user_name}}, this folder is yours.{{else}}This folder is yours.{{/if}}
 
-This folder is the source of truth. Agent instruction files, MCP responses, and
-search results are bounded views of it; they are not a second memory.
+It holds what you just told us: who you are, what you are working on, and what
+matters right now. All of it as ordinary text files on this computer.
 
-## Try the continuity loop
+Every AI you use starts from nothing and asks you to explain yourself again.
+This folder is what they read first, so you do not have to.
 
-1. Start a connected local agent outside the AIOS folder: use your usual folder
-   for Shared memory, or an attached project for project-only memory.
-2. Keep this AIOS folder as the storage you own; do not make it the agent's
-   working directory when you want a zero-read private session.
-3. Start with: \`Use my memory. Tell me what you know about how I work.\`
-4. Tell it one useful preference or decision and explicitly ask it to save it.
-5. Switch to a second connected agent and ask it to find that item and show the
-   source it came from.
+Open any file, change it, delete it. Nothing here is locked.
 
-DotAIOS saves deliberately; it does not treat every chat sentence as a durable fact.
+## Try it once, it takes two minutes
 
-## Choose memory at the start
+1. Open Claude, Cursor, Codex, or whichever AI you use, in your usual folder
+   and not in this one.
+2. Say: \`Use my memory. Tell me what you know about how I work.\`
+3. Tell it something true about how you work, and ask it to save it.
+4. Switch to a different assistant, a completely separate agent, and ask it what
+   you just saved. It will find it, and it will show you where it came from.
 
-- \`Use my memory\` — Shared: personal context and continuity.
-- \`Only this project\` — This project: only that project's files and explicitly
-  attributed continuity; no personal or unscoped memory.
-- \`Private chat\` — Off: DotAIOS does not read, search, save, or capture for the
-  session. Your AI app may still keep its own conversation history.
+That is the whole idea. Say something once, and everything you use knows it.
 
-The agent should show \`Memory: Shared\`, \`Memory: This project\`, or
-\`Memory: Off\` so the choice is visible.
+## Deciding what an AI can see
 
-Opening the AIOS folder itself can make your app preload its router before your
-first prompt. \`Private chat\` cannot undo that earlier host read; start the agent
-outside AIOS when you need the zero-read Off guarantee.
+Say one of these at the start of a conversation:
 
-## Keep it useful
+- \`Use my memory\`: it can read everything in this folder.
+- \`Only this project\`: it can read that one project and nothing else about you.
+- \`Private chat\`: it reads nothing and saves nothing.
+  Your AI app may still keep its own conversation history; that part is not ours
+  to erase.
 
-- Ask the agent to update your identity, work, priorities, and preferences when
-  they change. An assistant with no terminal passes them in with
-  \`{{cli}} interview --answers -\`; from a Terminal window,
-  \`{{cli}} interview --review\` shows the changes before saving.
-- Put durable project context under \`projects/<slug>/README.md\`.
-- Never put passwords, API keys, OAuth tokens, or recovery codes in memory.
+The assistant tells you which one it is using in its first line, so you never
+have to guess.
 
-Optional Gmail, Calendar, and Drive access is read-only beta setup. Preview it
-later with \`{{cli}} connect google --dry-run\`.
+Opening this AIOS folder can let your app read it before your first prompt, and
+saying \`Private chat\` afterwards cannot undo a read that already happened. Work
+somewhere else when you want a conversation that touches none of this.
+
+## Keeping it true
+
+- When something changes, just tell the assistant and ask it to update your
+  context. You do not have to edit files yourself.
+- Nothing is saved unless you ask. It will not quietly remember things you said
+  in passing.
+- Never put passwords, keys, or recovery codes in here.
+
+## What is in the folder
+
+- \`context/\`: your role, your work, your priorities.
+- \`projects/\`: one folder for each thing you are working on.
+- \`memory/\`: what you have asked it to remember, over time.
+
+Gmail, Calendar, and Drive can be connected later, read-only. There is no rush.
 `;
 }
 
