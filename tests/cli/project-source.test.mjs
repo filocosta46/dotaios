@@ -405,6 +405,42 @@ function sourceRevokeArgs(fixture, grantId, proof = null) {
   ];
 }
 
+test("spawned guided connect wires a folder without asking for a timestamp", assertConnectWithoutExpiry);
+
+function assertConnectWithoutExpiry() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    // An explicit date is still honoured, and still wins over the default.
+    const explicit = runJson(withExpiry(sourceConnectArgs(fixture), "2077-01-01T00:00:00.000Z"));
+    assert.equal(explicit.expires_at, "2077-01-01T00:00:00.000Z");
+
+    // Omitting it entirely is the point of this change.
+    const preview = runJson(withoutExpiry(sourceConnectArgs(fixture)));
+    assert.equal(preview.applied, false);
+    assert.equal(preview.expires_at, "2099-01-01T00:00:00.000Z");
+
+    const connected = runJson(withoutExpiry(sourceConnectArgs(fixture, { yes: true })));
+    assert.equal(connected.applied, true);
+    assert.match(connected.grant_id, /^[a-f0-9-]+$/);
+    assert.equal(connected.expires_at, "2099-01-01T00:00:00.000Z");
+
+    // The folder is usable immediately, with no timestamp ever typed.
+    assert.equal(runJson(retrieveArgs(fixture)).decision, "allowed");
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+function withoutExpiry(args) {
+  const index = args.indexOf("--expires-at");
+  return index === -1 ? args : [...args.slice(0, index), ...args.slice(index + 2)];
+}
+
+function withExpiry(args, value) {
+  const index = args.indexOf("--expires-at");
+  return index === -1 ? args : [...args.slice(0, index + 1), value, ...args.slice(index + 2)];
+}
+
 function sourceConnectArgs(fixture, { yes = false, json = true, folder = fixture.sourceRoot } = {}) {
   return [
     "project", "source", "connect", "acme-campaign", folder,

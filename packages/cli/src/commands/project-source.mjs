@@ -11,11 +11,21 @@ import {
 } from "../../../core/src/project-sources.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
+// Connect defaults the grant expiry so the owner never types a machine
+// timestamp to wire a folder. It must be a fixed instant, not now()+N:
+// matchingConnectGrant compares expires_at for equality, so a computed default
+// would differ between the preview run and the --yes run and refuse with
+// connection-mismatch. This matches the value every documented example uses.
+// Consent is still explicit -- it lives in the confirmed --yes, not in the date.
+const DEFAULT_CONNECT_EXPIRY = "2099-01-01T00:00:00.000Z";
+
 const HELP_TEXT = `Usage:
-  dotaios project source connect <project> <folder> --source-id <id> --label <label> --purpose <purpose> --expires-at <UTC> [--yes]
+  dotaios project source connect <project> <folder> --source-id <id> --label <label> --purpose <purpose> [--expires-at <UTC>] [--yes]
   dotaios project source retrieve [project] --task <text>
 
 Connect wires a folder and its read grant in one confirmed operation. Prefer it.
+Read access does not expire unless you ask it to: pass --expires-at to set an
+end date, or leave it out and the grant runs until ${DEFAULT_CONNECT_EXPIRY}.
 
 Lower-level steps, for repairing or auditing a connection one piece at a time:
   dotaios project source add <project> <folder> --source-id <id> --label <label> --purpose <purpose>
@@ -157,7 +167,6 @@ function runConnect(parsed, common) {
   requireOption(parsed.sourceId, "--source-id");
   requireOption(parsed.label, "--label");
   requireOption(parsed.purpose, "--purpose");
-  requireOption(parsed.expiresAt, "--expires-at");
   rejectOptions(parsed, ["grantId", "task"]);
   if (parsed.apply || parsed.operationId || parsed.planFingerprint) {
     throw new Error("Connect uses one explicit --yes confirmation and does not accept proof tokens.");
@@ -169,7 +178,7 @@ function runConnect(parsed, common) {
     sourceId: parsed.sourceId,
     label: parsed.label,
     purpose: parsed.purpose,
-    expiresAt: parsed.expiresAt,
+    expiresAt: parsed.expiresAt || DEFAULT_CONNECT_EXPIRY,
     yes: parsed.yes
   });
 }
