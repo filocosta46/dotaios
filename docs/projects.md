@@ -92,6 +92,35 @@ refuses instead of truncating when any independent bound is exceeded. The
 machine-local append-only receipt line must itself fit within 32,000 UTF-8
 bytes; if receipt publication cannot complete, DotAIOS withholds the result.
 
+Read the 256-file figure as a ceiling rather than a capacity: a retrieval
+refuses on size long before it reaches 256 files. The two 32,000 limits above
+are independent and measure different things — the serialized result is capped
+at 32,000 characters, while the receipt line is capped at 32,000 UTF-8 bytes —
+and the receipt is the tighter of the two. It carries every reference the result
+carries plus the task, grant, and identity fields, and it is counted in bytes,
+so non-ASCII names cost more there than they do in the result.
+
+Measured on this tree, connecting one flat folder and retrieving once per file
+count, the last accepted retrieval was:
+
+| Filenames | Files | Result characters | Receipt bytes |
+|---|---|---|---|
+| `Proposta lampade Acme 2026 - rev 12.key` | 112 | 31,349 | 31,734 |
+| `a1.key` | 127 | 31,470 | 31,855 |
+
+In both cases the next file refuses, and in both the receipt is the bound that
+runs out first. Names outside ASCII reach it sooner: 90 files named
+`Presentazione café 90 🚀.key` already spend 24,886 receipt bytes against 24,231
+result characters. Deeper paths lower every one of these numbers.
+
+This is why the ceiling is structural rather than a tunable. A receipt records
+every reference it returns, so a retrieval can never return more files than one
+receipt line can hold, and that line is re-validated against the ledger on every
+append.
+
+Connecting a folder is not subject to any of this. A folder of any size connects
+and grants normally; the bounds apply only to what a single retrieval returns.
+
 For search, `--project` selects the portable project corpus by slug or stable
 ID. `--session-project` filters session tags only. Older commands that used
 `--project` as a session attribution filter should migrate to
