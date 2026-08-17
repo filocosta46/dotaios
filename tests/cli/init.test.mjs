@@ -477,13 +477,14 @@ test("a new folder ships a scheduled memory check, not just a skills-symlink che
 
   const schedules = fs.readFileSync(path.join(target, "schedules.yml"), "utf8");
 
-  assert.match(schedules, /dotaios memory audit/, "staleness must be detectable on a clock, not only when someone remembers");
+  // The invocation is resolved at init time, so it may carry a version pin.
+  assert.match(schedules, /dotaios(?:@[\w.-]+)? memory audit/, "staleness must be detectable on a clock, not only when someone remembers");
   assert.doesNotMatch(
     schedules,
-    /dotaios skills doctor/,
+    /dotaios(?:@[\w.-]+)? skills doctor/,
     "the weekly health check must inspect memory, not skill symlinks"
   );
-  assert.match(schedules, /dotaios doctor/, "the health check must be the one that reads memory and context freshness");
+  assert.match(schedules, /dotaios(?:@[\w.-]+)? doctor/, "the health check must be the one that reads memory and context freshness");
 
   // Scheduling must stay opt-in: DotAIOS may not install OS jobs a user never asked for.
   const enabled = schedules.split("\n").filter((line) => line.includes("enabled:"));
