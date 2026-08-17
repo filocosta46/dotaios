@@ -7,11 +7,13 @@ import {
   MANAGED_END,
   MANAGED_START,
   bridgeContent,
+  bridgeManagedBlock,
   bridgePath,
   bridgePointer,
   findManagedBlock,
   isAgentInstalled,
-  loadAgentRegistry
+  loadAgentRegistry,
+  resolveCliInvocation
 } from "../../packages/core/src/bridges.mjs";
 
 test("managed bridge detection requires ordered markers", () => {
@@ -96,12 +98,14 @@ test("managed bridges route working memory through the canonical projection", as
   const content = await bridgeContent({ name: "Test Agent" }, "/tmp/example-aios");
 
   assert.match(content, /events, signals, and saved sessions only through the canonical bounded projection/);
-  assert.match(content, /dotaios brief --compact/);
+  // The invocation is resolved when the bridge is written, so it is either the
+  // bare command or the version-pinned npx form depending on the host machine.
+  assert.match(content, /dotaios(?:@[\w.-]+)? brief --compact/);
   assert.match(content, /^.*Private chat.*Memory: Off.*$/im);
   assert.match(content, /^.*Only this project.*Memory: This project.*$/im);
   assert.match(content, /^.*Use my memory.*Memory: Shared.*$/im);
   assert.match(content, /^Choose memory access for this session before any AIOS read:$/m);
-  assert.match(content, /not registered.*keep AIOS closed.*dotaios activate.*never fall back to Shared/is);
+  assert.match(content, /not registered.*keep AIOS closed.*dotaios(?:@[\w.-]+)? activate.*never fall back to Shared/is);
   assert.match(content, /Only after registration and exact identity.*read AGENTS\.md.*memory project/is);
   assert.match(content, /Only in Shared.*read AGENTS\.md.*memory shared/is);
   assert.match(content, /host.*history/i);
@@ -113,6 +117,41 @@ test("managed bridges route working memory through the canonical projection", as
     ["google", "calendar", "agenda"], ["google", "drive", "search"]
   ].map((parts) => parts.join("_"));
   assert.equal(retiredToolNames.some((name) => content.includes(name)), false);
+});
+
+// Regression guard for the defect this replaced: every documented install is
+// `npx dotaios@<version>`, which links no binary onto PATH, so a bare `dotaios`
+// in a bridge is an instruction the host answers with `command not found`. The
+// same managed block forbids reading `memory/` directly as a fallback, so that
+// one wrong word cost the agent its entire memory while `doctor` stayed green.
+test("a bridge never names an invocation the host cannot run", async () => {
+  const withoutBinary = await bridgeManagedBlock("/tmp/example-aios", { cli: "npx dotaios@9.9.9" });
+  assert.match(withoutBinary, /`npx dotaios@9\.9\.9 brief --compact --memory shared`/);
+  assert.equal(
+    /`dotaios /.test(withoutBinary),
+    false,
+    "no bare `dotaios ...` may survive when the machine has no such binary"
+  );
+
+  const withBinary = await bridgeManagedBlock("/tmp/example-aios", { cli: "dotaios" });
+  assert.match(withBinary, /`dotaios brief --compact --memory shared`/);
+  assert.match(withBinary, /`dotaios activate`/);
+});
+
+test("resolveCliInvocation prefers a real binary and pins the npx fallback", async () => {
+  assert.equal(
+    await resolveCliInvocation({ isAvailable: async () => true, version: "9.9.9" }),
+    "dotaios"
+  );
+  assert.equal(
+    await resolveCliInvocation({ isAvailable: async () => false, version: "9.9.9" }),
+    "npx dotaios@9.9.9"
+  );
+  // An unreadable package.json must still yield something runnable.
+  assert.equal(
+    await resolveCliInvocation({ isAvailable: async () => false, version: null }),
+    "npx dotaios"
+  );
 });
 
 // The bridge file is loaded by the host on every launch, in every directory.

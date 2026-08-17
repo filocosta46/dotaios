@@ -3,6 +3,7 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
+import { readPackageVersion, resolveCliInvocation } from "../../../core/src/bridges.mjs";
 import { copyFileSafe, listFiles, pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import { planTemplateTree, renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
@@ -131,6 +132,21 @@ export async function initCommand(args, lifecycle = {}) {
     vault_path: config.vault_path
   };
 
+  // Render-time only, deliberately NOT part of `data`. The setup transaction
+  // persists `data` and revalidates it with an exact-key check
+  // (`isSetupPlan` in setup.mjs), so an extra key there invalidates every
+  // in-flight transaction and breaks crash recovery. These two are machine and
+  // release facts, not the user's answers:
+  //   cli     — AGENTS.md tells every agent how to invoke DotAIOS, and a bare
+  //             command name is unrunnable after the documented npx install.
+  //   version — the doc links are pinned to a release tag, which is how the
+  //             hardcoded v2.0.5 pair rotted three releases behind.
+  const templateData = {
+    ...data,
+    cli: await resolveCliInvocation(),
+    version: await readPackageVersion()
+  };
+
   if (options.force) {
     await assertGeneratedDestinationsSafe(target, data, Boolean(config.vault_path));
   }
@@ -152,7 +168,7 @@ export async function initCommand(args, lifecycle = {}) {
   }
   const writeMode = options.overwrite ? "overwrite" : "preserve";
   const results = [];
-  results.push(...await renderTemplates(target, data, writeMode));
+  results.push(...await renderTemplates(target, templateData, writeMode));
   results.push(await writeFileSafe(
     path.join(target, "aios.json"),
     `${JSON.stringify(config, null, 2)}\n`,
@@ -160,7 +176,7 @@ export async function initCommand(args, lifecycle = {}) {
     { boundaryRoot: target }
   ));
   results.push(...await copySkills(target, writeMode));
-  results.push(...await createStarterFiles(target, data, writeMode));
+  results.push(...await createStarterFiles(target, templateData, writeMode));
   const skillsIndex = await writeSkillsIndex(target, { writeMode });
   results.push(...skillsIndex.results);
   if (
@@ -565,17 +581,19 @@ function starterFileContents(data) {
     // the ones that catch memory going stale — no LLM, no network, no cost.
     "schedules.yml": [
       "schedules:",
+      // These commands are executed, not read, so a bare name that is not on
+      // PATH fails the same way the bridges did. See resolveCliInvocation.
       "  - name: daily-brief",
       "    cadence: daily",
-      "    command: \"dotaios brief\"",
+      `    command: "${data.cli} brief"`,
       "    enabled: false",
       "  - name: weekly-health-check",
       "    cadence: weekly",
-      "    command: \"dotaios doctor\"",
+      `    command: "${data.cli} doctor"`,
       "    enabled: false",
       "  - name: weekly-memory-audit",
       "    cadence: weekly",
-      "    command: \"dotaios memory audit --all-memory\"",
+      `    command: "${data.cli} memory audit --all-memory"`,
       "    enabled: false"
     ].join("\n") + "\n",
     "skills/_registry.json": "{\n  \"format\": \"dotaios-skill-install-inventory/v2\",\n  \"skills\": [\"audit\", \"closeday\", \"import-context\", \"ingest\", \"memory-maintenance\", \"plan-today\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"today\", \"weekly-review\"],\n  \"managed\": [],\n  \"plugins\": []\n}\n"
@@ -645,13 +663,13 @@ outside AIOS when you need the zero-read Off guarantee.
 
 - Ask the agent to update your identity, work, priorities, and preferences when
   they change. An assistant with no terminal passes them in with
-  \`dotaios interview --answers -\`; from a Terminal window,
-  \`dotaios interview --review\` shows the changes before saving.
+  \`{{cli}} interview --answers -\`; from a Terminal window,
+  \`{{cli}} interview --review\` shows the changes before saving.
 - Put durable project context under \`projects/<slug>/README.md\`.
 - Never put passwords, API keys, OAuth tokens, or recovery codes in memory.
 
 Optional Gmail, Calendar, and Drive access is read-only beta setup. Preview it
-later with \`dotaios connect google --dry-run\`.
+later with \`{{cli}} connect google --dry-run\`.
 `;
 }
 
@@ -663,7 +681,7 @@ Local-first memory and context for AI agents.
 ## Start Here
 
 1. Read \`FIRST_SESSION.md\`.
-2. Run \`npx dotaios activate\` once.
+2. Run \`{{cli}} activate\` once.
 3. Keep \`context/\` current.
 4. Add active work under \`projects/<slug>/README.md\`.
 5. Put long-term knowledge in the configured vault.

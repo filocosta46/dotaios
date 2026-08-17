@@ -10,7 +10,8 @@ import {
   bridgePath,
   findManagedBlock,
   isAgentInstalled,
-  loadAgentRegistry
+  loadAgentRegistry,
+  resolveCliInvocation
 } from "../../../core/src/bridges.mjs";
 import {
   collectSkills,
@@ -411,6 +412,9 @@ async function createGlobalBridges(
   detectedAgentNames = new Set()
 ) {
   const registry = await loadAgentRegistry(aiosPath);
+  // Resolve once per run rather than once per bridge: every bridge must name
+  // the same invocation, and the answer cannot change mid-loop.
+  const cli = await resolveCliInvocation();
   const results = [];
   let installedCount = 0;
   let configuredContextCount = 0;
@@ -446,7 +450,7 @@ async function createGlobalBridges(
     try {
       result = await writeManagedFile(
         destination,
-        await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog }),
+        await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog, cli }),
         {
           ...options,
           boundaryRoot: homePath,
