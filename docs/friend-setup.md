@@ -43,7 +43,7 @@ Want to inspect the package first? Follow the provenance checks in
 
 ## 2. Approve the preview and set up
 
-The agent should ask the same four questions from INSTALL.md's assistant
+The agent should ask the same three questions from INSTALL.md's assistant
 section, one at a time in the conversation, then pipe the answers straight
 into setup so no answers file is left behind:
 
@@ -52,8 +52,7 @@ npx dotaios@2.0.8 setup --answers - <<'JSON'
 {
   "name": "...",
   "role": "...",
-  "work": "...",
-  "priorities": "..."
+  "work": "..."
 }
 JSON
 ```
