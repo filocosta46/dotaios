@@ -672,6 +672,114 @@ export async function retrieveProjectSource(options = {}) {
   }
 }
 
+// Hand the agent the folder, not a copy of its table of contents.
+//
+// `retrieveProjectSource` answers "what is in this folder?" by listing every
+// file, which is why it has a ceiling: the receipt records every reference it
+// returns, so the listing can never exceed one 32,000-byte receipt line — about
+// 110-120 ordinary filenames. Past that a connected folder refuses every
+// retrieval forever, even though connecting it worked fine.
+//
+// That ceiling only exists because of the listing. Every assistant DotAIOS
+// connects to already reads local folders natively, with no ceiling, and only
+// reads the files it actually needs. What it cannot do is know WHERE the folder
+// is: the label and purpose live in the synced card at
+// projects/<slug>/sources/<id>.md, but the absolute path is machine-local.
+//
+// So this resolves the card to a path and stops. Same project routing, same
+// grant, same consent, same refusals — everything `retrieve` does except the
+// enumeration. Cost is O(1) in the folder's size, so a 400-file folder and a
+// 4-file folder resolve identically, and the receipt is fixed-size because it
+// carries no references at all.
+export async function resolveProjectSourceLocation(options = {}) {
+  const task = validateTask(options.task);
+  const homePath = path.resolve(options.homePath);
+  const aiosPath = path.resolve(options.aiosPath);
+  const filesystem = options.filesystem || fs;
+  await assertIndependentProjectSourceState(aiosPath, homePath, filesystem);
+  let known = { projectId: null, project: null, sourceId: null, grant: null };
+  if (options.projectSelector !== undefined && options.projectSelector !== null) {
+    validateProjectSelector(options.projectSelector);
+  }
+  await assertAccessReceiptStoreAvailable({ homePath, filesystem });
+  try {
+    if (!options.projectSelector) throw sourceError("project-required", "A project selector is required.");
+    const { reader, project } = await resolveRetrievalProject({ ...options, aiosPath, filesystem });
+    known = { ...known, projectId: project.id, project: project.slug };
+    const source = await selectSource({ aiosPath, project, task, evidenceReader: reader });
+    known = { ...known, sourceId: source.source_id };
+    const stateCoordinates = { homePath, projectId: project.id, sourceId: source.source_id, filesystem };
+    const state = await readAuthorizationSnapshot(stateCoordinates);
+    known = {
+      ...known,
+      grant: state.grantIssue
+        ? state.grantReceipt
+        : state.grant
+          ? publicGrantSnapshot(state.grant)
+          : null
+    };
+    if (state.grantIssue) {
+      throw sourceError(state.grantIssue, "Project source authorization state does not match this operation.");
+    }
+    // This is the whole difference from retrieval: authorize, then stop.
+    // authorizeSelectedSource already re-stats the root and refuses with
+    // reconnect-required if its identity moved, so the path handed back has
+    // been verified as recently as a retrieval would have verified it.
+    const { binding, grant } = await authorizeSelectedSource({
+      filesystem,
+      source,
+      state,
+      stateCoordinates,
+      now: options.now
+    });
+    return await publishAllowedLocation({
+      homePath, filesystem, project, source, grant, binding, task, options
+    });
+  } catch (error) {
+    if (error?.code === "DOTAIOS_PROJECT_SOURCE_AUDIT_FAILED") throw error;
+    return publishRefusedRetrieval({ homePath, filesystem, task, known, error, options });
+  }
+}
+
+// One receipt, no references. The absolute path is deliberately absent from the
+// receipt and present only on the returned result: receipts are path-free by
+// design (tests/core/project-sources.test.mjs and tests/cli/project-source.test.mjs
+// both assert it), and the ledger is the portable audit trail while the path is
+// a fact about this machine only. A reference-free receipt is the same shape a
+// refusal already writes, so this adds no field and no version to the closed
+// receipt schema — older CLIs keep reading the ledger.
+async function publishAllowedLocation({
+  homePath, filesystem, project, source, grant, binding, task, options
+}) {
+  const receipt = createAccessReceipt({
+    decision: "allowed",
+    task,
+    projectId: project.id,
+    project: project.slug,
+    sourceId: source.source_id,
+    grant: publicGrantSnapshot(grant),
+    references: [],
+    createId: options.createId,
+    now: options.now
+  });
+  if (!accessReceiptFitsPublicationBound(receipt)) {
+    throw sourceError("result-too-large", "Complete project source results exceed the output bound.");
+  }
+  await appendAccessReceipt({ homePath, receipt, filesystem });
+  return Object.freeze({
+    decision: receipt.decision,
+    project_id: receipt.project_id,
+    project: receipt.project,
+    source_id: receipt.source_id,
+    label: source.label,
+    purpose: source.purpose,
+    root_path: binding.root_path,
+    receipt_id: receipt.receipt_id,
+    resolved_at: receipt.resolved_at,
+    references: []
+  });
+}
+
 async function resolveRetrievalProject({ aiosPath, filesystem, evidenceReader, projectSelector }) {
   const reader = evidenceReader || createEvidenceReader({ roots: [aiosPath], filesystem });
   const project = await resolvePortableProjectIdentity({

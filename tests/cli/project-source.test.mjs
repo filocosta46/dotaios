@@ -571,3 +571,90 @@ function runCli(args) {
     env: { ...process.env, DOTAIOS_ALLOW_AUTO_SYNC_HOOK: "0" },
   });
 }
+
+// --- locate: reach a connected folder without listing it ---
+
+function locateArgs(fixture) {
+  return [
+    "project", "source", "locate", "acme-campaign", "--task", CAMPAIGN_TASK,
+    ...commonFixtureArgs(fixture),
+  ];
+}
+
+// The defect this command exists to remove. `retrieve` records every reference
+// it returns in one 32,000-byte receipt line, so it cannot return more files
+// than that line holds — about 110-120 ordinary names. Past that, a folder that
+// connected successfully refuses every retrieval forever. `locate` answers
+// "where is it?" instead of "what is in it?", so the folder's size cannot
+// affect it: the assistant opens the folder with its own file tools and reads
+// only what the task needs.
+test("locate reaches a folder far past the retrieval ceiling, where retrieve refuses", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    for (let index = 0; index < 400; index += 1) {
+      fs.writeFileSync(
+        path.join(fixture.sourceRoot, `Proposta lampade Acme 2026 - rev ${index}.key`),
+        "x",
+      );
+    }
+    authorizeCliSource(fixture);
+
+    const refused = runJson(retrieveArgs(fixture));
+    assert.equal(refused.decision, "refused");
+    assert.equal(refused.references.length, 0);
+
+    const located = runJson(locateArgs(fixture));
+    assert.equal(located.decision, "allowed");
+    assert.equal(located.root_path, fs.realpathSync(fixture.sourceRoot));
+    assert.equal(located.label, "Campaign assets");
+    assert.equal(located.purpose, "Launch campaign assets");
+    assert.equal(located.source_id, "campaign-assets");
+    // No listing at any size — that is the whole point.
+    assert.deepEqual(located.references, []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("locate publishes one reference-free receipt and keeps the ledger path-free", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    authorizeCliSource(fixture);
+    // Authorizing writes grants and bindings, not access receipts: the ledger
+    // does not exist until something is actually accessed.
+    assert.equal(fs.existsSync(accessReceiptPath(fixture)), false);
+    const located = runJson(locateArgs(fixture));
+
+    const receipts = readReceipts(fixture);
+    assert.equal(receipts.length, 1, "locate publishes exactly one receipt");
+    const receipt = receipts.at(-1);
+    assert.equal(receipt.receipt_id, located.receipt_id);
+    assert.equal(receipt.decision, "allowed");
+    // A reference-free receipt is the shape a refusal already writes, so this
+    // adds no field and no version to the closed receipt schema.
+    assert.deepEqual(receipt.references, []);
+    assert.equal(receipt.version, 1);
+    // The absolute path is a fact about this machine. It belongs on the result
+    // the caller asked for, never in the portable audit trail.
+    assert.equal(JSON.stringify(receipt).includes(fixture.sourceRoot), false);
+    assert.equal(JSON.stringify(receipt).includes(fs.realpathSync(fixture.sourceRoot)), false);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("locate still requires consent and cannot grant it", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    // Declared but never granted: knowing where a folder is is still an access.
+    assert.equal(runJson(sourceAddArgs(fixture, runJson(sourceAddArgs(fixture)))).applied, true);
+    const refused = runJson(locateArgs(fixture));
+    assert.equal(refused.decision, "refused");
+    assert.equal(refused.root_path, undefined, "a refusal must not leak the folder");
+
+    const cannotApply = runCli([...locateArgs(fixture), "--apply"]);
+    assert.notEqual(cannotApply.status, 0);
+  } finally {
+    fixture.cleanup();
+  }
+});
