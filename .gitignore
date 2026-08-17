@@ -25,3 +25,7 @@ vault/
 connections/
 plugins/
 .vercel
+
+# This repo uses pnpm. An npm lockfile here is always accidental and
+# drifts silently from pnpm-lock.yaml, which CI is the one that reads.
+package-lock.json
