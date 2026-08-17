@@ -61,37 +61,55 @@ test("isHtmlComment identifies HTML comment strings", () => {
   assert.equal(isHtmlComment(null), false);
 });
 
+// These assert the RENDERED router, not the raw template: the invocation is a
+// placeholder resolved at init time, so the raw file no longer contains a
+// runnable command and checking it would prove nothing about what an agent
+// reads. Rendering with a known `cli` also pins the thing that actually broke —
+// a router naming a command the machine cannot run.
+const ROUTER_TEMPLATE = path.resolve("templates/AGENTS.md.hbs");
+const RENDER_FIXTURE = { cli: "npx dotaios@9.9.9", version: "9.9.9" };
+
+async function renderRouter() {
+  return renderTemplate(await fs.readFile(ROUTER_TEMPLATE, "utf8"), RENDER_FIXTURE);
+}
+
 test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", async () => {
-  const tpl = await fs.readFile(
-    path.resolve("templates/AGENTS.md.hbs"),
-    "utf8"
+  const rendered = await renderRouter();
+  assert.match(rendered, /## Rules/);
+  assert.match(rendered, /npx dotaios@9\.9\.9 ingest/);
+  assert.match(rendered, /URL/);
+  const rulesIdx = rendered.indexOf("## Rules");
+  assert.ok(
+    rendered.indexOf("npx dotaios@9.9.9 ingest", rulesIdx) > rulesIdx,
+    "rule must appear under Rules"
   );
-  assert.match(tpl, /## Rules/);
-  assert.match(tpl, /dotaios ingest/);
-  assert.match(tpl, /URL/);
-  const rulesIdx = tpl.indexOf("## Rules");
-  assert.ok(tpl.indexOf("dotaios ingest", rulesIdx) > rulesIdx, "rule must appear under Rules");
 });
 
 test("AGENTS.md.hbs Rules section includes safe sync and inbox-routing rules", async () => {
-  const tpl = await fs.readFile(
-    path.resolve("templates/AGENTS.md.hbs"),
-    "utf8"
-  );
-  const rulesIdx = tpl.indexOf("## Rules");
+  const rendered = await renderRouter();
+  const rulesIdx = rendered.indexOf("## Rules");
   assert.ok(rulesIdx !== -1, "Rules section exists");
-  assert.ok(tpl.indexOf("dotaios sync status", rulesIdx) > rulesIdx, "read-only sync rule under Rules");
-  assert.ok(tpl.indexOf("process-inbox", rulesIdx) > rulesIdx, "inbox-routing rule under Rules");
+  assert.ok(
+    rendered.indexOf("npx dotaios@9.9.9 sync status", rulesIdx) > rulesIdx,
+    "read-only sync rule under Rules"
+  );
+  assert.ok(rendered.indexOf("process-inbox", rulesIdx) > rulesIdx, "inbox-routing rule under Rules");
 });
 
 test("AGENTS.md.hbs documents boot context as captured prompt Markdown", async () => {
-  const tpl = await fs.readFile(
-    path.resolve("templates/AGENTS.md.hbs"),
-    "utf8"
-  );
-  assert.match(tpl, /BOOT_CONTEXT="\$\(dotaios skills resolve --boot-context\)"/);
-  assert.match(tpl, /append that\s+variable to the agent prompt/);
-  assert.doesNotMatch(tpl, new RegExp(["ready", "to", "source"].join("-"), "i"));
+  const rendered = await renderRouter();
+  assert.match(rendered, /BOOT_CONTEXT="\$\(npx dotaios@9\.9\.9 skills resolve --boot-context\)"/);
+  assert.match(rendered, /append that\s+variable to the agent prompt/);
+  assert.doesNotMatch(rendered, new RegExp(["ready", "to", "source"].join("-"), "i"));
+});
+
+// The regression guard: the router an agent actually reads must never name a
+// bare `dotaios`, because the documented npx install links no such binary.
+test("the rendered router never names a command the machine cannot run", async () => {
+  const rendered = await renderRouter();
+  assert.doesNotMatch(rendered, /`dotaios\s+[a-z]/, "no bare invocation may reach the router");
+  assert.doesNotMatch(rendered, /\{\{\w+\}\}/, "every placeholder must be substituted");
+  assert.doesNotMatch(rendered, /blob\/v(?!9\.9\.9)/, "doc links must follow the real version");
 });
 
 test("process-inbox skill ships in skills/", async () => {

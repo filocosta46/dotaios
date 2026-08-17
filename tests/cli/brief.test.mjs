@@ -326,12 +326,16 @@ test("init ships the daily brief schedule disabled by default", () => {
 
   assert.match(schedules, /name: daily-brief/);
   assert.match(schedules, /cadence: daily/);
-  assert.match(schedules, /command: "dotaios brief"/);
+  // A scheduled command is executed, so it carries the invocation resolved at
+  // init time: the bare name when a real binary exists, the version-pinned npx
+  // form otherwise. Either spelling is correct; a bare name on a machine
+  // without the binary is the bug this shape prevents.
+  assert.match(schedules, /command: "(?:npx )?dotaios(?:@[\w.-]+)? brief"/);
   assert.match(schedules, /enabled: false/);
 
   const list = run(["schedule", "list", "--path", aiosPath]);
   assert.match(list.stdout, /daily-brief/);
-  assert.match(list.stdout, /dotaios brief/);
+  assert.match(list.stdout, /dotaios(?:@[\w.-]+)? brief/);
 });
 
 test("compact text and Gemini hook JSON expose the same stale-schema action without changing the digest budget", () => {

@@ -7,13 +7,16 @@ import { SETUP_TRANSACTION_FILE, defaultAiosPath, expandHome } from "../../../co
 import { pathExists, readJson } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import {
+  AGENT_ENTRYPOINT,
   MANAGED_END,
   MANAGED_START,
   bridgePath,
   bridgePointer,
   findManagedBlock,
   isAgentInstalled,
-  loadAgentRegistry
+  isCommandAvailable,
+  loadAgentRegistry,
+  resolveCliInvocation
 } from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
 import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
@@ -73,6 +76,7 @@ export async function doctorCommand(args, { detection } = {}) {
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
+  checks.push(await checkCliReachable(target, homePath));
   checks.push(...await checkAgentBridges(target, homePath, detection, { verbose }));
 
   console.log("DotAIOS doctor");
@@ -625,6 +629,93 @@ function skipReason(skipped) {
     return "could not reach the npm registry — skipped, working offline is fine";
   }
   return "update check unavailable";
+}
+
+// A bridge that names a command this machine cannot run is worse than no
+// bridge at all: the host reads the instruction, the shell answers `command not
+// found`, and the same managed block forbids reading `memory/` directly as a
+// fallback — so the assistant is left with no memory while every other check
+// here still reports green. Every documented install is `npx dotaios@<version>`
+// and npx links no binary onto PATH, so this is the default outcome of the
+// documented path rather than an edge case. Bridges written before this release
+// carry the bare name; `activate` now resolves it, so the fix is to re-run it.
+// Matches a backticked bare invocation only. `` `npx dotaios@2.0.8 brief` ``
+// does not match, because the character after the backtick is not `d`.
+const BARE_INVOCATION = /`dotaios\s+[a-z]/;
+
+export async function checkCliReachable(target, homePath, {
+  loadRegistry = loadAgentRegistry,
+  isAvailable = isCommandAvailable,
+  resolveInvocation = resolveCliInvocation
+} = {}) {
+  const name = "DotAIOS command agents are told to run";
+
+  let registry;
+  try {
+    registry = await loadRegistry(target);
+  } catch (error) {
+    return {
+      name,
+      status: "ok",
+      detail: `Could not read the agent registry (${error.message}); this check did not run.`
+    };
+  }
+
+  const staleBridges = [];
+  for (const agent of registry) {
+    if (!agent.bridge) continue;
+    const filePath = bridgePath(homePath, agent);
+    if (!filePath) continue;
+    let content;
+    try {
+      content = await fs.readFile(filePath, "utf8");
+    } catch {
+      // Not connected yet. checkAgentBridges already reports that.
+      continue;
+    }
+    const managed = findManagedBlock(content);
+    if (!managed) continue;
+    if (BARE_INVOCATION.test(managed.text)) staleBridges.push(filePath);
+  }
+
+  // The bridge points every agent at this file, and it carries the same
+  // commands. `activate` rewrites bridges but never re-renders the entrypoint,
+  // so an upgraded machine can have correct bridges and a stale router. They
+  // need different remedies, so they are reported as different things.
+  const entrypoint = path.join(target, AGENT_ENTRYPOINT);
+  let staleEntrypoint = false;
+  try {
+    if (BARE_INVOCATION.test(await fs.readFile(entrypoint, "utf8"))) staleEntrypoint = true;
+  } catch {
+    // checkAiosFolder already reports a missing or unreadable folder.
+  }
+
+  if (!staleBridges.length && !staleEntrypoint) {
+    return { name, status: "ok", detail: "Every file that names a DotAIOS command names one that runs here." };
+  }
+
+  if (await isAvailable("dotaios")) {
+    return { name, status: "ok", detail: "`dotaios` resolves on PATH, so those commands run as written." };
+  }
+
+  const invocation = await resolveInvocation();
+  const parts = [];
+  const fixes = [];
+  if (staleBridges.length) {
+    parts.push(`${staleBridges.length} agent bridge${staleBridges.length === 1 ? "" : "s"} (${staleBridges.join(", ")})`);
+    fixes.push(`\`${invocation} activate\` rewrites the bridges`);
+  }
+  if (staleEntrypoint) {
+    parts.push(`the AIOS router at ${entrypoint}`);
+    fixes.push(`\`${invocation} init --overwrite\` re-renders the router`);
+  }
+
+  return {
+    name,
+    status: "fail",
+    detail: `${parts.join(" and ")} tell assistants to run \`dotaios ...\`, but no \`dotaios\` command exists on this machine — so every brief, search, and save from those assistants fails.`,
+    fix: `${fixes.join("; ")}.`
+  };
 }
 
 async function checkAgentBridges(target, homePath, detection = {}, { verbose = false } = {}) {

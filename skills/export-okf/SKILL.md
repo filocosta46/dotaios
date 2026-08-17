@@ -16,9 +16,9 @@ projection, not a migration. Your source files are never modified.
 ## How to run
 
 ```bash
-dotaios export-okf                 # writes to <aios>/build/okf-export
-dotaios export-okf --out ~/share   # choose the output directory
-dotaios export-okf --path ~/work   # use a non-default AIOS folder
+npx dotaios export-okf                 # writes to <aios>/build/okf-export
+npx dotaios export-okf --out ~/share   # choose the output directory
+npx dotaios export-okf --path ~/work   # use a non-default AIOS folder
 ```
 
 It injects the OKF-required `type` field at export, generates `index.md` per

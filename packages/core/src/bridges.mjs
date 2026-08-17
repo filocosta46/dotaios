@@ -255,6 +255,40 @@ export async function isCommandAvailable(
   return false;
 }
 
+export async function readPackageVersion() {
+  try {
+    const raw = await fs.readFile(new URL("../../../package.json", import.meta.url), "utf8");
+    return JSON.parse(raw).version || null;
+  } catch {
+    return null;
+  }
+}
+
+// How a bridge should spell "run DotAIOS", decided when the bridge is written.
+//
+// Every documented install path is `npx dotaios@<version>` and npx links no
+// binary onto PATH, so a bare `dotaios` in a bridge is an instruction the host
+// cannot follow: it resolves to `command not found`, and because the bridge
+// also forbids reading `memory/` directly, the agent is left with no memory at
+// all while `doctor` still reports the folder healthy. Name the invocation that
+// actually resolves on this machine instead, preferring the bare command when a
+// real binary exists and falling back to the version-pinned npx form otherwise
+// — the same pinning `dotaios mcp` and `skills/ingest/SKILL.md` already use.
+//
+// This is resolved at write time rather than baked in because `activate`
+// rewrites the managed block idempotently: a machine that later gains a global
+// install upgrades itself to the fast spelling on the next run.
+export async function resolveCliInvocation({
+  env = process.env,
+  platform = process.platform,
+  isAvailable = isCommandAvailable,
+  version
+} = {}) {
+  if (await isAvailable("dotaios", { env, platform })) return "dotaios";
+  const pinned = version === undefined ? await readPackageVersion() : version;
+  return pinned ? `npx dotaios@${pinned}` : "npx dotaios";
+}
+
 // The one spelling of "this bridge points at this AIOS folder". The writer
 // emits `current`; a reader must accept every form in `accepted`, because
 // bridges written by older releases are still valid. Both sides share this
@@ -296,18 +330,20 @@ export function bridgePointer(aiosPath) {
 // one. It lives here, alone, because `connect gemini` splices the same markers
 // into the same file `activate` writes: a second body meant whichever command
 // ran last silently replaced the other's.
-export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skillsCatalog } = {}) {
+export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skillsCatalog, cli } = {}) {
   const { current: pointerLine } = bridgePointer(aiosPath);
   const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
   const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
+  // Never a bare command name: see resolveCliInvocation.
+  const dotaios = cli ?? await resolveCliInvocation();
 
   const lines = [
     MANAGED_START,
     pointerLine,
     "Choose memory access for this session before any AIOS read:",
     "- `Private chat` locks `Memory: Off`: keep AIOS closed — no DotAIOS read, search, save, or capture. Say once that the host may keep its history.",
-    "- In an attached working directory, or after `Only this project`, use `Memory: This project` and exclude all other memory. If not registered, keep AIOS closed, say so, offer `dotaios activate`, and never fall back to Shared. Only after registration and exact identity are verified, read AGENTS.md and run `dotaios brief --compact --memory project --project <slug-or-id>`.",
-    "- When the user asks `Use my memory`, use `Memory: Shared`; this is the default elsewhere. Only in Shared, read AGENTS.md and run `dotaios brief --compact --memory shared`.",
+    `- In an attached working directory, or after \`Only this project\`, use \`Memory: This project\` and exclude all other memory. If not registered, keep AIOS closed, say so, offer \`${dotaios} activate\`, and never fall back to Shared. Only after registration and exact identity are verified, read AGENTS.md and run \`${dotaios} brief --compact --memory project --project <slug-or-id>\`.`,
+    `- When the user asks \`Use my memory\`, use \`Memory: Shared\`; this is the default elsewhere. Only in Shared, read AGENTS.md and run \`${dotaios} brief --compact --memory shared\`.`,
     "Lead every response with the selected receipt: `Memory: Shared`, `Memory: This project`, or `Memory: Off`.",
     "Route events, signals, and saved sessions only through the canonical bounded projection."
   ];

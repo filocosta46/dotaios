@@ -18,7 +18,7 @@ Build today's plan and write it to your daily note so you can refer back to it, 
 
 ## What this doesn't do
 
-- It does not plan without your context. If `prompt.md` and your context files are both empty, tell the user to run `dotaios interview` first.
+- It does not plan without your context. If `prompt.md` and your context files are both empty, tell the user to run `npx dotaios interview` first.
 - It does not read your calendar or email unless a plugin has written signals for them.
 - It does not close the day, that is `/closeday`.
 - It does not overwrite the `## Close` section if the file already exists and has been partially filled by `/closeday`.
@@ -35,11 +35,11 @@ Try saying:
 
 ### Read
 
-1. `prompt.md` in the `skills/today/` directory if present, compiled by `dotaios interview`. Prefer it over reading individual context files.
+1. `prompt.md` in the `skills/today/` directory if present, compiled by `npx dotaios interview`. Prefer it over reading individual context files.
 2. If `prompt.md` is missing, fall back to:
    - `context/priorities.md`
    - `context/work.md`
-3. `dotaios brief --compact` for the bounded recent-memory projection
+3. `npx dotaios brief --compact` for the bounded recent-memory projection
 5. `memory/daily/YYYY-MM-DD.md` where YYYY-MM-DD is today's date, check if it already exists
 
 ### Process
