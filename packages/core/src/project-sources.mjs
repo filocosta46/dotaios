@@ -173,7 +173,7 @@ const REFUSAL_GUIDANCE = Object.freeze({
 // here is a gap in the table, not a designed outcome.
 const REFUSAL_GUIDANCE_FALLBACK = Object.freeze({
   message: "DotAIOS could not complete this request.",
-  recovery: { code: "check_the_folder", message: "Check that the folder is still connected and still where it was, then ask again." }
+  recovery: { code: "ask_again", message: "Ask again. If it keeps happening, check this project and the folders connected to it." }
 });
 
 export class ProjectSourceError extends Error {
