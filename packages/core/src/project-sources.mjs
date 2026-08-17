@@ -48,6 +48,83 @@ const SOURCE_VERSION = 1;
 const SOURCE_LOCK_FORMAT = "dotaios-project-source-lock/v1";
 const MATCH_TIERS = { partial: 1, terms: 2, phrase: 3 };
 
+// A refusal is the owner's whole answer, so it says what happened and what to
+// do next. Both sentences are looked up here by stable reason rather than taken
+// from the thrown error: an unexpected error carries a filesystem path in its
+// message, and every refusal must stay path-free. Reasons absent from this
+// table fall back to REFUSAL_GUIDANCE_FALLBACK, so a new reason is never a
+// dead end. Adding a reason here does not add a reason to the product.
+const REFUSAL_FOLDER_PLACEHOLDER = "{folder}";
+const REFUSAL_FOLDER_FALLBACK = "that folder";
+const REFUSAL_GUIDANCE = Object.freeze({
+  "result-too-large": {
+    message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} has too many files to list in one answer.`,
+    recovery: { code: "connect-a-narrower-folder", message: "Connect the sub-folder that holds what you need instead of the whole folder." }
+  },
+  "source-bound-exceeded": {
+    message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} is too large or too deeply nested to read in one go.`,
+    recovery: { code: "connect-a-narrower-folder", message: "Connect a narrower sub-folder instead of the whole folder." }
+  },
+  "reconnect-required": {
+    message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} has moved or changed since it was connected.`,
+    recovery: { code: "connect-the-folder-again", message: "Connect it again from where it is now." }
+  },
+  "source-changed": {
+    message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} changed while it was being read.`,
+    recovery: { code: "ask-again", message: "Ask for it again." }
+  },
+  "root-invalid": {
+    message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} can no longer be found on this computer.`,
+    recovery: { code: "connect-the-folder-again", message: "Connect it again from its current location." }
+  },
+  "binding-missing": {
+    message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} is not connected on this computer.`,
+    recovery: { code: "connect-the-folder-again", message: "Connect it again from its current location." }
+  },
+  "grant-expired": {
+    message: `Permission to read ${REFUSAL_FOLDER_PLACEHOLDER} has run out.`,
+    recovery: { code: "give-permission-again", message: "Give permission again." }
+  },
+  "grant-revoked": {
+    message: `Permission to read ${REFUSAL_FOLDER_PLACEHOLDER} was withdrawn.`,
+    recovery: { code: "give-permission-again", message: "Give permission again if you still want it used." }
+  },
+  "grant-missing": {
+    message: `There is no permission recorded for ${REFUSAL_FOLDER_PLACEHOLDER}.`,
+    recovery: { code: "give-permission-again", message: "Give permission to read it." }
+  },
+  "source-busy": {
+    message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} is busy with another request.`,
+    recovery: { code: "ask-again", message: "Wait a moment and ask again." }
+  },
+  // Refused before any folder was chosen: these name only what the caller
+  // supplied, never a folder, a file count, or anything read from disk.
+  "source-no-match": {
+    message: "None of your connected folders matched those words.",
+    recovery: { code: "try-different-words", message: "Try the client's name, or the words you used when you connected the folder." }
+  },
+  "source-ambiguous": {
+    message: "More than one connected folder matched those words equally well.",
+    recovery: { code: "name-one-folder", message: "Say which one you mean, or give one of them a clearer description." }
+  },
+  "project-required": {
+    message: "This needs to know which project to look in.",
+    recovery: { code: "name-the-project", message: "Name the project you mean." }
+  },
+  "project-unknown": {
+    message: "There is no project by that name.",
+    recovery: { code: "name-the-project", message: "Check the name against the projects you have." }
+  },
+  "project-ambiguous": {
+    message: "More than one project answers to that name.",
+    recovery: { code: "name-the-project", message: "Say which one you mean by its full name." }
+  }
+});
+const REFUSAL_GUIDANCE_FALLBACK = Object.freeze({
+  message: `DotAIOS could not use ${REFUSAL_FOLDER_PLACEHOLDER} for this request.`,
+  recovery: { code: "check-the-folder", message: "Check that the folder is still connected and still where it was." }
+});
+
 export class ProjectSourceError extends Error {
   constructor(code, message, details = {}) {
     super(message);
@@ -754,9 +831,10 @@ async function publishAllowedRetrieval({ homePath, filesystem, project, source, 
 }
 
 async function publishRefusedRetrieval({ homePath, filesystem, task, known, error, options }) {
+  const reason = stableReason(error);
   const receipt = createAccessReceipt({
     decision: "refused",
-    reason: stableReason(error),
+    reason,
     task,
     projectId: known.projectId,
     project: known.project,
@@ -767,7 +845,20 @@ async function publishRefusedRetrieval({ homePath, filesystem, task, known, erro
     now: options.now
   });
   await appendAccessReceipt({ homePath, receipt, filesystem });
-  return refusedResult(receipt);
+  return refusedResult(receipt, refusalGuidance(reason, known.sourceId));
+}
+
+// The receipt is deliberately not given the sentence: its schema is closed and
+// re-validated against the ledger's existing final line on every append, so a
+// new field would make older binaries treat the whole ledger as poisoned.
+function refusalGuidance(reason, sourceId) {
+  const guidance = Object.hasOwn(REFUSAL_GUIDANCE, reason)
+    ? REFUSAL_GUIDANCE[reason]
+    : REFUSAL_GUIDANCE_FALLBACK;
+  return Object.freeze({
+    message: guidance.message.replaceAll(REFUSAL_FOLDER_PLACEHOLDER, sourceId || REFUSAL_FOLDER_FALLBACK),
+    recovery: Object.freeze({ ...guidance.recovery })
+  });
 }
 
 export function validateSourceId(value) {
@@ -1274,10 +1365,12 @@ function allowedResult(receipt) {
   });
 }
 
-function refusedResult(receipt) {
+function refusedResult(receipt, guidance) {
   return Object.freeze({
     decision: receipt.decision,
     reason: receipt.reason,
+    message: guidance.message,
+    recovery: guidance.recovery,
     receipt_id: receipt.receipt_id,
     resolved_at: receipt.resolved_at,
     ...(receipt.project_id ? { project_id: receipt.project_id } : {}),

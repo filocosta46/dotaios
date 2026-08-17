@@ -1479,6 +1479,7 @@ async function testAuthorizationRefusal({ name, reason, mutate, expectsGrant = t
     assert.equal(result.reason, reason, name);
     assert.deepEqual(result.references, [], name);
     assert.deepEqual(observations, [], name);
+    assertRefusalSpeaksPlainly(result, name);
     const receiptPath = path.join(fixture.homePath, ".dotaios", "project-sources", "access-receipts.jsonl");
     const receipts = fs.readFileSync(receiptPath, "utf8").trim().split("\n").map(JSON.parse);
     assert.equal(receipts.length, 1, name);
@@ -1487,11 +1488,70 @@ async function testAuthorizationRefusal({ name, reason, mutate, expectsGrant = t
     assert.equal(Object.hasOwn(receipts[0], "grant"), expectsGrant, name);
     if (grantKeys) assert.deepEqual(Object.keys(receipts[0].grant).sort(), grantKeys.toSorted(), name);
     assert.deepEqual(receipts[0].references, [], name);
+    assertReceiptCarriesNoGuidance(receipts[0], name);
     const serialized = JSON.stringify({ result, receipts });
     assert.equal(serialized.includes(fixture.sourceRoot), false, name);
     assert.equal(serialized.includes("project-other-002"), false, name);
     assert.equal(serialized.includes("f0a1-bad"), false, name);
     assert.equal(serialized.includes("WRONG_SCOPE_PRIVATE_PURPOSE"), false, name);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
+// The eleven names assertReceiptSchema pins with exactFields. Guidance is
+// deliberately absent: the schema is closed and re-validated against the
+// ledger's existing final line on every append, so an added field would make
+// older binaries treat the whole ledger as poisoned with no repair path.
+const CLOSED_RECEIPT_FIELDS = [
+  "version", "receipt_id", "resolved_at", "decision", "reason", "task",
+  "project_id", "project", "source_id", "grant", "references",
+];
+
+// A refusal is the owner's whole answer, so it owes them a sentence in words
+// and one next action. The bare reason token must not be what reaches them.
+function assertRefusalSpeaksPlainly(result, name) {
+  assert.equal(typeof result.message, "string", name);
+  assert.equal(result.message.length > 0, true, name);
+  assert.equal(result.message.includes(result.reason), false, name);
+  assert.equal(result.message.includes("{folder}"), false, name);
+  assert.equal(typeof result.recovery.code, "string", name);
+  assert.equal(result.recovery.code.length > 0, true, name);
+  assert.equal(typeof result.recovery.message, "string", name);
+  assert.equal(result.recovery.message.length > 0, true, name);
+}
+
+function assertReceiptCarriesNoGuidance(receipt, name) {
+  assert.equal(Object.hasOwn(receipt, "message"), false, name);
+  assert.equal(Object.hasOwn(receipt, "recovery"), false, name);
+  assert.deepEqual(Object.keys(receipt).filter((field) => !CLOSED_RECEIPT_FIELDS.includes(field)), [], name);
+}
+
+test(
+  "refusals raised before any permission is read speak plainly without naming folder contents",
+  assertPreAuthorizationRefusalsStayBlind,
+);
+
+async function assertPreAuthorizationRefusalsStayBlind() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const base = { aiosPath: fixture.aiosPath, homePath: fixture.homePath, task: CAMPAIGN_TASK };
+    const refusals = [
+      await retrieveProjectSource(base),
+      await retrieveProjectSource({ ...base, projectSelector: "acme-campaign" }),
+    ];
+    assert.deepEqual(refusals.map((refusal) => refusal.reason), ["project-required", "source-no-match"]);
+    for (const refusal of refusals) {
+      assertRefusalSpeaksPlainly(refusal, refusal.reason);
+      assert.equal(Object.hasOwn(refusal, "source_id"), false, refusal.reason);
+      const serialized = JSON.stringify(refusal);
+      assert.equal(serialized.includes(fixture.sourceRoot), false, refusal.reason);
+      assert.equal(serialized.includes("CONTENT_READ_CANARY"), false, refusal.reason);
+      for (const expectedPath of fixture.expectedPaths) {
+        assert.equal(serialized.includes(expectedPath), false, refusal.reason);
+      }
+      assert.equal(/\d+\s+(?:files?|references?|entries)/i.test(serialized), false, refusal.reason);
+    }
   } finally {
     fixture.cleanup();
   }

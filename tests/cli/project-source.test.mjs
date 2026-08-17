@@ -381,6 +381,32 @@ function assertRevokedCliRetrieval(fixture, grantId, receiptPath) {
   assert.equal(JSON.stringify({ refused, receipts }).includes(fixture.sourceRoot), false);
 }
 
+test("spawned CLI refusal says what happened and what to do next", assertCliRefusalSpeaksPlainly);
+
+function assertCliRefusalSpeaksPlainly() {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    const grantApplied = authorizeCliSource(fixture);
+    revokeCliGrant(fixture, grantApplied.grant_id);
+
+    const human = runCli(withoutJson(retrieveArgs(fixture)));
+    assert.equal(human.status, 0, human.stderr || human.stdout);
+    assert.match(human.stdout, /Permission to read campaign-assets was withdrawn\./);
+    assert.match(human.stdout, /Give permission again/);
+    assert.match(human.stdout, /^Receipt: /m);
+    assert.equal(human.stdout.includes("grant-revoked"), false);
+    assert.equal(human.stdout.includes(fixture.sourceRoot), false);
+
+    // Machine callers must not notice this at all: the stable reason stays.
+    const machine = runJson(retrieveArgs(fixture));
+    assert.equal(machine.decision, "refused");
+    assert.equal(machine.reason, "grant-revoked");
+    assert.deepEqual(machine.references, []);
+  } finally {
+    fixture.cleanup();
+  }
+}
+
 function sourceAddArgs(fixture, proof = null) {
   return [
     "project", "source", "add", "acme-campaign", fixture.sourceRoot,

@@ -286,7 +286,8 @@ function printResult(output, result) {
     return;
   }
   if (result.decision === "refused") {
-    output.log(`Project source retrieval refused: ${result.reason}`);
+    output.log(result.message);
+    output.log(result.recovery.message);
     output.log(`Receipt: ${result.receipt_id}`);
     return;
   }
