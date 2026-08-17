@@ -610,8 +610,8 @@ function firstSessionTemplate() {
 
 {{#if user_name}}{{user_name}}, this folder is yours.{{else}}This folder is yours.{{/if}}
 
-It holds what you just told us — who you are, what you are working on, and what
-matters right now — as ordinary text files on this computer.
+It holds what you just told us: who you are, what you are working on, and what
+matters right now. All of it as ordinary text files on this computer.
 
 Every AI you use starts from nothing and asks you to explain yourself again.
 This folder is what they read first, so you do not have to.
@@ -620,12 +620,12 @@ Open any file, change it, delete it. Nothing here is locked.
 
 ## Try it once, it takes two minutes
 
-1. Open Claude, Cursor, Codex, or whichever AI you use — in your usual folder,
-   not in this one.
+1. Open Claude, Cursor, Codex, or whichever AI you use, in your usual folder
+   and not in this one.
 2. Say: \`Use my memory. Tell me what you know about how I work.\`
 3. Tell it something true about how you work, and ask it to save it.
-4. Switch to a different assistant — a completely separate agent — and ask it
-   what you just saved. It will find it, and it will show you where it came from.
+4. Switch to a different assistant, a completely separate agent, and ask it what
+   you just saved. It will find it, and it will show you where it came from.
 
 That is the whole idea. Say something once, and everything you use knows it.
 
@@ -633,9 +633,9 @@ That is the whole idea. Say something once, and everything you use knows it.
 
 Say one of these at the start of a conversation:
 
-- \`Use my memory\` — it can read everything in this folder.
-- \`Only this project\` — it can read that one project and nothing else about you.
-- \`Private chat\` — it reads nothing and saves nothing.
+- \`Use my memory\`: it can read everything in this folder.
+- \`Only this project\`: it can read that one project and nothing else about you.
+- \`Private chat\`: it reads nothing and saves nothing.
   Your AI app may still keep its own conversation history; that part is not ours
   to erase.
 
@@ -656,9 +656,9 @@ somewhere else when you want a conversation that touches none of this.
 
 ## What is in the folder
 
-- \`context/\` — you: your role, your work, your priorities.
-- \`projects/\` — one folder for each thing you are working on.
-- \`memory/\` — what you have asked it to remember, over time.
+- \`context/\`: your role, your work, your priorities.
+- \`projects/\`: one folder for each thing you are working on.
+- \`memory/\`: what you have asked it to remember, over time.
 
 Gmail, Calendar, and Drive can be connected later, read-only. There is no rush.
 `;
