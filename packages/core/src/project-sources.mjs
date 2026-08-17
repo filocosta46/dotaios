@@ -59,70 +59,121 @@ const REFUSAL_FOLDER_FALLBACK = "that folder";
 const REFUSAL_GUIDANCE = Object.freeze({
   "result-too-large": {
     message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} has too many files to list in one answer.`,
-    recovery: { code: "connect-a-narrower-folder", message: "Connect the sub-folder that holds what you need instead of the whole folder." }
+    recovery: { code: "connect_a_narrower_folder", message: "Connect the sub-folder that holds what you need instead of the whole folder." }
   },
   "source-bound-exceeded": {
     message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} is too large or too deeply nested to read in one go.`,
-    recovery: { code: "connect-a-narrower-folder", message: "Connect a narrower sub-folder instead of the whole folder." }
+    recovery: { code: "connect_a_narrower_folder", message: "Connect a narrower sub-folder instead of the whole folder." }
   },
   "reconnect-required": {
     message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} has moved or changed since it was connected.`,
-    recovery: { code: "connect-the-folder-again", message: "Connect it again from where it is now." }
+    recovery: { code: "connect_the_folder_again", message: "Connect it again from where it is now." }
   },
   "source-changed": {
     message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} changed while it was being read.`,
-    recovery: { code: "ask-again", message: "Ask for it again." }
+    recovery: { code: "ask_again", message: "Ask for it again." }
   },
   "root-invalid": {
     message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} can no longer be found on this computer.`,
-    recovery: { code: "connect-the-folder-again", message: "Connect it again from its current location." }
+    recovery: { code: "connect_the_folder_again", message: "Connect it again from its current location." }
   },
   "binding-missing": {
     message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} is not connected on this computer.`,
-    recovery: { code: "connect-the-folder-again", message: "Connect it again from its current location." }
+    recovery: { code: "connect_the_folder_again", message: "Connect it again from its current location." }
   },
   "grant-expired": {
     message: `Permission to read ${REFUSAL_FOLDER_PLACEHOLDER} has run out.`,
-    recovery: { code: "give-permission-again", message: "Give permission again." }
+    recovery: { code: "give_permission_again", message: "Give permission again." }
   },
   "grant-revoked": {
     message: `Permission to read ${REFUSAL_FOLDER_PLACEHOLDER} was withdrawn.`,
-    recovery: { code: "give-permission-again", message: "Give permission again if you still want it used." }
+    recovery: { code: "give_permission_again", message: "Give permission again if you still want it used." }
   },
   "grant-missing": {
     message: `There is no permission recorded for ${REFUSAL_FOLDER_PLACEHOLDER}.`,
-    recovery: { code: "give-permission-again", message: "Give permission to read it." }
+    recovery: { code: "give_permission_again", message: "Give permission to read it." }
+  },
+  "grant-invalid": {
+    message: `The permission for ${REFUSAL_FOLDER_PLACEHOLDER} cannot be used for this.`,
+    recovery: { code: "give_permission_again", message: "Give permission again." }
+  },
+  "grant-scope-mismatch": {
+    message: `The permission for ${REFUSAL_FOLDER_PLACEHOLDER} does not cover reading it.`,
+    recovery: { code: "give_permission_again", message: "Give permission to read the folder." }
+  },
+  "purpose-mismatch": {
+    message: `The permission for ${REFUSAL_FOLDER_PLACEHOLDER} was given for a different purpose.`,
+    recovery: { code: "give_permission_again", message: "Give permission again for what you want it used for." }
+  },
+  "source-revision-mismatch": {
+    message: `The details of ${REFUSAL_FOLDER_PLACEHOLDER} changed after permission was given.`,
+    recovery: { code: "give_permission_again", message: "Give permission again so it matches the folder as it is now." }
+  },
+  "binding-revision-mismatch": {
+    message: `${REFUSAL_FOLDER_PLACEHOLDER} was reconnected after permission was given.`,
+    recovery: { code: "give_permission_again", message: "Give permission again so it matches the current connection." }
+  },
+  "authorization-state-invalid": {
+    message: `The saved permission for ${REFUSAL_FOLDER_PLACEHOLDER} is damaged or unreadable.`,
+    recovery: { code: "connect_the_folder_again", message: "Connect the folder again to rebuild its permission." }
+  },
+  "authorization-changed": {
+    message: `The permission for ${REFUSAL_FOLDER_PLACEHOLDER} changed while it was being used.`,
+    recovery: { code: "ask_again", message: "Ask for it again." }
+  },
+  "source-missing": {
+    message: `${REFUSAL_FOLDER_PLACEHOLDER} is no longer set up in this project.`,
+    recovery: { code: "connect_the_folder_again", message: "Connect it again from its current location." }
+  },
+  "source-declaration-invalid": {
+    message: `The saved details for ${REFUSAL_FOLDER_PLACEHOLDER} are damaged or unreadable.`,
+    recovery: { code: "connect_the_folder_again", message: "Connect it again to write them fresh." }
+  },
+  "source-unsafe-entry": {
+    message: `${REFUSAL_FOLDER_PLACEHOLDER} holds something DotAIOS will not read, such as a shortcut or a special file.`,
+    recovery: { code: "connect_a_narrower_folder", message: "Connect a sub-folder that does not contain it." }
+  },
+  "source-name-invalid": {
+    message: `${REFUSAL_FOLDER_PLACEHOLDER} holds a file whose name DotAIOS cannot handle.`,
+    recovery: { code: "connect_a_narrower_folder", message: "Rename that file, or connect a sub-folder without it." }
+  },
+  "source-unavailable": {
+    message: `DotAIOS could not read ${REFUSAL_FOLDER_PLACEHOLDER}.`,
+    recovery: { code: "check_the_folder", message: "Check the folder is still there and still readable." }
   },
   "source-busy": {
     message: `The folder ${REFUSAL_FOLDER_PLACEHOLDER} is busy with another request.`,
-    recovery: { code: "ask-again", message: "Wait a moment and ask again." }
+    recovery: { code: "ask_again", message: "Wait a moment and ask again." }
   },
   // Refused before any folder was chosen: these name only what the caller
   // supplied, never a folder, a file count, or anything read from disk.
   "source-no-match": {
     message: "None of your connected folders matched those words.",
-    recovery: { code: "try-different-words", message: "Try the client's name, or the words you used when you connected the folder." }
+    recovery: { code: "try_different_words", message: "Try the client's name, or the words you used when you connected the folder." }
   },
   "source-ambiguous": {
     message: "More than one connected folder matched those words equally well.",
-    recovery: { code: "name-one-folder", message: "Say which one you mean, or give one of them a clearer description." }
+    recovery: { code: "name_one_folder", message: "Say which one you mean, or give one of them a clearer description." }
   },
   "project-required": {
     message: "This needs to know which project to look in.",
-    recovery: { code: "name-the-project", message: "Name the project you mean." }
+    recovery: { code: "name_the_project", message: "Name the project you mean." }
   },
   "project-unknown": {
     message: "There is no project by that name.",
-    recovery: { code: "name-the-project", message: "Check the name against the projects you have." }
+    recovery: { code: "name_the_project", message: "Check the name against the projects you have." }
   },
   "project-ambiguous": {
     message: "More than one project answers to that name.",
-    recovery: { code: "name-the-project", message: "Say which one you mean by its full name." }
+    recovery: { code: "name_the_project", message: "Say which one you mean by its full name." }
   }
 });
+// Reached only by a reason with no entry above. It must not assume a folder was
+// ever chosen: some reasons are raised before selection. Any reason that lands
+// here is a gap in the table, not a designed outcome.
 const REFUSAL_GUIDANCE_FALLBACK = Object.freeze({
-  message: `DotAIOS could not use ${REFUSAL_FOLDER_PLACEHOLDER} for this request.`,
-  recovery: { code: "check-the-folder", message: "Check that the folder is still connected and still where it was." }
+  message: "DotAIOS could not complete this request.",
+  recovery: { code: "check_the_folder", message: "Check that the folder is still connected and still where it was, then ask again." }
 });
 
 export class ProjectSourceError extends Error {
@@ -855,10 +906,12 @@ function refusalGuidance(reason, sourceId) {
   const guidance = Object.hasOwn(REFUSAL_GUIDANCE, reason)
     ? REFUSAL_GUIDANCE[reason]
     : REFUSAL_GUIDANCE_FALLBACK;
-  return Object.freeze({
+  // Only recovery escapes onto the frozen result; this wrapper is destructured
+  // by refusedResult and discarded, so it does not need freezing itself.
+  return {
     message: guidance.message.replaceAll(REFUSAL_FOLDER_PLACEHOLDER, sourceId || REFUSAL_FOLDER_FALLBACK),
     recovery: Object.freeze({ ...guidance.recovery })
-  });
+  };
 }
 
 export function validateSourceId(value) {

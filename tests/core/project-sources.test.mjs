@@ -1508,11 +1508,18 @@ const CLOSED_RECEIPT_FIELDS = [
   "project_id", "project", "source_id", "grant", "references",
 ];
 
+// The generic sentence REFUSAL_GUIDANCE_FALLBACK produces. Pinned here so a
+// reason with no table entry fails loudly: without this assertion the fallback
+// satisfies every other check below, and the refusal matrix passes green while
+// most of its cases say nothing specific to the owner at all.
+const GENERIC_REFUSAL_MESSAGE = "DotAIOS could not complete this request.";
+
 // A refusal is the owner's whole answer, so it owes them a sentence in words
 // and one next action. The bare reason token must not be what reaches them.
 function assertRefusalSpeaksPlainly(result, name) {
   assert.equal(typeof result.message, "string", name);
   assert.equal(result.message.length > 0, true, name);
+  assert.notEqual(result.message, GENERIC_REFUSAL_MESSAGE, name);
   assert.equal(result.message.includes(result.reason), false, name);
   assert.equal(result.message.includes("{folder}"), false, name);
   assert.equal(typeof result.recovery.code, "string", name);
