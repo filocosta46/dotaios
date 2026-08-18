@@ -85,6 +85,17 @@
         "configFile": ".hermes/config.yaml",
         "key": "skills.external_dirs"
       }
+    },
+    {
+      "name": "Grok",
+      "detect": ".grok",
+      "command": "grok",
+      "bridge": null,
+      "skills": {
+        "mode": "symlink",
+        "dir": ".grok/skills",
+        "project": { "mode": "symlink", "dir": ".grok/skills" }
+      }
     }
   ],
   "wellKnownSkillDirs": [

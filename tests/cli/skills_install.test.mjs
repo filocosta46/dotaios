@@ -216,7 +216,7 @@ test("activation covers detected native clients and every Hermes profile without
   const canonicalSkills = path.join(aiosPath, "skills");
   const profilePath = path.join(homePath, ".hermes", "profiles", "bill", "config.yaml");
 
-  for (const dir of [".claude", ".codex", ".gemini", ".cursor", ".gemini/antigravity"]) {
+  for (const dir of [".claude", ".codex", ".gemini", ".cursor", ".gemini/antigravity", ".grok"]) {
     fs.mkdirSync(path.join(homePath, dir), { recursive: true });
   }
   fs.mkdirSync(path.join(homePath, ".hermes", "profiles", "bill"), { recursive: true });
@@ -249,7 +249,8 @@ test("activation covers detected native clients and every Hermes profile without
   for (const targetDir of [
     ".agents/skills",
     ".claude/skills",
-    ".gemini/config/skills"
+    ".gemini/config/skills",
+    ".grok/skills"
   ]) {
     const link = path.join(homePath, targetDir, skillName);
     assert.equal(fs.readlinkSync(link), source, `${targetDir} should expose the canonical skill`);

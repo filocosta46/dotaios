@@ -48,6 +48,19 @@ test("registry preserves non-bridge runtimes such as Hermes", async () => {
   assert.equal(bridgePath("/tmp/home", hermes), null);
 });
 
+test("Grok is a first-class skill host with no global instruction bridge", async () => {
+  const registry = await loadAgentRegistry();
+  const grok = registry.find((agent) => agent.name === "Grok");
+
+  assert.ok(grok);
+  assert.equal(grok.bridge, null);
+  assert.equal(grok.detect, ".grok");
+  assert.equal(grok.command, "grok");
+  assert.equal(grok.skills?.dir, ".grok/skills");
+  assert.equal(grok.skills?.project?.dir, ".grok/skills");
+  assert.equal(bridgePath("/tmp/home", grok), null);
+});
+
 // Source: https://antigravity.google/docs/skills publishes exactly two skill
 // discovery paths — workspace `<workspace-root>/.agents/skills/<skill>/` and
 // global `~/.gemini/config/skills/<skill>/`. Detection is a separate question:

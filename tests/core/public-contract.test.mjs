@@ -142,28 +142,48 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   ));
   const contents = relativeFiles.map((relativePath) => documents[relativePath]);
   const corpus = contents.join("\n");
-  const pinned = `dotaios@${pkg.version} setup`;
-  const pinnedPattern = pinned.replaceAll(".", "\\.");
 
   for (const relativePath of relativeFiles) {
-    assert.match(documents[relativePath], new RegExp(`${pinnedPattern} --dry-run`), `${relativePath} must pin the preview`);
-    assert.match(documents[relativePath], new RegExp(`^npx ${pinnedPattern}$`, "m"), `${relativePath} must retain a pinned manual recovery path`);
+    assert.match(
+      documents[relativePath],
+      /npx (?:-y )?dotaios@latest setup --dry-run/,
+      `${relativePath} must preview the current published package`
+    );
+    assert.match(
+      documents[relativePath],
+      /^npx (?:-y )?dotaios@latest setup$/m,
+      `${relativePath} must retain an @latest manual recovery path`
+    );
+    assert.doesNotMatch(
+      documents[relativePath],
+      /dotaios@\d+\.\d+\.\d+/,
+      `${relativePath} must not pin a release number`
+    );
+    assert.doesNotMatch(
+      documents[relativePath],
+      /blob\/v\d+\.\d+\.\d+\//,
+      `${relativePath} must not pin INSTALL to a version tag`
+    );
   }
   assert.match(documents["README.md"], /open .*assistant.*paste/is, "README must lead with one assistant request");
+  assert.match(
+    documents["README.md"],
+    /Please set up DotAIOS on my computer: https:\/\/github\.com\/filocosta46\/dotaios/,
+    "README must keep the unversioned paste line"
+  );
   assert.deepEqual(
     extractAssistantInstallRefs([
-      `https://github.com/filocosta46/dotaios/blob/v${pkg.version}/INSTALL.md`,
+      "https://github.com/filocosta46/dotaios/blob/v2.0.8/INSTALL.md",
       "https://github.com/filocosta46/dotaios/blob/feature/privacy/INSTALL.md"
     ].join("\n")),
-    [`v${pkg.version}`, "feature/privacy"],
-    "assistant handoff extraction must include slash-containing mutable refs"
+    ["v2.0.8", "feature/privacy"],
+    "assistant handoff extraction must still parse slash-containing refs"
   );
   for (const relativePath of ["README.md", "docs/friend-setup.md"]) {
-    const handoffRefs = extractAssistantInstallRefs(documents[relativePath]);
-    assert.deepEqual(
-      handoffRefs,
-      [`v${pkg.version}`],
-      `${relativePath} must use exactly one release-pinned assistant handoff`
+    assert.equal(
+      extractAssistantInstallRefs(documents[relativePath]).length,
+      0,
+      `${relativePath} must send the assistant to INSTALL.md on the current page, not a version tag`
     );
   }
   assert.match(documents["README.md"], /_npmUser\.name/, "README provenance must request the publisher it claims to display");
@@ -188,16 +208,15 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
-  assert.doesNotMatch(documents["docs/friend-setup.md"], /dotaios@latest (?:init|activate|setup)/, "friend setup must not switch first-time commands back to @latest");
-  assert.doesNotMatch(documents["docs/getting-started.md"], /Setup and upgrade commands use .*@latest/i, "getting started must distinguish pinned setup from later updates");
+  assert.match(documents["docs/friend-setup.md"], /dotaios@latest setup/, "friend setup must use the current published package");
   assert.match(documents["INSTALL.md"], /shared\s+`~\/\.agents\/skills` directory/i, "INSTALL must disclose the shared global skill surface");
   assert.match(documents["INSTALL.md"], /each attached checkout listed in `~\/\.dotaios\/projects\.json`/i, "INSTALL must cover project-local removal");
   assert.doesNotMatch(documents["INSTALL.md"], /use `\/memory-maintenance`/, "INSTALL must use cross-client skill invocation language");
-  assert.doesNotMatch(documents["INSTALL.md"], /npx(?: -y)? dotaios@latest/i, "INSTALL must inspect latest metadata before running one exact release");
-  assert.match(documents["INSTALL.md"], /pins DotAIOS itself, not its complete dependency graph/i, "INSTALL must bound the reproducibility claim");
+  assert.match(documents["INSTALL.md"], /npx(?: -y)? dotaios@latest setup/i, "INSTALL must run the current published package");
+  assert.match(documents["INSTALL.md"], /current published package|@latest/i, "INSTALL must not claim a frozen release pin");
   assert.match(documents["INSTALL.md"], /`~\/aios\/memory\/sessions`.*private GitHub mirror/is, "INSTALL must disclose capture and sync composition");
   assert.match(documents["INSTALL.md"], /GitHub\s+repository remains.*revoke the token/is, "INSTALL must disclose remote and credential cleanup");
-  assert.match(documents["INSTALL.md"], /bundled with the reviewed release.*does not install third-party plugins/is, "INSTALL must bound the shared skill surface");
+  assert.match(documents["INSTALL.md"], /bundled with the current package[\s\S]{0,40}does not install[\s\S]{0,10}third-party plugins/i, "INSTALL must bound the shared skill surface");
   assert.match(documents["INSTALL.md"], /\[would preserve collision\].*\[would stop\]/is, "INSTALL must turn preview output into a proceed-or-stop gate");
   assert.match(documents["INSTALL.md"], /^npx dotaios@[^\s]+ skills doctor$/m, "INSTALL must lead with human-readable skill verification");
   assert.match(documents["INSTALL.md"], /Do not use this for your personal installation/i, "INSTALL must separate test automation from personal setup");
@@ -256,7 +275,7 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   );
   assert.match(unwrapped["INSTALL.md"], /does not use the macOS Keychain or another operating-system credential store/i, "INSTALL must not imply an OS credential store it does not use");
   assert.doesNotMatch(corpus.replace(/\s+/g, " "), /[Cc]redentials stay in the machine credential store/, "no public page may claim an OS credential store");
-  assert.match(documents["INSTALL.md"], new RegExp(`${pkg.version.replaceAll(".", "\\.")} removal contract`, "i"), "INSTALL must scope removal instructions to the installed release");
+  assert.match(documents["INSTALL.md"], /current removal contract/i, "INSTALL must keep a removal contract without pinning a release number");
   assert.match(documents["INSTALL.md"], /doctor --path <aios-path>/i, "INSTALL must make custom-path removal inspectable");
   assert.match(documents["INSTALL.md"], /retired `~\/\.cursor\/skills`.*`~\/\.gemini\/skills`.*`~\/\.gemini\/config\/skills`/is, "INSTALL must cover retired global skill targets");
   assert.match(documents["INSTALL.md"], /\.cursor\/rules\/dotaios\.mdc.*remove only that block/is, "INSTALL must cover the retired project Cursor bridge");

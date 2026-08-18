@@ -34,9 +34,7 @@ commands, and paste:
 That link stays the same next year.
 
 If you are the assistant reading this page, follow
-[INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.9/INSTALL.md),
-under “If an AI assistant is helping you”. That file is pinned to the release
-you are about to install.
+[INSTALL.md](INSTALL.md), under “If an AI assistant is helping you”.
 
 ### What the assistant does
 
@@ -53,13 +51,13 @@ not need a GitHub or DotAIOS account.
 
 Use Terminal, PowerShell, or another system shell. DotAIOS requires Node.js 20
 or newer. The first command previews without creating `~/aios` or changing app
-configuration; the second runs the same pinned release:
+configuration; the second runs the current published package:
 
 npm may download and cache the named package.
 
 ```sh
-npx dotaios@2.0.9 setup --dry-run
-npx dotaios@2.0.9 setup
+npx dotaios@latest setup --dry-run
+npx dotaios@latest setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the
@@ -69,7 +67,7 @@ configuration. Private GitHub sync is off by default.
 Afterward, verify the local installation with:
 
 ```sh
-npx dotaios@2.0.9 doctor
+npx dotaios@latest doctor
 ```
 
 ## Choose what your AI can remember
@@ -135,23 +133,22 @@ You do not need this to use the product.
 
 The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios),
 published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios).
-Release `2.0.9` maps to Git tag
-[`v2.0.9`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.9).
+Setup always uses the current published package (`dotaios@latest`).
 
 These commands inspect registry provenance and packaged contents without
 running DotAIOS setup:
 
 ```sh
-npm view dotaios@2.0.9 version dist.integrity dist.tarball gitHead _npmUser.name
-npm view dotaios@2.0.9 scripts
-npm pack dotaios@2.0.9 --dry-run
+npm view dotaios version dist.integrity dist.tarball gitHead _npmUser.name
+npm view dotaios scripts
+npm pack dotaios --dry-run
 ```
 
 Those three commands show you the registry publisher (`_npmUser.name`), the
 integrity record, and every file in the package before anything runs. The
 package defines no `preinstall`, `install`, or `postinstall` script, so nothing
 executes until you invoke the CLI yourself. The commands above omit `npx -y`
-on purpose, so npm still asks you to confirm the pinned package. Interactive
+on purpose, so npm still asks you to confirm the current package. Interactive
 setup then offers private sync, a daily brief, conversation saving/backfill,
 and the optional Lightpanda helper; every one of them defaults to No.
 [INSTALL.md](INSTALL.md) has the full sequence and
