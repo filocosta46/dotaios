@@ -43,7 +43,7 @@ you are about to install.
 - Checks for Node.js 20 or newer, and installs it for you if it is missing
 - On a Mac and on Linux, that does not need your password
 - Previews the folder and app changes
-- Asks you four questions that become your starting context
+- Asks you three questions that become your starting context
 - Runs setup, verifies it, and says what happened in plain language
 
 The questions reach you in the conversation, not at a shell prompt. You do
