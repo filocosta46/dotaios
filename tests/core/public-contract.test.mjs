@@ -508,3 +508,42 @@ test("every heredoc in the docs closes on an unindented delimiter", async () => 
     }
   }
 });
+
+// The npm package is read by strangers. A maintainer's own name in a shipped
+// comment is a private detail leaking into a public artifact, and it dates the
+// code — it reads as "this is one person's project" to someone deciding whether
+// to depend on it. This pins the shipped file set only; CHANGELOG.md and the
+// repo's own docs are not published and may credit people by name.
+test("no personal names ship inside the npm package", async () => {
+  const packageJson = JSON.parse(
+    await fs.readFile(path.join(repoRoot, "package.json"), "utf8")
+  );
+  const NAMES = /\b(filippo|morena|dalmonte|roberto|tomada)\b/i;
+  const offenders = [];
+
+  async function scan(relative) {
+    const absolute = path.join(repoRoot, relative);
+    let entry;
+    try {
+      entry = await fs.stat(absolute);
+    } catch {
+      return;
+    }
+    if (entry.isDirectory()) {
+      for (const child of await fs.readdir(absolute)) {
+        await scan(path.join(relative, child));
+      }
+      return;
+    }
+    if (!/\.(mjs|md|json|hbs|template)$/.test(relative)) return;
+    const text = await fs.readFile(absolute, "utf8");
+    for (const [index, line] of text.split("\n").entries()) {
+      // The repository URL is the project's real address, not a personal detail.
+      if (line.includes("github.com/")) continue;
+      if (NAMES.test(line)) offenders.push(`${relative}:${index + 1}: ${line.trim()}`);
+    }
+  }
+
+  for (const shipped of packageJson.files) await scan(shipped);
+  assert.deepEqual(offenders, [], `personal names in shipped files:\n${offenders.join("\n")}`);
+});
