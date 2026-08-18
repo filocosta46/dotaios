@@ -4,14 +4,16 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.10] - 2026-08-18
+
 ### Changed
-- First-time setup in README, INSTALL, and friend-setup uses `dotaios@latest`
-  and the unversioned GitHub paste line. The page is no longer rewritten every
-  release just to bump a number.
+- First-time setup uses `dotaios@latest` and the unversioned GitHub paste line.
+  The page is no longer rewritten every release just to bump a number.
 
 ### Added
 - Grok is a detected skill host. `activate` links the AIOS catalog into
-  `~/.grok/skills`, the directory Grok always scans.
+  `~/.grok/skills`, the directory Grok always scans. This is not a Grok
+  installer.
 
 ## [2.0.9] - 2026-08-18
 
