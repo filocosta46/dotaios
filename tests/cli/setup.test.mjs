@@ -55,10 +55,11 @@ test("setup --dry-run previews concrete actions without DotAIOS-managed changes"
 
 // The preview built its own answer to "which skill-link directories get
 // written" instead of reading the one the writer uses. It promised one
-// directory while the run created three. On a machine with Claude Code
-// installed only the Antigravity line is visibly missing, so this fixture must
-// keep every agent undetected — no client directories and no agent binaries on
-// PATH — or the test passes while .claude/skills is still under-reported.
+// directory while the run created every default projection root. On a machine
+// with Claude Code installed only the Antigravity line is visibly missing, so
+// this fixture must keep every agent undetected — no client directories and no
+// agent binaries on PATH — or the test passes while .claude/skills is still
+// under-reported.
 function skillDirsUnder(root) {
   const found = [];
   const walk = (dir) => {
@@ -102,8 +103,9 @@ test("setup --dry-run promises every skill-link directory the real run creates",
     assert.deepEqual(created, [
       path.join(homePath, ".agents", "skills"),
       path.join(homePath, ".claude", "skills"),
-      path.join(homePath, ".gemini", "config", "skills")
-    ].sort(), "all three projection roots are written with nothing detected");
+      path.join(homePath, ".gemini", "config", "skills"),
+      path.join(homePath, ".grok", "skills")
+    ].sort(), "every default projection root is written with nothing detected");
   } finally {
     fsSync.rmSync(tmp, { recursive: true, force: true });
   }

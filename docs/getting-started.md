@@ -8,19 +8,17 @@ DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of i
 > previewing every change and leaving the meaningful choices to you.
 
 ```bash
-npx dotaios@2.0.9 setup --dry-run
-npx dotaios@2.0.9 setup
+npx dotaios@latest setup --dry-run
+npx dotaios@latest setup
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
 
-First-time setup stays pinned so the package, source tag, and integrity record
-are reproducible. Later maintenance examples use `@latest` deliberately when
-you choose to inspect or run the newest published release; no global install is
-needed.
+Setup and later commands use the current published package (`dotaios@latest`).
+No global install is needed.
 
 The recommended flow is the one request in [Friend Setup](friend-setup.md). The
-agent checks Node, previews the exact changes, runs the pinned setup, verifies
+agent checks Node, previews the exact changes, runs setup, verifies
 it, and shows the one AIOS folder. The setup flow asks a few questions, creates starter context and memory files,
 then adds managed bridge blocks or links for detected Claude Code, Codex, and
 Gemini installations. Private sync remains off unless you explicitly opt in.
@@ -65,7 +63,7 @@ To connect a consultant or client asset folder, preview the consent with
 `dotaios project source connect <project> <folder>`:
 
 ```bash
-npx dotaios@2.0.9 project source connect acme-campaign /path/to/assets \
+npx dotaios@latest project source connect acme-campaign /path/to/assets \
   --source-id campaign-assets \
   --label "Campaign assets" \
   --purpose "Launch campaign assets"
@@ -86,7 +84,7 @@ After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Curs
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
 
 ```bash
-npx dotaios@2.0.9 init --vault-path ~/my-vault
+npx dotaios@latest init --vault-path ~/my-vault
 ```
 
 Check setup health:

@@ -150,7 +150,8 @@ test("preview is deterministic and zero-write while binding the complete opaque 
     [
       ".agents/skills/review",
       ".claude/skills/review",
-      ".gemini/config/skills/review"
+      ".gemini/config/skills/review",
+      ".grok/skills/review"
     ]
   );
   const sharedProjection = first.projections.find((entry) => entry.relative_path === ".agents/skills/review");
@@ -465,7 +466,7 @@ test("exact-proof adoption byte-preserves opaque assets and leaves an arbitrary 
   );
   assert.equal(fs.existsSync(executionCanary), false);
 
-  for (const relativeRoot of [".agents/skills", ".claude/skills", ".gemini/config/skills"]) {
+  for (const relativeRoot of [".agents/skills", ".claude/skills", ".gemini/config/skills", ".grok/skills"]) {
     const projection = path.join(fixture.homePath, relativeRoot, "binary-bundle");
     assert.equal(fs.lstatSync(projection).isSymbolicLink(), true);
     assert.equal(fs.readlinkSync(projection), path.join(fixture.aiosPath, "skills", "binary-bundle"));

@@ -18,6 +18,7 @@ A successful file write proves only configured. Public support requires a reprod
 | Cursor (project) | Project `AGENTS.md` from `dotaios attach` | Project Agent Skills links | Configured locally; project-scoped production is not proven by the bounded probe |
 | Antigravity IDE | No always-on context bridge | Global `.gemini/config/skills`, project `.agents/skills`; optional MCP | Documented adapter; requires an invocation receipt |
 | Hermes | No always-on context bridge | Global `skills.external_dirs` in `~/.hermes/config.yaml`; no project-local adapter | Global configuration adapter only; invocation remains unverified |
+| Grok | No always-on context bridge | Global and project `~/.grok/skills` links; also reads `~/.agents/skills` and `~/.claude/skills` natively | Configured locally; verify invocation in the client |
 | Kimi Code CLI | No Kimi-specific DotAIOS instruction bridge | Native shared `.agents/skills`; optional MCP through `.kimi-code/mcp.json` | Configured and documented; requires an invocation receipt |
 | OpenCode | Global `~/.config/opencode/AGENTS.md`, the instructions file OpenCode documents | Native shared `.agents/skills`; optional MCP through `~/.config/opencode/opencode.json` | Configured and documented; requires an invocation receipt |
 | Browser chats | No local filesystem access | No native local skill path | Attach files or paste a bounded brief explicitly |
