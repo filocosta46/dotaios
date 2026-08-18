@@ -9,20 +9,20 @@ and no hosted DotAIOS memory service.
 
 ## Who this is for
 
-DotAIOS is for an independent consultant or freelancer who already moves
-between AI chats and local agents, but does not want to build or maintain a
-memory system. It is useful when the expensive part of changing tools is not the
-new interface—it is having to retell the useful context again.
+An independent consultant or freelancer who already moves between AI chats
+and local agents, and does not want to build a memory system.
+
+The expensive part of changing tools is not the new interface. It is having
+to retell the useful context again.
 
 The free core is available now.
 
-## The continuity loop
+### How it stays with you
 
-1. **Install and personalize** one folder with the context you choose.
-2. **Save** a useful preference, decision, or piece of work deliberately.
+1. **Install** and **personalize** one folder with the context you choose.
+2. **Save** a useful preference, decision, or piece of work on purpose.
 3. **Switch** to another connected assistant and retrieve it with its source.
-4. **Choose privacy** for the work in front of you: Shared, This project, or Off.
-5. **Repeat** without handing ownership of your context to one model vendor.
+4. Choose **privacy** for the work in front of you: Shared, This project, or Off.
 
 ## Install with one request
 
@@ -31,25 +31,29 @@ commands, and paste:
 
 > Please set up DotAIOS on my computer: https://github.com/filocosta46/dotaios
 
-Nothing else to copy, and nothing to keep up to date — that link is the same
-next year. If you are the assistant reading this page, the instructions are in
+That link stays the same next year.
+
+If you are the assistant reading this page, follow
 [INSTALL.md for the current release](https://github.com/filocosta46/dotaios/blob/v2.0.9/INSTALL.md),
-under “If an AI assistant is helping you”. Follow that file rather than this
-one: it is pinned to the release you are about to install, so the steps and the
-package always match.
+under “If an AI assistant is helping you”. That file is pinned to the release
+you are about to install.
 
-The assistant checks whether Node.js 20 or newer is available, and installs it
-for you if it is missing — on a Mac and on Linux without needing your password
-at all. It then previews the exact folder and app changes, asks you the four
-questions that become your starting context, runs setup, verifies the result,
-and translates it into plain language. The questions reach you in the
-conversation rather than at a shell prompt. You do not need a GitHub or DotAIOS
-account.
+### What the assistant does
 
-If you prefer to run the technical recovery path yourself, use Terminal,
-PowerShell, or another system shell. DotAIOS requires Node.js 20 or newer. The
-first command previews without creating `~/aios` or changing app configuration;
-the second runs the same pinned release:
+- Checks for Node.js 20 or newer, and installs it for you if it is missing
+- On a Mac and on Linux, that does not need your password
+- Previews the folder and app changes
+- Asks you four questions that become your starting context
+- Runs setup, verifies it, and says what happened in plain language
+
+The questions reach you in the conversation, not at a shell prompt. You do
+not need a GitHub or DotAIOS account.
+
+### If you prefer Terminal
+
+Use Terminal, PowerShell, or another system shell. DotAIOS requires Node.js 20
+or newer. The first command previews without creating `~/aios` or changing app
+configuration; the second runs the same pinned release:
 
 npm may download and cache the named package.
 
@@ -58,9 +62,11 @@ npx dotaios@2.0.9 setup --dry-run
 npx dotaios@2.0.9 setup
 ```
 
-Setup creates `~/aios`, then connects supported AI apps detected on the machine. It preserves unmanaged files and stops before replacing existing configuration. Private GitHub sync is off by default.
+Setup creates `~/aios`, then connects supported AI apps detected on the
+machine. It preserves unmanaged files and stops before replacing existing
+configuration. Private GitHub sync is off by default.
 
-Afterward, either you or the assistant can verify the local installation with:
+Afterward, verify the local installation with:
 
 ```sh
 npx dotaios@2.0.9 doctor
@@ -68,7 +74,7 @@ npx dotaios@2.0.9 doctor
 
 ## Choose what your AI can remember
 
-Your AIOS folder is the source of truth. Start a connected local-agent session
+Your AIOS folder is what they read. Start a connected local-agent session
 with one of these phrases:
 
 - `Use my memory` — **Memory: Shared** uses your personal continuity.
@@ -78,6 +84,8 @@ with one of these phrases:
 - `Private chat` — **Memory: Off** tells DotAIOS operations to perform no read,
   search, save, or capture. Your AI app may still keep its own chat history.
 
+### What Off actually does
+
 Gemini's managed hook preserves the first-message choice. Codex and Claude Code
 rely on their bridge instructions to forward Off on every DotAIOS operation and
 show the receipt; they do not independently enforce a host-wide session lock.
@@ -85,7 +93,7 @@ Off also cannot undo instructions or context the AI app may already have loaded
 before your first message, so begin a Private chat outside the AIOS folder or an
 attached project.
 
-Saving remains deliberate: one explicit save becomes one conceptual memory
+Saving stays deliberate: one explicit save becomes one conceptual memory
 result, and another connected assistant can show where it came from.
 
 ## What you have afterward
@@ -98,21 +106,40 @@ result, and another connected assistant can show where it came from.
 
 Your context stays in a local `~/aios` folder: readable, portable, and yours.
 DotAIOS does not keep an endless transcript or turn every chat into permanent
-memory. Important information is saved deliberately into the right place so it
-remains useful later.
+memory. You save the important parts on purpose, in the right place.
+
+### Good to know
+
+- A browser-only chat cannot open local files by itself.
+- Each assistant uses local context in its own way.
+  [Client support](docs/client-support.md) records what has been observed.
+- Claude Code supports managed automatic session capture today. Other clients
+  use explicit capture, import, or the bundled `save-session` workflow.
+- Optional sync sends the selected Git mirror to your own private GitHub
+  repository. The free core does not upload context to a DotAIOS service.
+
+### The promise
+
+- **Private by default.** DotAIOS does not run a hosted memory service.
+- **Yours to keep.** Your context lives in readable local files, not inside a
+  locked-in account.
+- **Works with the assistants you choose.** Models are rented. Your context
+  is owned.
 
 ## Technical reference
 
-The sections below explain package provenance, project workspaces, optional
-private sync, managed skills, updates, and removal. You do not need them to
-understand the product, but they keep the operating and security boundaries
-inspectable.
+Verify the package, connect projects, update a release, or remove DotAIOS.
+You do not need this to use the product.
 
 ### Verify before running
 
-The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios), published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios). Release `2.0.9` maps to Git tag [`v2.0.9`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.9).
+The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios),
+published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios).
+Release `2.0.9` maps to Git tag
+[`v2.0.9`](https://github.com/filocosta46/dotaios/releases/tag/v2.0.9).
 
-These commands inspect registry provenance and packaged contents without running DotAIOS setup:
+These commands inspect registry provenance and packaged contents without
+running DotAIOS setup:
 
 ```sh
 npm view dotaios@2.0.9 version dist.integrity dist.tarball gitHead _npmUser.name
@@ -120,29 +147,41 @@ npm view dotaios@2.0.9 scripts
 npm pack dotaios@2.0.9 --dry-run
 ```
 
-Those three commands show you the registry publisher (`_npmUser.name`), the integrity record, and every file in the package before anything runs. The package defines no `preinstall`, `install`, or `postinstall` script, so nothing executes until you invoke the CLI yourself. The commands above omit `npx -y` on purpose, so npm still asks you to confirm the pinned package — approve it once what you see matches what you expect. Interactive setup then offers private sync, a daily brief, conversation saving/backfill, and the optional Lightpanda helper; every one of them defaults to No. [INSTALL.md](INSTALL.md) has the full sequence and [the security model](docs/security.md) has the package and permission boundaries.
+Those three commands show you the registry publisher (`_npmUser.name`), the
+integrity record, and every file in the package before anything runs. The
+package defines no `preinstall`, `install`, or `postinstall` script, so nothing
+executes until you invoke the CLI yourself. The commands above omit `npx -y`
+on purpose, so npm still asks you to confirm the pinned package. Interactive
+setup then offers private sync, a daily brief, conversation saving/backfill,
+and the optional Lightpanda helper; every one of them defaults to No.
+[INSTALL.md](INSTALL.md) has the full sequence and
+[the security model](docs/security.md) has the package and permission
+boundaries.
 
 ### What setup connects
 
 Activation may add a DotAIOS-managed block to `~/.claude/CLAUDE.md`,
 `~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, or
-`~/.config/opencode/AGENTS.md`, plus documented skill links
-for detected clients. Cursor connects per project. Machine-local project path
-mappings live in `~/.dotaios/projects.json`, and existing unmanaged content is
-preserved. Claude Code can use managed session capture; other clients use
-explicit saving or import. [Client support](docs/client-support.md) records what
-each client has actually been observed to do.
+`~/.config/opencode/AGENTS.md`, plus documented skill links for detected
+clients. Cursor connects per project. Machine-local project path mappings live
+in `~/.dotaios/projects.json`. Existing unmanaged content is preserved.
 
-When you use an AI client, that provider processes the context you send it. You
-can optionally sync selected AIOS files privately between your own devices.
+Claude Code can use managed session capture; other clients use explicit
+saving or import. [Client support](docs/client-support.md) records what each
+client has actually been observed to do.
+
+When you use an AI client, that provider processes the context you send it.
+You can optionally sync selected AIOS files privately between your own
+devices.
 
 Project records sync with AIOS. Managed project repositories sit under its
 ignored `workspaces/` root with their own history and credentials, so source
 code never enters the personal-context mirror.
 
-## Projects and workspaces
+### Projects and workspaces
 
-Register an existing repository without changing it, inspect the plan, then apply it:
+Register an existing repository without changing it, inspect the plan, then
+apply it:
 
 ```sh
 npx -y dotaios@latest project add /path/to/project
@@ -151,7 +190,9 @@ npx -y dotaios@latest attach /path/to/project --dry-run
 npx -y dotaios@latest attach /path/to/project
 ```
 
-The portable project record lives in `~/aios/projects`. The checkout stays where it is. On another machine, restore a missing checkout into the ignored workspace shelf with:
+The portable project record lives in `~/aios/projects`. The checkout stays
+where it is. On another machine, restore a missing checkout into the ignored
+workspace shelf with:
 
 ```sh
 npx -y dotaios@latest project restore <slug-or-id> --dry-run
@@ -160,7 +201,7 @@ npx -y dotaios@latest project restore <slug-or-id>
 
 DotAIOS never copies a project's source code into the personal-context mirror.
 
-## Optional private sync
+### Optional private sync
 
 Sync is opt-in and uses a private GitHub repository you control:
 
@@ -170,13 +211,17 @@ npx -y dotaios@latest sync now
 npx -y dotaios@latest sync status
 ```
 
-Credentials stay on the machine and are not written into the Git remote URL. Managed project checkouts, external vault contents, secrets, and ignored local state are outside the mirror. Stop syncing and remove the local sync credential with `npx -y dotaios@latest sync logout`; the private repository remains in your GitHub account.
+Credentials stay on the machine and are not written into the Git remote URL.
+Managed project checkouts, external vault contents, secrets, and ignored
+local state are outside the mirror. Stop syncing and remove the local sync
+credential with `npx -y dotaios@latest sync logout`; the private repository
+remains in your GitHub account.
 
-## Managed Agent Skills
+### Managed Agent Skills
 
-AIOS real directories under `skills/<name>/SKILL.md` are canonical. Native
-agent folders are derived projections; linked shelf entries and real skills
-found only in native folders stay unroutable until explicit adoption.
+Canonical skills live at `skills/<name>/SKILL.md`. Native agent folders are
+derived projections. Linked shelf entries and skills found only in native
+folders stay unroutable until you adopt them.
 
 ```sh
 dotaios skills inventory --json
@@ -187,7 +232,7 @@ dotaios skills reconcile --json
 dotaios skills remove <name> --json
 ```
 
-Preview commands are zero-write. Apply requires both exact tokens from the
+Preview commands write nothing. Apply needs both exact tokens from the
 matching preview. Adoption copies the complete bounded regular-file bundle,
 never executes scripts, and refuses links, special or hardlinked files, stale
 proofs, unsafe parents, and foreign collisions.
@@ -224,28 +269,20 @@ client config automatically. Do not replace `<version>` with `latest`.
 
 ## Disconnecting or removing
 
-DotAIOS has no hosted account or background service to cancel. Before removing local data, make a backup of anything you want to keep.
+DotAIOS has no hosted account or background service to cancel. Before removing
+local data, make a backup of anything you want to keep.
 
 ```sh
 npx -y dotaios@latest capture disable claude-code
 npx -y dotaios@latest sync logout
 ```
 
-Those commands stop managed capture and private sync. The last step is deliberately yours: review the DotAIOS-managed bridge blocks and links in your client configuration, remove those, then archive or delete `~/aios`. There is no one-command wipe, because the same command would have to guess which parts of your client configuration are ours — and anything unmanaged is left exactly as you wrote it.
-
-## Good to know
-
-- A browser-only chat cannot open local files by itself.
-- Each assistant discovers and uses local context in its own way. [Client support](docs/client-support.md) records what has been observed for each one, rather than asking you to take it on faith.
-- Claude Code supports managed automatic session capture today. Other clients use explicit capture, import, or the bundled `save-session` workflow.
-- Optional sync sends the selected Git mirror to your own private GitHub repository. The free core does not upload context to a DotAIOS service.
-- [Client support](docs/client-support.md) separates configured, discoverable, invoked, and produced evidence for each client.
-
-## The promise
-
-- **Private by default.** DotAIOS does not run a hosted memory service.
-- **Yours to keep.** Your context lives in readable local files, not inside a locked-in account.
-- **Works with the assistants you choose.** Models are rented. Your context is owned.
+Those commands stop managed capture and private sync. The last step is
+deliberately yours: review the DotAIOS-managed bridge blocks and links in your
+client configuration, remove those, then archive or delete `~/aios`. There is
+no one-command wipe, because the same command would have to guess which parts
+of your client configuration are ours — and anything unmanaged is left exactly
+as you wrote it.
 
 ## Docs
 
