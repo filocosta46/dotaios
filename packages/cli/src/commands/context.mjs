@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { pathExists, readJson, writeFileSafe } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
+import { readPackageVersion, resolveCliInvocation } from "../../../core/src/bridges.mjs";
 import { isHtmlComment, planTemplateTree } from "../../../core/src/render.mjs";
 import { confirmWrites } from "../../../core/src/review.mjs";
 import { readBullet, readSection } from "../../../core/src/sections.mjs";
@@ -163,6 +164,9 @@ async function readTemplateData(target) {
 
   const strip = (v) => (isHtmlComment(v) ? "" : v);
 
+  // Same render-time pair init supplies. These are machine/release facts, not
+  // folder answers. A missing {{cli}} or {{version}} becomes an empty command
+  // and a dead doc link — the documented rewrite path must not do that.
   return {
     created_at: config.created_at || new Date().toISOString(),
     ai_tools: config.ai_tools || [],
@@ -170,7 +174,9 @@ async function readTemplateData(target) {
     user_name: strip(readBullet(identity, "Name")) || "Your Name",
     user_role: strip(readBullet(identity, "Role")) || "student / operator / builder",
     current_work: readSection(work, "Current Work") || "Add the active work threads agents should keep in mind.",
-    priorities: readSection(priorities, "Current Bets") || "Add the current bets and near-term priorities."
+    priorities: readSection(priorities, "Current Bets") || "Add the current bets and near-term priorities.",
+    cli: await resolveCliInvocation(),
+    version: await readPackageVersion()
   };
 }
 

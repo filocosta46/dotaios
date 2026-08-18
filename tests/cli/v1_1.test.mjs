@@ -122,6 +122,18 @@ test("context prints files and refreshes generated entrypoints", () => {
   assert.match(read(path.join(aiosPath, "CLAUDE.md")), /@AGENTS\.md/);
 });
 
+// The documented rewrite path must keep the same runnable invocation init wrote.
+// A missing {{cli}}/{{version}} becomes an empty command and a dead doc link.
+test("context --refresh still names a command the machine can run", () => {
+  const { aiosPath } = setupAios();
+  run(["context", "--refresh", "--path", aiosPath]);
+  const router = read(path.join(aiosPath, "AGENTS.md"));
+  assert.doesNotMatch(router, /` brief /, "refresh must not emit an empty command name");
+  assert.doesNotMatch(router, /blob\/v\//, "refresh must not drop the release from doc links");
+  assert.doesNotMatch(router, /\{\{\w+\}\}/, "every router placeholder must still be filled");
+  assert.match(router, /npx dotaios@\d+\.\d+\.\d+ brief --compact --memory shared/);
+});
+
 test("init creates secret-safe env placeholders", () => {
   const { aiosPath } = setupAios();
 

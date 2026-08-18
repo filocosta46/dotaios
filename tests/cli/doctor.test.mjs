@@ -398,3 +398,36 @@ describe("doctorCommand", () => {
     assert.match(lines.join("\n"), /predates v1\.23.*read_session_digest/i);
   });
 });
+
+describe("doctor command reachability", () => {
+  it("fails when the router names an empty command", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-empty-cli-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    await fs.mkdir(homePath, { recursive: true });
+    await fs.writeFile(
+      path.join(aiosPath, "AGENTS.md"),
+      [
+        "Use ` brief --compact --memory shared`",
+        "https://github.com/filocosta46/dotaios/blob/v/docs/security.md#plugins",
+        ""
+      ].join("\n")
+    );
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    try {
+      const result = await checkCliReachable(aiosPath, homePath, {
+        loadRegistry: async () => [],
+        isAvailable: async () => false,
+        resolveInvocation: async () => "npx dotaios@2.0.8"
+      });
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /empty|unrunnable|blank|cannot run/i);
+      assert.match(result.fix, /context --refresh/);
+      assert.doesNotMatch(result.fix, /init --overwrite/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
