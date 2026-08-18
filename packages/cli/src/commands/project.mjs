@@ -22,6 +22,7 @@ const HELP_TEXT = `Usage:
   dotaios project doctor [options]
   dotaios project context <slug-or-id> [options]
   dotaios project source connect <project> <folder> [options]
+  dotaios project source locate [project] --task <text>
   dotaios project source retrieve [project] --task <text>
   dotaios project source add <project> <folder> [options]
   dotaios project source bind <project> <source-id> <folder> [options]

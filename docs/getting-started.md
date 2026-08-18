@@ -8,8 +8,8 @@ DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of i
 > previewing every change and leaving the meaningful choices to you.
 
 ```bash
-npx dotaios@2.0.8 setup --dry-run
-npx dotaios@2.0.8 setup
+npx dotaios@2.0.9 setup --dry-run
+npx dotaios@2.0.9 setup
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
@@ -61,21 +61,21 @@ Run without a slug to restore every missing project, or add `--dry-run` to
 preview. The project repository stays independent and never enters the AIOS Git
 mirror; external checkout locations remain supported.
 
-To connect a consultant or client asset folder, preview the complete finite
-read consent with `dotaios project source connect <project> <folder>`:
+To connect a consultant or client asset folder, preview the consent with
+`dotaios project source connect <project> <folder>`:
 
 ```bash
-npx dotaios@latest project source connect acme-campaign /path/to/assets \
+npx dotaios@2.0.9 project source connect acme-campaign /path/to/assets \
   --source-id campaign-assets \
   --label "Campaign assets" \
-  --purpose "Launch campaign assets" \
-  --expires-at 2099-01-01T00:00:00.000Z
+  --purpose "Launch campaign assets"
 ```
 
-The preview names the project, source, read scope, purpose, approval timing,
-and expiry, and writes nothing. Repeat the same command with `--yes` for the
-single explicit confirmation; no operation ID or fingerprint transcription is
-required.
+The preview names the project, source, read scope, and purpose, and writes
+nothing. Repeat the same command with `--yes` for the single explicit
+confirmation. Then reach the folder with `project source locate` and open only
+the files the task needs. `retrieve` lists file metadata and will refuse a
+sizeable folder.
 
 For search, `--project` selects the portable project corpus by slug or stable
 ID. `--session-project` filters session tags only. If an older command used
@@ -86,7 +86,7 @@ After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Curs
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
 
 ```bash
-npx dotaios@2.0.8 init --vault-path ~/my-vault
+npx dotaios@2.0.9 init --vault-path ~/my-vault
 ```
 
 Check setup health:

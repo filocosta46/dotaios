@@ -113,6 +113,9 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
         ? readText(filesystem, path.join(aiosPath, "context", "priorities.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
         : "",
       includesSharedSurfaces
+        ? readText(filesystem, path.join(aiosPath, "context", "work.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        : "",
+      includesSharedSurfaces
         ? readText(filesystem, path.join(aiosPath, "decisions", "log.md"), aiosPath, readBudget, MAX_DECISIONS_SOURCE_BYTES)
         : "",
       includesSharedSurfaces
@@ -164,7 +167,7 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     error.code = "DOTAIOS_WORKING_CONTEXT_READ_FAILED";
     throw error;
   }
-  const [identity, priorities, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] = sources;
+  const [identity, priorities, workNote, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] = sources;
 
   const projectScope = resolveProjectScope(requestedProject, projects);
   const projectFilter = projectScope?.filter || null;
@@ -186,6 +189,7 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const candidates = {
     identity: compactHeader(stripMarkdownFrontmatter(identity)),
     priorities: compactHeader(stripMarkdownFrontmatter(priorities)),
+    currentWork: compactHeader(readSection(workNote, "Current Work") || stripMarkdownFrontmatter(workNote)),
     decisions: recentDecisions(decisionsLog, MAX_DECISION_ITEMS),
     today: {
       focus: firstLine(readSection(todayNote, "Focus")),
@@ -232,6 +236,7 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
     ...base,
     identity: "",
     priorities: "",
+    currentWork: "",
     decisions: [],
     todayContext: { focus: "", plan: [] },
     carryOver: [],
@@ -253,6 +258,7 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
 
   if (candidates.identity) consider({ ...selected, identity: candidates.identity });
   if (candidates.priorities) consider({ ...selected, priorities: candidates.priorities });
+  if (candidates.currentWork) consider({ ...selected, currentWork: candidates.currentWork });
   if (candidates.decisions.length > 0) consider({ ...selected, decisions: candidates.decisions });
 
   if (base.projectFilter && candidates.activeProject) {
@@ -355,6 +361,7 @@ function renderUnbounded(context) {
 
   if (context?.identity) lines.push("### Identity", context.identity, "");
   if (context?.priorities) lines.push("### Priorities", context.priorities, "");
+  if (context?.currentWork) lines.push("### Current Work", context.currentWork, "");
   if (context?.decisions?.length > 0) {
     lines.push("### Decisions", ...context.decisions.map((decision) => `- ${decision}`), "");
   }

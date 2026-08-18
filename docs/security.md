@@ -48,9 +48,10 @@ Project-source paths, grants, revocation state, and access receipts are
 machine-local. A portable declaration carries only source identity, label,
 type, and purpose beneath its owning project. Add, bind, grant, and revoke
 commands preview by default; apply requires the displayed operation ID and plan
-fingerprint from that exact state. An explicit future expiry and exact purpose
-are mandatory. Neither task text nor the read-only MCP adapter can grant
-consent.
+fingerprint from that exact state. An exact purpose is mandatory. Expiry is stored as a future UTC timestamp so
+older CLIs can still validate the grant; the default path uses a far date
+rather than asking the owner to type one. Neither task text nor the read-only
+MCP adapter can grant consent.
 
 Each grant is limited to one project, source, read operation, purpose, portable
 source revision, binding generation, and root identity. Missing, mismatched,
@@ -68,10 +69,13 @@ receipt publication keep a durable in-flight guard; directory-sync uncertainty
 reinstates that guard or retains a non-reclaimable poisoned owner lock before
 authorization can resume.
 
-Retrieval opens no source-content bytes and returns no absolute roots or local
-state paths. It emits only complete source-relative metadata after containment
-and identity rechecks, then syncs one guarded append-only receipt before
-returning. Receipt uncertainty poisons later access rather than repairing or
+`locate` is the supported read: after the same consent checks it returns the
+absolute folder path on this machine so the assistant can open only the files
+the task needs. That path is on the result, never on the receipt. Later native
+reads are the host's. `retrieve` still lists source-relative file metadata only,
+opens no source-content bytes, and returns no absolute roots. It emits a
+complete listing after containment and identity rechecks, then syncs one
+guarded append-only receipt before returning. Receipt uncertainty poisons later access rather than repairing or
 truncating historical bytes. Root, directory, and file identities use BigInt
 metadata observations; linked or special entries and every exceeded traversal,
 path, output, or receipt bound fail closed with empty references. Node's

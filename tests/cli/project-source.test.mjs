@@ -128,9 +128,16 @@ test("project-source help is reachable at every nested boundary and explains sea
   ]) {
     const result = runCli(args);
     assert.equal(result.status, 0, result.stderr || result.stdout);
-    for (const subcommand of ["add", "bind", "grant", "revoke", "retrieve", "connect"]) {
+    for (const subcommand of ["add", "bind", "grant", "revoke", "retrieve", "connect", "locate"]) {
       assert.match(result.stdout, new RegExp(`project source ${subcommand}\\b`), args.join(" "));
     }
+    const parent = runCli(["project", "--help"]);
+    assert.equal(parent.status, 0, parent.stderr || parent.stdout);
+    const locateAt = parent.stdout.indexOf("project source locate");
+    const retrieveAt = parent.stdout.indexOf("project source retrieve");
+    assert.ok(locateAt !== -1, "parent help must list locate");
+    assert.ok(retrieveAt !== -1, "parent help must still list retrieve");
+    assert.ok(locateAt < retrieveAt, "locate must be listed before retrieve");
   }
   const search = runCli(["search", "--help"]);
   assert.equal(search.status, 0, search.stderr || search.stdout);
@@ -611,6 +618,30 @@ test("locate reaches a folder far past the retrieval ceiling, where retrieve ref
     assert.equal(located.source_id, "campaign-assets");
     // No listing at any size — that is the whole point.
     assert.deepEqual(located.references, []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+test("a refused retrieve says what happened and points at locate", () => {
+  const fixture = createProjectSourceRetrievalFixture();
+  try {
+    for (let index = 0; index < 400; index += 1) {
+      fs.writeFileSync(path.join(fixture.sourceRoot, `file-${index}.txt`), "x");
+    }
+    authorizeCliSource(fixture);
+    const human = runCli([
+      "project", "source", "retrieve", "acme-campaign", "--task", CAMPAIGN_TASK,
+      "--path", fixture.aiosPath, "--home", fixture.homePath,
+    ]);
+    assert.equal(human.status, 0, human.stderr || human.stdout);
+    assert.doesNotMatch(human.stdout, /Project source retrieval refused: source-bound-exceeded/);
+    assert.doesNotMatch(human.stdout, /result-too-large/);
+    assert.match(human.stdout, /too many files|too large|cannot list/i);
+    assert.match(human.stdout, /locate/i);
+    assert.match(human.stdout, /Receipt:/);
+    const json = runJson(retrieveArgs(fixture));
+    assert.equal(json.reason, "source-bound-exceeded");
   } finally {
     fixture.cleanup();
   }

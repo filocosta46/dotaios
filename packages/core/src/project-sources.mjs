@@ -721,16 +721,21 @@ export async function resolveProjectSourceLocation(options = {}) {
     if (state.grantIssue) {
       throw sourceError(state.grantIssue, "Project source authorization state does not match this operation.");
     }
-    // This is the whole difference from retrieval: authorize, then stop.
-    // authorizeSelectedSource already re-stats the root and refuses with
-    // reconnect-required if its identity moved, so the path handed back has
-    // been verified as recently as a retrieval would have verified it.
-    const { binding, grant } = await authorizeSelectedSource({
+    // The whole difference from retrieval is the enumeration, and only the
+    // enumeration. Consent is not a place to be cheaper: authorizeSelectedSource
+    // re-stats the root, and then the same recheck retrieval runs after its walk
+    // runs here too, so the binding, the source declaration and the grant are
+    // all still what they were at the instant the path is handed over.
+    const authorization = await authorizeSelectedSource({
       filesystem,
       source,
       state,
       stateCoordinates,
       now: options.now
+    });
+    const { binding, grant } = authorization;
+    await assertAuthorizationStillStands({
+      aiosPath, filesystem, project, source, reader, ...authorization
     });
     return await publishAllowedLocation({
       homePath, filesystem, project, source, grant, binding, task, options
@@ -809,6 +814,24 @@ async function enumerateAndRecheck({
     sourceId: source.source_id,
     filesystem
   });
+  await assertAuthorizationStillStands({
+    aiosPath, filesystem, project, source, reader, binding, grant, rootBefore, stateCoordinates
+  });
+  return references;
+}
+
+// readAuthorizationSnapshot takes the source lock, reads, and releases it, so a
+// concurrent `revoke` can land after the grant was validated and before the
+// result is published. Every surface that publishes an allowed access has to
+// close that window itself, and both of them now close it with this one
+// function: locate used to authorize and publish straight from the snapshot it
+// already held, so a revoke that completed mid-operation still handed back a
+// live absolute path and stamped the ledger `allowed`. That is worse here than
+// for retrieval, because the disclosed artifact is a path rather than a
+// snapshot, so a wrong answer outlives the call.
+async function assertAuthorizationStillStands({
+  aiosPath, filesystem, project, source, reader, binding, grant, rootBefore, stateCoordinates
+}) {
   const [rootAfter, sourceAfter, stateAfter] = await Promise.all([
     inspectRetrievalRootIdentity(binding.root_path, filesystem),
     readSourceDeclaration({ aiosPath, project, evidenceReader: reader }, source.source_id),
@@ -820,7 +843,6 @@ async function enumerateAndRecheck({
   if (stableJson(stateAfter.grant) !== stableJson(grant)) {
     throw sourceError("authorization-changed", "Project source authorization changed while it was being resolved.");
   }
-  return references;
 }
 
 async function inspectRetrievalRootIdentity(rootPath, filesystem) {

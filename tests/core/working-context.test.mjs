@@ -356,6 +356,17 @@ test("scoped views dedupe update channels like unscoped views", async () => {
   assert.equal((scopedA.rendered.match(/A update/g) || []).length, 1);
 });
 
+test("compact projection includes current work from context/work.md", async () => {
+  const aiosPath = tmpAios();
+  fs.mkdirSync(path.join(aiosPath, "context"), { recursive: true });
+  fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nI am the launch owner.\n");
+  fs.writeFileSync(path.join(aiosPath, "context", "priorities.md"), "# Priorities\n\nShip the hardening release this week.\n");
+  fs.writeFileSync(path.join(aiosPath, "context", "work.md"), "# Work\n\n## Current Work\n\nLaunching DotAIOS 2.0.9 publicly.\n");
+
+  const result = await buildWorkingContext(aiosPath, {}, { clock: fixedClock });
+  assert.match(result.rendered, /### Current Work[\s\S]*Launching DotAIOS 2\.0\.9/);
+});
+
 test("compact projection answers identity and priorities within the same budget", async () => {
   const aiosPath = tmpAios();
   fs.mkdirSync(path.join(aiosPath, "context"), { recursive: true });

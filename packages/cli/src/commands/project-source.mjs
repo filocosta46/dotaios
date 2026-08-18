@@ -311,10 +311,63 @@ function safeCliErrorMessage(error) {
     || /^Usage: dotaios project source [a-z]+ /.test(message)
     || /^--yes is only valid for project source connect\.$/.test(message)
     || /^Connect uses one explicit --yes confirmation/.test(message)
-    || /^Option is not valid for (?:add|bind|grant|revoke|retrieve|connect): --[a-z-]+$/.test(message)
+    || /^Option is not valid for (?:add|bind|grant|revoke|retrieve|connect|locate): --[a-z-]+$/.test(message)
   ) return message;
   return "Project source request is invalid.";
 }
+
+// Frozen owner-facing copy. Never interpolate error.message: unexpected
+// failures can carry an absolute path. Never invent a new receipt field.
+const REFUSAL_COPY = Object.freeze({
+  "result-too-large": Object.freeze({
+    message: "That folder has too many files to list in one answer.",
+    next: "Ask where the folder is with project source locate, then open only the files the task needs."
+  }),
+  "source-bound-exceeded": Object.freeze({
+    message: "That folder is too large to list in one answer.",
+    next: "Ask where the folder is with project source locate, then open only the files the task needs."
+  }),
+  "reconnect-required": Object.freeze({
+    message: "That folder has moved or changed since it was connected.",
+    next: "Connect it again from its current location."
+  }),
+  "source-changed": Object.freeze({
+    message: "That folder has moved or changed since it was connected.",
+    next: "Connect it again from its current location."
+  }),
+  "grant-expired": Object.freeze({
+    message: "Permission to use that folder has ended.",
+    next: "Grant permission again if you still want it used."
+  }),
+  "grant-revoked": Object.freeze({
+    message: "Permission to use that folder was withdrawn.",
+    next: "Grant permission again if you still want it used."
+  }),
+  "grant-missing": Object.freeze({
+    message: "That folder is not allowed to be used yet.",
+    next: "Connect it first."
+  }),
+  "source-no-match": Object.freeze({
+    message: "None of the connected folders matched those words.",
+    next: "Try the client's name, or the words used when the folder was connected."
+  }),
+  "source-ambiguous": Object.freeze({
+    message: "Two connected folders matched those words equally well.",
+    next: "Say which one, or give one of them a clearer description."
+  }),
+  "root-invalid": Object.freeze({
+    message: "That folder can no longer be found on this computer.",
+    next: "Connect it again from its current location."
+  }),
+  "project-required": Object.freeze({
+    message: "A project is needed to reach a connected folder.",
+    next: "Name the project, or connect a folder to one first."
+  }),
+  "project-unknown": Object.freeze({
+    message: "That project is not in this folder.",
+    next: "Check the project name, or add the project first."
+  })
+});
 
 function printResult(output, result) {
   if (result.decision === "allowed") {
@@ -325,7 +378,7 @@ function printResult(output, result) {
       output.log(`${result.label} (${result.project}/${result.source_id})`);
       output.log(`Folder: ${result.root_path}`);
       if (result.purpose) output.log(`For: ${result.purpose}`);
-      output.log("Open it directly — read only what the task needs.");
+      output.log("Open it directly and read only what the task needs.");
       output.log(`Receipt: ${result.receipt_id}`);
       return;
     }
@@ -335,7 +388,9 @@ function printResult(output, result) {
     return;
   }
   if (result.decision === "refused") {
-    output.log(`Project source retrieval refused: ${result.reason}`);
+    const copy = REFUSAL_COPY[result.reason];
+    output.log(copy ? copy.message : "That folder could not be used.");
+    output.log(copy ? copy.next : "Connect it again if you still want it used.");
     output.log(`Receipt: ${result.receipt_id}`);
     return;
   }

@@ -63,9 +63,10 @@ dotaios project source connect acme-campaign /path/to/assets \
   --json
 ```
 
-Read access does not expire unless you ask it to. Pass `--expires-at <UTC>` to
-set an end date; leave it out and the grant runs until `2099-01-01T00:00:00.000Z`.
-The lower-level `grant` command still requires the value explicitly.
+Read access stays open until you revoke it. Pass `--expires-at <UTC>` to set an
+end date; leave it out and the stored record uses `2099-01-01T00:00:00.000Z` so
+older copies of the CLI can still read the grant. `connect` and `grant` both
+default that way.
 
 The preview writes nothing and names the project, source, read scope, exact
 purpose, approval timing, and UTC expiry. Re-run the same values with `--yes`

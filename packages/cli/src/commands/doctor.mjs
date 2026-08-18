@@ -642,6 +642,12 @@ function skipReason(skipped) {
 // Matches a backticked bare invocation only. `` `npx dotaios@2.0.8 brief` ``
 // does not match, because the character after the backtick is not `d`.
 const BARE_INVOCATION = /`dotaios\s+[a-z]/;
+// A refresh that forgot {{cli}} writes `` ` brief `` and `blob/v/docs`.
+// That is worse than a bare name: the command does not exist, and this
+// check used to call the folder healthy because the backtick is not
+// followed by `dotaios`.
+const EMPTY_INVOCATION = /` (brief|search|ingest|project|memory|skills|sync|activate|doctor)\b/;
+const UNVERSIONED_DOC_LINK = /blob\/v\//;
 
 export async function checkCliReachable(target, homePath, {
   loadRegistry = loadAgentRegistry,
@@ -684,17 +690,22 @@ export async function checkCliReachable(target, homePath, {
   // need different remedies, so they are reported as different things.
   const entrypoint = path.join(target, AGENT_ENTRYPOINT);
   let staleEntrypoint = false;
+  let brokenEntrypoint = false;
   try {
-    if (BARE_INVOCATION.test(await fs.readFile(entrypoint, "utf8"))) staleEntrypoint = true;
+    const router = await fs.readFile(entrypoint, "utf8");
+    if (BARE_INVOCATION.test(router)) staleEntrypoint = true;
+    if (EMPTY_INVOCATION.test(router) || UNVERSIONED_DOC_LINK.test(router)) brokenEntrypoint = true;
   } catch {
     // checkAiosFolder already reports a missing or unreadable folder.
   }
 
-  if (!staleBridges.length && !staleEntrypoint) {
+  if (!staleBridges.length && !staleEntrypoint && !brokenEntrypoint) {
     return { name, status: "ok", detail: "Every file that names a DotAIOS command names one that runs here." };
   }
 
-  if (await isAvailable("dotaios")) {
+  // A bare `dotaios` is fine when the binary exists. An empty command name
+  // is never runnable, even on a machine that has the CLI on PATH.
+  if (!brokenEntrypoint && await isAvailable("dotaios")) {
     return { name, status: "ok", detail: "`dotaios` resolves on PATH, so those commands run as written." };
   }
 
@@ -705,15 +716,20 @@ export async function checkCliReachable(target, homePath, {
     parts.push(`${staleBridges.length} agent bridge${staleBridges.length === 1 ? "" : "s"} (${staleBridges.join(", ")})`);
     fixes.push(`\`${invocation} activate\` rewrites the bridges`);
   }
-  if (staleEntrypoint) {
+  if (staleEntrypoint || brokenEntrypoint) {
     parts.push(`the AIOS router at ${entrypoint}`);
-    fixes.push(`\`${invocation} init --overwrite\` re-renders the router`);
+    fixes.push(`\`${invocation} context --refresh\` re-renders the router`);
   }
+
+  const verb = parts.length === 1 && !staleBridges.length ? "tells" : "tell";
+  const what = brokenEntrypoint && !staleBridges.length && !staleEntrypoint
+    ? `${parts.join(" and ")} ${verb} assistants to run an empty command name — so every brief, search, and save from those assistants fails.`
+    : `${parts.join(" and ")} ${verb} assistants to run \`dotaios ...\`, but no \`dotaios\` command exists on this machine — so every brief, search, and save from those assistants fails.`;
 
   return {
     name,
     status: "fail",
-    detail: `${parts.join(" and ")} tell assistants to run \`dotaios ...\`, but no \`dotaios\` command exists on this machine — so every brief, search, and save from those assistants fails.`,
+    detail: what,
     fix: `${fixes.join("; ")}.`
   };
 }

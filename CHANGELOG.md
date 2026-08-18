@@ -4,6 +4,8 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.9] - 2026-08-18
+
 ### Added
 - `dotaios project source locate` answers "where is that folder?" instead of
   "what is in it?", so a connected folder can be reached at any size. Retrieval
@@ -18,6 +20,26 @@ All notable changes to DotAIOS will be documented in this file.
   tokens on files nobody asked for. The receipt carries no references, which is
   the shape a refusal already writes, so the closed receipt schema is unchanged
   and older versions keep reading the ledger.
+
+### Fixed
+- `context --refresh` now fills the same command name and release that `init`
+  writes. It had been reprinting the router with empty commands and dead doc
+  links, and `doctor` called that healthy. `doctor` now fails on an empty
+  command name and points at `context --refresh`, not `init --overwrite`.
+- A refused folder listing now says what happened and what to do next, in
+  words. Size refusals point at `locate`. The machine reason stays in `--json`.
+  The receipt is unchanged.
+- Parent `project` help lists `locate` above `retrieve`, so the one-step path
+  is the one that gets read.
+- Connecting a folder no longer asks for a deadline. `connect` and `grant`
+  default to a far stored date so older CLIs can still read the grant. Access
+  stays open until you revoke it.
+- Compact `brief` now includes **Current Work** from `context/work.md`. Setup
+  already asked for it and then hid it from every session start.
+
+### Changed
+- The first file a new person reads (`FIRST_SESSION.md`) is now in their
+  language, not the product's internals.
 
 ## [2.0.8] - 2026-08-17
 
