@@ -101,8 +101,8 @@ export function normalizeAgentRegistry(data) {
 
 // Load the shipped agent registry, then merge any user-defined registry at
 // <aiosPath>/agents.json. User entries with the same name override the
-// defaults; new names are appended. This is how a user (or Filippo) adds a
-// new AI tool without a code release.
+// defaults; new names are appended. This is how anyone adds a new AI tool
+// without waiting for a code release.
 export async function loadAgentRegistry(aiosPath) {
   const defaultValue = bundledAgentRegistry;
   assertAgentRegistryBounds(defaultValue);
