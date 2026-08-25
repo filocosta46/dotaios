@@ -799,7 +799,7 @@ export async function checkCliReachable(target, homePath, {
     if (invocation) fixes.push(`\`${invocation} context --refresh\` re-renders the router`);
   }
 
-  const verb = parts.length === 1 && !staleBridges.length ? "tells" : "tell";
+  const verb = parts.length === 1 && staleBridges.length <= 1 ? "tells" : "tell";
   const what = brokenEntrypoint && !staleBridges.length && !staleEntrypoint
     ? `${parts.join(" and ")} ${verb} assistants to run an empty command name — so every brief, search, and save from those assistants fails.`
     : `${parts.join(" and ")} ${verb} assistants to run a non-candidate DotAIOS command, so those managed instructions can run a different release.`;

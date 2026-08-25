@@ -803,7 +803,7 @@ function planScheduleLastRunUpdate(source, name) {
   const firstPrefix = source.slice(lineStart, firstPair.key.range[0]);
   const indent = firstPrefix.replace(/-\s*$/u, (marker) => " ".repeat(marker.length));
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
-  const insertAt = scheduleMap.range[2] ?? scheduleMap.range[1];
+  const insertAt = scheduleMap.range[1];
   const leadingEol = insertAt > 0 && !/[\r\n]/u.test(source[insertAt - 1]) ? eol : "";
   return (timestamp) => {
     const addition = `${leadingEol}${indent}last_run: ${JSON.stringify(timestamp)}${eol}`;

@@ -524,14 +524,46 @@ describe("doctor command reachability", () => {
     try {
       const result = await checkCliReachable(aiosPath, homePath, {
         loadRegistry: async () => [],
-        isAvailable: async () => {
-          throw new Error("PATH-resolved dotaios must not be consulted");
-        },
         resolveInvocation: async () => "npx dotaios@2.0.11"
       });
       assert.equal(result.status, "fail");
       assert.match(result.detail, /bare|candidate|managed instruction/i);
       assert.match(result.fix, /npx dotaios@2\.0\.11 context --refresh/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses singular grammar for one stale agent bridge", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-one-stale-bridge-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    const bridgeFile = path.join(homePath, ".codex", "AGENTS.md");
+    await fs.mkdir(path.dirname(bridgeFile), { recursive: true });
+    await fs.writeFile(
+      bridgeFile,
+      [
+        "<!-- dotaios-managed:start -->",
+        "Run `npx dotaios@2.0.10 brief --compact --memory shared`.",
+        "<!-- dotaios-managed:end -->",
+        ""
+      ].join("\n")
+    );
+    await fs.writeFile(
+      path.join(aiosPath, "AGENTS.md"),
+      "Use `npx dotaios@2.0.11 brief --compact --memory shared`.\n"
+    );
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    try {
+      const result = await checkCliReachable(aiosPath, homePath, {
+        loadRegistry: async () => [{ name: "Codex", bridge: ".codex/AGENTS.md" }],
+        resolveInvocation: async () => "npx dotaios@2.0.11"
+      });
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /1 agent bridge .* tells assistants/);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

@@ -307,6 +307,61 @@ test("runs a generated npx schedule through the in-package CLI without executing
   }
 });
 
+test("run-due records every due schedule without changing the remaining file", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-schedule-run-due-"));
+  const aiosPath = path.join(root, "aios");
+
+  try {
+    const init = spawnSync(process.execPath, [cli, "init", "--yes", "--path", aiosPath], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+    assert.equal(init.status, 0, init.stderr);
+
+    const schedulesPath = path.join(aiosPath, "schedules.yml");
+    const before = [
+      "# preserve this header",
+      "schedules:",
+      "  - name: first-status",
+      "    cadence: weekly",
+      "    command: \"npx dotaios@2.0.10 status\" # generated invocation",
+      "    enabled: true",
+      "    custom_flag: keep-first",
+      "  # preserve this separator",
+      "  - name: second-status",
+      "    cadence: daily",
+      "    command: \"npx dotaios@2.0.10 status\"",
+      "    enabled: true",
+      "    custom_flag: keep-second",
+      "tail: preserve",
+      ""
+    ].join("\n");
+    fs.writeFileSync(schedulesPath, before);
+
+    const run = spawnSync(
+      process.execPath,
+      [cli, "schedule", "run-due", "--path", aiosPath],
+      { cwd: repoRoot, encoding: "utf8" }
+    );
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+
+    const after = fs.readFileSync(schedulesPath, "utf8");
+    const entries = after.split(/^  - /m).slice(1);
+    assert.equal(entries.length, 2);
+    for (const entry of entries) {
+      const timestamp = entry.match(
+        /^name: (?:first|second)-status[\s\S]*^    last_run: "([^"]+)"$/m
+      )?.[1];
+      assert.ok(timestamp);
+      assert.equal(new Date(timestamp).toISOString(), timestamp);
+    }
+    assert.equal(after.match(/^    last_run: /gm)?.length, 2);
+    assert.equal(after.replace(/^    last_run: .*\n/gm, ""), before);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("refuses a flow-style schedule even on dry-run when last_run has no safe field boundary", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-schedule-flow-"));
   const aiosPath = path.join(root, "aios");
