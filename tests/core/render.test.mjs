@@ -223,8 +223,12 @@ test("memory-maintenance skill ships in skills/", async () => {
   assert.match(content, /\nname: memory-maintenance\n/);
   assert.match(content, /\ntriggers: .*\S/);
   assert.match(content, /\ndescription: .*\S/);
-  assert.match(content, /dotaios memory audit/, "the skill runs on machine-computed staleness, not vibes");
-  assert.match(content, /dotaios capture list/);
+  assert.match(
+    content,
+    /npx dotaios@<exact-candidate-version> memory audit/,
+    "the skill runs on machine-computed staleness through the package-materialized candidate"
+  );
+  assert.match(content, /npx dotaios@<exact-candidate-version> capture list/);
   assert.match(content, /--operation supersede/);
   assert.match(content, /--match/);
   assert.match(content, /supersede/);

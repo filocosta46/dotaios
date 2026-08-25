@@ -12,6 +12,13 @@ import {
 import { acquireOperationLock, releaseOperationLock } from "./operation-lock.mjs";
 import { assertOwnedFileStats, ensureOwnedDirectory } from "./owned-state.mjs";
 import { normalizeAgentRegistry } from "./bridges.mjs";
+import {
+  isRecognizedOfficialSkillOverlay,
+  loadOfficialSkillPackage,
+  materializeOfficialCandidateBytes,
+  officialSkillManifest,
+  officialSkillNames
+} from "./official-skills.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
 
 const require = createRequire(import.meta.url);
@@ -29,6 +36,10 @@ const LOCK_FORMAT = "dotaios-managed-skill-store-lock/v1";
 const NAME_RE = /^(?=.{1,64}$)[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
+const POSIX_MODE_MASK = 0o7777;
+// Windows exposes synthetic permission bits; keep manifest modes as portable
+// intent but do not classify those synthetic observations as ownership drift.
+const ENFORCES_POSIX_MODES = process.platform !== "win32";
 const DEFAULT_LIMITS = Object.freeze({
   maxDepth: 16,
   maxEntries: 4096,
@@ -85,6 +96,8 @@ export class ManagedSkillStoreError extends Error {
 export function createManagedSkillStore({
   aiosPath,
   homePath,
+  officialPackageRoot = null,
+  officialCandidateVersion,
   limits = {},
   hooks = {}
 }) {
@@ -98,11 +111,15 @@ export function createManagedSkillStore({
   const settings = Object.freeze({
     aiosPath: path.resolve(aiosPath),
     homePath: path.resolve(homePath),
+    officialPackageRoot: officialPackageRoot ? path.resolve(officialPackageRoot) : null,
+    officialCandidateVersion,
     limits: Object.freeze(configuredLimits),
     hooks
   });
   return Object.freeze({
     inspect: () => inspectManagedSkills(settings),
+    previewOfficialBatch: () => previewOfficialSkillBatch(settings),
+    applyOfficialBatch: (input) => applyOfficialSkillBatch(settings, input),
     previewAdoption: (input) => previewManagedSkillAdoption(settings, input),
     applyAdoption: (input) => applyManagedSkillAdoption(settings, input),
     reconcile: (input = {}) => reconcileManagedSkills(settings, input),
@@ -425,6 +442,849 @@ async function refuseRetiredProjectionHistory(settings, receipt) {
       ) throw managedError("unproved_removal", "retired_projection_target_requires_explicit_proof");
     }
   }
+}
+
+async function previewOfficialSkillBatch(settings) {
+  return (await buildOfficialSkillBatchPlan(settings)).proof;
+}
+
+async function buildOfficialSkillBatchPlan(settings) {
+  await assertStoreRoots(settings);
+  const official = await loadOfficialPackageForStore(settings);
+  const targets = [];
+  const conflicts = [];
+  for (const skill of official.skills) {
+    const target = await classifyOfficialDestination(settings, skill);
+    targets.push(target);
+    conflicts.push(...target.conflicts);
+  }
+
+  const sourceFingerprint = officialSourceFingerprint(official);
+  let desiredRegistry = null;
+  let catalogSkills = null;
+  let desiredCatalogs = null;
+  if (conflicts.length === 0) {
+    const catalogPlan = await buildOfficialCatalogPlan(settings, official);
+    desiredRegistry = catalogPlan.registry;
+    catalogSkills = catalogPlan.skills;
+    desiredCatalogs = catalogPlan.catalogs;
+  }
+  const currentCatalogs = await inspectCatalogs(settings);
+  const payload = {
+    format: "dotaios-official-skill-batch-proof/v1",
+    candidate_version: official.candidate_version,
+    candidate_invocation: official.candidate_invocation,
+    source_fingerprint: sourceFingerprint,
+    targets,
+    conflicts: conflicts.sort(compareCollisionEntries),
+    catalogs: currentCatalogs,
+    desired_catalogs: desiredCatalogs,
+    effects: {
+      repair_official_skills: targets.filter(({ action }) => action === "repair").map(({ name }) => name),
+      publish_catalogs: conflicts.length === 0 && !sameCatalogDigests(currentCatalogs, desiredCatalogs)
+    }
+  };
+  const hash = sha256(canonicalJson(payload));
+  return {
+    proof: deepFreeze({
+      ...payload,
+      operation_id: `skill-official-${hash.slice(0, 24)}`,
+      plan_fingerprint: `sha256:${hash}`
+    }),
+    official,
+    desiredRegistry,
+    catalogSkills
+  };
+}
+
+async function loadOfficialPackageForStore(settings) {
+  const options = {};
+  if (settings.officialPackageRoot) options.packageRoot = settings.officialPackageRoot;
+  if (settings.officialCandidateVersion !== undefined) {
+    options.candidateVersion = settings.officialCandidateVersion;
+  }
+  try {
+    return await loadOfficialSkillPackage(options);
+  } catch {
+    throw managedError("unsafe_source", "official_skill_package_invalid");
+  }
+}
+
+function officialSourceFingerprint(official) {
+  return `sha256:${sha256(canonicalJson({
+    manifest_format: official.manifest_format,
+    candidate_version: official.candidate_version,
+    skills: official.skills.map((skill) => ({
+      name: skill.name,
+      mode: skill.mode,
+      overlays: skill.generated_overlays,
+      files: skill.files.map((file) => ({
+        path: file.path,
+        mode: file.mode,
+        bytes: file.bytes,
+        packed_sha256: file.packed_sha256,
+        installed_sha256: file.installed_sha256,
+        predecessors: file.predecessors
+      }))
+    }))
+  }))}`;
+}
+
+async function classifyOfficialDestination(settings, skill) {
+  const destination = path.join(settings.aiosPath, "skills", skill.name);
+  const rootStats = await lstatIfPresent(destination, { bigint: true });
+  const candidateFiles = skill.files.map((file) => ({
+    path: file.path,
+    mode: file.mode,
+    bytes: file.bytes,
+    sha256: file.installed_sha256
+  }));
+  if (!rootStats) {
+    return {
+      name: skill.name,
+      coordinate: `skills/${skill.name}`,
+      classification: "missing-official",
+      action: "repair",
+      files: candidateFiles.map((file) => ({ ...file, classification: "missing-official" })),
+      overlays: [],
+      conflicts: [],
+      current_manifest: null
+    };
+  }
+
+  const rootIdentity = statIdentity(rootStats);
+  if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+    const conflict = officialConflict(skill.name, "", "foreign-conflicting", "official_root_not_real_directory");
+    return conflictingOfficialTarget(skill, rootIdentity, [conflict]);
+  }
+  if (ENFORCES_POSIX_MODES && (Number(rootStats.mode) & POSIX_MODE_MASK) !== skill.mode) {
+    const conflict = officialConflict(skill.name, "", "mode-drift", "official_root_mode_drift");
+    return conflictingOfficialTarget(skill, rootIdentity, [conflict]);
+  }
+
+  const entries = await readDirectoryEntries(destination, {
+    maxEntries: settings.limits.maxEntries
+  });
+  const byName = new Map(entries.map((entry) => [entry.name, entry]));
+  const declaredFiles = new Set(skill.files.map(({ path: relative }) => relative));
+  const declaredOverlays = new Map(skill.generated_overlays.map((overlay) => [overlay.path, overlay]));
+  const conflicts = [];
+  const files = [];
+  const overlays = [];
+  const manifestFiles = [];
+  let recognizedExisting = false;
+
+  for (const entry of entries) {
+    if (!declaredFiles.has(entry.name) && !declaredOverlays.has(entry.name)) {
+      conflicts.push(officialConflict(
+        skill.name,
+        entry.name,
+        "unknown-extra",
+        entry.kind === "directory" ? "unknown_extra_directory" : "unknown_extra_file"
+      ));
+    }
+  }
+
+  for (const expected of skill.files) {
+    const entry = byName.get(expected.path);
+    if (!entry) {
+      files.push({
+        path: expected.path,
+        mode: expected.mode,
+        bytes: expected.bytes,
+        sha256: expected.installed_sha256,
+        classification: "missing-official"
+      });
+      continue;
+    }
+    if (entry.kind !== "file") {
+      conflicts.push(officialConflict(skill.name, expected.path, "foreign-conflicting", "official_file_not_regular"));
+      files.push({ path: expected.path, classification: "foreign-conflicting" });
+      continue;
+    }
+    let observed;
+    try {
+      observed = await readBoundedRegularFile(
+        path.join(destination, expected.path),
+        settings.limits.maxFileBytes
+      );
+    } catch {
+      conflicts.push(officialConflict(skill.name, expected.path, "foreign-conflicting", "official_file_unreadable"));
+      files.push({ path: expected.path, classification: "foreign-conflicting" });
+      continue;
+    }
+    const mode = Number(observed.stats.mode) & POSIX_MODE_MASK;
+    const digest = sha256(observed.bytes);
+    const evidence = {
+      path: expected.path,
+      mode,
+      bytes: observed.bytes.length,
+      sha256: digest,
+      identity: statIdentity(observed.stats)
+    };
+    manifestFiles.push(evidence);
+    if (observed.stats.nlink !== 1n) {
+      conflicts.push(officialConflict(skill.name, expected.path, "foreign-conflicting", "official_file_hardlinked"));
+      files.push({ ...evidence, classification: "foreign-conflicting" });
+    } else if (ENFORCES_POSIX_MODES && mode !== expected.mode) {
+      conflicts.push(officialConflict(skill.name, expected.path, "mode-drift", "official_file_mode_drift"));
+      files.push({ ...evidence, classification: "mode-drift" });
+    } else if (digest === expected.installed_sha256) {
+      recognizedExisting = true;
+      files.push({ ...evidence, classification: "candidate-official" });
+    } else {
+      const releases = expected.predecessors
+        .filter((predecessor) => (
+          (!ENFORCES_POSIX_MODES || predecessor.mode === mode)
+          && predecessor.sha256 === digest
+        ))
+        .map(({ release }) => release);
+      if (releases.length > 0) {
+        recognizedExisting = true;
+        files.push({ ...evidence, classification: "accepted-official-predecessor", releases });
+      } else {
+        conflicts.push(officialConflict(skill.name, expected.path, "foreign-conflicting", "official_file_bytes_unrecognized"));
+        files.push({ ...evidence, classification: "foreign-conflicting" });
+      }
+    }
+  }
+
+  for (const overlay of skill.generated_overlays) {
+    const entry = byName.get(overlay.path);
+    if (!entry) continue;
+    if (entry.kind !== "file") {
+      conflicts.push(officialConflict(skill.name, overlay.path, "foreign-conflicting", "generated_overlay_not_regular"));
+      continue;
+    }
+    let observed;
+    try {
+      observed = await readBoundedRegularFile(
+        path.join(destination, overlay.path),
+        settings.limits.maxFileBytes
+      );
+    } catch {
+      conflicts.push(officialConflict(skill.name, overlay.path, "foreign-conflicting", "generated_overlay_unreadable"));
+      continue;
+    }
+    const mode = Number(observed.stats.mode) & POSIX_MODE_MASK;
+    const evidence = {
+      path: overlay.path,
+      mode,
+      bytes: observed.bytes.length,
+      sha256: sha256(observed.bytes),
+      identity: statIdentity(observed.stats),
+      classification: "recognized-generated-overlay"
+    };
+    manifestFiles.push({ ...evidence, classification: undefined });
+    if (
+      observed.stats.nlink !== 1n
+      || (ENFORCES_POSIX_MODES && mode !== overlay.mode)
+      || !isRecognizedOfficialSkillOverlay(skill.name, overlay.path, observed.bytes)
+    ) {
+      conflicts.push(officialConflict(skill.name, overlay.path, "foreign-conflicting", "generated_overlay_unrecognized"));
+      overlays.push({ ...evidence, classification: "foreign-conflicting" });
+    } else {
+      recognizedExisting = true;
+      overlays.push(evidence);
+    }
+  }
+
+  if (!recognizedExisting) {
+    conflicts.push(officialConflict(skill.name, "", "personal-same-name-directory", "same_name_directory_unowned"));
+  }
+  const finalRootStats = await lstatIfPresent(destination, { bigint: true });
+  if (!matchesProofIdentity(finalRootStats ? statIdentity(finalRootStats) : null, rootIdentity)) {
+    throw managedError("source_changed", "official_destination_changed_during_preview");
+  }
+  const currentManifest = {
+    root_identity: directoryProofIdentity(rootIdentity),
+    mode: Number(rootStats.mode) & POSIX_MODE_MASK,
+    files: manifestFiles.sort((left, right) => compareUtf8(left.path, right.path))
+  };
+  if (conflicts.length > 0) {
+    return {
+      name: skill.name,
+      coordinate: `skills/${skill.name}`,
+      classification: "foreign-conflicting",
+      action: "blocked",
+      files,
+      overlays,
+      conflicts,
+      current_manifest: currentManifest
+    };
+  }
+
+  const needsRepair = files.some(({ classification }) => classification !== "candidate-official");
+  const hasPredecessor = files.some(({ classification }) => classification === "accepted-official-predecessor");
+  return {
+    name: skill.name,
+    coordinate: `skills/${skill.name}`,
+    classification: needsRepair
+      ? (hasPredecessor ? "accepted-official-predecessor" : "mixed-recognized-official")
+      : "candidate-official",
+    action: needsRepair ? "repair" : "none",
+    files,
+    overlays,
+    conflicts: [],
+    current_manifest: currentManifest
+  };
+}
+
+function conflictingOfficialTarget(skill, rootIdentity, conflicts) {
+  return {
+    name: skill.name,
+    coordinate: `skills/${skill.name}`,
+    classification: "foreign-conflicting",
+    action: "blocked",
+    files: [],
+    overlays: [],
+    conflicts,
+    current_manifest: rootIdentity ? { root_identity: rootIdentity, mode: Number(rootIdentity.mode) & POSIX_MODE_MASK, files: [] } : null
+  };
+}
+
+function officialConflict(name, relative, classification, reason) {
+  return {
+    coordinate: relative ? `skills/${name}/${relative}` : `skills/${name}`,
+    classification,
+    reason
+  };
+}
+
+async function buildOfficialCatalogPlan(settings, official) {
+  const officialNames = new Set(official.skills.map(({ name }) => name));
+  const observed = await collectSkills(settings.aiosPath);
+  const skills = [
+    ...observed.filter(({ dir }) => !officialNames.has(dir)),
+    ...official.skills.map(({ catalog }) => catalog)
+  ].sort((left, right) => compareUtf8(left.name, right.name) || compareUtf8(left.dir, right.dir));
+  const registry = normalizePortableRegistry(await readPortableRegistry(settings), skills);
+  const registryBytes = Buffer.from(`${JSON.stringify(registry, null, 2)}\n`);
+  const indexBytes = renderSkillsIndexBytes(skills);
+  const resolverBytes = renderResolverBytes(skills);
+  if (
+    registryBytes.length > settings.limits.maxRegistryBytes
+    || indexBytes.length > settings.limits.maxCatalogBytes
+    || resolverBytes.length > settings.limits.maxCatalogBytes
+  ) throw managedError("bundle_bound_exceeded", "official_catalog_bound_exceeded");
+  return {
+    registry,
+    skills,
+    catalogs: {
+      registry_sha256: sha256(registryBytes),
+      index_sha256: sha256(indexBytes),
+      resolver_sha256: sha256(resolverBytes)
+    }
+  };
+}
+
+function sameCatalogDigests(left, right) {
+  return Boolean(right)
+    && left.registry_sha256 === right.registry_sha256
+    && left.index_sha256 === right.index_sha256
+    && left.resolver_sha256 === right.resolver_sha256;
+}
+
+async function applyOfficialSkillBatch(settings, input = {}) {
+  await assertStoreRoots(settings);
+  const operationId = input.operationId || input.operation_id;
+  const planFingerprint = input.planFingerprint || input.plan_fingerprint;
+  if (!operationId || !planFingerprint) throw managedError("proof_mismatch", "exact_proof_required");
+
+  const state = storeStatePaths(settings);
+  await ensureStoreState(state);
+  const lock = await acquireOperationLock(state.lock, {
+    format: LOCK_FORMAT,
+    strictOwnedState: true,
+    ownedDirectories: [state.dotaios, state.root]
+  });
+  if (!lock) throw managedError("store_busy", "managed_skill_store_busy");
+  try {
+    await recoverPendingTransaction(settings, state);
+    const plan = await buildOfficialSkillBatchPlan(settings);
+    if (
+      plan.proof.operation_id !== operationId
+      || plan.proof.plan_fingerprint !== planFingerprint
+    ) throw managedError("proof_mismatch", "official_batch_changed_under_lock");
+    const repairs = plan.proof.targets.filter(({ action }) => action === "repair");
+    const catalogsCurrent = sameCatalogDigests(plan.proof.catalogs, plan.proof.desired_catalogs);
+    if (repairs.length === 0 && (plan.proof.conflicts.length > 0 || catalogsCurrent)) {
+      return {
+        status: plan.proof.conflicts.length > 0 ? "blocked-conflict" : "verified",
+        repaired: [],
+        conflicts: plan.proof.conflicts,
+        catalogs_published: false
+      };
+    }
+    return await commitOfficialSkillBatch(settings, state, plan);
+  } finally {
+    await releaseOperationLock(lock, { strictOwnedState: true }).catch(() => {});
+    await cleanupEmptyStoreState(state).catch(() => {});
+  }
+}
+
+async function commitOfficialSkillBatch(settings, state, plan) {
+  const { proof, official, desiredRegistry, catalogSkills } = plan;
+  const skillsRoot = path.join(settings.aiosPath, "skills");
+  const stageRoot = path.join(skillsRoot, ".managed-skill-store", "staging", proof.operation_id);
+  const recoveryRoot = path.join(skillsRoot, ".managed-skill-store", "recovery", proof.operation_id);
+  const repairs = proof.targets.filter(({ action }) => action === "repair");
+  const officialByName = new Map(official.skills.map((skill) => [skill.name, skill]));
+  const oldArtifacts = await captureDerivedArtifacts(settings);
+  const oldArtifactModes = await captureDerivedArtifactModes(settings);
+  const journal = {
+    format: JOURNAL_FORMAT,
+    kind: "official-batch",
+    state: "official_prepared",
+    operation_id: proof.operation_id,
+    plan_fingerprint: proof.plan_fingerprint,
+    candidate_version: proof.candidate_version,
+    source_fingerprint: proof.source_fingerprint,
+    publish_catalogs: proof.effects.publish_catalogs,
+    old_artifacts: oldArtifacts,
+    old_artifact_modes: oldArtifactModes,
+    targets: repairs.map((target) => ({
+      name: target.name,
+      destination: path.join(skillsRoot, target.name),
+      staged_path: path.join(stageRoot, target.name),
+      backup_path: path.join(recoveryRoot, "official-backups", target.name),
+      rollback_path: path.join(recoveryRoot, "official-rollbacks", target.name),
+      preimage: target.current_manifest,
+      desired_files: desiredOfficialFiles(officialByName.get(target.name), target),
+      stage_root_identity: null,
+      staged_manifest: null
+    }))
+  };
+  await writeJsonAtomic(state.journal, journal, settings.limits.maxJournalBytes);
+
+  try {
+    await checkpoint(settings, "official_prepared", journal);
+    await ensureDirectoryChain(skillsRoot, stageRoot, 0o700);
+    for (const target of journal.targets) {
+      await createDurableDirectory(target.staged_path, 0o755);
+      target.stage_root_identity = statIdentity(await fs.lstat(target.staged_path, { bigint: true }));
+      await transitionJournal(state, journal, journal.state);
+      await stageOfficialTarget(settings, target, officialByName.get(target.name));
+      target.staged_manifest = await snapshotFlatOfficialTree(settings, target.staged_path);
+      if (!officialTreeMatchesDesired(target.staged_manifest, target.desired_files, target.stage_root_identity)) {
+        throw managedError("source_changed", "official_staged_tree_mismatch");
+      }
+      await transitionJournal(state, journal, journal.state);
+    }
+    await transitionJournal(state, journal, "official_staged");
+    await checkpoint(settings, "official_batch_staged", journal);
+
+    let revalidated;
+    try {
+      revalidated = await buildOfficialSkillBatchPlan(settings);
+    } catch (error) {
+      if (
+        error instanceof ManagedSkillStoreError
+        && !(error.code === "unsafe_source" && error.reason === "official_skill_package_invalid")
+      ) throw error;
+      throw managedError("source_changed", "official_source_changed_after_staging");
+    }
+    if (revalidated.proof.source_fingerprint !== proof.source_fingerprint) {
+      throw managedError("source_changed", "official_source_changed_after_staging");
+    }
+    if (revalidated.proof.plan_fingerprint !== proof.plan_fingerprint) {
+      throw managedError("destination_changed", "official_destination_changed_after_staging");
+    }
+
+    await transitionJournal(state, journal, "official_publishing");
+    for (const target of journal.targets) {
+      await assertOfficialPreimage(settings, target.destination, target.preimage);
+      if (target.preimage) {
+        await ensureDirectoryChain(skillsRoot, path.dirname(target.backup_path), 0o700);
+        await renameAndSync(target.destination, target.backup_path);
+        await checkpoint(settings, "official_target_backed_up", { name: target.name });
+      }
+      await renameAndSync(target.staged_path, target.destination);
+      await checkpoint(settings, "official_target_published", { name: target.name });
+      await transitionJournal(state, journal, journal.state);
+    }
+
+    const afterPublication = await buildOfficialSkillBatchPlan(settings);
+    assertOfficialBatchVerification(afterPublication.proof, proof, repairs, {
+      requireFullBatch: proof.conflicts.length === 0,
+      expectedCurrentCatalogs: proof.conflicts.length === 0 ? proof.catalogs : null
+    });
+    await transitionJournal(state, journal, "official_verified");
+    if (proof.conflicts.length === 0) {
+      await checkpoint(settings, "official_batch_verified", { repaired: repairs.map(({ name }) => name) });
+      const beforeCatalogPublication = await buildOfficialSkillBatchPlan(settings);
+      assertOfficialBatchVerification(beforeCatalogPublication.proof, proof, repairs, {
+        requireFullBatch: true,
+        expectedCurrentCatalogs: proof.catalogs
+      });
+      if (proof.effects.publish_catalogs) {
+        await transitionJournal(state, journal, "official_derived_publishing");
+        await publishDerivedArtifacts(settings, desiredRegistry, catalogSkills);
+        const afterCatalogPublication = await buildOfficialSkillBatchPlan(settings);
+        assertOfficialBatchVerification(afterCatalogPublication.proof, proof, repairs, {
+          requireFullBatch: true,
+          expectedCurrentCatalogs: proof.desired_catalogs
+        });
+        await transitionJournal(state, journal, "official_derived_published");
+      }
+    } else {
+      await checkpoint(settings, "official_repairs_verified", { repaired: repairs.map(({ name }) => name) });
+      const afterRepairCheckpoint = await buildOfficialSkillBatchPlan(settings);
+      assertOfficialBatchVerification(afterRepairCheckpoint.proof, proof, repairs);
+    }
+
+    await transitionJournal(state, journal, "official_committed");
+    await finishCommittedOfficialBatch(settings, state, journal);
+    return {
+      status: proof.conflicts.length > 0 ? "blocked-conflict" : "verified",
+      repaired: repairs.map(({ name }) => name),
+      conflicts: proof.conflicts,
+      catalogs_published: proof.effects.publish_catalogs
+    };
+  } catch (error) {
+    if (!['official_committed', 'needs_attention'].includes(journal.state)) {
+      await rollbackOfficialBatch(settings, state, journal).catch(() => {});
+    }
+    throw error;
+  }
+}
+
+function assertOfficialBatchVerification(
+  observed,
+  expected,
+  repairs,
+  { requireFullBatch = false, expectedCurrentCatalogs = null } = {}
+) {
+  if (observed.source_fingerprint !== expected.source_fingerprint) {
+    throw managedError("source_changed", "official_source_changed_after_publication");
+  }
+  for (const repaired of repairs) {
+    const target = observed.targets.find(({ name }) => name === repaired.name);
+    if (target?.classification !== "candidate-official") {
+      throw managedError("destination_changed", "official_batch_verification_failed");
+    }
+  }
+  if (!requireFullBatch) return;
+  if (
+    observed.conflicts.length > 0
+    || observed.targets.some(({ classification }) => classification !== "candidate-official")
+    || !sameCatalogDigests(observed.desired_catalogs, expected.desired_catalogs)
+    || (expectedCurrentCatalogs && !sameCatalogDigests(observed.catalogs, expectedCurrentCatalogs))
+  ) throw managedError("destination_changed", "official_batch_full_verification_failed");
+}
+
+function desiredOfficialFiles(skill, target) {
+  const declaredOverlays = new Map(skill.generated_overlays.map((overlay) => [overlay.path, overlay]));
+  const files = skill.files.map((file) => ({
+    path: file.path,
+    mode: file.mode,
+    bytes: file.bytes,
+    sha256: file.installed_sha256,
+    packed_base64: file.packed_bytes.toString("base64"),
+    kind: "candidate"
+  }));
+  for (const overlay of target.overlays.filter(({ classification }) => classification === "recognized-generated-overlay")) {
+    const declared = declaredOverlays.get(overlay.path);
+    if (!declared) throw managedError("unsafe_source", "official_overlay_manifest_invalid");
+    files.push({
+      path: overlay.path,
+      // The journal records portable manifest intent. The observed mode is
+      // synthetic on Windows and remains only in the destination preimage.
+      mode: declared.mode,
+      bytes: overlay.bytes,
+      sha256: overlay.sha256,
+      source_identity: overlay.identity,
+      kind: "overlay"
+    });
+  }
+  return files.sort((left, right) => compareUtf8(left.path, right.path));
+}
+
+async function stageOfficialTarget(settings, target, skill) {
+  const candidateByPath = new Map(skill.files.map((file) => [file.path, file]));
+  for (const desired of target.desired_files) {
+    let bytes;
+    if (desired.kind === "candidate") {
+      bytes = candidateByPath.get(desired.path)?.installed_bytes;
+    } else {
+      const source = path.join(target.destination, desired.path);
+      const observed = await readBoundedRegularFile(source, settings.limits.maxFileBytes);
+      if (
+        observed.stats.nlink !== 1n
+        || (ENFORCES_POSIX_MODES && (Number(observed.stats.mode) & POSIX_MODE_MASK) !== desired.mode)
+        || observed.bytes.length !== desired.bytes
+        || sha256(observed.bytes) !== desired.sha256
+        || !matchesProofIdentity(statIdentity(observed.stats), desired.source_identity)
+      ) throw managedError("destination_changed", "official_overlay_changed_after_preview");
+      bytes = observed.bytes;
+    }
+    if (!bytes || bytes.length !== desired.bytes || sha256(bytes) !== desired.sha256) {
+      throw managedError("source_changed", "official_candidate_changed_after_preview");
+    }
+    const destination = path.join(target.staged_path, desired.path);
+    await fs.writeFile(destination, bytes, { flag: "wx", mode: desired.mode });
+    await fs.chmod(destination, desired.mode);
+    await syncFile(destination);
+  }
+  await fs.chmod(target.staged_path, 0o755);
+  await syncDirectory(target.staged_path);
+}
+
+async function snapshotFlatOfficialTree(settings, root) {
+  const rootStats = await lstatIfPresent(root, { bigint: true });
+  if (!rootStats?.isDirectory() || rootStats.isSymbolicLink()) {
+    throw managedError("destination_changed", "official_tree_not_real_directory");
+  }
+  const entries = await readDirectoryEntries(root, { maxEntries: settings.limits.maxEntries });
+  const files = [];
+  let totalBytes = 0;
+  for (const entry of entries) {
+    if (entry.kind !== "file") throw managedError("destination_changed", "official_tree_contains_unsafe_entry");
+    const observed = await readBoundedRegularFile(path.join(root, entry.name), settings.limits.maxFileBytes);
+    if (observed.stats.nlink !== 1n) throw managedError("destination_changed", "official_tree_file_hardlinked");
+    totalBytes += observed.bytes.length;
+    if (totalBytes > settings.limits.maxTotalBytes) {
+      throw managedError("bundle_bound_exceeded", "official_tree_byte_bound_exceeded");
+    }
+    files.push({
+      path: entry.name,
+      mode: Number(observed.stats.mode) & POSIX_MODE_MASK,
+      bytes: observed.bytes.length,
+      sha256: sha256(observed.bytes),
+      identity: statIdentity(observed.stats)
+    });
+  }
+  const finalRootStats = await lstatIfPresent(root, { bigint: true });
+  if (!matchesProofIdentity(finalRootStats ? statIdentity(finalRootStats) : null, statIdentity(rootStats))) {
+    throw managedError("destination_changed", "official_tree_changed_during_inspection");
+  }
+  return {
+    root_identity: directoryProofIdentity(statIdentity(rootStats)),
+    mode: Number(rootStats.mode) & POSIX_MODE_MASK,
+    files: files.sort((left, right) => compareUtf8(left.path, right.path))
+  };
+}
+
+function directoryProofIdentity(identity) {
+  return identity ? {
+    type: "directory",
+    dev: String(identity.dev),
+    ino: String(identity.ino)
+  } : null;
+}
+
+function officialTreeMatchesDesired(observed, desiredFiles, expectedRootIdentity) {
+  if (
+    (ENFORCES_POSIX_MODES && observed?.mode !== 0o755)
+    || !matchesDirectoryProofIdentity(observed?.root_identity, expectedRootIdentity)
+    || observed.files.length !== desiredFiles.length
+  ) return false;
+  return observed.files.every((file, index) => {
+    const desired = desiredFiles[index];
+    return file.path === desired.path
+      && (!ENFORCES_POSIX_MODES || file.mode === desired.mode)
+      && file.bytes === desired.bytes
+      && file.sha256 === desired.sha256;
+  });
+}
+
+function officialTreeMatchesManifest(observed, expected) {
+  if (
+    !observed || !expected
+    || (ENFORCES_POSIX_MODES && observed.mode !== expected.mode)
+    || !matchesDirectoryProofIdentity(observed.root_identity, expected.root_identity)
+    || observed.files.length !== expected.files.length
+  ) return false;
+  return observed.files.every((file, index) => {
+    const wanted = expected.files[index];
+    return file.path === wanted.path
+      && (!ENFORCES_POSIX_MODES || file.mode === wanted.mode)
+      && file.bytes === wanted.bytes
+      && file.sha256 === wanted.sha256
+      && matchesLeafProofIdentity(file.identity, wanted.identity);
+  });
+}
+
+async function assertOfficialPreimage(settings, destination, preimage) {
+  const stats = await lstatIfPresent(destination);
+  if (!preimage) {
+    if (stats) throw managedError("destination_changed", "official_destination_appeared");
+    return;
+  }
+  if (!stats) throw managedError("destination_changed", "official_destination_disappeared");
+  const observed = await snapshotFlatOfficialTree(settings, destination);
+  if (!officialTreeMatchesManifest(observed, preimage)) {
+    throw managedError("destination_changed", "official_destination_changed");
+  }
+}
+
+async function rollbackOfficialBatch(settings, state, journal) {
+  try {
+    for (const target of [...journal.targets].reverse()) {
+      const [destinationStats, backupStats, stagedStats] = await Promise.all([
+        lstatIfPresent(target.destination),
+        lstatIfPresent(target.backup_path),
+        lstatIfPresent(target.staged_path)
+      ]);
+      if (destinationStats) {
+        const destination = await snapshotFlatOfficialTree(settings, target.destination);
+        if (target.staged_manifest && officialTreeMatchesManifest(destination, target.staged_manifest)) {
+          await ensureDirectoryChain(
+            path.join(settings.aiosPath, "skills"),
+            path.dirname(target.rollback_path),
+            0o700
+          );
+          if (await lstatIfPresent(target.rollback_path)) {
+            throw managedError("recovery_required", "official_rollback_path_changed");
+          }
+          await renameAndSync(target.destination, target.rollback_path);
+          if (target.preimage) {
+            if (!backupStats) throw managedError("recovery_required", "official_backup_missing");
+            const backup = await snapshotFlatOfficialTree(settings, target.backup_path);
+            if (!officialTreeMatchesManifest(backup, target.preimage)) {
+              throw managedError("recovery_required", "official_backup_changed");
+            }
+            await renameAndSync(target.backup_path, target.destination);
+          } else if (backupStats) {
+            throw managedError("recovery_required", "unexpected_official_backup");
+          }
+          await removePartialOfficialTree(
+            settings,
+            target.rollback_path,
+            target.staged_manifest.files,
+            target.staged_manifest.root_identity
+          );
+        } else if (!target.preimage || !officialTreeMatchesManifest(destination, target.preimage) || backupStats) {
+          throw managedError("recovery_required", "official_destination_rollback_needs_attention");
+        }
+      } else if (backupStats) {
+        if (!target.preimage) throw managedError("recovery_required", "unexpected_official_backup");
+        const backup = await snapshotFlatOfficialTree(settings, target.backup_path);
+        if (!officialTreeMatchesManifest(backup, target.preimage)) {
+          throw managedError("recovery_required", "official_backup_changed");
+        }
+        await renameAndSync(target.backup_path, target.destination);
+      } else if (target.preimage) {
+        throw managedError("recovery_required", "official_destination_and_backup_missing");
+      }
+
+      if (await lstatIfPresent(target.rollback_path)) {
+        if (!target.staged_manifest) {
+          throw managedError("recovery_required", "official_rollback_manifest_missing");
+        }
+        await removePartialOfficialTree(
+          settings,
+          target.rollback_path,
+          target.staged_manifest.files,
+          target.staged_manifest.root_identity
+        );
+      }
+
+      if (stagedStats) {
+        await removePartialOfficialTree(
+          settings,
+          target.staged_path,
+          target.staged_manifest?.files || target.desired_files,
+          target.stage_root_identity
+        );
+      }
+    }
+    // A conflict batch repairs only safe official roots and never publishes
+    // dependent catalogs. Its rollback therefore has no catalog write to undo;
+    // restoring the prepared snapshot would clobber an unrelated concurrent edit.
+    if (
+      journal.publish_catalogs
+      && ["official_derived_publishing", "official_derived_published"].includes(journal.state)
+    ) {
+      await restoreDerivedArtifacts(settings.aiosPath, journal.old_artifacts);
+      await restoreDerivedArtifactModes(settings.aiosPath, journal.old_artifact_modes);
+    }
+    await removeFileAndSync(state.journal);
+    await cleanupOfficialBatchParents(settings.aiosPath, journal.operation_id);
+  } catch (error) {
+    await transitionJournal(state, journal, "needs_attention").catch(() => {});
+    throw error;
+  }
+}
+
+async function finishCommittedOfficialBatch(settings, state, journal) {
+  try {
+    for (const target of journal.targets) {
+      if (await lstatIfPresent(target.backup_path)) {
+        if (!target.preimage) throw managedError("recovery_required", "unexpected_official_backup");
+        await removePartialOfficialTree(
+          settings,
+          target.backup_path,
+          target.preimage.files,
+          target.preimage.root_identity
+        );
+      }
+      if (await lstatIfPresent(target.staged_path)) {
+        await removePartialOfficialTree(
+          settings,
+          target.staged_path,
+          target.staged_manifest?.files || target.desired_files,
+          target.stage_root_identity
+        );
+      }
+      if (await lstatIfPresent(target.rollback_path)) {
+        await removePartialOfficialTree(
+          settings,
+          target.rollback_path,
+          target.staged_manifest?.files || target.desired_files,
+          target.staged_manifest?.root_identity || target.stage_root_identity
+        );
+      }
+    }
+    await removeFileAndSync(state.journal);
+    await cleanupOfficialBatchParents(settings.aiosPath, journal.operation_id);
+  } catch (error) {
+    await transitionJournal(state, journal, "needs_attention").catch(() => {});
+    throw error;
+  }
+}
+
+async function removePartialOfficialTree(settings, root, allowedFiles, expectedRootIdentity) {
+  const rootStats = await lstatIfPresent(root, { bigint: true });
+  if (!rootStats) return;
+  if (
+    !rootStats.isDirectory()
+    || rootStats.isSymbolicLink()
+    || !matchesDirectoryProofIdentity(statIdentity(rootStats), expectedRootIdentity)
+  ) throw managedError("recovery_required", "official_cleanup_root_changed");
+  const allowed = new Map(allowedFiles.map((file) => [file.path, file]));
+  const entries = await readDirectoryEntries(root, { maxEntries: settings.limits.maxEntries });
+  for (const entry of entries) {
+    const expected = allowed.get(entry.name);
+    if (!expected || entry.kind !== "file") {
+      throw managedError("recovery_required", "official_cleanup_tree_changed");
+    }
+    const observed = await readBoundedRegularFile(path.join(root, entry.name), settings.limits.maxFileBytes);
+    if (
+      observed.stats.nlink !== 1n
+      || (ENFORCES_POSIX_MODES && (Number(observed.stats.mode) & POSIX_MODE_MASK) !== expected.mode)
+      || observed.bytes.length !== expected.bytes
+      || sha256(observed.bytes) !== expected.sha256
+      || (expected.identity && !matchesLeafProofIdentity(statIdentity(observed.stats), expected.identity))
+    ) throw managedError("recovery_required", "official_cleanup_file_changed");
+    await unlinkAndSync(path.join(root, entry.name));
+    await checkpoint(settings, "official_cleanup_file_removed", { root, path: entry.name });
+  }
+  await removeEmptyDirectoryAndSync(root);
+}
+
+async function cleanupOfficialBatchParents(aiosPath, operationId) {
+  const internal = path.join(aiosPath, "skills", ".managed-skill-store");
+  const candidates = [
+    path.join(internal, "staging", operationId),
+    path.join(internal, "recovery", operationId, "official-backups"),
+    path.join(internal, "recovery", operationId, "official-rollbacks"),
+    path.join(internal, "recovery", operationId),
+    path.join(internal, "staging"),
+    path.join(internal, "recovery"),
+    internal
+  ];
+  for (const directory of candidates) await fs.rmdir(directory).catch(() => {});
 }
 
 async function previewManagedSkillAdoption(settings, input = {}) {
@@ -1789,6 +2649,19 @@ async function captureDerivedArtifacts(settings) {
   return artifacts;
 }
 
+async function captureDerivedArtifactModes(settings) {
+  const root = path.join(settings.aiosPath, "skills");
+  const modes = {};
+  for (const name of ["_registry.json", "INDEX.md", "RESOLVER.md"]) {
+    const stats = await lstatIfPresent(path.join(root, name));
+    if (stats && (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1)) {
+      throw managedError("unsafe_state", "unsafe_derived_artifact");
+    }
+    modes[name] = stats ? Number(stats.mode) & 0o777 : null;
+  }
+  return modes;
+}
+
 async function restoreDerivedArtifacts(aiosPath, artifacts) {
   const root = path.join(aiosPath, "skills");
   for (const [name, encoded] of Object.entries(artifacts || {})) {
@@ -1796,6 +2669,17 @@ async function restoreDerivedArtifacts(aiosPath, artifacts) {
     if (encoded === null) await removeFileAndSync(destination);
     else await writeBufferAtomic(destination, Buffer.from(encoded, "base64"));
   }
+}
+
+async function restoreDerivedArtifactModes(aiosPath, modes) {
+  const root = path.join(aiosPath, "skills");
+  for (const [name, mode] of Object.entries(modes || {})) {
+    if (mode === null) continue;
+    const destination = path.join(root, name);
+    await fs.chmod(destination, mode);
+    await syncFile(destination);
+  }
+  await syncDirectory(root);
 }
 
 async function readPortableRegistry(settings) {
@@ -2335,6 +3219,10 @@ async function recoverPendingTransaction(settings, state) {
     await finishCommittedReconcile(settings, state, journal);
     return { status: "completed" };
   }
+  if (journal.kind === "official-batch" && journal.state === "official_committed") {
+    await finishCommittedOfficialBatch(settings, state, journal);
+    return { status: "completed" };
+  }
   if (journal.kind === "adoption") {
     await rollbackAdoption(settings, state, journal);
     return { status: "rolled_back" };
@@ -2345,6 +3233,10 @@ async function recoverPendingTransaction(settings, state) {
   }
   if (journal.kind === "reconcile") {
     await rollbackReconcile(settings, state, journal);
+    return { status: "rolled_back" };
+  }
+  if (journal.kind === "official-batch") {
+    await rollbackOfficialBatch(settings, state, journal);
     return { status: "rolled_back" };
   }
   throw managedError("unsafe_state", "unknown_transaction_kind");
@@ -2521,9 +3413,9 @@ async function validateJournalAuthority(settings, state, journal) {
   if (
     !journal || typeof journal !== "object" || Array.isArray(journal)
     || journal.format !== JOURNAL_FORMAT
-    || !["adoption", "reconcile", "removal"].includes(journal.kind)
+    || !["adoption", "reconcile", "removal", "official-batch"].includes(journal.kind)
     || typeof journal.operation_id !== "string"
-    || !/^skill-(?:adopt|reconcile|remove)-[a-f0-9]{24}$/.test(journal.operation_id)
+    || !/^skill-(?:adopt|reconcile|remove|official)-[a-f0-9]{24}$/.test(journal.operation_id)
   ) throw managedError("unsafe_state", "invalid_transaction_journal");
   const allowedStates = {
     adoption: new Set(["prepared", "source_backed_up", "canonical_published", "projections_published", "derived_published", "receipt_published", "committed", "needs_attention"]),
@@ -2534,7 +3426,17 @@ async function validateJournalAuthority(settings, state, journal) {
       "reconcile_history_published",
       "needs_attention"
     ]),
-    removal: new Set(["remove_prepared", "projections_detached", "canonical_archived", "archive_verified", "source_restored", "derived_published", "receipt_tombstoned", "remove_committed", "cleanup_started", "cleanup_completed", "needs_attention"])
+    removal: new Set(["remove_prepared", "projections_detached", "canonical_archived", "archive_verified", "source_restored", "derived_published", "receipt_tombstoned", "remove_committed", "cleanup_started", "cleanup_completed", "needs_attention"]),
+    "official-batch": new Set([
+      "official_prepared",
+      "official_staged",
+      "official_publishing",
+      "official_verified",
+      "official_derived_publishing",
+      "official_derived_published",
+      "official_committed",
+      "needs_attention"
+    ])
   };
   if (!allowedStates[journal.kind].has(journal.state)) {
     throw managedError("unsafe_state", "invalid_transaction_state");
@@ -2595,7 +3497,9 @@ async function validateJournalAuthority(settings, state, journal) {
     }
   }
 
-  if (journal.kind === "adoption") {
+  if (journal.kind === "official-batch") {
+    await validateOfficialBatchJournal(settings, journal);
+  } else if (journal.kind === "adoption") {
     if (!NAME_RE.test(journal.name || "")) throw managedError("unsafe_state", "invalid_transaction_skill_name");
     const canonical = path.join(settings.aiosPath, "skills", journal.name);
     const staged = path.join(settings.aiosPath, "skills", ".managed-skill-store", "staging", journal.operation_id, journal.name);
@@ -2641,6 +3545,200 @@ async function validateJournalAuthority(settings, state, journal) {
   if (!sameLexicalPath(state.journal, path.join(state.root, "transaction.json"))) {
     throw managedError("unsafe_state", "invalid_transaction_state_root");
   }
+}
+
+async function validateOfficialBatchJournal(settings, journal) {
+  if (
+    !/^sha256:[a-f0-9]{64}$/.test(journal.plan_fingerprint || "")
+    || journal.operation_id !== `skill-official-${journal.plan_fingerprint.slice(7, 31)}`
+    || !/^sha256:[a-f0-9]{64}$/.test(journal.source_fingerprint || "")
+    || !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(journal.candidate_version || "")
+    || typeof journal.publish_catalogs !== "boolean"
+    || !Array.isArray(journal.targets)
+    || journal.targets.length > settings.limits.maxOwnedSkills
+  ) throw managedError("unsafe_state", "invalid_official_batch_journal");
+  validateOfficialArtifactModes(journal.old_artifact_modes);
+
+  const manifestByName = new Map(officialSkillManifest().skills.map((skill) => [skill.name, skill]));
+  const expectedNames = new Set(officialSkillNames());
+  const observedNames = new Set();
+  const skillsRoot = path.join(settings.aiosPath, "skills");
+  const stageRoot = path.join(skillsRoot, ".managed-skill-store", "staging", journal.operation_id);
+  const recoveryRoot = path.join(skillsRoot, ".managed-skill-store", "recovery", journal.operation_id);
+  for (const target of journal.targets) {
+    if (
+      !target || typeof target !== "object" || Array.isArray(target)
+      || !expectedNames.has(target.name)
+      || observedNames.has(target.name)
+    ) throw managedError("unsafe_state", "invalid_official_batch_target");
+    observedNames.add(target.name);
+    const definition = manifestByName.get(target.name);
+    const candidateByPath = new Map(definition.files.map((file) => [file.path, file]));
+    const officialPaths = new Set(definition.files.map(({ path: relative }) => relative));
+    const overlayPaths = new Set(definition.generated_overlays.map(({ path: relative }) => relative));
+    const allowedPaths = new Set([...officialPaths, ...overlayPaths]);
+    if (
+      !sameLexicalPath(target.destination || "", path.join(skillsRoot, target.name))
+      || !sameLexicalPath(target.staged_path || "", path.join(stageRoot, target.name))
+      || !sameLexicalPath(
+        target.backup_path || "",
+        path.join(recoveryRoot, "official-backups", target.name)
+      )
+      || !sameLexicalPath(
+        target.rollback_path || "",
+        path.join(recoveryRoot, "official-rollbacks", target.name)
+      )
+      || !Array.isArray(target.desired_files)
+    ) throw managedError("unsafe_state", "invalid_official_batch_path");
+
+    const desiredPaths = new Set();
+    for (const file of target.desired_files) {
+      validateOfficialJournalFile(file, allowedPaths, settings.limits, { desired: true });
+      if (desiredPaths.has(file.path)) throw managedError("unsafe_state", "invalid_official_batch_file");
+      desiredPaths.add(file.path);
+      if (officialPaths.has(file.path) !== (file.kind === "candidate")) {
+        throw managedError("unsafe_state", "invalid_official_batch_file_kind");
+      }
+      if (overlayPaths.has(file.path) !== (file.kind === "overlay")) {
+        throw managedError("unsafe_state", "invalid_official_batch_file_kind");
+      }
+      if (file.kind === "candidate") {
+        const candidate = candidateByPath.get(file.path);
+        let packed;
+        let installed;
+        try {
+          packed = decodeCanonicalBase64(file.packed_base64, settings.limits.maxFileBytes);
+          installed = materializeOfficialCandidateBytes(
+            packed,
+            candidate?.render,
+            journal.candidate_version
+          );
+        } catch {
+          throw managedError("unsafe_state", "invalid_official_batch_candidate_authority");
+        }
+        if (
+          !candidate
+          || packed.length !== candidate.bytes
+          || sha256(packed) !== candidate.packed_sha256
+          || file.mode !== candidate.mode
+          || file.bytes !== installed.length
+          || file.sha256 !== sha256(installed)
+          || file.source_identity != null
+        ) throw managedError("unsafe_state", "invalid_official_batch_candidate_authority");
+      } else {
+        const preimage = target.preimage?.files?.find(({ path: relative }) => relative === file.path);
+        if (
+          !preimage
+          || (ENFORCES_POSIX_MODES && preimage.mode !== file.mode)
+          || preimage.bytes !== file.bytes
+          || preimage.sha256 !== file.sha256
+          || file.packed_base64 != null
+          || !matchesLeafProofIdentity(preimage.identity, file.source_identity)
+        ) throw managedError("unsafe_state", "invalid_official_batch_overlay_authority");
+      }
+    }
+    if ([...officialPaths].some((relative) => !desiredPaths.has(relative))) {
+      throw managedError("unsafe_state", "incomplete_official_batch_files");
+    }
+    if (target.stage_root_identity != null && target.stage_root_identity?.type !== "directory") {
+      throw managedError("unsafe_state", "invalid_official_batch_stage_identity");
+    }
+    validateOfficialJournalTree(target.preimage, allowedPaths, settings.limits, { allowNull: true });
+    validateOfficialJournalTree(target.staged_manifest, desiredPaths, settings.limits, { allowNull: true });
+    if (target.staged_manifest && !target.stage_root_identity) {
+      throw managedError("unsafe_state", "invalid_official_batch_stage_identity");
+    }
+    if (target.staged_manifest) {
+      if (
+        !matchesDirectoryProofIdentity(
+          target.staged_manifest.root_identity,
+          target.stage_root_identity
+        )
+        || !officialJournalManifestMatchesDesired(target.staged_manifest, target.desired_files)
+      ) throw managedError("unsafe_state", "invalid_official_batch_staged_authority");
+    }
+  }
+}
+
+function decodeCanonicalBase64(encoded, maxBytes) {
+  if (
+    typeof encoded !== "string"
+    || encoded.length > Math.ceil(maxBytes / 3) * 4 + 4
+    || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(encoded)
+  ) throw new Error("invalid base64");
+  const bytes = Buffer.from(encoded, "base64");
+  if (bytes.length > maxBytes || bytes.toString("base64") !== encoded) throw new Error("invalid base64");
+  return bytes;
+}
+
+function officialJournalManifestMatchesDesired(staged, desired) {
+  if (staged.files.length !== desired.length) return false;
+  const byPath = new Map(desired.map((file) => [file.path, file]));
+  return staged.files.every((file) => {
+    const expected = byPath.get(file.path);
+    return Boolean(
+      expected
+      && file.identity?.type === "file"
+      && file.bytes === expected.bytes
+      && file.sha256 === expected.sha256
+      && (!ENFORCES_POSIX_MODES || file.mode === expected.mode)
+    );
+  });
+}
+
+function validateOfficialArtifactModes(modes) {
+  if (!modes || typeof modes !== "object" || Array.isArray(modes)) {
+    throw managedError("unsafe_state", "invalid_official_batch_artifact_modes");
+  }
+  const expected = new Set(["_registry.json", "INDEX.md", "RESOLVER.md"]);
+  for (const [name, mode] of Object.entries(modes)) {
+    if (
+      !expected.delete(name)
+      || (mode !== null && (!Number.isSafeInteger(mode) || mode < 0 || mode > 0o777))
+    ) throw managedError("unsafe_state", "invalid_official_batch_artifact_modes");
+  }
+  if (expected.size > 0) throw managedError("unsafe_state", "invalid_official_batch_artifact_modes");
+}
+
+function validateOfficialJournalTree(tree, allowedPaths, limits, { allowNull = false } = {}) {
+  if (tree == null) {
+    if (allowNull) return;
+    throw managedError("unsafe_state", "invalid_official_batch_tree");
+  }
+  if (
+    !tree || typeof tree !== "object" || Array.isArray(tree)
+    || tree.root_identity?.type !== "directory"
+    || (ENFORCES_POSIX_MODES
+      ? tree.mode !== 0o755
+      : (!Number.isSafeInteger(tree.mode) || tree.mode < 0 || tree.mode > POSIX_MODE_MASK))
+    || !Array.isArray(tree.files)
+    || tree.files.length > limits.maxFiles
+  ) throw managedError("unsafe_state", "invalid_official_batch_tree");
+  const seen = new Set();
+  for (const file of tree.files) {
+    validateOfficialJournalFile(file, allowedPaths, limits);
+    if (seen.has(file.path) || file.identity?.type !== "file") {
+      throw managedError("unsafe_state", "invalid_official_batch_tree_file");
+    }
+    seen.add(file.path);
+  }
+}
+
+function validateOfficialJournalFile(file, allowedPaths, limits, { desired = false } = {}) {
+  if (
+    !file || typeof file !== "object" || Array.isArray(file)
+    || typeof file.path !== "string" || !allowedPaths.has(file.path)
+    || file.path.includes("/") || file.path.includes("\\") || file.path.includes("\0")
+    || (desired
+      ? file.mode !== 0o644
+      : (ENFORCES_POSIX_MODES
+        ? file.mode !== 0o644
+        : (!Number.isSafeInteger(file.mode) || file.mode < 0 || file.mode > POSIX_MODE_MASK)))
+    || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || file.bytes > limits.maxFileBytes
+    || !/^[a-f0-9]{64}$/.test(file.sha256 || "")
+    || (desired && !["candidate", "overlay"].includes(file.kind))
+    || (desired && file.kind === "overlay" && file.source_identity?.type !== "file")
+  ) throw managedError("unsafe_state", "invalid_official_batch_file");
 }
 
 function validateReplacedSource(settings, replaced, operationId, name, targets) {
