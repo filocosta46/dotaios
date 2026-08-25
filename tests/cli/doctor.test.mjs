@@ -400,6 +400,243 @@ describe("doctorCommand", () => {
 });
 
 describe("doctor command reachability", () => {
+  it("reports an exact candidate with no persistent PATH CLI", async () => {
+    const { checkCliInstallations } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    const result = await checkCliInstallations({
+      candidateVersion: "2.0.11",
+      inspectPersistent: async () => ({ status: "missing", ownership: "none" })
+    });
+
+    assert.equal(result.status, "ok");
+    assert.match(result.detail, /Candidate CLI: 2\.0\.11 \(`npx dotaios@2\.0\.11`\)/);
+    assert.match(result.detail, /Persistent PATH CLI: not installed\./);
+  });
+
+  it("reports the candidate and an owned stale global separately", async () => {
+    const { checkCliInstallations } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    const result = await checkCliInstallations({
+      candidateVersion: "2.0.11",
+      inspectPersistent: async () => ({
+        status: "owned",
+        ownership: "owned",
+        version: "2.0.9",
+        command_path: "/example/bin/dotaios"
+      })
+    });
+
+    assert.equal(result.status, "warn");
+    assert.match(result.detail, /Candidate CLI: 2\.0\.11 \(`npx dotaios@2\.0\.11`\)/);
+    assert.match(result.detail, /Persistent PATH CLI: 2\.0\.9 .*stale/i);
+    assert.match(result.detail, /\/example\/bin\/dotaios/);
+  });
+
+  it("requires exact version identity before calling a persistent CLI a match", async () => {
+    const { checkCliInstallations } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    for (const persistentVersion of ["2.0.11-beta.1", "2.0.11+other-build"]) {
+      const result = await checkCliInstallations({
+        candidateVersion: "2.0.11",
+        inspectPersistent: async () => ({
+          status: "owned",
+          ownership: "owned",
+          version: persistentVersion,
+          command_path: "/example/bin/dotaios"
+        })
+      });
+
+      assert.equal(result.status, "warn");
+      assert.doesNotMatch(result.detail, /matches candidate/i);
+      assert.match(result.detail, /does not match candidate/i);
+    }
+  });
+
+  it("reports an unrecognized PATH command as unknown and unowned", async () => {
+    const { checkCliInstallations } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    const result = await checkCliInstallations({
+      candidateVersion: "2.0.11",
+      inspectPersistent: async () => ({
+        status: "unknown",
+        ownership: "unowned",
+        command_path: "/custom/bin/dotaios"
+      })
+    });
+
+    assert.equal(result.status, "warn");
+    assert.match(result.detail, /Candidate CLI: 2\.0\.11/);
+    assert.match(result.detail, /Persistent PATH CLI: unknown, unowned/);
+    assert.match(result.detail, /\/custom\/bin\/dotaios/);
+  });
+
+  it("still classifies the persistent PATH CLI when candidate identity is unreadable", async () => {
+    const { checkCliInstallations } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    let inspections = 0;
+
+    const result = await checkCliInstallations({
+      candidateVersion: null,
+      resolveInvocation: async () => {
+        throw new Error("candidate package metadata unreadable");
+      },
+      inspectPersistent: async () => {
+        inspections += 1;
+        return {
+          status: "owned",
+          ownership: "owned",
+          version: "2.0.9",
+          command_path: "/example/bin/dotaios"
+        };
+      }
+    });
+
+    assert.equal(inspections, 1);
+    assert.equal(result.status, "warn");
+    assert.match(result.detail, /Candidate CLI: unknown/i);
+    assert.match(result.detail, /Persistent PATH CLI: 2\.0\.9/);
+    assert.match(result.detail, /\/example\/bin\/dotaios/);
+    assert.doesNotMatch(result.detail, /npx dotaios|`dotaios\b/i);
+    assert.equal(result.fix, undefined);
+  });
+
+  it("rejects a bare managed invocation without consulting the PATH binary", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-bare-cli-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    await fs.mkdir(homePath, { recursive: true });
+    await fs.writeFile(
+      path.join(aiosPath, "AGENTS.md"),
+      "Use `dotaios brief --compact --memory shared`\n"
+    );
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    try {
+      const result = await checkCliReachable(aiosPath, homePath, {
+        loadRegistry: async () => [],
+        resolveInvocation: async () => "npx dotaios@2.0.11"
+      });
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /bare|candidate|managed instruction/i);
+      assert.match(result.fix, /npx dotaios@2\.0\.11 context --refresh/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses singular grammar for one stale agent bridge", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-one-stale-bridge-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    const bridgeFile = path.join(homePath, ".codex", "AGENTS.md");
+    await fs.mkdir(path.dirname(bridgeFile), { recursive: true });
+    await fs.writeFile(
+      bridgeFile,
+      [
+        "<!-- dotaios-managed:start -->",
+        "Run `npx dotaios@2.0.10 brief --compact --memory shared`.",
+        "<!-- dotaios-managed:end -->",
+        ""
+      ].join("\n")
+    );
+    await fs.writeFile(
+      path.join(aiosPath, "AGENTS.md"),
+      "Use `npx dotaios@2.0.11 brief --compact --memory shared`.\n"
+    );
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    try {
+      const result = await checkCliReachable(aiosPath, homePath, {
+        loadRegistry: async () => [{ name: "Codex", bridge: ".codex/AGENTS.md" }],
+        resolveInvocation: async () => "npx dotaios@2.0.11"
+      });
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /1 agent bridge .* tells assistants/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects predecessor-pinned and unpinned managed invocations", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-pinned-cli-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    const bridgeFile = path.join(homePath, ".codex", "AGENTS.md");
+    await fs.mkdir(path.dirname(bridgeFile), { recursive: true });
+    await fs.writeFile(
+      bridgeFile,
+      [
+        "<!-- dotaios-managed:start -->",
+        "Run `npx dotaios@2.0.10 brief --compact --memory shared`.",
+        "<!-- dotaios-managed:end -->",
+        ""
+      ].join("\n")
+    );
+    await fs.writeFile(
+      path.join(aiosPath, "AGENTS.md"),
+      "Use `npx dotaios brief --compact --memory shared`.\n"
+    );
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    try {
+      const result = await checkCliReachable(aiosPath, homePath, {
+        loadRegistry: async () => [{ name: "Codex", bridge: ".codex/AGENTS.md" }],
+        resolveInvocation: async () => "npx dotaios@2.0.11"
+      });
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /agent bridge/i);
+      assert.match(result.detail, /AIOS router/i);
+      assert.match(result.detail, /non-candidate|exact candidate/i);
+      assert.match(result.fix, /npx dotaios@2\.0\.11 activate/);
+      assert.match(result.fix, /npx dotaios@2\.0\.11 context --refresh/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("reports stale managed instructions without inventing a command when candidate identity is unreadable", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-unreadable-candidate-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    await fs.mkdir(homePath, { recursive: true });
+    await fs.writeFile(
+      path.join(aiosPath, "AGENTS.md"),
+      "Use `dotaios brief --compact --memory shared`\n"
+    );
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    try {
+      const result = await checkCliReachable(aiosPath, homePath, {
+        loadRegistry: async () => [],
+        resolveInvocation: async () => {
+          throw new Error("candidate package metadata unreadable");
+        }
+      });
+
+      assert.equal(result.status, "fail");
+      assert.match(result.detail, /bare|candidate|managed instruction/i);
+      assert.equal(result.fix, undefined);
+      assert.doesNotMatch(JSON.stringify(result), /npx dotaios|`dotaios (?:activate|context)/i);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("fails when the router names an empty command", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-empty-cli-"));
     const aiosPath = await makeMinimalAios(root);

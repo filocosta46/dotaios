@@ -13,13 +13,14 @@ import {
   bridgePath,
   bridgePointer,
   findManagedBlock,
+  inspectDotaiosOnPath,
   isAgentInstalled,
-  isCommandAvailable,
   loadAgentRegistry,
   resolveCliInvocation
 } from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
 import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
+import { compareVersions } from "../../../core/src/version-check.mjs";
 import { checkForUpdate } from "../adapters/npm-registry.mjs";
 import { hasHelpFlag, parsePathHomeOptions } from "../lib/args.mjs";
 
@@ -76,6 +77,9 @@ export async function doctorCommand(args, { detection } = {}) {
   checks.push(await checkMemoryHealth(target));
   checks.push(await checkContextFreshness(target));
   checks.push(await checkLatestVersion({ currentVersion: INSTALLED_VERSION }));
+  checks.push(await checkCliInstallations({
+    inspectPersistent: () => inspectDotaiosOnPath(detection)
+  }));
   checks.push(await checkCliReachable(target, homePath));
   checks.push(...await checkAgentBridges(target, homePath, detection, { verbose }));
 
@@ -638,10 +642,10 @@ function skipReason(skipped) {
 // here still reports green. Every documented install is `npx dotaios@<version>`
 // and npx links no binary onto PATH, so this is the default outcome of the
 // documented path rather than an edge case. Bridges written before this release
-// carry the bare name; `activate` now resolves it, so the fix is to re-run it.
-// Matches a backticked bare invocation only. `` `npx dotaios@2.0.8 brief` ``
-// does not match, because the character after the backtick is not `d`.
-const BARE_INVOCATION = /`dotaios\s+[a-z]/;
+// carry either the bare name or an older exact pin; `activate` now resolves it,
+// so the fix is to re-run it. Capture the invocation separately from its
+// subcommand so every managed command can be compared with the running package.
+const MANAGED_INVOCATION = /`((?:npx\s+)?dotaios(?:@[^\s`]+)?)\s+[a-z]/g;
 // A refresh that forgot {{cli}} writes `` ` brief `` and `blob/v/docs`.
 // That is worse than a bare name: the command does not exist, and this
 // check used to call the folder healthy because the backtick is not
@@ -649,12 +653,93 @@ const BARE_INVOCATION = /`dotaios\s+[a-z]/;
 const EMPTY_INVOCATION = /` (brief|search|ingest|project|memory|skills|sync|activate|doctor)\b/;
 const UNVERSIONED_DOC_LINK = /blob\/v\//;
 
+function hasNonCandidateManagedInvocation(text, candidateInvocation) {
+  for (const match of text.matchAll(MANAGED_INVOCATION)) {
+    const invocation = match[1];
+    if (invocation === "dotaios" || invocation === "npx dotaios") return true;
+    if (candidateInvocation && invocation !== candidateInvocation) return true;
+  }
+  return false;
+}
+
+export async function checkCliInstallations({
+  candidateVersion = INSTALLED_VERSION,
+  inspectPersistent = inspectDotaiosOnPath,
+  resolveInvocation = resolveCliInvocation
+} = {}) {
+  const name = "DotAIOS candidate and persistent CLI";
+  let candidateInvocation;
+  try {
+    candidateInvocation = await resolveInvocation({ version: candidateVersion });
+  } catch {
+    candidateInvocation = null;
+  }
+
+  const candidate = candidateInvocation
+    ? `Candidate CLI: ${candidateVersion} (\`${candidateInvocation}\`).`
+    : "Candidate CLI: unknown; the candidate version is unreadable.";
+  let persistent;
+  try {
+    persistent = await inspectPersistent();
+  } catch {
+    persistent = { status: "unknown", ownership: "unowned" };
+  }
+
+  if (persistent?.status === "missing") {
+    return {
+      name,
+      status: candidateInvocation ? "ok" : "warn",
+      detail: `${candidate} Persistent PATH CLI: not installed.`
+    };
+  }
+
+  const commandPath = persistent?.command_path ? ` at ${persistent.command_path}` : "";
+  if (persistent?.status !== "owned" || persistent?.ownership !== "owned") {
+    return {
+      name,
+      status: "warn",
+      detail: `${candidate} Persistent PATH CLI: unknown, unowned${commandPath}; DotAIOS did not execute or classify it.`
+    };
+  }
+
+  if (!candidateInvocation) {
+    return {
+      name,
+      status: "warn",
+      detail: `${candidate} Persistent PATH CLI: ${persistent.version}${commandPath}; its relation to the candidate is unknown. DotAIOS did not execute it.`
+    };
+  }
+
+  if (persistent.version === candidateVersion) {
+    return {
+      name,
+      status: "ok",
+      detail: `${candidate} Persistent PATH CLI: ${persistent.version}${commandPath} (matches candidate).`
+    };
+  }
+
+  const comparison = compareVersions(persistent.version, candidateVersion);
+  const relation = comparison === -1 ? "stale" : "does not match candidate";
+  return {
+    name,
+    status: "warn",
+    detail: `${candidate} Persistent PATH CLI: ${persistent.version}${commandPath} (${relation}).`,
+    fix: `Use \`${candidateInvocation}\` for this release; update or remove the separate PATH installation when convenient.`
+  };
+}
+
 export async function checkCliReachable(target, homePath, {
   loadRegistry = loadAgentRegistry,
-  isAvailable = isCommandAvailable,
   resolveInvocation = resolveCliInvocation
 } = {}) {
   const name = "DotAIOS command agents are told to run";
+
+  let invocation;
+  try {
+    invocation = await resolveInvocation();
+  } catch {
+    invocation = null;
+  }
 
   let registry;
   try {
@@ -681,7 +766,7 @@ export async function checkCliReachable(target, homePath, {
     }
     const managed = findManagedBlock(content);
     if (!managed) continue;
-    if (BARE_INVOCATION.test(managed.text)) staleBridges.push(filePath);
+    if (hasNonCandidateManagedInvocation(managed.text, invocation)) staleBridges.push(filePath);
   }
 
   // The bridge points every agent at this file, and it carries the same
@@ -693,7 +778,7 @@ export async function checkCliReachable(target, homePath, {
   let brokenEntrypoint = false;
   try {
     const router = await fs.readFile(entrypoint, "utf8");
-    if (BARE_INVOCATION.test(router)) staleEntrypoint = true;
+    if (hasNonCandidateManagedInvocation(router, invocation)) staleEntrypoint = true;
     if (EMPTY_INVOCATION.test(router) || UNVERSIONED_DOC_LINK.test(router)) brokenEntrypoint = true;
   } catch {
     // checkAiosFolder already reports a missing or unreadable folder.
@@ -703,34 +788,27 @@ export async function checkCliReachable(target, homePath, {
     return { name, status: "ok", detail: "Every file that names a DotAIOS command names one that runs here." };
   }
 
-  // A bare `dotaios` is fine when the binary exists. An empty command name
-  // is never runnable, even on a machine that has the CLI on PATH.
-  if (!brokenEntrypoint && await isAvailable("dotaios")) {
-    return { name, status: "ok", detail: "`dotaios` resolves on PATH, so those commands run as written." };
-  }
-
-  const invocation = await resolveInvocation();
   const parts = [];
   const fixes = [];
   if (staleBridges.length) {
     parts.push(`${staleBridges.length} agent bridge${staleBridges.length === 1 ? "" : "s"} (${staleBridges.join(", ")})`);
-    fixes.push(`\`${invocation} activate\` rewrites the bridges`);
+    if (invocation) fixes.push(`\`${invocation} activate\` rewrites the bridges`);
   }
   if (staleEntrypoint || brokenEntrypoint) {
     parts.push(`the AIOS router at ${entrypoint}`);
-    fixes.push(`\`${invocation} context --refresh\` re-renders the router`);
+    if (invocation) fixes.push(`\`${invocation} context --refresh\` re-renders the router`);
   }
 
-  const verb = parts.length === 1 && !staleBridges.length ? "tells" : "tell";
+  const verb = parts.length === 1 && staleBridges.length <= 1 ? "tells" : "tell";
   const what = brokenEntrypoint && !staleBridges.length && !staleEntrypoint
     ? `${parts.join(" and ")} ${verb} assistants to run an empty command name — so every brief, search, and save from those assistants fails.`
-    : `${parts.join(" and ")} ${verb} assistants to run \`dotaios ...\`, but no \`dotaios\` command exists on this machine — so every brief, search, and save from those assistants fails.`;
+    : `${parts.join(" and ")} ${verb} assistants to run a non-candidate DotAIOS command, so those managed instructions can run a different release.`;
 
   return {
     name,
     status: "fail",
     detail: what,
-    fix: `${fixes.join("; ")}.`
+    ...(fixes.length > 0 ? { fix: `${fixes.join("; ")}.` } : {})
   };
 }
 

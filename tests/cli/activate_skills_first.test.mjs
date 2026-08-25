@@ -75,7 +75,7 @@ describe("activateCommand --skills-first", () => {
     assert.equal(cfg.skills_first, true);
 
     const bridge = await fs.readFile(path.join(dirs.homePath, ".claude", "CLAUDE.md"), "utf8");
-    assert.match(bridge, /Skills first \(inlined by/);
+    assert.match(bridge, /Skills first \(inlined during DotAIOS activation\)/);
     assert.match(bridge, /test-skill/);
     assert.match(bridge, /run a test/);
 
@@ -102,7 +102,7 @@ describe("activateCommand --skills-first", () => {
     assert.equal(cfg.skills_first, false);
 
     const bridge = await fs.readFile(path.join(homePath, ".claude", "CLAUDE.md"), "utf8");
-    assert.doesNotMatch(bridge, /Skills first \(inlined by/);
+    assert.doesNotMatch(bridge, /Skills first \(inlined during DotAIOS activation\)/);
     // Pointer mode names the routing table; only --skills-first inlines a catalog.
     assert.match(bridge, /skills\/RESOLVER\.md/);
     assert.doesNotMatch(bridge, /## test-skill/);

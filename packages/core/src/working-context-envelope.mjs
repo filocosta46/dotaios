@@ -1,6 +1,7 @@
 import { buildSessionDigest } from "./digest.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { inspectMigrationState } from "./migrations.mjs";
+import { resolveCliInvocation } from "./bridges.mjs";
 
 export const WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT = 1024;
 
@@ -19,14 +20,18 @@ export async function buildWorkingContextEnvelope(aiosPath, options = {}, depend
 
   const digestBuilder = dependencies.buildSessionDigest || buildSessionDigest;
   const migrationInspector = dependencies.inspectMigrationState || inspectMigrationState;
+  const invocationResolver = dependencies.resolveCliInvocation || resolveCliInvocation;
 
   const [digestResult, migration] = await Promise.all([
     digestBuilder(aiosPath, options, dependencies),
     Promise.resolve()
       .then(() => migrationInspector({ aiosPath }, dependencies))
-      .catch(migrationInspectionFailure)
+      .catch(migrationInspectionFailure),
   ]);
-  const operational = { migration: describeMigrationAction(migration) };
+  const cli = migration.status === "current"
+    ? null
+    : await Promise.resolve().then(() => invocationResolver()).catch(() => null);
+  const operational = { migration: describeMigrationAction(migration, cli) };
 
   const notice = renderOperationalNotice(operational);
   if (notice && notice.length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
@@ -65,7 +70,9 @@ export function renderOperationalNotice(operational) {
     return [
       "> [DotAIOS] Migration transaction metadata is present; liveness is not verified.",
       "> Tell the user before writing to the folder and do not start blind recovery.",
-      "> Diagnose this same folder with: dotaios doctor --path <this-aios-folder>"
+      migration.action
+        ? `> Diagnose this same folder with: ${migration.action.command} --path <this-aios-folder>`
+        : "> The exact candidate invocation is unavailable; tell the user before attempting recovery."
     ].join("\n");
   }
 
@@ -73,7 +80,9 @@ export function renderOperationalNotice(operational) {
     return [
       `> [DotAIOS] This folder uses schema ${migration.folder_schema_version}; this build supports ${migration.supported_schema_version}.`,
       "> A migration preview is required before any compatibility change.",
-      "> Preview this same folder with: dotaios migrate --path <this-aios-folder>"
+      migration.action
+        ? `> Preview this same folder with: ${migration.action.command} --path <this-aios-folder>`
+        : "> The exact candidate invocation is unavailable; tell the user before attempting migration."
     ].join("\n");
   }
 
@@ -81,7 +90,9 @@ export function renderOperationalNotice(operational) {
     return [
       `> [DotAIOS] Folder migration state could not be verified (${migration.code}).`,
       "> Do not assume the folder is current or start a compatibility write.",
-      "> Diagnose this same folder with: dotaios doctor --path <this-aios-folder>"
+      migration.action
+        ? `> Diagnose this same folder with: ${migration.action.command} --path <this-aios-folder>`
+        : "> The exact candidate invocation is unavailable; tell the user before attempting diagnosis."
     ].join("\n");
   }
 
@@ -94,20 +105,25 @@ function migrationInspectionFailure(error) {
   return { status: "inspection_failed", code };
 }
 
-function describeMigrationAction(migration) {
+function describeMigrationAction(migration, cli) {
   if (migration.status === "current") {
     return { ...migration, severity: "none", action: null };
   }
+  const actionCommand = typeof cli === "string" && cli.length > 0 ? cli : null;
   if (migration.status === "schema_outdated") {
     return {
       ...migration,
       severity: "notice",
-      action: { command: "dotaios migrate", path_scope: "configured_aios" }
+      action: actionCommand
+        ? { command: `${actionCommand} migrate`, path_scope: "configured_aios" }
+        : null
     };
   }
   return {
     ...migration,
     severity: "warning",
-    action: { command: "dotaios doctor", path_scope: "configured_aios" }
+    action: actionCommand
+      ? { command: `${actionCommand} doctor`, path_scope: "configured_aios" }
+      : null
   };
 }

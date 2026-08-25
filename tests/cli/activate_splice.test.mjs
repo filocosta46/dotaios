@@ -127,12 +127,12 @@ describe("activate — managed block splicing", () => {
 
       await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all", "--no-skills-first"]);
       const pointer = splitAroundBlock(await fs.readFile(bridge, "utf8"));
-      assert.doesNotMatch(pointer.block, /Skills first \(inlined by/);
+      assert.doesNotMatch(pointer.block, /Skills first \(inlined during DotAIOS activation\)/);
 
       await activate(["--path", dirs.aiosPath, "--home", dirs.homePath, "--all", "--skills-first"]);
       const inlined = splitAroundBlock(await fs.readFile(bridge, "utf8"));
 
-      assert.match(inlined.block, /Skills first \(inlined by/);
+      assert.match(inlined.block, /Skills first \(inlined during DotAIOS activation\)/);
       assert.match(inlined.block, /test-skill/);
       assert.notEqual(inlined.block, pointer.block);
       assert.equal(inlined.before, BEFORE);
@@ -165,7 +165,7 @@ describe("activate — managed block splicing", () => {
 
       assert.equal(edited, true, "the test must exercise the read-to-replacement race");
       assert.equal(result?.action, "conflict");
-      assert.match(result?.note ?? "", /changed during activation/i);
+      assert.match(result?.note ?? "", /changed during bridge update/i);
       assert.equal(await fs.readFile(bridge, "utf8"), concurrent);
       assert.equal(await exists(backup), false, "a rejected replacement must not create a backup");
     } finally {

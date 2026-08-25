@@ -10,6 +10,7 @@ import { planTemplateTree, renderTemplate, renderTemplateTree } from "../../../c
 import { createAiosConfig } from "../../../core/src/schema.mjs";
 import { writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasStableManagedWorkspaceIgnoreRule } from "../../../core/src/workspace-ignore.mjs";
+import { OFFICIAL_SCHEDULES } from "./schedule.mjs";
 import {
   SETUP_TRANSACTION_FILE,
   defaultAiosPath,
@@ -567,7 +568,7 @@ function starterFileContents(data) {
       "# Google Workspace",
       "# DotAIOS uses the local gws CLI for Gmail/Calendar/Drive beta access.",
       "# OAuth credentials stay in gws, not in this folder.",
-      "# Run: dotaios connect google --dry-run"
+      `# Run: ${data.cli} connect google --dry-run`
     ].join("\n") + "\n",
     "connections/registry.md": "# Connections\n\n| Service | Status | Notes |\n|---|---|---|\n",
     "decisions/log.md": "# Decision Log\n\n",
@@ -581,20 +582,15 @@ function starterFileContents(data) {
     // the ones that catch memory going stale — no LLM, no network, no cost.
     "schedules.yml": [
       "schedules:",
-      // These commands are executed, not read, so a bare name that is not on
-      // PATH fails the same way the bridges did. See resolveCliInvocation.
-      "  - name: daily-brief",
-      "    cadence: daily",
-      `    command: "${data.cli} brief"`,
-      "    enabled: false",
-      "  - name: weekly-health-check",
-      "    cadence: weekly",
-      `    command: "${data.cli} doctor"`,
-      "    enabled: false",
-      "  - name: weekly-memory-audit",
-      "    cadence: weekly",
-      `    command: "${data.cli} memory audit --all-memory"`,
-      "    enabled: false"
+      // Persist the exact candidate identity for inspection and field repair.
+      // The scheduler parses this field, then invokes the in-package CLI module;
+      // it never executes the recorded PATH command.
+      ...OFFICIAL_SCHEDULES.flatMap(({ name, cadence, commandTail }) => [
+        `  - name: ${name}`,
+        `    cadence: ${cadence}`,
+        `    command: "${data.cli} ${commandTail}"`,
+        "    enabled: false"
+      ])
     ].join("\n") + "\n",
     "skills/_registry.json": "{\n  \"format\": \"dotaios-skill-install-inventory/v2\",\n  \"skills\": [\"audit\", \"closeday\", \"import-context\", \"ingest\", \"memory-maintenance\", \"plan-today\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"today\", \"weekly-review\"],\n  \"managed\": [],\n  \"plugins\": []\n}\n"
   };

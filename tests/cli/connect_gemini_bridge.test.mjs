@@ -4,7 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { writeGeminiBridge } from "../../packages/cli/src/adapters/gemini.mjs";
+import {
+  buildGeminiHookScript,
+  writeGeminiBridge,
+  writeGeminiHookScript
+} from "../../packages/cli/src/adapters/gemini.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -289,6 +293,29 @@ test("connect gemini preflights a foreign hook before changing bridge or setting
     assert.equal(fs.readFileSync(bridge, "utf8"), bridgeBefore);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("a build-metadata candidate recognizes its own managed Gemini hook", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-gemini-build-metadata-"));
+  const geminiDir = path.join(root, ".gemini");
+  const hookPath = path.join(geminiDir, "dotaios-context-hook.sh");
+  const aiosPath = path.join(root, "aios");
+  fs.mkdirSync(geminiDir, { recursive: true });
+  const current = buildGeminiHookScript(aiosPath);
+  const withBuildMetadata = current.replace(
+    /dotaios@(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?=')/,
+    "dotaios@$1+local.1"
+  );
+  assert.notEqual(withBuildMetadata, current, "fixture must carry a build-metadata package candidate");
+  fs.writeFileSync(hookPath, withBuildMetadata, { mode: 0o700 });
+
+  try {
+    const result = await writeGeminiHookScript(hookPath, aiosPath, { boundaryRoot: geminiDir });
+    assert.equal(result.action, "updated");
+    assert.equal(fs.readFileSync(hookPath, "utf8"), current);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
 

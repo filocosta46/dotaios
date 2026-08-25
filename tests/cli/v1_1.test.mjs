@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 
 test("activate creates global and project agent bridges for installed tools", () => {
   const { aiosPath, homePath, projectPath } = setupAios();
@@ -134,11 +135,38 @@ test("context --refresh still names a command the machine can run", () => {
   assert.match(router, /npx dotaios@\d+\.\d+\.\d+ brief --compact --memory shared/);
 });
 
+test("generated managed instruction surfaces contain no bare or unpinned DotAIOS command", () => {
+  const { aiosPath, homePath } = setupAios();
+  run(["activate", "--all", "--skills-first", "--path", aiosPath, "--home", homePath]);
+
+  const surfaces = [
+    path.join(aiosPath, "AGENTS.md"),
+    path.join(aiosPath, "README.md"),
+    path.join(aiosPath, ".env.example"),
+    path.join(aiosPath, "schedules.yml"),
+    path.join(aiosPath, "skills", "INDEX.md"),
+    path.join(aiosPath, "skills", "RESOLVER.md"),
+    path.join(homePath, ".claude", "CLAUDE.md"),
+    path.join(homePath, ".codex", "AGENTS.md"),
+    path.join(homePath, ".gemini", "GEMINI.md"),
+    path.join(homePath, ".config", "opencode", "AGENTS.md")
+  ];
+
+  for (const surface of surfaces) {
+    const content = read(surface);
+    assert.doesNotMatch(content, /\bdotaios\s+[a-z]/, `bare command in ${surface}`);
+    assert.doesNotMatch(content, /\bnpx\s+dotaios(?!@)/, `unpinned npx command in ${surface}`);
+  }
+});
+
 test("init creates secret-safe env placeholders", () => {
   const { aiosPath } = setupAios();
 
   assert.equal(fs.existsSync(path.join(aiosPath, ".env")), false);
-  assert.match(read(path.join(aiosPath, ".env.example")), /Never paste secrets/);
+  const envExample = read(path.join(aiosPath, ".env.example"));
+  assert.match(envExample, /Never paste secrets/);
+  assert.match(envExample, new RegExp(`Run: npx dotaios@${packageVersion.replaceAll(".", "\\.")} connect google --dry-run`));
+  assert.doesNotMatch(envExample, /Run: dotaios\s|Run: npx dotaios(?!@)/);
   assert.match(read(path.join(aiosPath, ".gitignore")), /^\.env$/m);
   assert.match(read(path.join(aiosPath, ".gitignore")), /^token\.\*$/m);
 });
@@ -238,7 +266,8 @@ test("schedule doctor and install dry-run explain local OS handoff", () => {
 
   const doctor = run(["schedule", "doctor", "--path", aiosPath]);
   assert.match(doctor.stdout, /DotAIOS schedule doctor/);
-  assert.match(doctor.stdout, /dotaios schedule run-due/);
+  assert.match(doctor.stdout, /npx dotaios@2\.0\.10 schedule run-due/);
+  assert.doesNotMatch(doctor.stdout, /(?:^|[`: ])dotaios schedule (?:install|run-due)/m);
 
   const cron = run(["schedule", "install", "--dry-run", "--target", "cron", "--path", aiosPath]);
   assert.match(cron.stdout, /Target: cron/);

@@ -13,6 +13,8 @@ import {
 } from "../../packages/core/src/skills.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
+const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
+const exactCli = `npx dotaios@${packageVersion}`;
 
 function makeSkill(skillsDir, dir, name, description) {
   fs.mkdirSync(path.join(skillsDir, dir), { recursive: true });
@@ -48,10 +50,23 @@ test("renderSkillsIndex lists each skill with run instructions", () => {
   assert.match(md, /## audit/);
   assert.match(md, /Health check\./);
   assert.match(md, /skills\/audit\/SKILL\.md/);
+  assert.match(md, new RegExp(`${exactCli.replaceAll(".", "\\.")} activate`));
 });
 
 test("renderSkillsIndex handles an empty skill set", () => {
-  assert.match(renderSkillsIndex([]), /No skills installed yet/);
+  const md = renderSkillsIndex([]);
+  assert.match(md, /No skills installed yet/);
+  assert.match(md, new RegExp(`${exactCli.replaceAll(".", "\\.")} skill add <local-folder>`));
+  assert.doesNotMatch(md, /`dotaios\s+[a-z]|npx dotaios(?!@)/);
+});
+
+test("generated skill catalogs contain no bare or unpinned executable command", () => {
+  const skills = [{ dir: "audit", name: "audit", description: "Health check.", triggers: ["audit"] }];
+  for (const catalog of [renderSkillsIndex(skills), renderResolver(skills)]) {
+    assert.match(catalog, new RegExp(`${exactCli.replaceAll(".", "\\.")} activate`));
+    assert.doesNotMatch(catalog, /`dotaios\s+[a-z]/);
+    assert.doesNotMatch(catalog, /npx dotaios(?!@)/);
+  }
 });
 
 test("writeSkillsIndex writes skills/INDEX.md from the skills on disk", async () => {

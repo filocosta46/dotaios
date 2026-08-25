@@ -185,3 +185,42 @@ test("buildPlan ignores removed brief skills even if old folders exist", () => {
   assert.ok(prompts[0].path.includes("plan-today"));
   assert.doesNotMatch(prompts[0].path, /morning-digest/);
 });
+
+test("generated interview guidance pins the exact candidate without changing bundled skill bytes", () => {
+  const sources = makeSources({ withPreferences: true, installedSkills: ["plan-today"] });
+  sources.preferences = [
+    "# Preferences",
+    "",
+    "How you want AI agents to plan your day. Edit by hand or re-run `dotaios interview`.",
+    "",
+    "## Planning",
+    "",
+    "- Plan style: focused",
+    "- Priorities per day: 3",
+    "- Time blocks: yes",
+    "- Frog definition: overdue tasks",
+    ""
+  ].join("\n");
+
+  const plan = buildPlan("/aios", sources, defaultAnswers(sources), {
+    cli: "npx dotaios@2.0.11"
+  });
+  const preferences = plan.find((item) => item.path === sources.preferencesPath);
+  const prompt = plan.find((item) => item.path.endsWith("plan-today/prompt.md"));
+  assert.match(preferences.content, /`npx dotaios@2\.0\.11 interview`/);
+  assert.match(prompt.content, /`npx dotaios@2\.0\.11 interview`/);
+  assert.doesNotMatch(preferences.content, /`(?:dotaios|npx dotaios) interview`/);
+  assert.doesNotMatch(prompt.content, /`(?:dotaios|npx dotaios) interview`/);
+});
+
+test("generated interview guidance emits no runnable fallback without candidate identity", () => {
+  const sources = makeSources({ installedSkills: ["plan-today"] });
+  const plan = buildPlan("/aios", sources, defaultAnswers(sources), { cli: null });
+
+  for (const item of plan.filter((entry) =>
+    entry.path === sources.preferencesPath || entry.path.endsWith("prompt.md")
+  )) {
+    assert.doesNotMatch(item.content, /`(?:dotaios|npx\s+dotaios)[^`]*`/);
+    assert.match(item.content, /candidate version was unavailable/i);
+  }
+});
