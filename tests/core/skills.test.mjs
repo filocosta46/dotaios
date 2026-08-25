@@ -248,17 +248,22 @@ test("writeSkillsIndex also writes skills/RESOLVER.md", async () => {
   assert.match(resolver, /skills\/audit\/SKILL\.md/);
 });
 
-test("bundled save-session skill is shipped and has digest instructions", () => {
+test("bundled save-session skill routes one idempotent request through the verified writer", () => {
   const skillPath = path.join(repoRoot, "skills", "save-session", "SKILL.md");
   const content = fs.readFileSync(skillPath, "utf8");
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 
   assert.ok(packageJson.files.includes("skills"), "npm package must include bundled skills");
   assert.match(content, /^---\nname: save-session\n/m);
-  assert.match(content, /memory\/sessions\/YYYY-MM-DD/);
   assert.match(content, /<!-- digest:start -->/);
   assert.match(content, /<!-- digest:end -->/);
-  assert.match(content, /index\.jsonl/);
+  assert.match(content, /capture save-summary/);
+  assert.match(content, /"version": 1/);
+  assert.match(content, /Generate one unique `operation_id`/);
+  assert.match(content, /same `operation_id` and the exact same envelope bytes/);
+  assert.match(content, /Do not generate or send `session_id`, `captured_at`/);
+  assert.match(content, /Never fall back to direct file or index writes/);
+  assert.doesNotMatch(content, /Create one Markdown file|After writing the Markdown file|still save the Markdown file/i);
 });
 
 test("bundled skillify skill ships with trigger phrases and an approval gate", () => {

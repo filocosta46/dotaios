@@ -3,6 +3,9 @@ import path from "node:path";
 import { stdin as input } from "node:process";
 import { expandHome } from "../../../core/src/paths.mjs";
 import { isHtmlComment } from "../../../core/src/render.mjs";
+import { repeatedJsonObjectKey } from "../../../core/src/json.mjs";
+
+export { repeatedJsonObjectKey } from "../../../core/src/json.mjs";
 
 // The interview answers, as a value rather than a terminal session. `dotaios
 // init --answers` and `dotaios setup --answers` are the only two callers, so
@@ -340,41 +343,6 @@ export const SECTION_BODY_CONTROL_CHARACTERS = CONTROL_CHARACTERS_EXCEPT_NEWLINE
 // and event text it appends.
 export const JOURNAL_CONTROL_CHARACTERS = CONTROL_CHARACTERS;
 
-// JSON.parse collapses {"name":"a","name":"b"} to "b" before Object.entries can
-// see it, so the two-spellings guard above — written because one answer
-// silently winning by key order was judged unacceptable — never fires on the
-// literal same-key case, which has exactly the same semantics. There is no
-// dependency budget for a streaming parser, so the raw text is scanned for the
-// top-level keys. This runs only after JSON.parse has already accepted the
-// text, which is what keeps it small: it never has to diagnose malformed JSON,
-// only find the keys in input already proven valid.
 export function repeatedTopLevelKey(raw) {
-  const seen = new Set();
-  let depth = 0;
-
-  for (let index = 0; index < raw.length; index += 1) {
-    const character = raw[index];
-    if (character === "{" || character === "[") depth += 1;
-    else if (character === "}" || character === "]") depth -= 1;
-    else if (character === '"') {
-      // Consuming the whole literal is also what keeps a brace or a quote
-      // inside a string value from moving the depth or ending the scan early.
-      const start = index;
-      index += 1;
-      while (index < raw.length && raw[index] !== '"') index += raw[index] === "\\" ? 2 : 1;
-      if (depth !== 1) continue;
-
-      let after = index + 1;
-      while (/\s/.test(raw[after] || "")) after += 1;
-      // At depth 1 a string is either a key or a value; only a key is followed
-      // by a colon.
-      if (raw[after] !== ":") continue;
-
-      const key = JSON.parse(raw.slice(start, index + 1));
-      if (seen.has(key)) return key;
-      seen.add(key);
-    }
-  }
-
-  return null;
+  return repeatedJsonObjectKey(raw, { topLevelOnly: true });
 }

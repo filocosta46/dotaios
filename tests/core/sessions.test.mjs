@@ -19,6 +19,7 @@ import {
   readSessionIndex,
   filterSessions,
   deleteSession,
+  searchSessions,
   SESSIONS_SUBDIR,
 } from "../../packages/core/src/sessions.mjs";
 
@@ -48,6 +49,16 @@ function makeSession(overrides = {}) {
     ],
     ...overrides,
   };
+}
+
+function stageDeletionCrash(aios, canonicalPath, token, { copy = false } = {}) {
+  const date = path.basename(path.dirname(canonicalPath));
+  const stagingDate = path.join(aios, SESSIONS_SUBDIR, ".deletions", date);
+  const stagedPath = path.join(stagingDate, `${path.basename(canonicalPath)}.delete-2147483647-${token}`);
+  fs.mkdirSync(stagingDate, { recursive: true });
+  if (copy) fs.copyFileSync(canonicalPath, stagedPath);
+  else fs.renameSync(canonicalPath, stagedPath);
+  return stagedPath;
 }
 
 // ---------- pure helpers ----------
@@ -165,6 +176,33 @@ test("writeSession skips exact duplicate (same source_path, same content)", asyn
   assert.equal(index.length, 1, "no duplicate index entry");
 });
 
+test("writeSession validates a dedup row path before returning an already-saved result", async () => {
+  const aios = tmpAios();
+  const session = makeSession({ source_path: "/tmp/unsafe-dedup.jsonl" });
+  const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+  const row = {
+    session_id: session.session_id,
+    agent: session.agent,
+    captured_at: session.captured_at,
+    source_type: session.source_type,
+    source_path: session.source_path,
+    project: session.project,
+    turns: session.turns.length,
+    title: session.title,
+    path: "memory/sessions/index.jsonl.lock",
+    content_hash: contentHash(renderSessionBody(session)),
+  };
+  fs.writeFileSync(indexPath, `${JSON.stringify(row)}\n`);
+  const beforeIndex = fs.readFileSync(indexPath);
+
+  await assert.rejects(() => writeSession(aios, session), /unsafe session file path/i);
+
+  assert.deepEqual(fs.readFileSync(indexPath), beforeIndex);
+  assert.deepEqual(fs.readdirSync(path.join(aios, SESSIONS_SUBDIR)).sort(), [
+    "index.jsonl",
+  ]);
+});
+
 test("writeSession updates in place when source_path matches but content changed", async () => {
   const aios = tmpAios();
   const session1 = makeSession({
@@ -218,6 +256,69 @@ test("writeSession appends without source_path (no dedup)", async () => {
   assert.equal(index.length, 2);
 });
 
+test("writeSession atomically replaces a hard-linked index without mutating the outside inode", async (t) => {
+  if (process.platform === "win32") return t.skip("hard links are not portable on Windows");
+  const aios = tmpAios();
+  await writeSession(aios, makeSession({ session_id: "first-row" }));
+  const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+  const outside = path.join(aios, "outside-index.jsonl");
+  fs.linkSync(indexPath, outside);
+  const outsideBefore = fs.readFileSync(outside);
+
+  await writeSession(aios, makeSession({ session_id: "second-row" }));
+
+  assert.deepEqual(fs.readFileSync(outside), outsideBefore);
+  assert.deepEqual((await readSessionIndex(aios)).map((entry) => entry.session_id), [
+    "first-row",
+    "second-row",
+  ]);
+});
+
+test("writeSession refuses a symlinked session leaf without changing its target", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink creation is not portable on Windows");
+  const aios = tmpAios();
+  const session = makeSession({ session_id: "feedface" });
+  const dateDir = path.join(aios, SESSIONS_SUBDIR, sessionDateDir(session));
+  const sessionPath = path.join(dateDir, sessionFilename(session));
+  const outside = path.join(aios, "outside-session.md");
+  fs.mkdirSync(dateDir, { recursive: true });
+  fs.writeFileSync(outside, "outside must stay unchanged");
+  fs.symlinkSync(outside, sessionPath);
+
+  await assert.rejects(() => writeSession(aios, session), /unsafe|symbolic|symlink/i);
+
+  assert.equal(fs.readFileSync(outside, "utf8"), "outside must stay unchanged");
+  assert.equal((await readSessionIndex(aios)).length, 0);
+});
+
+test("writeSession accepts an intentional symlink to the selected AIOS root", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink creation is not portable on Windows");
+  const aios = tmpAios();
+  const alias = `${aios}-alias`;
+  fs.symlinkSync(aios, alias, "dir");
+  t.after(() => fs.rmSync(alias, { force: true }));
+
+  const result = await writeSession(alias, makeSession());
+
+  assert.equal(result.skipped, false);
+  assert.equal((await readSessionIndex(aios)).length, 1);
+  assert.ok(fs.existsSync(path.join(aios, result.relativePath)));
+});
+
+test("writeSession refuses a symlinked index lock without changing its target", async (t) => {
+  if (process.platform === "win32") return t.skip("symlink creation is not portable on Windows");
+  const aios = tmpAios();
+  const outside = path.join(aios, "outside-lock.txt");
+  const lockPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock");
+  fs.writeFileSync(outside, "outside lock target");
+  fs.symlinkSync(outside, lockPath);
+
+  await assert.rejects(() => writeSession(aios, makeSession()), /unsafe session storage file/i);
+
+  assert.equal(fs.readFileSync(outside, "utf8"), "outside lock target");
+  assert.equal(fs.lstatSync(lockPath).isSymbolicLink(), true);
+});
+
 // ---------- deleteSession ----------
 
 test("deleteSession removes file and index entry", async () => {
@@ -255,6 +356,176 @@ test("deleteSession succeeds even if file already missing", async () => {
 
   const index = await readSessionIndex(aios);
   assert.equal(index.length, 0);
+});
+
+test("deleteSession accepts and normalizes a safe legacy Windows index path", async () => {
+  const aios = tmpAios();
+  const session = makeSession({ session_id: "windows-legacy" });
+  const published = await writeSession(aios, session);
+  const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+  const [row] = await readSessionIndex(aios);
+  fs.writeFileSync(indexPath, `${JSON.stringify({ ...row, path: row.path.replaceAll("/", "\\") })}\n`);
+
+  await deleteSession(aios, session.session_id);
+
+  assert.equal(fs.existsSync(published.filePath), false);
+  assert.deepEqual(await readSessionIndex(aios), []);
+});
+
+test("deleteSession restores the session when its index rewrite fails", async (t) => {
+  const aios = tmpAios();
+  const session = makeSession();
+  const published = await writeSession(aios, session);
+  const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+  const canonicalIndexPath = fs.realpathSync(indexPath);
+  const beforeIndex = fs.readFileSync(indexPath);
+  const beforeSession = fs.readFileSync(published.filePath);
+  const originalRename = fsp.rename.bind(fsp);
+  t.mock.method(fsp, "rename", async (source, destination) => {
+    if (destination === canonicalIndexPath) {
+      const error = new Error("injected index rewrite failure");
+      error.code = "EIO";
+      throw error;
+    }
+    return originalRename(source, destination);
+  });
+
+  await assert.rejects(
+    () => deleteSession(aios, session.session_id),
+    /injected index rewrite failure/,
+  );
+
+  assert.deepEqual(fs.readFileSync(indexPath), beforeIndex);
+  assert.deepEqual(fs.readFileSync(published.filePath), beforeSession);
+  assert.equal((await readSessionIndex(aios)).length, 1);
+});
+
+test("deleteSession refuses unsafe index paths without touching outside files", async () => {
+  for (const unsafePath of ["../../outside-session.md", "/tmp/outside-session.md"]) {
+    const aios = tmpAios();
+    const outside = path.join(aios, "outside-session.md");
+    fs.writeFileSync(outside, "outside survives");
+    const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+    const row = {
+      session_id: "unsafe-row",
+      captured_at: "2026-05-16T14:30:00.000Z",
+      path: unsafePath,
+    };
+    fs.writeFileSync(indexPath, `${JSON.stringify(row)}\n`);
+    const beforeIndex = fs.readFileSync(indexPath);
+
+    await assert.rejects(() => deleteSession(aios, row.session_id), /unsafe session file path/i);
+
+    assert.equal(fs.readFileSync(outside, "utf8"), "outside survives");
+    assert.deepEqual(fs.readFileSync(indexPath), beforeIndex);
+  }
+});
+
+test("deleteSession refuses session-corpus control paths without mutating the index", async () => {
+  for (const controlPath of [
+    "memory/sessions/index.jsonl",
+    "memory/sessions/index.jsonl.lock",
+  ]) {
+    const aios = tmpAios();
+    const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+    const row = {
+      session_id: `control-${path.basename(controlPath)}`,
+      captured_at: "2026-05-16T14:30:00.000Z",
+      path: controlPath,
+    };
+    fs.writeFileSync(indexPath, `${JSON.stringify(row)}\n`);
+    const beforeIndex = fs.readFileSync(indexPath);
+
+    await assert.rejects(() => deleteSession(aios, row.session_id), /unsafe session file path/i);
+
+    assert.deepEqual(fs.readFileSync(indexPath), beforeIndex);
+    assert.deepEqual(
+      fs.readdirSync(path.join(aios, SESSIONS_SUBDIR)).sort(),
+      ["index.jsonl"],
+    );
+  }
+});
+
+test("deleteSession refuses duplicate identity or path claims without orphaning files", async () => {
+  for (const claim of ["session_id", "path"]) {
+    const aios = tmpAios();
+    const first = await writeSession(aios, makeSession({ session_id: `first-${claim}` }));
+    const second = await writeSession(aios, makeSession({ session_id: `second-${claim}` }));
+    const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+    const rows = await readSessionIndex(aios);
+    rows[1][claim] = rows[0][claim];
+    fs.writeFileSync(indexPath, rows.map((row) => `${JSON.stringify(row)}\n`).join(""));
+    const beforeIndex = fs.readFileSync(indexPath);
+    const beforeFirst = fs.readFileSync(first.filePath);
+    const beforeSecond = fs.readFileSync(second.filePath);
+
+    await assert.rejects(
+      () => deleteSession(aios, rows[0].session_id),
+      /ambiguous session index claims/i,
+      claim,
+    );
+
+    assert.deepEqual(fs.readFileSync(indexPath), beforeIndex, claim);
+    assert.deepEqual(fs.readFileSync(first.filePath), beforeFirst, claim);
+    assert.deepEqual(fs.readFileSync(second.filePath), beforeSecond, claim);
+  }
+});
+
+test("the next locked write restores a deletion staged before its index commit", async () => {
+  const aios = tmpAios();
+  const original = await writeSession(aios, makeSession({ session_id: "restore-after-crash" }));
+  const stagedPath = stageDeletionCrash(
+    aios,
+    original.filePath,
+    "00000000-0000-4000-8000-000000000001",
+  );
+
+  await writeSession(aios, makeSession({ session_id: "recovery-trigger" }));
+
+  assert.equal(fs.existsSync(original.filePath), true);
+  assert.equal(fs.existsSync(stagedPath), false);
+  assert.deepEqual((await readSessionIndex(aios)).map((entry) => entry.session_id), [
+    "restore-after-crash",
+    "recovery-trigger",
+  ]);
+});
+
+test("the next locked write finishes a deletion staged after its index commit", async () => {
+  const aios = tmpAios();
+  const original = await writeSession(aios, makeSession({ session_id: "finish-after-crash" }));
+  const stagedPath = stageDeletionCrash(
+    aios,
+    original.filePath,
+    "00000000-0000-4000-8000-000000000002",
+  );
+  fs.writeFileSync(path.join(aios, SESSIONS_SUBDIR, "index.jsonl"), "");
+
+  await writeSession(aios, makeSession({ session_id: "cleanup-trigger" }));
+
+  assert.equal(fs.existsSync(original.filePath), false);
+  assert.equal(fs.existsSync(stagedPath), false);
+  assert.deepEqual((await readSessionIndex(aios)).map((entry) => entry.session_id), ["cleanup-trigger"]);
+});
+
+test("deletion recovery refuses an ambiguous canonical-and-staged session", async () => {
+  const aios = tmpAios();
+  const original = await writeSession(aios, makeSession({ session_id: "ambiguous-delete" }));
+  const stagedPath = stageDeletionCrash(
+    aios,
+    original.filePath,
+    "00000000-0000-4000-8000-000000000003",
+    { copy: true },
+  );
+  const beforeIndex = fs.readFileSync(path.join(aios, SESSIONS_SUBDIR, "index.jsonl"));
+
+  await assert.rejects(
+    () => writeSession(aios, makeSession({ session_id: "must-not-publish" })),
+    /ambiguous staged session deletion/i,
+  );
+
+  assert.equal(fs.existsSync(original.filePath), true);
+  assert.equal(fs.existsSync(stagedPath), true);
+  assert.deepEqual(fs.readFileSync(path.join(aios, SESSIONS_SUBDIR, "index.jsonl")), beforeIndex);
 });
 
 // ---------- filterSessions ----------
@@ -295,6 +566,26 @@ test("filterSessions by since cuts off old sessions", async () => {
   const recent = await filterSessions(aios, { since: "30d" });
   assert.equal(recent.length, 1);
   assert.equal(recent[0].captured_at, recentCapturedAt);
+});
+
+test("searchSessions does not crash on a permissive legacy row with a non-string session_id", async () => {
+  const aios = tmpAios();
+  const indexPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl");
+  fs.writeFileSync(indexPath, `${JSON.stringify({
+    session_id: 12345,
+    agent: "manual",
+    captured_at: "2026-05-16T14:30:00.000Z",
+    source_type: "import",
+    turns: 0,
+    title: "Permissive legacy title",
+    path: "memory/sessions/2026-05-16/missing.md",
+    content_hash: "0123456789abcdef",
+  })}\n`);
+
+  const results = await searchSessions(aios, "legacy title");
+
+  assert.equal(results.length, 1);
+  assert.equal(results[0].entry.title, "Permissive legacy title");
 });
 
 // ---------- manual adapter ----------
@@ -502,6 +793,23 @@ test("withIndexLock reclaims a stale lock with an old mtime", async () => {
   assert.equal(fs.existsSync(lockPath), false);
 });
 
+test("withIndexLock reclaims an abandoned stale-lock steal guard", async () => {
+  const aios = tmpAios();
+  const lockPath = path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock");
+  const guardPath = path.join(aios, "tmp", ".dotaios-locks", "index-steal.lock");
+  fs.mkdirSync(path.dirname(guardPath), { recursive: true });
+  fs.writeFileSync(lockPath, "2147483647");
+  fs.writeFileSync(guardPath, "abandoned guard");
+  const old = (Date.now() - 60_000) / 1000;
+  fs.utimesSync(guardPath, old, old);
+
+  await writeSession(aios, makeSession({ session_id: "stale-steal-guard" }));
+
+  assert.equal((await readSessionIndex(aios)).some((entry) => entry.session_id === "stale-steal-guard"), true);
+  assert.equal(fs.existsSync(lockPath), false);
+  assert.equal(fs.existsSync(guardPath), false);
+});
+
 test("withIndexLock serializes concurrent writers without losing entries", async () => {
   const aios = tmpAios();
   const N = 10;
@@ -546,6 +854,28 @@ test("withIndexLock: concurrent writers all stealing one dead lock keep every en
 
   const index = await readSessionIndex(aios);
   assert.equal(index.length, N);
+});
+
+test("concurrent summary saves stealing one dead lock ignore steal-guard bookkeeping", async () => {
+  const aios = tmpAios();
+  fs.writeFileSync(path.join(aios, SESSIONS_SUBDIR, "index.jsonl.lock"), "2147483647");
+  const sessionsUrl = new URL("../../packages/core/src/sessions.mjs", import.meta.url).href;
+  const workerPath = path.join(aios, "summary-worker.mjs");
+  fs.writeFileSync(
+    workerPath,
+    `import { saveSessionSummary } from ${JSON.stringify(sessionsUrl)};\n` +
+      `const [aios, id] = process.argv.slice(2);\n` +
+      `await saveSessionSummary(aios, { operation_id: "summary-" + id, request_hash: "a".repeat(64), agent: "codex", title: "summary " + id, summary: "# Summary " + id });\n`,
+  );
+  const count = 8;
+
+  await Promise.all(Array.from({ length: count }, (_, index) => (
+    execFileAsync(process.execPath, [workerPath, aios, String(index)])
+  )));
+
+  const entries = await readSessionIndex(aios, { strict: true });
+  assert.equal(entries.length, count);
+  assert.equal(new Set(entries.map((entry) => entry.operation_id)).size, count);
 });
 
 // ---------- no collision with existing commands ----------

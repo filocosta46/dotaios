@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { Readable } from "node:stream";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseAnswers, readAllStdin } from "../../packages/cli/src/lib/answers.mjs";
+import { parseAnswers, readAllStdin, repeatedJsonObjectKey } from "../../packages/cli/src/lib/answers.mjs";
 
 // The advertised install path is "ask your assistant to install DotAIOS". An
 // assistant runs commands through a pipe, never a TTY, so the interview at
@@ -403,6 +403,34 @@ test("the same key twice stops the run instead of the last one quietly winning",
   const nested = runInit(["--path", target, "--answers", writeAnswers(root, '{"name":"Ada","ai_tools":{"a":1,"a":2}}')]);
   assert.notEqual(nested.status, 0);
   assert.match(nested.stderr, /must be a string or an array of strings/);
+});
+
+test("the duplicate-key scanner finds the first repeated key inside a nested object", () => {
+  assert.equal(
+    repeatedJsonObjectKey('{"outer":{"first":1,"first":2},"later":{"second":1,"second":2}}'),
+    "first"
+  );
+});
+
+test("the duplicate-key scanner keeps sibling object key sets independent", () => {
+  assert.equal(
+    repeatedJsonObjectKey('{"left":{"shared":1},"right":{"shared":2}}'),
+    null
+  );
+});
+
+test("the duplicate-key scanner checks objects contained in arrays", () => {
+  assert.equal(
+    repeatedJsonObjectKey('{"items":[{"safe":1},{"hidden":1,"hidden":2}]}'),
+    "hidden"
+  );
+});
+
+test("the duplicate-key scanner compares decoded object keys", () => {
+  assert.equal(
+    repeatedJsonObjectKey('{"nested":{"name":1,"na\\u006de":2}}'),
+    "name"
+  );
 });
 
 test("the preview refuses the --answers/--yes contradiction the real run refuses", () => {
