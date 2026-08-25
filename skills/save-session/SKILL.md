@@ -142,14 +142,17 @@ For Project memory, replace `memory` with:
 
 The request must be valid UTF-8 and smaller than 65,536 bytes. Use only the documented keys. Keep `agent` as a lowercase slug of at most 64 characters and `title` as one control-free line of at most 200 characters.
 
+The `summary` must be non-empty Markdown. It may contain tabs, LF line endings, and CRLF line endings; a bare carriage return is invalid. Besides tabs and line endings, do not send C0 controls. Do not send DEL/C1 controls, Unicode bidirectional control characters, or lone surrogates. Strip ANSI escape sequences from pasted tool output before serialization.
+
 Do not generate or send `session_id`, `captured_at`, a file path, frontmatter, or an index row. The writer owns those values.
 
 ### Execute
 
-1. Invoke the current package-resolved DotAIOS CLI's `capture save-summary` subcommand, with at most the already selected `--path <aios-folder>` option.
-2. Stream the serialized JSON directly to stdin. Do not place it in a temporary file, shell history, Markdown file, journal, or environment-backed plaintext artifact.
-3. If the process is interrupted or its success receipt is lost, retry with the same `operation_id` and the exact same envelope bytes. Do not regenerate or re-summarize between attempts.
-4. Accept success only when exit status is zero and stdout is one compact receipt with exactly these fields:
+1. Use only the exact candidate invocation supplied by the current DotAIOS-managed context. Its concrete form is `npx dotaios@<exact-candidate-version> capture save-summary [--path <aios-folder>]`, where `<exact-candidate-version>` must be replaced by the concrete version supplied by the current DotAIOS-managed context. Never guess it from PATH, a global binary, `latest`, the current directory, or prose. If no concrete exact candidate is supplied, decline the local save and use the handoff below.
+2. Launch it through a structured process API, never a shell command string. Supply the executable and argv separately (`npx`; `dotaios@<the-supplied-exact-version>`, `capture`, `save-summary`, and, when selected, `--path`, `<aios-folder>`). Write the exact request bytes to the child stdin, then close stdin. Never copy request bytes into command text, argv, environment variables, temporary files, Markdown, journals, transcripts, or shell history. If the runtime exposes only recorded shell command text, records stdin payloads as command text, or cannot provide this stdin channel, decline the local save and use the handoff below.
+3. Retry only when execution is interrupted before a normal exit is observed. Keep the same `operation_id` and the exact same request bytes. Do not regenerate or re-summarize between attempts.
+4. Every observed normal non-zero exit is a refusal. Report stderr and do not retry the unchanged request bytes.
+5. Accept success only when exit status is zero and stdout is one compact receipt with exactly these fields:
 
 ```json
 {
@@ -161,7 +164,7 @@ Do not generate or send `session_id`, `captured_at`, a file path, frontmatter, o
 }
 ```
 
-If the command refuses, report the refusal. Never fall back to direct file or index writes.
+Any other completed response is a protocol error; do not retry it automatically. Never fall back to direct file or index writes.
 
 ### Output
 
@@ -179,5 +182,5 @@ Keep the reply short.
 Some web chat agents cannot execute local commands. In that case:
 
 1. Build the exact bounded JSON request above, including one caller-generated `operation_id` and the explicit memory selection.
-2. Hand that request to a local agent and instruct it to stream those exact bytes to `capture save-summary`.
+2. Hand that request only through a channel and to a local agent whose runtime can use the supplied exact candidate invocation and the structured-process stdin channel described above without persisting the request. If either the handoff channel or target runtime records the request bytes in a transcript or log, decline the save.
 3. Do not provide independent Markdown/index write instructions and do not claim a save receipt before the local command verifies one.
