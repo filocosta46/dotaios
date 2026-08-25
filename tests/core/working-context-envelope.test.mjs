@@ -17,6 +17,9 @@ import {
   renderOperationalNotice
 } from "../../packages/core/src/working-context-envelope.mjs";
 
+const packageVersion = JSON.parse(await fs.readFile(new URL("../../package.json", import.meta.url), "utf8")).version;
+const exactCli = `npx dotaios@${packageVersion}`;
+
 test("Off returns a fixed safe envelope before digest or migration inspection", async () => {
   let digestCalls = 0;
   let migrationCalls = 0;
@@ -511,10 +514,72 @@ test("inspection failure stays structured, path-free, and does not take down the
     status: "inspection_failed",
     code: "INVALID_SCHEMA",
     severity: "warning",
-    action: { command: "dotaios doctor", path_scope: "configured_aios" }
+    action: { command: `${exactCli} doctor`, path_scope: "configured_aios" }
   });
-  assert.match(renderOperationalNotice(envelope.operational), /dotaios doctor/);
+  assert.match(renderOperationalNotice(envelope.operational), new RegExp(`${exactCli.replaceAll(".", "\\.")} doctor`));
   assert.doesNotMatch(JSON.stringify(envelope.operational), new RegExp(escapeRegExp(aiosPath)));
+});
+
+test("a current folder does not resolve a candidate invocation", async () => {
+  let resolverCalls = 0;
+  const envelope = await buildWorkingContextEnvelope("/canonical/aios", {}, {
+    buildSessionDigest: async () => ({
+      digest: "## Active Context\n",
+      budget: { limit: 6000, used: 18, remaining: 5982, truncated: false },
+      generatedAt: "2099-01-01T00:00:00.000Z",
+      projectFilter: null,
+    }),
+    inspectMigrationState: async () => ({
+      status: "current",
+      folder_schema_version: "1.2.0",
+      supported_schema_version: "1.2.0",
+    }),
+    resolveCliInvocation: async () => {
+      resolverCalls += 1;
+      throw new Error("candidate package metadata unreadable");
+    },
+  });
+
+  assert.equal(resolverCalls, 0);
+  assert.equal(envelope.digest, "## Active Context\n");
+  assert.deepEqual(envelope.operational.migration, {
+    status: "current",
+    folder_schema_version: "1.2.0",
+    supported_schema_version: "1.2.0",
+    severity: "none",
+    action: null,
+  });
+  assert.equal(envelope.notice, null);
+});
+
+test("an unreadable candidate identity preserves stale context without a runnable fallback", async () => {
+  const envelope = await buildWorkingContextEnvelope("/canonical/aios", {}, {
+    buildSessionDigest: async () => ({
+      digest: "## Active Context\n",
+      budget: { limit: 6000, used: 18, remaining: 5982, truncated: false },
+      generatedAt: "2099-01-01T00:00:00.000Z",
+      projectFilter: null,
+    }),
+    inspectMigrationState: async () => ({
+      status: "schema_outdated",
+      folder_schema_version: "1.1.0",
+      supported_schema_version: "1.2.0",
+    }),
+    resolveCliInvocation: async () => {
+      throw new Error("candidate package metadata unreadable");
+    },
+  });
+
+  assert.equal(envelope.digest, "## Active Context\n");
+  assert.deepEqual(envelope.operational.migration, {
+    status: "schema_outdated",
+    folder_schema_version: "1.1.0",
+    supported_schema_version: "1.2.0",
+    severity: "notice",
+    action: null,
+  });
+  assert.match(envelope.notice, /exact candidate invocation is unavailable/i);
+  assert.doesNotMatch(envelope.notice, /(?:^|\s)dotaios(?:\s|$)|npx\s+dotaios/i);
 });
 
 test("future, unsupported, invalid-encoding, and excessive transaction state fail closed with bounded codes", async (t) => {
@@ -530,7 +595,7 @@ test("future, unsupported, invalid-encoding, and excessive transaction state fai
         status: "inspection_failed",
         code,
         severity: "warning",
-        action: { command: "dotaios doctor", path_scope: "configured_aios" }
+        action: { command: `${exactCli} doctor`, path_scope: "configured_aios" }
       });
       assert.ok(envelope.notice.length < 512);
     });
@@ -550,7 +615,7 @@ test("future, unsupported, invalid-encoding, and excessive transaction state fai
       status: "inspection_failed",
       code: "INVALID_CONFIG_ENCODING",
       severity: "warning",
-      action: { command: "dotaios doctor", path_scope: "configured_aios" }
+      action: { command: `${exactCli} doctor`, path_scope: "configured_aios" }
     });
     assert.deepEqual(await fs.readFile(configPath), bytes);
   });
@@ -568,7 +633,7 @@ test("future, unsupported, invalid-encoding, and excessive transaction state fai
       status: "inspection_failed",
       code: "TOO_MANY_TRANSACTIONS",
       severity: "warning",
-      action: { command: "dotaios doctor", path_scope: "configured_aios" }
+      action: { command: `${exactCli} doctor`, path_scope: "configured_aios" }
     });
     assert.doesNotMatch(JSON.stringify(envelope.operational), /migrate-1_1_0/);
   });

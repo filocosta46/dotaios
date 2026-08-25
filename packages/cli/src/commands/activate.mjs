@@ -1,12 +1,14 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { describeFileError, pathExists, replaceFileIfUnchanged, writeFileSafe } from "../../../core/src/files.mjs";
+import { describeFileError, pathExists } from "../../../core/src/files.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, isPathWithinLexically } from "../../../core/src/paths.mjs";
 import {
   MANAGED_END,
   MANAGED_START,
+  applyManagedBridgeFile,
   bridgeContent,
+  bridgeManagedBlock,
   bridgePath,
   findManagedBlock,
   isAgentInstalled,
@@ -415,6 +417,7 @@ async function createGlobalBridges(
   // Resolve once per run rather than once per bridge: every bridge must name
   // the same invocation, and the answer cannot change mid-loop.
   const cli = await resolveCliInvocation();
+  const managedBlock = await bridgeManagedBlock(aiosPath, { skillsFirst, skillsCatalog, cli });
   const results = [];
   let installedCount = 0;
   let configuredContextCount = 0;
@@ -450,7 +453,7 @@ async function createGlobalBridges(
     try {
       result = await writeManagedFile(
         destination,
-        await bridgeContent(agent, aiosPath, { skillsFirst, skillsCatalog, cli }),
+        await bridgeContent(agent, aiosPath, { managedBlock }),
         {
           ...options,
           boundaryRoot: homePath,
@@ -618,8 +621,9 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
     };
   }
   const registry = await loadAgentRegistry(aiosPath);
+  const cli = await resolveCliInvocation();
   const bridges = [
-    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, resolvePath(options.home || os.homedir())), {
+    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, resolvePath(options.home || os.homedir()), cli), {
       ...options,
       projectRoot: projectPath,
       beforeReplace: lifecycle.beforeBridgeReplace,
@@ -772,145 +776,15 @@ async function writeManagedFile(
       return { action: "unsafe-target", path: destination, note: safety.reason };
     }
   }
-  const stats = await lstatIfPresent(destination);
-  if (stats && (!stats.isFile() || stats.isSymbolicLink())) {
-    return { action: "unsafe-target", path: destination, note: "existing bridge path is not a regular file" };
-  }
-
-  if (!stats) {
-    if (!dryRun) {
-      await writeFileSafe(destination, content, "preserve", { boundaryRoot });
-    }
-    return { action: dryRun ? "would create" : "created", path: destination };
-  }
-
-  const current = await fs.readFile(destination, "utf8");
-  const existingBlock = findManagedBlock(current);
-
-  // No usable managed block: any DotAIOS marker is ambiguous and always fails
-  // closed. A truly unmanaged file can be replaced only with explicit overwrite.
-  if (!existingBlock) {
-    const hasManagedMarker = current.includes(managedStart) || current.includes(managedEnd);
-    if (hasManagedMarker) {
-      return {
-        action: "kept",
-        path: destination,
-        note: "managed markers are malformed; existing file kept"
-      };
-    }
-    if (!overwrite) {
-      // The default has always been to leave a file DotAIOS does not own
-      // completely alone, and that promise stays. `--merge` is the explicit
-      // opt-in for the common case below.
-      //
-      // Appending is only ever offered for the user's OWN home. A project
-      // bridge lives in a repository that may be shared, reviewed, and
-      // committed by other people, so a foreign one always fails closed.
-      if (!merge || projectRoot) {
-        return { action: "kept", path: destination, note: "existing unmanaged file" };
-      }
-      // Anyone who has ever asked their assistant to remember a preference
-      // already has one of these files. Refusing to touch it left the most
-      // common user in the worst state available: skills linked, exit 0, no
-      // error, and their assistant never told who they are. The managed block
-      // is delimited, so appending it below their own text loses nothing and
-      // stays precisely removable. Replacing the file outright is still an
-      // explicit --overwrite decision.
-      const appendBlock = findManagedBlock(content);
-      if (!appendBlock) {
-        throw new Error("generated bridge content is missing its managed block");
-      }
-      if (dryRun) {
-        return { action: "would append", path: destination };
-      }
-      const separator = current.endsWith("\n\n") ? "" : current.endsWith("\n") ? "\n" : "\n\n";
-      const appended = `${current}${separator}${appendBlock.text}\n`;
-      const result = await replaceFileIfUnchanged(destination, current, appended, {
-        boundaryRoot,
-        beforeReplace,
-        beforePublish,
-        beforeCommit,
-        expectedStats: stats,
-        mode: stats.mode & 0o777
-      });
-      return result.replaced
-        ? {
-            action: "appended",
-            path: destination,
-            note: "added the DotAIOS block below your existing instructions"
-          }
-        : concurrentBridgeResult(destination, result.preservedPath);
-    }
-    if (dryRun) {
-      return { action: "would update", path: destination };
-    }
-    const replacement = await replaceFileIfUnchanged(destination, current, content, {
-      boundaryRoot,
-      beforeReplace,
-      beforePublish,
-      beforeCommit,
-      expectedStats: stats,
-      mode: stats.mode & 0o777
-    });
-    return replacement.replaced
-      ? updatedBridgeResult(destination, replacement.preservedPath)
-      : concurrentBridgeResult(destination, replacement.preservedPath);
-  }
-
-  // Managed block present: replace only the block. Every byte the user wrote
-  // outside the markers survives untouched.
-  const generatedBlock = findManagedBlock(content);
-  if (!generatedBlock) {
-    throw new Error("generated bridge content is missing its managed block");
-  }
-  const next = `${current.slice(0, existingBlock.start)}${generatedBlock.text}${current.slice(existingBlock.end)}`;
-
-  // Nothing to do when the block is already current. Rewriting an identical
-  // file would only churn mtimes and litter a pointless backup beside it.
-  if (next === current) {
-    return { action: "unchanged", path: destination };
-  }
-
-  if (dryRun) {
-    return { action: "would update", path: destination };
-  }
-
-  const replacement = await replaceFileIfUnchanged(destination, current, next, {
+  return applyManagedBridgeFile(destination, content, {
+    dryRun,
+    merge: merge && !projectRoot,
+    overwrite,
     boundaryRoot,
     beforeReplace,
     beforePublish,
-    beforeCommit,
-    expectedStats: stats,
-    mode: stats.mode & 0o777
+    beforeCommit
   });
-  return replacement.replaced
-    ? updatedBridgeResult(destination, replacement.preservedPath)
-    : concurrentBridgeResult(destination, replacement.preservedPath);
-}
-
-function updatedBridgeResult(destination, preservedPath) {
-  return {
-    action: "updated",
-    path: destination,
-    ...(preservedPath ? { note: `preserved the previous file at ${path.basename(preservedPath)}` } : {})
-  };
-}
-
-function concurrentBridgeResult(destination, preservedPath = null) {
-  return {
-    action: "conflict",
-    path: destination,
-    note: `bridge changed during activation; left the concurrent edit untouched${preservedPath ? ` and preserved the previous file at ${path.basename(preservedPath)}` : ""}`
-  };
-}
-
-async function lstatIfPresent(destination) {
-  try {
-    return await fs.lstat(destination);
-  } catch (error) {
-    if (error?.code === "ENOENT") return null;
-    throw error;
-  }
 }
 
 async function removeRetiredManagedFile(destination, { dryRun = false, projectRoot = null } = {}) {
@@ -962,14 +836,14 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
   };
 }
 
-function projectAgentsBridge(aiosPath, project, homePath) {
+function projectAgentsBridge(aiosPath, project, homePath, cli) {
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
     "This attached checkout defaults to `Memory: This project`.",
-    `At session start run \`dotaios brief --compact --memory project --project ${project.id}\`.`,
+    `At session start run \`${cli} brief --compact --memory project --project ${project.id}\`.`,
     `Keep later searches and explicit saves in the same mode with \`--memory project --project ${project.id}\`.`,
     "This mode may use only this project's files and explicitly attributed sessions, signals, and events; exclude personal, unscoped, and other-project memory.",
-    ...(project.registered ? [] : ["This checkout is not in the project catalog yet; run `dotaios project add <repo-path>` to enable automatic writer attribution."]),
+    ...(project.registered ? [] : [`This checkout is not in the project catalog yet; run \`${cli} project add <repo-path>\` to enable automatic writer attribution.`]),
     "",
     `The DotAIOS entrypoint is ${portableAiosPointer(aiosPath, homePath)}. Do not open personal context from it while this session is in project mode.`,
     "",

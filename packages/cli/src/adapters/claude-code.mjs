@@ -6,6 +6,7 @@ import { ADAPTER_LEVELS } from "../../../core/src/adapter-contract.mjs";
 import { writeSession, readSessionIndex } from "../../../core/src/sessions.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
 import { detectMemoryModeFromFirstMessage, resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
+import { exactCandidatePackage } from "../../../core/src/bridges.mjs";
 
 export const name = "claude-code";
 export const level = ADAPTER_LEVELS.FULL_AUTO;
@@ -26,7 +27,7 @@ const SETTINGS_PATH = path.join(CLAUDE_DIR, "settings.json");
 const HOOK_VERSION = JSON.parse(
   readFileSync(new URL("../../../../package.json", import.meta.url), "utf8")
 ).version;
-const HOOK_COMMAND = `npx -y dotaios@${HOOK_VERSION} capture hook claude-code`;
+const HOOK_COMMAND = `npx -y ${exactCandidatePackage(HOOK_VERSION)} capture hook claude-code`;
 const HOOK_MARKER = "capture hook claude-code";
 
 // The command is written into another program's config and run through a

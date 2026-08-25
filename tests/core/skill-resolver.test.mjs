@@ -10,6 +10,10 @@ import {
   MIN_SCORE
 } from "../../packages/core/src/skill-resolver.mjs";
 
+const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
+const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
+const exactCli = `npx dotaios@${packageVersion}`;
+
 function skill(dir, name, description, triggers = []) {
   return { dir, name, description, triggers };
 }
@@ -106,10 +110,11 @@ test("renderBootContext emits a Skills first block with the resolver rule and ea
 test("renderBootContext handles an empty skill set", () => {
   const md = renderBootContext([], { skillsDir: "/aios/skills" });
   assert.match(md, /No skills installed/);
+  assert.match(md, new RegExp(`${exactCli.replaceAll(".", "\\.")} skill add <local-folder>`));
+  assert.doesNotMatch(md, /`dotaios\s+[a-z]|npx dotaios(?!@)/);
 });
 
 test("bundled plan-today skill resolves from its real frontmatter triggers", async () => {
-  const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
   const { collectSkills } = await import("../../packages/core/src/skills.mjs");
   const skills = await collectSkills(repoRoot);
   const ranked = rankSkills("plan my day", skills);

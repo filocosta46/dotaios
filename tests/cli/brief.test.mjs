@@ -10,6 +10,8 @@ import { isoDate } from "../../packages/core/src/memory.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
+const exactCliInvocation = `npx dotaios@${packageVersion}`;
 
 function run(args) {
   const result = spawnSync(process.execPath, [cli, ...args], {
@@ -326,16 +328,14 @@ test("init ships the daily brief schedule disabled by default", () => {
 
   assert.match(schedules, /name: daily-brief/);
   assert.match(schedules, /cadence: daily/);
-  // A scheduled command is executed, so it carries the invocation resolved at
-  // init time: the bare name when a real binary exists, the version-pinned npx
-  // form otherwise. Either spelling is correct; a bare name on a machine
-  // without the binary is the bug this shape prevents.
-  assert.match(schedules, /command: "(?:npx )?dotaios(?:@[\w.-]+)? brief"/);
+  assert.match(schedules, new RegExp(`command: "npx dotaios@${packageVersion.replaceAll(".", "\\.")} brief"`));
+  assert.doesNotMatch(schedules, /command: "dotaios\s/);
+  assert.doesNotMatch(schedules, /command: "npx dotaios(?!@)/);
   assert.match(schedules, /enabled: false/);
 
   const list = run(["schedule", "list", "--path", aiosPath]);
   assert.match(list.stdout, /daily-brief/);
-  assert.match(list.stdout, /dotaios(?:@[\w.-]+)? brief/);
+  assert.match(list.stdout, new RegExp(`npx dotaios@${packageVersion.replaceAll(".", "\\.")} brief`));
 });
 
 test("compact text and Gemini hook JSON expose the same stale-schema action without changing the digest budget", () => {
@@ -350,10 +350,10 @@ test("compact text and Gemini hook JSON expose the same stale-schema action with
     const plain = run(["brief", "--compact", "--budget", "512", "--path", aiosPath]).stdout;
     const hook = JSON.parse(run(["brief", "--compact", "--json", "--budget", "512", "--path", aiosPath]).stdout);
 
-    assert.match(plain, /\[DotAIOS\].*schema 1\.1\.0.*1\.2\.0.*dotaios migrate/s);
-    assert.match(hook.hookSpecificOutput.additionalContext, /\[DotAIOS\].*schema 1\.1\.0.*1\.2\.0.*dotaios migrate/s);
-    assert.match(plain, /dotaios migrate --path <this-aios-folder>/);
-    assert.match(hook.hookSpecificOutput.additionalContext, /dotaios migrate --path <this-aios-folder>/);
+    assert.match(plain, /\[DotAIOS\].*schema 1\.1\.0.*1\.2\.0/s);
+    assert.match(hook.hookSpecificOutput.additionalContext, /\[DotAIOS\].*schema 1\.1\.0.*1\.2\.0/s);
+    assert.match(plain, new RegExp(`${exactCliInvocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} migrate --path <this-aios-folder>`));
+    assert.match(hook.hookSpecificOutput.additionalContext, new RegExp(`${exactCliInvocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} migrate --path <this-aios-folder>`));
     assert.doesNotMatch(`${plain}\n${JSON.stringify(hook)}`, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.deepEqual(hook.contextBudget, currentJson.contextBudget);
   } finally {
@@ -372,19 +372,23 @@ test("compact output surfaces transaction and failed inspection state but stays 
     fs.mkdirSync(path.join(migrationsRoot, "transactions", planId), { recursive: true });
     fs.writeFileSync(path.join(migrationsRoot, "owner.json"), `${JSON.stringify({ schema: "dotaios.migrations.v1" }, null, 2)}\n`);
     const transaction = run(["brief", "--compact", "--path", aiosPath]).stdout;
-    assert.match(transaction, /\[DotAIOS\].*transaction metadata.*liveness is not verified.*dotaios doctor/s);
+    assert.match(transaction, /\[DotAIOS\].*transaction metadata.*liveness is not verified/s);
+    assert.match(transaction, new RegExp(`${exactCliInvocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} doctor`));
     const transactionHook = JSON.parse(run(["brief", "--compact", "--json", "--path", aiosPath]).stdout);
-    assert.match(transactionHook.hookSpecificOutput.additionalContext, /transaction metadata.*liveness is not verified.*dotaios doctor/s);
+    assert.match(transactionHook.hookSpecificOutput.additionalContext, /transaction metadata.*liveness is not verified/s);
+    assert.match(transactionHook.hookSpecificOutput.additionalContext, new RegExp(`${exactCliInvocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} doctor`));
     assert.doesNotMatch(transactionHook.hookSpecificOutput.additionalContext, /migrate --recover/);
 
     fs.rmSync(path.join(aiosPath, ".dotaios"), { recursive: true, force: true });
     fs.writeFileSync(path.join(aiosPath, "aios.json"), "{\"schema_version\":\"invalid\"}\n");
     const failed = run(["brief", "--compact", "--path", aiosPath]).stdout;
-    assert.match(failed, /\[DotAIOS\].*could not be verified.*dotaios doctor/s);
+    assert.match(failed, /\[DotAIOS\].*could not be verified/s);
+    assert.match(failed, new RegExp(`${exactCliInvocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} doctor`));
     assert.match(failed, /## Active Context/);
     assert.doesNotMatch(failed, new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     const failedHook = JSON.parse(run(["brief", "--compact", "--json", "--path", aiosPath]).stdout);
-    assert.match(failedHook.hookSpecificOutput.additionalContext, /could not be verified.*dotaios doctor/s);
+    assert.match(failedHook.hookSpecificOutput.additionalContext, /could not be verified/s);
+    assert.match(failedHook.hookSpecificOutput.additionalContext, new RegExp(`${exactCliInvocation.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} doctor`));
     assert.doesNotMatch(JSON.stringify(failedHook), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });

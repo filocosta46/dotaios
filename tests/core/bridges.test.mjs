@@ -11,6 +11,7 @@ import {
   bridgePath,
   bridgePointer,
   findManagedBlock,
+  inspectDotaiosOnPath,
   isAgentInstalled,
   loadAgentRegistry,
   resolveCliInvocation
@@ -107,18 +108,111 @@ test("agent detection recognizes a declared command on PATH without a config fol
   }
 });
 
+test("PATH inspection proves only the canonical DotAIOS global link without executing it", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-path-owner-"));
+  const binDir = path.join(root, "bin");
+  const packageRoot = path.join(root, "lib", "node_modules", "dotaios");
+  const entrypoint = path.join(packageRoot, "packages", "cli", "src", "index.mjs");
+  const executionMarker = path.join(root, "executed");
+  await fs.mkdir(binDir, { recursive: true });
+  await fs.mkdir(path.dirname(entrypoint), { recursive: true });
+  await fs.writeFile(entrypoint, `#!/bin/sh\nprintf executed > ${executionMarker}\n`, { mode: 0o755 });
+  await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
+    name: "dotaios",
+    version: "2.0.9",
+    bin: { dotaios: "packages/cli/src/index.mjs" }
+  }));
+  await fs.symlink("../lib/node_modules/dotaios/packages/cli/src/index.mjs", path.join(binDir, "dotaios"));
+
+  try {
+    const result = await inspectDotaiosOnPath({ env: { PATH: binDir }, platform: process.platform });
+    assert.equal(result.status, "owned");
+    assert.equal(result.ownership, "owned");
+    assert.equal(result.version, "2.0.9");
+    assert.equal(result.command_path, path.join(binDir, "dotaios"));
+    assert.equal(result.package_path, path.join(await fs.realpath(packageRoot), "package.json"));
+    await assert.rejects(fs.access(executionMarker), { code: "ENOENT" });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("PATH inspection reports an unrecognized executable as unknown and unowned", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-path-unowned-"));
+  const commandPath = path.join(root, "dotaios");
+  await fs.writeFile(commandPath, "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+
+  try {
+    assert.deepEqual(
+      await inspectDotaiosOnPath({ env: { PATH: root }, platform: process.platform }),
+      {
+        status: "unknown",
+        ownership: "unowned",
+        command_path: commandPath
+      }
+    );
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("PATH inspection skips an npx shim and finds the persistent global without execution", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-path-npx-overlay-"));
+  const transientRoot = path.join(root, "_npx", "candidate", "node_modules", "dotaios");
+  const transientBin = path.join(path.dirname(transientRoot), ".bin");
+  const globalBin = path.join(root, "global", "bin");
+  const globalRoot = path.join(root, "global", "lib", "node_modules", "dotaios");
+  const executionMarker = path.join(root, "executed");
+
+  async function installOwnedPackage(packageRoot, version) {
+    const entrypoint = path.join(packageRoot, "packages", "cli", "src", "index.mjs");
+    await fs.mkdir(path.dirname(entrypoint), { recursive: true });
+    await fs.writeFile(entrypoint, `#!/bin/sh\nprintf executed >> ${executionMarker}\n`, { mode: 0o755 });
+    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
+      name: "dotaios",
+      version,
+      bin: { dotaios: "packages/cli/src/index.mjs" }
+    }));
+    return entrypoint;
+  }
+
+  try {
+    const transientEntrypoint = await installOwnedPackage(transientRoot, "2.0.11");
+    const globalEntrypoint = await installOwnedPackage(globalRoot, "2.0.9");
+    await fs.mkdir(transientBin, { recursive: true });
+    await fs.mkdir(globalBin, { recursive: true });
+    await fs.symlink(transientEntrypoint, path.join(transientBin, "dotaios"));
+    await fs.symlink(globalEntrypoint, path.join(globalBin, "dotaios"));
+
+    assert.deepEqual(
+      await inspectDotaiosOnPath({ env: { PATH: transientBin }, platform: process.platform }),
+      { status: "missing", ownership: "none" }
+    );
+
+    const result = await inspectDotaiosOnPath({
+      env: { PATH: [transientBin, globalBin].join(path.delimiter) },
+      platform: process.platform
+    });
+    assert.equal(result.status, "owned");
+    assert.equal(result.version, "2.0.9");
+    assert.equal(result.command_path, path.join(globalBin, "dotaios"));
+    await assert.rejects(fs.access(executionMarker), { code: "ENOENT" });
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("managed bridges route working memory through the canonical projection", async () => {
   const content = await bridgeContent({ name: "Test Agent" }, "/tmp/example-aios");
 
   assert.match(content, /events, signals, and saved sessions only through the canonical bounded projection/);
-  // The invocation is resolved when the bridge is written, so it is either the
-  // bare command or the version-pinned npx form depending on the host machine.
-  assert.match(content, /dotaios(?:@[\w.-]+)? brief --compact/);
+  // The invocation is resolved from the running package, never from PATH.
+  assert.match(content, /npx dotaios@[\w.-]+ brief --compact/);
   assert.match(content, /^.*Private chat.*Memory: Off.*$/im);
   assert.match(content, /^.*Only this project.*Memory: This project.*$/im);
   assert.match(content, /^.*Use my memory.*Memory: Shared.*$/im);
   assert.match(content, /^Choose memory access for this session before any AIOS read:$/m);
-  assert.match(content, /not registered.*keep AIOS closed.*dotaios(?:@[\w.-]+)? activate.*never fall back to Shared/is);
+  assert.match(content, /not registered.*keep AIOS closed.*npx dotaios@[\w.-]+ activate.*never fall back to Shared/is);
   assert.match(content, /Only after registration and exact identity.*read AGENTS\.md.*memory project/is);
   assert.match(content, /Only in Shared.*read AGENTS\.md.*memory shared/is);
   assert.match(content, /host.*history/i);
@@ -137,7 +231,7 @@ test("managed bridges route working memory through the canonical projection", as
 // in a bridge is an instruction the host answers with `command not found`. The
 // same managed block forbids reading `memory/` directly as a fallback, so that
 // one wrong word cost the agent its entire memory while `doctor` stayed green.
-test("a bridge never names an invocation the host cannot run", async () => {
+test("a bridge accepts only an exact candidate invocation", async () => {
   const withoutBinary = await bridgeManagedBlock("/tmp/example-aios", { cli: "npx dotaios@9.9.9" });
   assert.match(withoutBinary, /`npx dotaios@9\.9\.9 brief --compact --memory shared`/);
   assert.equal(
@@ -145,25 +239,45 @@ test("a bridge never names an invocation the host cannot run", async () => {
     false,
     "no bare `dotaios ...` may survive when the machine has no such binary"
   );
-
-  const withBinary = await bridgeManagedBlock("/tmp/example-aios", { cli: "dotaios" });
-  assert.match(withBinary, /`dotaios brief --compact --memory shared`/);
-  assert.match(withBinary, /`dotaios activate`/);
+  await assert.rejects(
+    bridgeManagedBlock("/tmp/example-aios", { cli: "dotaios" }),
+    /exact candidate/i
+  );
 });
 
-test("resolveCliInvocation prefers a real binary and pins the npx fallback", async () => {
+test("the skills-first managed bridge contains no bare activation command", async () => {
+  const content = await bridgeManagedBlock("/tmp/example-aios", {
+    cli: "npx dotaios@9.9.9",
+    skillsFirst: true,
+    skillsCatalog: { indexText: "# Skills", resolverText: "# Resolver" }
+  });
+
+  assert.doesNotMatch(content, /`dotaios\s+[a-z]/);
+  assert.doesNotMatch(content, /npx dotaios(?!@)/);
+});
+
+test("resolveCliInvocation always pins the exact candidate without probing PATH", async () => {
+  let availabilityProbes = 0;
   assert.equal(
-    await resolveCliInvocation({ isAvailable: async () => true, version: "9.9.9" }),
-    "dotaios"
-  );
-  assert.equal(
-    await resolveCliInvocation({ isAvailable: async () => false, version: "9.9.9" }),
+    await resolveCliInvocation({
+      isAvailable: async () => {
+        availabilityProbes += 1;
+        return true;
+      },
+      version: "9.9.9"
+    }),
     "npx dotaios@9.9.9"
   );
-  // An unreadable package.json must still yield something runnable.
-  assert.equal(
-    await resolveCliInvocation({ isAvailable: async () => false, version: null }),
-    "npx dotaios"
+  assert.equal(availabilityProbes, 0, "managed invocation selection never consults PATH");
+  await assert.rejects(
+    resolveCliInvocation({ version: null }),
+    /package version/i,
+    "an unknown version must not silently select unpinned npm code"
+  );
+  await assert.rejects(
+    resolveCliInvocation({ version: "latest" }),
+    /package version/i,
+    "a dist-tag must not masquerade as an exact package candidate"
   );
 });
 

@@ -1,18 +1,33 @@
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
+import {
+  regularFilePreimageMetadata,
+  replaceFileIfUnchanged,
+  sameRegularFile,
+  validateManagedFilePath,
+  writeFileSafe
+} from "./files.mjs";
 import { isSafeRegistryPathText, parseExternalSkillsKey } from "./skill-config-key.mjs";
 
 const MAX_AGENT_REGISTRY_BYTES = 1024 * 1024;
 const MAX_AGENT_REGISTRY_ENTRIES = 256;
 const MAX_AGENT_FIELD_BYTES = 1024;
 const MAX_AGENT_SKILL_TARGETS = 128;
+const MAX_PACKAGE_MANIFEST_BYTES = 64 * 1024;
+const EXACT_CANDIDATE_VERSION = /^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 const STRICT_UTF8 = new TextDecoder("utf-8", { fatal: true });
 const require = createRequire(import.meta.url);
 const bundledAgentRegistry = require("./agents.json");
+const bundledPackageVersion = JSON.parse(
+  readFileSync(new URL("../../../package.json", import.meta.url), "utf8")
+).version;
 
 export const MANAGED_START = "<!-- dotaios-managed:start -->";
 export const MANAGED_END = "<!-- dotaios-managed:end -->";
+const MANAGED_BRIDGE_PLAN_FORMAT = "dotaios-managed-bridge-plan/v1";
 
 // Locate one complete managed block. Malformed or reversed markers are not
 // ownership proof, so callers must preserve the file instead of editing it.
@@ -33,6 +48,266 @@ export function findManagedBlock(text, startMarker = MANAGED_START, endMarker = 
   ) return null;
   const end = endStart + endMarker.length;
   return { start, end, text: text.slice(start, end) };
+}
+
+export async function previewManagedBridgeFile(
+  destination,
+  generatedContent,
+  { refreshOnly = false, merge = false, overwrite = false, boundaryRoot = null } = {}
+) {
+  const generatedBlock = findManagedBlock(generatedContent);
+  if (!generatedBlock) {
+    throw new Error("Generated bridge content is missing its managed block.");
+  }
+
+  let stats = null;
+  if (boundaryRoot) {
+    try {
+      stats = await validateManagedFilePath(destination, boundaryRoot, {
+        allowMissingParents: true
+      });
+    } catch (error) {
+      const reason = /unsafe file destination/i.test(error.message)
+        ? "existing bridge path is not a regular file"
+        : error.message;
+      return managedBridgePlan({
+        destination,
+        action: "unsafe-target",
+        status: "blocked-conflict",
+        current: null,
+        next: null,
+        stats: null,
+        reason
+      });
+    }
+  } else {
+    try {
+      stats = await fs.lstat(destination);
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+  }
+
+  if (!stats) {
+    return managedBridgePlan({
+      destination,
+      action: refreshOnly ? "none" : "create",
+      status: refreshOnly ? "not-managed" : "ready",
+      current: null,
+      next: refreshOnly ? null : generatedContent,
+      stats: null,
+      reason: refreshOnly ? "bridge-does-not-exist" : null
+    });
+  }
+
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    return managedBridgePlan({
+      destination,
+      action: "unsafe-target",
+      status: "blocked-conflict",
+      current: null,
+      next: null,
+      stats,
+      reason: "existing bridge path is not a regular file"
+    });
+  }
+
+  const current = await fs.readFile(destination, "utf8");
+  const after = await fs.lstat(destination);
+  if (!sameRegularFile(after, stats)) {
+    return managedBridgePlan({
+      destination,
+      action: "conflict",
+      status: "blocked-conflict",
+      current,
+      next: null,
+      stats: after,
+      reason: "bridge changed while its preview was being read"
+    });
+  }
+
+  const existingBlock = findManagedBlock(current);
+  if (!existingBlock) {
+    const hasMarker = current.includes(MANAGED_START) || current.includes(MANAGED_END);
+    if (!hasMarker && !refreshOnly && overwrite) {
+      return managedBridgePlan({
+        destination,
+        action: "replace-unmanaged",
+        status: "ready",
+        current,
+        next: generatedContent,
+        stats: after,
+        reason: null
+      });
+    }
+    if (!hasMarker && !refreshOnly && merge) {
+      const separator = current.endsWith("\n\n") ? "" : current.endsWith("\n") ? "\n" : "\n\n";
+      return managedBridgePlan({
+        destination,
+        action: "append-managed-block",
+        status: "ready",
+        current,
+        next: `${current}${separator}${generatedBlock.text}\n`,
+        stats: after,
+        reason: null
+      });
+    }
+    return managedBridgePlan({
+      destination,
+      action: hasMarker ? "kept" : "none",
+      status: hasMarker ? "blocked-conflict" : "not-managed",
+      current,
+      next: null,
+      stats: after,
+      reason: hasMarker ? "managed markers are malformed; existing file kept" : "existing file is not managed by DotAIOS"
+    });
+  }
+
+  const next = `${current.slice(0, existingBlock.start)}${generatedBlock.text}${current.slice(existingBlock.end)}`;
+  return managedBridgePlan({
+    destination,
+    action: next === current ? "none" : "update-managed-block",
+    status: next === current ? "current" : "ready",
+    current,
+    next,
+    stats: after,
+    reason: null
+  });
+}
+
+export async function applyManagedBridgeFile(
+  destination,
+  generatedContent,
+  {
+    dryRun = false,
+    merge = false,
+    overwrite = false,
+    refreshOnly = false,
+    expectedFingerprint = null,
+    boundaryRoot = null,
+    beforeReplace = null,
+    beforePublish = null,
+    beforeCommit = null
+  } = {}
+) {
+  const plan = await previewManagedBridgeFile(destination, generatedContent, {
+    refreshOnly,
+    merge,
+    overwrite,
+    boundaryRoot
+  });
+
+  if (expectedFingerprint && plan.fingerprint !== expectedFingerprint) {
+    return {
+      action: "conflict",
+      path: destination,
+      note: "bridge changed after preview; left the current file untouched"
+    };
+  }
+  if (plan.status === "blocked-conflict") {
+    return { action: plan.action, path: destination, note: plan.reason };
+  }
+  if (plan.status === "not-managed") {
+    return refreshOnly
+      ? { action: "unchanged", path: destination, note: plan.reason }
+      : { action: "kept", path: destination, note: "existing unmanaged file" };
+  }
+  if (plan.status === "current") return { action: "unchanged", path: destination };
+
+  if (dryRun) {
+    const action = plan.action === "create"
+      ? "would create"
+      : plan.action === "append-managed-block"
+        ? "would append"
+        : "would update";
+    return { action, path: destination };
+  }
+
+  if (plan.action === "create") {
+    const result = await writeFileSafe(destination, planNext(plan), "preserve", { boundaryRoot });
+    return result.action === "created"
+      ? result
+      : { action: "kept", path: destination, note: "another file appeared after preview" };
+  }
+
+  const stats = planStats(plan);
+  const replacement = await replaceFileIfUnchanged(destination, planCurrent(plan), planNext(plan), {
+    boundaryRoot,
+    beforeReplace,
+    beforePublish,
+    beforeCommit,
+    expectedStats: stats,
+    mode: stats.mode & 0o777
+  });
+  if (!replacement.replaced) {
+    return {
+      action: "conflict",
+      path: destination,
+      note: `bridge changed during bridge update; left the concurrent edit untouched${replacement.preservedPath ? ` and preserved the previous file at ${path.basename(replacement.preservedPath)}` : ""}`
+    };
+  }
+  if (plan.action === "append-managed-block") {
+    return {
+      action: "appended",
+      path: destination,
+      note: "added the DotAIOS block below your existing instructions"
+    };
+  }
+  return {
+    action: "updated",
+    path: destination,
+    ...(replacement.preservedPath ? { note: `preserved the previous file at ${path.basename(replacement.preservedPath)}` } : {})
+  };
+}
+
+function managedBridgePlan({ destination, action, status, current, next, stats, reason }) {
+  const preimage = current == null ? "missing" : hashBridgeText(current);
+  const nextDigest = next == null ? null : hashBridgeText(next);
+  const preimageMetadata = regularFilePreimageMetadata(stats);
+  const fingerprint = hashBridgeText(JSON.stringify({
+    format: MANAGED_BRIDGE_PLAN_FORMAT,
+    path: destination,
+    action,
+    status,
+    preimage,
+    preimage_metadata: preimageMetadata,
+    next: nextDigest,
+    reason
+  }));
+  const plan = {
+    format: MANAGED_BRIDGE_PLAN_FORMAT,
+    domain: "managed-bridges",
+    target: { kind: "bridge-managed-block", path: destination },
+    status,
+    action,
+    fingerprint,
+    preimage_fingerprint: preimage,
+    preimage_metadata: preimageMetadata,
+    next_fingerprint: nextDigest,
+    ...(reason ? { reason } : {})
+  };
+  Object.defineProperties(plan, {
+    _current: { value: current },
+    _next: { value: next },
+    _stats: { value: stats }
+  });
+  return plan;
+}
+
+function planCurrent(plan) {
+  return plan._current;
+}
+
+function planNext(plan) {
+  return plan._next;
+}
+
+function planStats(plan) {
+  return plan._stats;
+}
+
+function hashBridgeText(value) {
+  return createHash("sha256").update(String(value), "utf8").digest("hex");
 }
 
 // The canonical entrypoint every bridge points at. One front door for every agent.
@@ -228,7 +503,7 @@ export async function isAgentInstalled(
   }
 }
 
-export async function isCommandAvailable(
+async function findCommandsOnPath(
   command,
   { env = process.env, platform = process.platform } = {}
 ) {
@@ -239,6 +514,8 @@ export async function isCommandAvailable(
     ? (env.PATHEXT || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean)
     : [""];
 
+  const matches = [];
+  const seen = new Set();
   for (const directory of directories) {
     for (const extension of extensions) {
       const candidate = explicitPath
@@ -246,13 +523,133 @@ export async function isCommandAvailable(
         : path.join(directory, `${command}${extension}`);
       try {
         await fs.access(candidate, platform === "win32" ? fs.constants.F_OK : fs.constants.X_OK);
-        if ((await fs.stat(candidate)).isFile()) return true;
+        if ((await fs.stat(candidate)).isFile() && !seen.has(candidate)) {
+          seen.add(candidate);
+          matches.push(candidate);
+        }
       } catch {
         // Keep scanning PATH.
       }
     }
   }
-  return false;
+  return matches;
+}
+
+async function findCommandOnPath(command, options = {}) {
+  return (await findCommandsOnPath(command, options))[0] || null;
+}
+
+function isExecutionLocalCommandShim(commandPath) {
+  const binDirectory = path.dirname(commandPath);
+  return path.basename(binDirectory).toLowerCase() === ".bin"
+    && path.basename(path.dirname(binDirectory)).toLowerCase() === "node_modules";
+}
+
+export async function isCommandAvailable(command, options = {}) {
+  return Boolean(await findCommandOnPath(command, options));
+}
+
+export async function inspectDotaiosOnPath({
+  env = process.env,
+  platform = process.platform
+} = {}) {
+  // npm exec and local package runners prepend node_modules/.bin to PATH. Those
+  // shims are the running candidate, not a persistent CLI installation, so keep
+  // scanning for the separate global installation doctor is meant to report.
+  const commandPath = (await findCommandsOnPath("dotaios", { env, platform }))
+    .find((candidate) => !isExecutionLocalCommandShim(candidate));
+  if (!commandPath) return { status: "missing", ownership: "none" };
+
+  const unknown = () => ({
+    status: "unknown",
+    ownership: "unowned",
+    command_path: commandPath
+  });
+
+  try {
+    const linkStats = await fs.lstat(commandPath);
+    if (!linkStats.isSymbolicLink()) return unknown();
+
+    const resolvedPath = await fs.realpath(commandPath);
+    const entrypointStats = await fs.stat(resolvedPath);
+    if (!entrypointStats.isFile()) return unknown();
+
+    const packageRoot = path.resolve(path.dirname(resolvedPath), "../../..");
+    const expectedEntrypoint = path.join(packageRoot, "packages", "cli", "src", "index.mjs");
+    if (
+      path.resolve(resolvedPath) !== expectedEntrypoint
+      || path.basename(packageRoot) !== "dotaios"
+      || path.basename(path.dirname(packageRoot)) !== "node_modules"
+    ) return unknown();
+
+    const packagePath = path.join(packageRoot, "package.json");
+    const manifest = await readBoundedPackageManifest(packagePath);
+    if (
+      manifest?.name !== "dotaios"
+      || typeof manifest.version !== "string"
+      || !EXACT_CANDIDATE_VERSION.test(manifest.version)
+      || manifest.bin?.dotaios !== "packages/cli/src/index.mjs"
+    ) return unknown();
+
+    const declaredEntrypoint = await fs.realpath(path.resolve(packageRoot, manifest.bin.dotaios));
+    if (declaredEntrypoint !== resolvedPath) return unknown();
+
+    return {
+      status: "owned",
+      ownership: "owned",
+      command_path: commandPath,
+      resolved_path: resolvedPath,
+      package_path: packagePath,
+      version: manifest.version
+    };
+  } catch {
+    return unknown();
+  }
+}
+
+async function readBoundedPackageManifest(filePath) {
+  const before = await fs.lstat(filePath, { bigint: true });
+  if (
+    !before.isFile()
+    || before.isSymbolicLink()
+    || before.nlink !== 1n
+    || before.size > BigInt(MAX_PACKAGE_MANIFEST_BYTES)
+  ) return null;
+
+  const handle = await fs.open(filePath, "r");
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (
+      !opened.isFile()
+      || opened.nlink !== 1n
+      || opened.dev !== before.dev
+      || opened.ino !== before.ino
+      || opened.size !== before.size
+    ) return null;
+
+    const bytes = Buffer.alloc(Number(opened.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const read = await handle.read(bytes, offset, bytes.length - offset, offset);
+      if (read.bytesRead === 0) break;
+      offset += read.bytesRead;
+    }
+    const after = await handle.stat({ bigint: true });
+    if (
+      offset !== bytes.length
+      || after.dev !== opened.dev
+      || after.ino !== opened.ino
+      || after.size !== opened.size
+    ) return null;
+
+    const text = STRICT_UTF8.decode(bytes);
+    const value = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  } finally {
+    await handle.close();
+  }
 }
 
 export async function readPackageVersion() {
@@ -264,29 +661,50 @@ export async function readPackageVersion() {
   }
 }
 
-// How a bridge should spell "run DotAIOS", decided when the bridge is written.
-//
-// Every documented install path is `npx dotaios@<version>` and npx links no
-// binary onto PATH, so a bare `dotaios` in a bridge is an instruction the host
-// cannot follow: it resolves to `command not found`, and because the bridge
-// also forbids reading `memory/` directly, the agent is left with no memory at
-// all while `doctor` still reports the folder healthy. Name the invocation that
-// actually resolves on this machine instead, preferring the bare command when a
-// real binary exists and falling back to the version-pinned npx form otherwise
-// — the same pinning `dotaios mcp` and `skills/ingest/SKILL.md` already use.
-//
-// This is resolved at write time rather than baked in because `activate`
-// rewrites the managed block idempotently: a machine that later gains a global
-// install upgrades itself to the fast spelling on the next run.
+// How a managed surface spells "run this DotAIOS candidate". PATH is not an
+// authority for package identity: a global binary may be older than the package
+// rendering the surface. Always pin the running package, and fail closed rather
+// than silently selecting unreviewed npm code when its version is unreadable.
 export async function resolveCliInvocation({
-  env = process.env,
-  platform = process.platform,
-  isAvailable = isCommandAvailable,
   version
 } = {}) {
-  if (await isAvailable("dotaios", { env, platform })) return "dotaios";
   const pinned = version === undefined ? await readPackageVersion() : version;
-  return pinned ? `npx dotaios@${pinned}` : "npx dotaios";
+  return exactCliInvocation(pinned);
+}
+
+export function exactCandidatePackage(version) {
+  if (typeof version !== "string" || !EXACT_CANDIDATE_VERSION.test(version)) {
+    throw new Error("Could not read the running DotAIOS package version; refusing to emit an unpinned command.");
+  }
+  return `dotaios@${version}`;
+}
+
+export function isExactCandidatePackageSpec(value) {
+  if (typeof value !== "string" || !value.startsWith("dotaios@")) return false;
+  try {
+    return exactCandidatePackage(value.slice("dotaios@".length)) === value;
+  } catch {
+    return false;
+  }
+}
+
+export function exactCliInvocation(version) {
+  return `npx ${exactCandidatePackage(version)}`;
+}
+
+export function bundledCliInvocation() {
+  return exactCliInvocation(bundledPackageVersion);
+}
+
+function assertExactCandidateInvocation(cli) {
+  if (
+    typeof cli !== "string"
+    || !cli.startsWith("npx ")
+    || !isExactCandidatePackageSpec(cli.slice("npx ".length))
+  ) {
+    throw new Error("Managed bridges require an exact candidate DotAIOS invocation.");
+  }
+  return cli;
 }
 
 // The one spelling of "this bridge points at this AIOS folder". The writer
@@ -302,14 +720,13 @@ export async function resolveCliInvocation({
 // `accepted` answers "is this one of ours?" and `current` answers "is this the
 // one we write today?". They are different questions and a reader that only
 // asks the first calls a stale bridge healthy: `accepted` deliberately includes
-// retired spellings so an upgrade does not turn every installed bridge red, and
-// nothing else in the product rewrites a bridge on upgrade. Callers that report
-// health must ask both.
+// retired spellings so activation and upgrade can recognize an owned bridge
+// before refreshing it. Callers that report health must ask both.
 export function bridgePointer(aiosPath) {
   const entrypoint = path.join(aiosPath, AGENT_ENTRYPOINT);
   const current = `DotAIOS keeps the user's personal context in a folder at ${aiosPath} (entrypoint: ${entrypoint}).`;
-  // Older releases wrote these. A user upgrades by running activate again, so
-  // until they do, the file on their disk is one of these and still points here.
+  // Older releases wrote these. Activation and the upgrade bridge target both
+  // recognize them, so the installed file remains attributable until refresh.
   const retired = [
     `@${entrypoint}`,
     `DotAIOS entrypoint (read this file first): ${entrypoint}`,
@@ -335,7 +752,7 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
   const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
   const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
   // Never a bare command name: see resolveCliInvocation.
-  const dotaios = cli ?? await resolveCliInvocation();
+  const dotaios = assertExactCandidateInvocation(cli ?? await resolveCliInvocation());
 
   const lines = [
     MANAGED_START,
@@ -354,7 +771,7 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
       skillsCatalog?.resolverText ?? readCatalogFile(resolver)
     ]);
     lines.push("");
-    lines.push("## Skills first (inlined by `dotaios activate --skills-first`)");
+    lines.push("## Skills first (inlined during DotAIOS activation)");
     lines.push("");
     lines.push("Match the user's intent to a skill below, then open that skill's SKILL.md before acting. If nothing fits, hand-roll the work and offer to skillify a repeat.");
     lines.push("");
@@ -380,10 +797,11 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
 // The whole bridge file for one agent: the shared managed block under a header
 // that names the host. Only the header differs between agents.
 export async function bridgeContent(agent, aiosPath, options = {}) {
+  const managedBlock = options.managedBlock ?? await bridgeManagedBlock(aiosPath, options);
   return [
     `# DotAIOS ${agent.name} Bridge`,
     "",
-    await bridgeManagedBlock(aiosPath, options),
+    managedBlock,
     ""
   ].join("\n");
 }

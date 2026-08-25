@@ -556,7 +556,7 @@ test("MCP returns the same actionable migration state beside the unchanged bound
     folder_schema_version: "1.1.0",
     supported_schema_version: "1.2.0",
     severity: "notice",
-    action: { command: "dotaios migrate", path_scope: "configured_aios" }
+    action: { command: `npx dotaios@${releaseVersion} migrate`, path_scope: "configured_aios" }
   });
   assert.deepEqual(snapshotTree(aiosPath), snapshot);
   assert.doesNotMatch(JSON.stringify(stale.operational), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
@@ -590,7 +590,7 @@ test("MCP returns the same actionable migration state beside the unchanged bound
     status: "inspection_failed",
     code: "INVALID_SCHEMA",
     severity: "warning",
-    action: { command: "dotaios doctor", path_scope: "configured_aios" }
+    action: { command: `npx dotaios@${releaseVersion} doctor`, path_scope: "configured_aios" }
   });
   assert.equal(failed.markdown, current.markdown);
   assert.doesNotMatch(JSON.stringify(failed), new RegExp(aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

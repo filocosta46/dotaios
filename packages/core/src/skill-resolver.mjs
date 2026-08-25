@@ -1,4 +1,5 @@
 import path from "node:path";
+import { bundledCliInvocation } from "./bridges.mjs";
 
 // Deterministic, local intent -> skill ranking. No embeddings, no network, no
 // model calls. Shared by the CLI (`dotaios skills resolve`) and the MCP server
@@ -152,7 +153,10 @@ export function renderBootContext(skills, { skillsDir } = {}) {
   ];
 
   if (!skills.length) {
-    lines.push("No skills installed yet. Run `dotaios activate` to refresh.", "");
+    lines.push(
+      `No skills installed yet. Add a reviewed local folder with \`${bundledCliInvocation()} skill add <local-folder>\`.`,
+      ""
+    );
     return lines.join("\n");
   }
 

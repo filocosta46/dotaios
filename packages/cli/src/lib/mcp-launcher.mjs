@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { exactCandidatePackage } from "../../../core/src/bridges.mjs";
 
 const packageJson = JSON.parse(
   fs.readFileSync(new URL("../../../../package.json", import.meta.url), "utf8")
@@ -12,7 +13,7 @@ export function mcpLauncher(aiosPath, version = DOTAIOS_PACKAGE_VERSION) {
     args: [
       "--yes",
       "--package",
-      `dotaios@${version}`,
+      exactCandidatePackage(version),
       "dotaios-mcp",
       "--path",
       aiosPath

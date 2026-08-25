@@ -126,7 +126,11 @@ async function createOrKeepWithTemporaryFile(destination, createTemporary) {
   }
 }
 
-async function validateDestinationParent(destination, boundaryRoot, { createMissing = false } = {}) {
+async function validateDestinationParent(
+  destination,
+  boundaryRoot,
+  { createMissing = false, allowMissingTail = false } = {}
+) {
   const parent = path.dirname(destination);
   if (!boundaryRoot) {
     if (createMissing) await fs.mkdir(parent, { recursive: true });
@@ -162,6 +166,7 @@ async function validateDestinationParent(destination, boundaryRoot, { createMiss
       }
     }
     const stats = await lstatIfPresent(current);
+    if (!stats && allowMissingTail) break;
     if (!stats || !stats.isDirectory() || stats.isSymbolicLink()) {
       throw new Error(`Cannot write through unsafe managed directory: ${current}`);
     }
@@ -172,8 +177,14 @@ async function ensureDestinationParent(destination, boundaryRoot) {
   await validateDestinationParent(destination, boundaryRoot, { createMissing: true });
 }
 
-export async function validateManagedFilePath(destination, boundaryRoot) {
-  await validateDestinationParent(destination, boundaryRoot);
+export async function validateManagedFilePath(
+  destination,
+  boundaryRoot,
+  { allowMissingParents = false } = {}
+) {
+  await validateDestinationParent(destination, boundaryRoot, {
+    allowMissingTail: allowMissingParents
+  });
   const stats = await lstatIfPresent(destination);
   if (!stats) return null;
   assertSafeOverwriteTarget(destination, stats);
@@ -314,7 +325,7 @@ async function fileStillMatches(destination, expectedBytes, expectedStats) {
   return current.equals(expectedBytes) && sameRegularFile(after, before);
 }
 
-function sameRegularFile(actual, expected) {
+export function sameRegularFile(actual, expected) {
   if (!actual?.isFile() || actual.isSymbolicLink() || !expected) return false;
   return actual.dev === expected.dev
     && actual.ino === expected.ino
@@ -322,6 +333,18 @@ function sameRegularFile(actual, expected) {
     && actual.mtimeMs === expected.mtimeMs
     && actual.ctimeMs === expected.ctimeMs
     && (actual.mode & 0o777) === (expected.mode & 0o777);
+}
+
+export function regularFilePreimageMetadata(stats) {
+  if (!stats) return null;
+  return {
+    device: String(stats.dev),
+    inode: String(stats.ino),
+    size: stats.size,
+    mode: stats.mode & 0o777,
+    mtime_ms: stats.mtimeMs,
+    ctime_ms: stats.ctimeMs
+  };
 }
 
 export async function copyFileSafe(

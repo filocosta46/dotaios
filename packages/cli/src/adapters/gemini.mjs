@@ -1,6 +1,13 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { MANAGED_END, MANAGED_START, bridgeManagedBlock, findManagedBlock } from "../../../core/src/bridges.mjs";
+import {
+  MANAGED_END,
+  MANAGED_START,
+  bridgeManagedBlock,
+  exactCandidatePackage,
+  findManagedBlock,
+  isExactCandidatePackageSpec
+} from "../../../core/src/bridges.mjs";
 import {
   replaceFileIfUnchanged,
   validateManagedFilePath,
@@ -176,7 +183,7 @@ if [ "$private_status" -ne 3 ]; then
   printf '%s\\n' ${shSingleQuote(fallback)}
   exit 0
 fi
-output="$(printf '%s' "$input" | (cd / && npx -y --loglevel=error --package ${shSingleQuote(`dotaios@${packageVersion}`)} dotaios brief --compact --json --path ${shSingleQuote(aiosPath)} --gemini-hook))"
+output="$(printf '%s' "$input" | (cd / && npx -y --loglevel=error --package ${shSingleQuote(exactCandidatePackage(packageVersion))} dotaios brief --compact --json --path ${shSingleQuote(aiosPath)} --gemini-hook))"
 status=$?
 if [ "$status" -eq 0 ] && printf '%s' "$output" | node --input-type=module -e ${shSingleQuote(validator)}; then
   exit 0
@@ -280,11 +287,12 @@ function isCurrentGeminiHookScript(content) {
   } catch {
     return false;
   }
-  const versionMatch = /npx -y --loglevel=error --package 'dotaios@([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?)' dotaios brief --compact --json --path /.exec(content);
-  if (!versionMatch) return false;
+  const packageMatch = /npx -y --loglevel=error --package '([^']+)' dotaios brief --compact --json --path /.exec(content);
+  if (!packageMatch || !isExactCandidatePackageSpec(packageMatch[1])) return false;
+  const packageVersion = packageMatch[1].slice("dotaios@".length);
   return content === buildGeminiHookScriptVersion(embeddedPath, {
     moduleUrl: embeddedModule,
-    packageVersion: versionMatch[1]
+    packageVersion
   });
 }
 
