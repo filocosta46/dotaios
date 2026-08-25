@@ -1,13 +1,23 @@
 import fs from "node:fs/promises";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { writeSession, filterSessions, deleteSession } from "../../../core/src/sessions.mjs";
+import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
+import { createEvidenceReader } from "../../../core/src/evidence-reader.mjs";
+import { repeatedJsonObjectKey } from "../../../core/src/json.mjs";
+import { writeSession, saveSessionSummary, filterSessions, deleteSession } from "../../../core/src/sessions.mjs";
 import { parseRawText } from "../adapters/manual.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { emitReliabilityMetric } from "../lib/reliability-metrics.mjs";
-import { resolveProjectContext } from "../../../core/src/projects.mjs";
+import {
+  resolvePortableProjectIdentity,
+  resolveProjectContext,
+  validateProjectSelector,
+} from "../../../core/src/projects.mjs";
+
+const SAVE_SUMMARY_MAX_BYTES = 64 * 1024;
 
 const HELP_TEXT = `Usage:
   dotaios capture <subcommand> [options]
@@ -15,6 +25,7 @@ const HELP_TEXT = `Usage:
 Save and search your AI conversations locally so other agents can remember them.
 
 Subcommands:
+  save-summary              Save one bounded session summary from v1 JSON on stdin
   import file <path>        Save a conversation file
   import paste              Paste a conversation (opens your editor)
   import claude-code [--all]  Backfill past Claude Code sessions
@@ -38,6 +49,7 @@ export async function captureCommand(args) {
 
   const [sub, ...rest] = args;
 
+  if (sub === "save-summary") return runSaveSummary(rest);
   if (sub === "import") return runImport(rest);
   if (sub === "list") return runList(rest);
   if (sub === "delete") return runDelete(rest);
@@ -49,6 +61,171 @@ export async function captureCommand(args) {
   console.error(`Unknown capture subcommand: ${sub}`);
   console.log(HELP_TEXT);
   process.exitCode = 1;
+}
+
+// ---------- intentional summary save ----------
+
+async function runSaveSummary(args) {
+  const options = parseSaveSummaryOptions(args);
+  const { input, requestHash } = await readSaveSummaryInput();
+  const envelope = validateSaveSummaryEnvelope(input);
+  const projectIdentity = envelope.memory.mode === "project"
+    ? envelope.memory.project
+    : null;
+  const memoryPolicy = resolveMemoryPolicy({
+    mode: envelope.memory.mode,
+    project: projectIdentity?.id,
+  });
+
+  // Resolve policy before the AIOS path so Off is provably zero-access even when
+  // the caller supplies a path that does not exist.
+  if (memoryPolicy.mode === "off") {
+    throw new Error("capture save-summary refuses Memory Off without reading or writing the AIOS folder.");
+  }
+
+  const aiosPath = resolveAiosPath(options);
+  await ensureAiosFolder(aiosPath);
+
+  let project = null;
+  if (projectIdentity) {
+    project = await resolvePortableProjectIdentity({
+      aiosPath,
+      projectSelector: projectIdentity.id,
+      evidenceReader: createEvidenceReader({ roots: [aiosPath] }),
+    });
+    if (project.id !== projectIdentity.id || project.slug !== projectIdentity.slug) {
+      throw new Error("Project identity does not exactly match the registered project.");
+    }
+  }
+
+  const receipt = await saveSessionSummary(aiosPath, {
+    operation_id: envelope.operation_id,
+    request_hash: requestHash,
+    agent: envelope.session.agent,
+    title: envelope.session.title,
+    summary: envelope.session.summary,
+    ...(project && { project: project.slug, project_id: project.id }),
+  });
+  console.log(JSON.stringify(receipt));
+}
+
+async function readSaveSummaryInput(stream = process.stdin) {
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of stream) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    bytes += value.length;
+    if (bytes >= SAVE_SUMMARY_MAX_BYTES) {
+      throw new Error(`capture save-summary input must be smaller than the ${SAVE_SUMMARY_MAX_BYTES}-byte limit.`);
+    }
+    chunks.push(value);
+  }
+
+  const raw = Buffer.concat(chunks);
+  const text = raw.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(raw)) {
+    throw new Error("capture save-summary input is not valid UTF-8.");
+  }
+  let input;
+  try {
+    input = JSON.parse(text);
+  } catch {
+    throw new Error("capture save-summary input is not valid JSON.");
+  }
+  const repeatedKey = repeatedJsonObjectKey(text);
+  if (repeatedKey !== null) {
+    throw new Error(`capture save-summary input sets "${repeatedKey}" twice; keep one decoded JSON key per object.`);
+  }
+  return {
+    input,
+    requestHash: crypto.createHash("sha256").update(raw).digest("hex"),
+  };
+}
+
+function validateSaveSummaryEnvelope(input) {
+  assertPlainObject(input, "capture save-summary input");
+  assertExactKeys(input, ["version", "operation_id", "memory", "session"], "capture save-summary input");
+  if (input.version !== 1) {
+    throw new Error("capture save-summary supports only envelope version 1.");
+  }
+  if (
+    typeof input.operation_id !== "string"
+    || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(input.operation_id)
+  ) {
+    throw new Error("capture save-summary operation_id must be 1-128 safe characters and start with a letter or number.");
+  }
+
+  assertPlainObject(input.memory, "capture save-summary memory");
+  if (input.memory.mode === "project") {
+    assertExactKeys(input.memory, ["mode", "project"], "capture save-summary memory");
+    assertPlainObject(input.memory.project, "capture save-summary project");
+    assertExactKeys(input.memory.project, ["id", "slug"], "capture save-summary project");
+    validateProjectSelector(input.memory.project.id);
+    validateProjectSelector(input.memory.project.slug);
+  } else {
+    assertExactKeys(input.memory, ["mode"], "capture save-summary memory");
+    if (input.memory.mode !== "shared" && input.memory.mode !== "off") {
+      throw new Error("capture save-summary memory mode must be shared, project, or off.");
+    }
+  }
+
+  assertPlainObject(input.session, "capture save-summary session");
+  assertExactKeys(input.session, ["agent", "title", "summary"], "capture save-summary session");
+  if (
+    typeof input.session.agent !== "string"
+    || !/^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/.test(input.session.agent)
+  ) {
+    throw new Error("capture save-summary agent must be a lowercase slug of at most 64 characters.");
+  }
+  if (
+    typeof input.session.title !== "string"
+    || input.session.title.trim().length === 0
+    || Array.from(input.session.title).length > 200
+    || /[\p{Cc}\p{Cs}\p{Cf}\p{Zl}\p{Zp}]/u.test(input.session.title)
+  ) {
+    throw new Error("capture save-summary title must be 1-200 characters without control or formatting characters.");
+  }
+  if (
+    typeof input.session.summary !== "string"
+    || input.session.summary.trim().length === 0
+    || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u.test(input.session.summary)
+    || /\p{Bidi_Control}|\p{Cs}/u.test(input.session.summary)
+    || /\r(?!\n)/u.test(input.session.summary)
+  ) {
+    throw new Error("capture save-summary summary must be non-empty Markdown without unsafe control characters.");
+  }
+
+  return input;
+}
+
+function parseSaveSummaryOptions(args = []) {
+  const options = { path: null };
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "--path" || options.path !== null) {
+      throw new Error("capture save-summary accepts only one optional --path value; all save data belongs in the stdin envelope.");
+    }
+    options.path = readOptionValue(args, index, "--path");
+    index += 1;
+  }
+  return options;
+}
+
+function assertPlainObject(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be a JSON object.`);
+  }
+}
+
+function assertExactKeys(value, allowed, label) {
+  const unknown = Object.keys(value).filter((key) => !allowed.includes(key));
+  const missing = allowed.filter((key) => !Object.hasOwn(value, key));
+  if (unknown.length > 0 || missing.length > 0) {
+    const details = [
+      unknown.length > 0 ? `unknown: ${unknown.join(", ")}` : null,
+      missing.length > 0 ? `missing: ${missing.join(", ")}` : null,
+    ].filter(Boolean).join("; ");
+    throw new Error(`${label} has invalid fields (${details}).`);
+  }
 }
 
 // ---------- import ----------

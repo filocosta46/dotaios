@@ -11,15 +11,16 @@ Save the useful parts of the current AI conversation into DotAIOS memory.
 
 ## What this does
 
-- Summarizes the current session into a readable Markdown file.
-- Saves decisions, open threads, and action items in `memory/sessions/`.
-- Adds a structured digest block that future agents can read quickly.
-- Works without a CLI command when the agent can write local files.
+- Summarizes the current session into useful Markdown.
+- Sends one bounded, versioned request to `capture save-summary`.
+- Returns only after DotAIOS verifies both the session file and its index row.
 
 ## What this doesn't do
 
 - It does not save a raw transcript.
 - It does not upload anything.
+- It does not write session Markdown or `index.jsonl` directly.
+- It does not create a prepared request, journal, or other plaintext intermediate file.
 - It does not write durable identity, project, CRM, company, person, or wiki knowledge.
 - It does not invent missing details. Mark unclear items as uncertain or leave them out.
 - It does not save secrets, credentials, private keys, tokens, or large tool-output dumps.
@@ -37,13 +38,13 @@ Try saying:
 
 ### Read
 
-1. Use the current DotAIOS folder. If no folder is already known, use `~/aios`.
-2. Review only the visible current conversation unless the user asks you to include other files.
-3. Identify:
-   - current timestamp in ISO 8601 format
-   - current date as `YYYY-MM-DD`
-   - the tool name, such as `claude-code`, `codex`, `cursor`, `gemini-cli`, `claude-web`, `chatgpt-web`, or `manual`
-   - project name if obvious from the conversation or working directory
+1. Use the current memory receipt before any DotAIOS access.
+   - For `Memory: Off`, stop without running the save command or opening the AIOS folder.
+   - For `Memory: Shared`, use `{ "mode": "shared" }`.
+   - For `Memory: This project`, require the selected registered project's exact stable `id` and `slug`. Never guess either value from prose or a working-directory name.
+2. Use the current DotAIOS folder. If no folder is already known, use `~/aios`.
+3. Review only the visible current conversation unless the user asks you to include other files.
+4. Identify the tool name, such as `claude-code`, `codex`, `cursor`, `gemini-cli`, `claude-web`, `chatgpt-web`, or `manual`.
 
 ### Process
 
@@ -59,50 +60,11 @@ Try saying:
 - If the session contains secrets or credentials, do not write them. Note only that sensitive material was omitted.
 - If there is nothing useful to save, tell the user that and stop.
 
-### File path
+### Summary content
 
-Create this folder if it does not exist:
-
-```text
-~/aios/memory/sessions/YYYY-MM-DD/
-```
-
-Create one Markdown file with this filename shape:
-
-```text
-YYYY-MM-DDTHH-MM-SS_<agent-slug>_<session-id-prefix>.md
-```
-
-Rules:
-
-- Replace `:` in the ISO timestamp with `-`.
-- Use a lowercase agent slug with only `a-z`, `0-9`, and `-`.
-- Generate `session-id` as 8 lowercase hex characters when possible.
-- Use the first 6 characters of `session-id` in the filename.
-- If randomness is unavailable, use a timestamp-based 8 character id and keep going.
-
-Example:
-
-```text
-~/aios/memory/sessions/2026-05-17/2026-05-17T15-42-08_codex_a1b2c3.md
-```
-
-### File content
-
-Write the session file with this structure:
+Use this structure for the `session.summary` Markdown string:
 
 ```markdown
----
-agent: <agent-slug>
-session_id: <8-char-id>
-captured_at: <ISO 8601 timestamp>
-source_type: save-session
-project: <project-slug-if-known>
-turns: 0
-title: "<short title>"
-schema: 1
----
-
 # <short title>
 
 <!-- digest:start -->
@@ -133,8 +95,6 @@ open_threads:
 <Anything a future AI should know before continuing.>
 ```
 
-Omit the `project:` frontmatter line when the project is unknown.
-
 If there are no decisions, write:
 
 ```markdown
@@ -149,26 +109,62 @@ open_threads:
 - None.
 ```
 
-### Index entry
+### Request
 
-After writing the Markdown file, update:
+Generate one unique `operation_id` for this save before the first attempt. It must be 1-128 ASCII characters, start with a letter or number, and otherwise contain only letters, numbers, `.`, `_`, or `-`. Keep that value and the exact serialized request bytes available in memory until the operation succeeds or is explicitly abandoned.
 
-```text
-~/aios/memory/sessions/index.jsonl
-```
-
-Append one compact JSON line for the saved session:
+For Shared memory, build exactly this JSON shape:
 
 ```json
-{"session_id":"<8-char-id>","agent":"<agent-slug>","captured_at":"<ISO 8601 timestamp>","source_type":"save-session","project":"<project-slug-if-known>","turns":0,"title":"<short title>","path":"memory/sessions/YYYY-MM-DD/<filename>.md"}
+{
+  "version": 1,
+  "operation_id": "save-session-<unique-safe-id>",
+  "memory": { "mode": "shared" },
+  "session": {
+    "agent": "<lowercase-agent-slug>",
+    "title": "<short-title>",
+    "summary": "<the-Markdown-summary>"
+  }
+}
 ```
 
-Rules:
+For Project memory, replace `memory` with:
 
-- Use forward slashes in `path`.
-- Omit the `project` field when unknown.
-- Do not append a duplicate if `session_id` or `path` is already present.
-- If you cannot safely update the JSONL index, still save the Markdown file and tell the user the index was not updated.
+```json
+{
+  "mode": "project",
+  "project": {
+    "id": "<exact-stable-project-id>",
+    "slug": "<exact-project-slug>"
+  }
+}
+```
+
+The request must be valid UTF-8 and smaller than 65,536 bytes. Use only the documented keys. Keep `agent` as a lowercase slug of at most 64 characters and `title` as one control-free line of at most 200 characters.
+
+The `summary` must be non-empty Markdown. It may contain tabs, LF line endings, and CRLF line endings; a bare carriage return is invalid. Besides tabs and line endings, do not send C0 controls. Do not send DEL/C1 controls, Unicode bidirectional control characters, or lone surrogates. Strip ANSI escape sequences from pasted tool output before serialization.
+
+Do not generate or send `session_id`, `captured_at`, a file path, frontmatter, or an index row. The writer owns those values.
+
+### Execute
+
+1. Use only the exact candidate invocation supplied by the current DotAIOS-managed context. Its concrete form is `npx dotaios@<exact-candidate-version> capture save-summary [--path <aios-folder>]`, where `<exact-candidate-version>` must be replaced by the concrete version supplied by the current DotAIOS-managed context. Never guess it from PATH, a global binary, `latest`, the current directory, or prose. If no concrete exact candidate is supplied, decline the local save and use the handoff below.
+2. Launch it through a structured process API, never a shell command string. Supply the executable and argv separately (`npx`; `dotaios@<the-supplied-exact-version>`, `capture`, `save-summary`, and, when selected, `--path`, `<aios-folder>`). Write the exact request bytes to the child stdin, then close stdin. Never copy request bytes into command text, argv, environment variables, temporary files, Markdown, journals, transcripts, or shell history. If the runtime exposes only recorded shell command text, records stdin payloads as command text, or cannot provide this stdin channel, decline the local save and use the handoff below.
+3. Retry only when execution is interrupted before a normal exit is observed. Keep the same `operation_id` and the exact same request bytes. Do not regenerate or re-summarize between attempts.
+4. Every observed normal non-zero exit is a refusal. Report stderr and do not retry the unchanged request bytes.
+5. Accept success only when exit status is zero and stdout is one compact receipt with exactly these fields:
+
+```json
+{
+  "version": 1,
+  "status": "verified",
+  "operation_id": "<the-caller-operation-id>",
+  "session_id": "<writer-generated-id>",
+  "path": "memory/sessions/<date>/<file>.md"
+}
+```
+
+Any other completed response is a protocol error; do not retry it automatically. Never fall back to direct file or index writes.
 
 ### Output
 
@@ -176,14 +172,15 @@ After saving, tell the user:
 
 - the relative path saved
 - the title
+- the verified session ID
 - any sensitive material omitted
 
 Keep the reply short.
 
-## If the agent cannot write files
+## If the agent cannot run the local CLI
 
-Some web chat agents cannot write to local files. In that case:
+Some web chat agents cannot execute local commands. In that case:
 
-1. Produce the complete Markdown session content.
-2. Give the intended path under `~/aios/memory/sessions/YYYY-MM-DD/`.
-3. Tell the user to save it with a local agent or text editor.
+1. Build the exact bounded JSON request above, including one caller-generated `operation_id` and the explicit memory selection.
+2. Hand that request only through a channel and to a local agent whose runtime can use the supplied exact candidate invocation and the structured-process stdin channel described above without persisting the request. If either the handoff channel or target runtime records the request bytes in a transcript or log, decline the save.
+3. Do not provide independent Markdown/index write instructions and do not claim a save receipt before the local command verifies one.

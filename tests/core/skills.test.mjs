@@ -248,17 +248,43 @@ test("writeSkillsIndex also writes skills/RESOLVER.md", async () => {
   assert.match(resolver, /skills\/audit\/SKILL\.md/);
 });
 
-test("bundled save-session skill is shipped and has digest instructions", () => {
+test("bundled save-session skill routes one idempotent request through the verified writer", () => {
   const skillPath = path.join(repoRoot, "skills", "save-session", "SKILL.md");
   const content = fs.readFileSync(skillPath, "utf8");
   const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 
   assert.ok(packageJson.files.includes("skills"), "npm package must include bundled skills");
   assert.match(content, /^---\nname: save-session\n/m);
-  assert.match(content, /memory\/sessions\/YYYY-MM-DD/);
   assert.match(content, /<!-- digest:start -->/);
   assert.match(content, /<!-- digest:end -->/);
-  assert.match(content, /index\.jsonl/);
+  assert.match(content, /capture save-summary/);
+  assert.match(content, /"version": 1/);
+  assert.match(content, /Generate one unique `operation_id`/);
+  assert.match(content, /`npx dotaios@<exact-candidate-version> capture save-summary/);
+  assert.match(content, /concrete version supplied by the current DotAIOS-managed context/);
+  assert.match(content, /Never guess it from PATH|never guess it from PATH/i);
+  assert.match(content, /If no concrete exact candidate is supplied, decline the local save/);
+  assert.match(content, /structured process API/);
+  assert.match(content, /executable and argv separately/);
+  assert.match(content, /write the exact request bytes to the child stdin, then close stdin/i);
+  assert.match(content, /records stdin payloads as command text.*decline the local save/i);
+  assert.match(content, /Retry only when execution is interrupted before a normal exit is observed/);
+  assert.match(content, /normal non-zero exit is a refusal/i);
+  assert.match(content, /same `operation_id` and the exact same request bytes/);
+  assert.doesNotMatch(content, /exact same envelope bytes/);
+  assert.doesNotMatch(content, /success receipt is lost/);
+  assert.match(content, /CRLF/);
+  assert.match(content, /bare carriage return/);
+  assert.match(content, /C0 controls/);
+  assert.match(content, /C1 controls/);
+  assert.match(content, /Unicode bidirectional control/);
+  assert.match(content, /lone surrogate/);
+  assert.match(content, /Strip ANSI escape sequences/);
+  assert.match(content, /handoff channel or target runtime records the request bytes.*decline the save/i);
+  assert.match(content, /Do not generate or send `session_id`, `captured_at`/);
+  assert.match(content, /Never fall back to direct file or index writes/);
+  assert.doesNotMatch(content, /current package-resolved DotAIOS CLI/);
+  assert.doesNotMatch(content, /Create one Markdown file|After writing the Markdown file|still save the Markdown file/i);
 });
 
 test("bundled skillify skill ships with trigger phrases and an approval gate", () => {
