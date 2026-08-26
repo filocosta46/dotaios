@@ -119,6 +119,7 @@ export function createManagedSkillStore({
   return Object.freeze({
     inspect: () => inspectManagedSkills(settings),
     previewOfficialBatch: () => previewOfficialSkillBatch(settings),
+    previewOfficialBatchComposition: () => previewOfficialSkillBatchComposition(settings),
     applyOfficialBatch: (input) => applyOfficialSkillBatch(settings, input),
     previewAdoption: (input) => previewManagedSkillAdoption(settings, input),
     applyAdoption: (input) => applyManagedSkillAdoption(settings, input),
@@ -448,6 +449,16 @@ async function previewOfficialSkillBatch(settings) {
   return (await buildOfficialSkillBatchPlan(settings)).proof;
 }
 
+async function previewOfficialSkillBatchComposition(settings) {
+  const plan = await buildOfficialSkillBatchPlan(settings);
+  const composition = { proof: plan.proof };
+  Object.defineProperty(composition, "skillsCatalog", {
+    value: plan.skillsCatalog,
+    enumerable: false
+  });
+  return Object.freeze(composition);
+}
+
 async function buildOfficialSkillBatchPlan(settings) {
   await assertStoreRoots(settings);
   const official = await loadOfficialPackageForStore(settings);
@@ -462,11 +473,13 @@ async function buildOfficialSkillBatchPlan(settings) {
   const sourceFingerprint = officialSourceFingerprint(official);
   let desiredRegistry = null;
   let catalogSkills = null;
+  let skillsCatalog = null;
   let desiredCatalogs = null;
   if (conflicts.length === 0) {
     const catalogPlan = await buildOfficialCatalogPlan(settings, official);
     desiredRegistry = catalogPlan.registry;
     catalogSkills = catalogPlan.skills;
+    skillsCatalog = catalogPlan.skillsCatalog;
     desiredCatalogs = catalogPlan.catalogs;
   }
   const currentCatalogs = await inspectCatalogs(settings);
@@ -493,7 +506,8 @@ async function buildOfficialSkillBatchPlan(settings) {
     }),
     official,
     desiredRegistry,
-    catalogSkills
+    catalogSkills,
+    skillsCatalog
   };
 }
 
@@ -780,6 +794,10 @@ async function buildOfficialCatalogPlan(settings, official) {
   return {
     registry,
     skills,
+    skillsCatalog: deepFreeze({
+      indexText: indexBytes.toString("utf8"),
+      resolverText: resolverBytes.toString("utf8")
+    }),
     catalogs: {
       registry_sha256: sha256(registryBytes),
       index_sha256: sha256(indexBytes),
