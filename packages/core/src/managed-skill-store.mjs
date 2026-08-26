@@ -608,8 +608,11 @@ async function classifyOfficialDestination(settings, skill) {
         path.join(destination, expected.path),
         settings.limits.maxFileBytes
       );
-    } catch {
-      conflicts.push(officialConflict(skill.name, expected.path, "foreign-conflicting", "official_file_unreadable"));
+    } catch (error) {
+      const reason = isHardlinkReadRefusal(error)
+        ? "official_file_hardlinked"
+        : "official_file_unreadable";
+      conflicts.push(officialConflict(skill.name, expected.path, "foreign-conflicting", reason));
       files.push({ path: expected.path, classification: "foreign-conflicting" });
       continue;
     }
@@ -662,8 +665,11 @@ async function classifyOfficialDestination(settings, skill) {
         path.join(destination, overlay.path),
         settings.limits.maxFileBytes
       );
-    } catch {
-      conflicts.push(officialConflict(skill.name, overlay.path, "foreign-conflicting", "generated_overlay_unreadable"));
+    } catch (error) {
+      const reason = isHardlinkReadRefusal(error)
+        ? "generated_overlay_unrecognized"
+        : "generated_overlay_unreadable";
+      conflicts.push(officialConflict(skill.name, overlay.path, "foreign-conflicting", reason));
       continue;
     }
     const mode = Number(observed.stats.mode) & POSIX_MODE_MASK;
@@ -4606,6 +4612,12 @@ function managedError(code, reason) {
 
 function stableReason(error) {
   return error instanceof ManagedSkillStoreError ? error.reason : "candidate_inspection_failed";
+}
+
+function isHardlinkReadRefusal(error) {
+  return error instanceof ManagedSkillStoreError
+    && error.code === "unsafe_source"
+    && error.reason === "hardlinked_file_refused";
 }
 
 function deepFreeze(value) {

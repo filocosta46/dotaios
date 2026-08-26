@@ -429,8 +429,12 @@ test("official-batch repairs stale catalogs when every official root is already 
     format: "dotaios-skill-install-inventory/v2",
     skills: ["audit"],
     managed: [],
-    plugins: []
+    plugins: [{ name: "legacy", path: root }]
   }, null, 2)}\n`);
+  const pluginPath = path.join(aiosPath, "plugins", "legacy");
+  fs.mkdirSync(pluginPath, { recursive: true });
+  fs.writeFileSync(path.join(pluginPath, "plugin.json"), "legacy plugin bytes\n");
+  const pluginBefore = snapshotTree(pluginPath);
   fs.writeFileSync(path.join(aiosPath, "skills", "INDEX.md"), "stale index\n");
   fs.writeFileSync(path.join(aiosPath, "skills", "RESOLVER.md"), "stale resolver\n");
 
@@ -445,10 +449,11 @@ test("official-batch repairs stale catalogs when every official root is already 
   assert.equal(result.status, "verified");
   assert.deepEqual(result.repaired, []);
   assert.equal(result.catalogs_published, true);
-  assert.deepEqual(
-    JSON.parse(fs.readFileSync(path.join(aiosPath, "skills", "_registry.json"), "utf8")).skills,
-    officialSkillNames()
-  );
+  const registry = JSON.parse(fs.readFileSync(path.join(aiosPath, "skills", "_registry.json"), "utf8"));
+  assert.deepEqual(registry.skills, officialSkillNames());
+  assert.deepEqual(registry.plugins, []);
+  assert.equal(JSON.stringify(registry).includes(root), false);
+  assert.deepEqual(snapshotTree(pluginPath), pluginBefore);
 });
 
 test("root-only repair preserves already-current catalog bytes and inodes", async (t) => {
@@ -732,6 +737,52 @@ test("official-batch blocks the complete foreign/conflict matrix without refresh
       for (const [name, bytes] of Object.entries(derived)) {
         assert.deepEqual(fs.readFileSync(path.join(aiosPath, "skills", name)), bytes, `${label}: ${name}`);
       }
+    });
+  }
+});
+
+test("official-batch reports hardlinked official files and overlays precisely", async (t) => {
+  const cases = [
+    {
+      label: "declared official file",
+      expectedReason: "official_file_hardlinked",
+      mutate: (aiosPath) => {
+        const skillPath = path.join(aiosPath, "skills", "audit", "SKILL.md");
+        const externalPath = path.join(aiosPath, "audit-hardlink-source.md");
+        fs.renameSync(skillPath, externalPath);
+        fs.linkSync(externalPath, skillPath);
+        assert.equal(fs.statSync(skillPath, { bigint: true }).nlink, 2n);
+      }
+    },
+    {
+      label: "generated overlay",
+      expectedReason: "generated_overlay_unrecognized",
+      mutate: (aiosPath) => {
+        const externalPath = path.join(aiosPath, "prompt-hardlink-source.md");
+        fs.writeFileSync(externalPath, renderGeneratedPrompt("hardlink-overlay"), { mode: 0o644 });
+        const overlayPath = path.join(aiosPath, "skills", "plan-today", "prompt.md");
+        fs.linkSync(externalPath, overlayPath);
+        assert.equal(fs.statSync(overlayPath, { bigint: true }).nlink, 2n);
+      }
+    }
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.label, async (t) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-hardlink-reason-"));
+      const aiosPath = path.join(root, "aios");
+      const homePath = path.join(root, "home");
+      fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+      fs.mkdirSync(homePath);
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      writePredecessorSkills(aiosPath);
+      scenario.mutate(aiosPath);
+
+      const preview = await createManagedSkillStore({ aiosPath, homePath }).previewOfficialBatch();
+      assert.ok(
+        preview.conflicts.some(({ reason }) => reason === scenario.expectedReason),
+        `${scenario.label}: ${JSON.stringify(preview.conflicts)}`
+      );
     });
   }
 });
