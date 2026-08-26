@@ -20,7 +20,7 @@ import {
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const MANAGED_SCHEDULE_REPAIR_FORMAT = "dotaios-managed-schedule-repair-plan/v1";
-const SUPPORTED_SCHEDULE_ORIGINS = new Set(["2.0.9", "2.0.10"]);
+const RECOGNIZED_SCHEDULE_PREDECESSORS = new Set(["2.0.9", "2.0.10"]);
 const TERMINAL_SCHEDULE_FIELDS = new Set(["name", "cadence", "command"]);
 const UNSAFE_TERMINAL_TEXT = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]|\p{Bidi_Control}/u;
 export const OFFICIAL_SCHEDULES = Object.freeze([
@@ -165,12 +165,13 @@ async function readStableScheduleSource(schedulesPath) {
   if (!before.isFile() || before.isSymbolicLink()) {
     throw new Error(`Refusing to read an unsafe schedules file: ${schedulesPath}`);
   }
-  const source = await fs.readFile(schedulesPath, "utf8");
+  const bytes = await fs.readFile(schedulesPath);
+  const source = bytes.toString("utf8");
   const after = await fs.lstat(schedulesPath);
   if (!sameRegularFile(after, before)) {
     throw new Error(`Schedules changed while being read: ${schedulesPath}`);
   }
-  return { source, stats: after };
+  return { bytes, source, stats: after };
 }
 
 function printSchedules(schedules) {
@@ -375,15 +376,14 @@ function launchdPlist({ node, cli, target }) {
 `;
 }
 
-export function planManagedScheduleRepair(source, { candidateVersion, originVersion } = {}) {
-  return buildManagedScheduleRepairPlan(source, { candidateVersion, originVersion });
+export function planManagedScheduleRepair(source, { candidateVersion } = {}) {
+  return buildManagedScheduleRepairPlan(source, { candidateVersion });
 }
 
 export async function previewManagedScheduleFile(
   schedulesPath,
   {
     candidateVersion,
-    originVersion,
     boundaryRoot = path.dirname(path.resolve(schedulesPath))
   } = {}
 ) {
@@ -393,12 +393,12 @@ export async function previewManagedScheduleFile(
     return attachScheduleFileEvidence(
       buildManagedScheduleRepairPlan("", {
         candidateVersion,
-        originVersion,
         targetPath,
         preimageMetadata: null
       }),
       "",
-      null
+      null,
+      Buffer.alloc(0)
     );
   }
 
@@ -409,12 +409,12 @@ export async function previewManagedScheduleFile(
   return attachScheduleFileEvidence(
     buildManagedScheduleRepairPlan(stable.source, {
       candidateVersion,
-      originVersion,
       targetPath,
       preimageMetadata: regularFilePreimageMetadata(stable.stats)
     }),
     stable.source,
-    stable.stats
+    stable.stats,
+    stable.bytes
   );
 }
 
@@ -422,13 +422,13 @@ export async function applyManagedScheduleFile(
   schedulesPath,
   {
     candidateVersion,
-    originVersion,
     expectedFingerprint,
     boundaryRoot = path.dirname(path.resolve(schedulesPath)),
     beforeReplace = null,
     beforePublish = null,
     beforeCommit = null,
-    beforeRename = null
+    beforeRename = null,
+    beforeVerify = null
   } = {}
 ) {
   if (typeof expectedFingerprint !== "string" || !expectedFingerprint) {
@@ -438,7 +438,6 @@ export async function applyManagedScheduleFile(
   const targetPath = path.resolve(schedulesPath);
   const plan = await previewManagedScheduleFile(targetPath, {
     candidateVersion,
-    originVersion,
     boundaryRoot
   });
   if (plan.fingerprint !== expectedFingerprint) {
@@ -485,24 +484,36 @@ export async function applyManagedScheduleFile(
     };
   }
 
-  const verified = await previewManagedScheduleFile(targetPath, {
-    candidateVersion,
-    originVersion,
-    boundaryRoot
-  });
-  if (verified.status !== "current") {
-    return {
-      action: "updated",
-      status: "recovery-required",
-      path: targetPath,
-      note: "schedule fields were published but post-write verification did not reach current",
-      ...(replacement.preservedPath ? { preservedPath: replacement.preservedPath } : {})
-    };
+  const nextBytes = Buffer.from(next, "utf8");
+  try {
+    await beforeVerify?.({ destination: targetPath, next: nextBytes });
+    const verified = await previewManagedScheduleFile(targetPath, {
+      candidateVersion,
+      boundaryRoot
+    });
+    if (
+      verified.status === "current"
+      && verified._stats?.isFile()
+      && !verified._stats.isSymbolicLink()
+      && verified.preimage_fingerprint === fingerprintText(next)
+      && verified._bytes.equals(nextBytes)
+    ) {
+      return {
+        action: "updated",
+        status: "verified",
+        path: targetPath,
+        ...(replacement.preservedPath ? { preservedPath: replacement.preservedPath } : {})
+      };
+    }
+  } catch {
+    // Verification is intentionally fail-closed after publication: concurrent
+    // bytes stay in place for the caller to inspect rather than being restored.
   }
   return {
     action: "updated",
-    status: "verified",
+    status: "recovery-required",
     path: targetPath,
+    note: "schedule fields were published but post-write verification did not reach current",
     ...(replacement.preservedPath ? { preservedPath: replacement.preservedPath } : {})
   };
 }
@@ -511,7 +522,6 @@ function buildManagedScheduleRepairPlan(
   source,
   {
     candidateVersion,
-    originVersion,
     targetPath = null,
     preimageMetadata = null
   } = {}
@@ -526,22 +536,9 @@ function buildManagedScheduleRepairPlan(
     target: targetPath ? { kind: "schedule-command-fields", path: targetPath } : null,
     preimage_fingerprint: preimageFingerprint,
     preimage_metadata: preimageMetadata,
-    origin_version: originVersion ?? null,
     candidate_version: candidateVersion,
     candidate_invocation: candidateInvocation
   };
-
-  if (!SUPPORTED_SCHEDULE_ORIGINS.has(originVersion)) {
-    return finalizeScheduleRepairPlan({
-      ...base,
-      status: "blocked-conflict",
-      changes,
-      conflicts: [{
-        reason: "unsupported-origin",
-        detail: `managed schedule repair supports only 2.0.9 and 2.0.10 origins, not ${originVersion ?? "an unknown origin"}`
-      }]
-    });
-  }
 
   let scheduleMaps;
   try {
@@ -643,7 +640,6 @@ export function applyManagedScheduleRepair(source, plan) {
   }
   const checkedPlan = buildManagedScheduleRepairPlan(source, {
     candidateVersion: plan.candidate_version,
-    originVersion: plan.origin_version,
     targetPath: plan.target?.path || null,
     preimageMetadata: plan.preimage_metadata ?? null
   });
@@ -668,7 +664,6 @@ export function applyManagedScheduleRepair(source, plan) {
 
   const verified = buildManagedScheduleRepairPlan(next, {
     candidateVersion: plan.candidate_version,
-    originVersion: plan.origin_version,
     targetPath: plan.target?.path || null,
     preimageMetadata: plan.preimage_metadata ?? null
   });
@@ -694,7 +689,7 @@ function classifyOfficialScheduleCommand(value, commandTail, current) {
   if (value === current) return "current";
   if (value === `dotaios ${commandTail}`) return "bare-predecessor";
   const match = /^npx dotaios@([^\s]+) (.+)$/.exec(value);
-  if (!match || match[2] !== commandTail || !SUPPORTED_SCHEDULE_ORIGINS.has(match[1])) return null;
+  if (!match || match[2] !== commandTail || !RECOGNIZED_SCHEDULE_PREDECESSORS.has(match[1])) return null;
   return `version-${match[1]}`;
 }
 
@@ -735,8 +730,9 @@ function finalizeScheduleRepairPlan(plan) {
   };
 }
 
-function attachScheduleFileEvidence(plan, source, stats) {
+function attachScheduleFileEvidence(plan, source, stats, bytes) {
   Object.defineProperties(plan, {
+    _bytes: { value: bytes },
     _source: { value: source },
     _stats: { value: stats }
   });
@@ -750,7 +746,6 @@ function scheduleRepairPlanFingerprint(plan) {
     status: plan.status,
     preimage_fingerprint: plan.preimage_fingerprint,
     preimage_metadata: plan.preimage_metadata,
-    origin_version: plan.origin_version,
     candidate_version: plan.candidate_version,
     candidate_invocation: plan.candidate_invocation,
     changes: plan.changes.map(({ name, field, from, to, start, end, expected, replacement }) => ({

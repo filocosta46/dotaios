@@ -12,19 +12,26 @@ import {
   materializeOfficialCandidateBytes,
   officialSkillNames
 } from "../../packages/core/src/official-skills.mjs";
+import {
+  applyManagedBridgeFile,
+  bridgeContent,
+  bridgePath,
+  loadAgentRegistry,
+  previewManagedBridgeFile
+} from "../../packages/core/src/bridges.mjs";
 import { createManagedSkillStore } from "../../packages/core/src/managed-skill-store.mjs";
 import { snapshotTree } from "../helpers/managed-skills.mjs";
+import {
+  predecessorFixture,
+  renderGeneratedPrompt,
+  writePredecessorSkills
+} from "../helpers/official-skills-fixture.mjs";
 
 const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const packageVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
 ).version;
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
-const predecessorFixture = JSON.parse(fs.readFileSync(
-  path.join(repoRoot, "tests", "fixtures", "official-skills-predecessor.json"),
-  "utf8"
-));
-
 test("the predecessor fixture reconstructs the exact tagged Git skills tree", () => {
   assert.deepEqual(predecessorFixture.origins, [
     {
@@ -557,6 +564,100 @@ for (const origin of predecessorFixture.origins) {
     }
   });
 }
+
+test("official preview composes desired catalogs into the exact skills-first bridge bytes", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-bridge-composition-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  writePredecessorSkills(aiosPath);
+  const personalSkill = path.join(aiosPath, "skills", "personal-workflow");
+  fs.mkdirSync(personalSkill);
+  fs.writeFileSync(path.join(personalSkill, "SKILL.md"), [
+    "---",
+    "name: personal-workflow",
+    "description: A personal workflow outside the official manifest.",
+    "---",
+    "# Personal",
+    ""
+  ].join("\n"));
+  const promptPath = path.join(aiosPath, "skills", "plan-today", "prompt.md");
+  const promptBytes = Buffer.from(renderGeneratedPrompt("2.0.10"));
+  fs.writeFileSync(promptPath, promptBytes);
+  fs.writeFileSync(path.join(aiosPath, "skills", "INDEX.md"), "# stale index sentinel\n");
+  fs.writeFileSync(path.join(aiosPath, "skills", "RESOLVER.md"), "# stale resolver sentinel\n");
+
+  const codex = (await loadAgentRegistry(aiosPath)).find(({ name }) => name === "Codex");
+  const destination = bridgePath(homePath, codex);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.writeFileSync(
+    destination,
+    await bridgeContent(codex, aiosPath, {
+      skillsFirst: true,
+      cli: `npx dotaios@${packageVersion}`
+    })
+  );
+
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const composition = await store.previewOfficialBatchComposition();
+  const publicPreview = await store.previewOfficialBatch();
+  assert.deepEqual(composition.proof, publicPreview);
+  assert.equal(JSON.stringify(composition), JSON.stringify({ proof: publicPreview }));
+  assert.doesNotMatch(JSON.stringify(publicPreview), /indexText|resolverText|stale .* sentinel/i);
+  assert.ok(composition.skillsCatalog);
+  assert.doesNotMatch(composition.skillsCatalog.indexText, /stale index sentinel/i);
+  assert.doesNotMatch(composition.skillsCatalog.resolverText, /stale resolver sentinel/i);
+  assert.match(composition.skillsCatalog.indexText, /skills\/personal-workflow\/SKILL\.md/);
+  assert.match(composition.skillsCatalog.resolverText, /skills\/personal-workflow\/SKILL\.md/);
+  assert.equal(
+    sha256(Buffer.from(composition.skillsCatalog.indexText, "utf8")),
+    composition.proof.desired_catalogs.index_sha256
+  );
+  assert.equal(
+    sha256(Buffer.from(composition.skillsCatalog.resolverText, "utf8")),
+    composition.proof.desired_catalogs.resolver_sha256
+  );
+
+  const generated = await bridgeContent(codex, aiosPath, {
+    skillsFirst: true,
+    skillsCatalog: composition.skillsCatalog,
+    cli: composition.proof.candidate_invocation
+  });
+  const bridgePreview = await previewManagedBridgeFile(destination, generated, {
+    refreshOnly: true,
+    boundaryRoot: homePath
+  });
+  assert.equal(bridgePreview.status, "ready");
+
+  const officialResult = await store.applyOfficialBatch({
+    operationId: composition.proof.operation_id,
+    planFingerprint: composition.proof.plan_fingerprint
+  });
+  assert.equal(officialResult.status, "verified");
+  assert.deepEqual(fs.readFileSync(promptPath), promptBytes);
+
+  const generatedFromPublishedCatalogs = await bridgeContent(codex, aiosPath, {
+    skillsFirst: true,
+    cli: composition.proof.candidate_invocation
+  });
+  assert.equal(generatedFromPublishedCatalogs, generated);
+  const bridgeResult = await applyManagedBridgeFile(destination, generatedFromPublishedCatalogs, {
+    refreshOnly: true,
+    expectedFingerprint: bridgePreview.fingerprint,
+    boundaryRoot: homePath
+  });
+  assert.equal(bridgeResult.action, "updated");
+  assert.equal(sha256(fs.readFileSync(destination)), bridgePreview.next_fingerprint);
+
+  fs.writeFileSync(path.join(aiosPath, "skills", "audit", "personal.txt"), "personal\n");
+  const blockedComposition = await store.previewOfficialBatchComposition();
+  assert.ok(blockedComposition.proof.conflicts.length > 0);
+  assert.equal(blockedComposition.skillsCatalog, null);
+  assert.equal(JSON.stringify(blockedComposition), JSON.stringify({ proof: blockedComposition.proof }));
+});
 
 const conflictCases = [
   ["unknown extra file", (aiosPath) => {
@@ -2092,18 +2193,6 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function writePredecessorSkills(aiosPath) {
-  assert.equal(predecessorFixture.format, "dotaios-official-skill-predecessor-fixture/v1");
-  for (const file of predecessorFixture.files) {
-    const destination = path.join(aiosPath, "skills", ...file.path.split("/"));
-    const bytes = Buffer.from(predecessorFixture.blobs[file.sha256], "base64");
-    assert.equal(sha256(bytes), file.sha256, file.path);
-    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o755 });
-    fs.writeFileSync(destination, bytes, { mode: file.mode });
-    fs.chmodSync(destination, file.mode);
-  }
-}
-
 function writeCandidateSkills(aiosPath, official) {
   for (const skill of official.skills) {
     const destinationRoot = path.join(aiosPath, "skills", skill.name);
@@ -2115,29 +2204,4 @@ function writeCandidateSkills(aiosPath, official) {
       fs.chmodSync(destination, file.mode);
     }
   }
-}
-
-function renderGeneratedPrompt(origin, guidance = "This file is generated by DotAIOS. Re-run `npx dotaios interview` to refresh it.") {
-  return [
-    "# plan-today personalization",
-    "",
-    guidance,
-    "Skills should prefer this compiled file over reading the individual context files.",
-    "",
-    "## Who you are",
-    `Fixture owner — origin ${origin}`,
-    "",
-    "## What you're working on",
-    "Preserve these exact personalized bytes.",
-    "",
-    "## What matters this week",
-    "Safe official adoption.",
-    "",
-    "## Planning preferences",
-    "- Plan style: focused",
-    "- Priorities per day: 3",
-    "- Time blocks: yes",
-    "- Frog definition: overdue tasks",
-    ""
-  ].join("\n");
 }

@@ -119,6 +119,7 @@ export function createManagedSkillStore({
   return Object.freeze({
     inspect: () => inspectManagedSkills(settings),
     previewOfficialBatch: () => previewOfficialSkillBatch(settings),
+    previewOfficialBatchComposition: () => previewOfficialSkillBatchComposition(settings),
     applyOfficialBatch: (input) => applyOfficialSkillBatch(settings, input),
     previewAdoption: (input) => previewManagedSkillAdoption(settings, input),
     applyAdoption: (input) => applyManagedSkillAdoption(settings, input),
@@ -448,7 +449,17 @@ async function previewOfficialSkillBatch(settings) {
   return (await buildOfficialSkillBatchPlan(settings)).proof;
 }
 
-async function buildOfficialSkillBatchPlan(settings) {
+async function previewOfficialSkillBatchComposition(settings) {
+  const plan = await buildOfficialSkillBatchPlan(settings, { includeSkillsCatalog: true });
+  const composition = { proof: plan.proof };
+  Object.defineProperty(composition, "skillsCatalog", {
+    value: plan.skillsCatalog,
+    enumerable: false
+  });
+  return Object.freeze(composition);
+}
+
+async function buildOfficialSkillBatchPlan(settings, { includeSkillsCatalog = false } = {}) {
   await assertStoreRoots(settings);
   const official = await loadOfficialPackageForStore(settings);
   const targets = [];
@@ -462,11 +473,13 @@ async function buildOfficialSkillBatchPlan(settings) {
   const sourceFingerprint = officialSourceFingerprint(official);
   let desiredRegistry = null;
   let catalogSkills = null;
+  let skillsCatalog = null;
   let desiredCatalogs = null;
   if (conflicts.length === 0) {
-    const catalogPlan = await buildOfficialCatalogPlan(settings, official);
+    const catalogPlan = await buildOfficialCatalogPlan(settings, official, { includeSkillsCatalog });
     desiredRegistry = catalogPlan.registry;
     catalogSkills = catalogPlan.skills;
+    skillsCatalog = catalogPlan.skillsCatalog;
     desiredCatalogs = catalogPlan.catalogs;
   }
   const currentCatalogs = await inspectCatalogs(settings);
@@ -493,7 +506,8 @@ async function buildOfficialSkillBatchPlan(settings) {
     }),
     official,
     desiredRegistry,
-    catalogSkills
+    catalogSkills,
+    skillsCatalog
   };
 }
 
@@ -761,7 +775,7 @@ function officialConflict(name, relative, classification, reason) {
   };
 }
 
-async function buildOfficialCatalogPlan(settings, official) {
+async function buildOfficialCatalogPlan(settings, official, { includeSkillsCatalog = false } = {}) {
   const officialNames = new Set(official.skills.map(({ name }) => name));
   const observed = await collectSkills(settings.aiosPath);
   const skills = [
@@ -780,6 +794,12 @@ async function buildOfficialCatalogPlan(settings, official) {
   return {
     registry,
     skills,
+    skillsCatalog: includeSkillsCatalog
+      ? deepFreeze({
+        indexText: indexBytes.toString("utf8"),
+        resolverText: resolverBytes.toString("utf8")
+      })
+      : null,
     catalogs: {
       registry_sha256: sha256(registryBytes),
       index_sha256: sha256(indexBytes),

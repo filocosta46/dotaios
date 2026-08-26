@@ -39,7 +39,8 @@ const commands = {
   skills: "./commands/skills.mjs",
   status: "./commands/status.mjs",
   sync: "./commands/sync.mjs",
-  update: "./commands/update.mjs"
+  update: "./commands/update.mjs",
+  upgrade: "./commands/upgrade.mjs"
 };
 
 function printHelp() {
@@ -80,6 +81,7 @@ Commands:
   status            Check the health of a local AIOS folder
   sync <cmd>        Cross-device sync to a private GitHub repo
   update [text]     Log a quick update — decision, meeting, note — to memory
+  upgrade           Refresh managed scaffold only — no memory writes, no sync
 
 Options:
   -h, --help        Show help
