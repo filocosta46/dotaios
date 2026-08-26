@@ -4,12 +4,12 @@ import { buildPlan, renderInterviewRecap } from "../../packages/cli/src/commands
 
 test("renderInterviewRecap reflects name, role, work, priorities and hands off to the agent", () => {
   const recap = renderInterviewRecap({
-    name: "Filippo",
+    name: "Avery",
     role: "founder",
     work: "shipping DotAIOS 1.18",
     priorities: "launch the new website"
   });
-  assert.match(recap, /Filippo/);
+  assert.match(recap, /Avery/);
   assert.match(recap, /founder/);
   assert.match(recap, /shipping DotAIOS 1\.18/);
   assert.match(recap, /launch the new website/);

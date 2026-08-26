@@ -6,11 +6,11 @@ import { isHtmlComment, renderTemplate, templateOutputPath } from "../../package
 
 test("renderTemplate fills simple values and vault branches", () => {
   const rendered = renderTemplate("Hi {{user_name}} {{#if vault_path}}at {{vault_path}}{{else}}local{{/if}}", {
-    user_name: "Filippo",
+    user_name: "Avery",
     vault_path: "/notes"
   });
 
-  assert.equal(rendered, "Hi Filippo at /notes");
+  assert.equal(rendered, "Hi Avery at /notes");
 });
 
 test("renderTemplate handles ai_tools loops", () => {
@@ -56,7 +56,7 @@ test("renderTemplate strips HTML comment in direct {{key}} substitution", () => 
 test("isHtmlComment identifies HTML comment strings", () => {
   assert.equal(isHtmlComment("<!-- Your Name -->"), true);
   assert.equal(isHtmlComment("<!-- -->"), true);
-  assert.equal(isHtmlComment("Filippo"), false);
+  assert.equal(isHtmlComment("Avery"), false);
   assert.equal(isHtmlComment(""), false);
   assert.equal(isHtmlComment(null), false);
 });

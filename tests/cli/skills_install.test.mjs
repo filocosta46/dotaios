@@ -226,7 +226,7 @@ test("activation covers detected native clients and every Hermes profile without
   );
   fs.writeFileSync(
     profilePath,
-    "model:\n  provider: openrouter\nskills:\n    external_dirs:\n      - /Users/filo/aios/skills\n"
+    "model:\n  provider: openrouter\nskills:\n    external_dirs:\n      - /Users/tester/aios/skills\n"
   );
 
   const foreign = path.join(homePath, ".cursor", "skills", "humanizer");
@@ -273,7 +273,7 @@ test("activation covers detected native clients and every Hermes profile without
     const config = fs.readFileSync(configPath, "utf8");
     assert.equal(config.split(canonicalSkills).length - 1, 1);
   }
-  assert.match(fs.readFileSync(profilePath, "utf8"), /- \/Users\/filo\/aios\/skills/);
+  assert.match(fs.readFileSync(profilePath, "utf8"), /- \/Users\/tester\/aios\/skills/);
 
   const doctor = run(
     ["skills", "doctor", "--json", "--path", aiosPath, "--home", homePath],

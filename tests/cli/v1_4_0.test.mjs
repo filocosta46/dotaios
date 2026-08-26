@@ -514,8 +514,8 @@ test("detectBlockedExtraction flags known walls and shells but spares short real
   assert.ok(detectBlockedExtraction("If playback doesn’t begin shortly, try restarting your device."));
   assert.ok(detectBlockedExtraction("Your browser can't play this video"));
   assert.ok(detectBlockedExtraction("Drop files here to upload"));
-  assert.ok(detectBlockedExtraction("Join Filippo Costa on Substack"));
-  assert.ok(detectBlockedExtraction("Filippo Costa shared this with you."));
+  assert.ok(detectBlockedExtraction("Join Example Writer on Substack"));
+  assert.ok(detectBlockedExtraction("Example Writer shared this with you."));
 
   // A real 452-byte capture from the wild. Any byte floor able to catch the
   // 480-byte Garry Tan wall would have discarded this, which is why the guard

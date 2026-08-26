@@ -30,11 +30,11 @@ test("can create the skills section for a legacy Hermes profile", async () => {
   const p = await writeCfg("model:\n  provider: openai-codex\n");
   const res = await ensureExternalSkillsDir({
     configPath: p,
-    skillsPath: "/Users/filo/aios/skills",
+    skillsPath: "/Users/tester/aios/skills",
     createMissing: true
   });
   assert.equal(res.action, "added-section");
-  assert.match(await fs.readFile(p, "utf8"), /skills:\n  external_dirs:\n    - \/Users\/filo\/aios\/skills/);
+  assert.match(await fs.readFile(p, "utf8"), /skills:\n  external_dirs:\n    - \/Users\/tester\/aios\/skills/);
 });
 
 test("refuses a symlinked global config without touching its target", async () => {
@@ -562,7 +562,7 @@ test("honors a registry-provided custom external skills key", async () => {
 });
 
 test("preserves Hermes profiles that indent external_dirs list items by two spaces", async () => {
-  const existing = "/Users/filo/aios/skills";
+  const existing = "/Users/tester/aios/skills";
   const p = await writeCfg([
     "skills:",
     "  external_dirs:",
@@ -588,13 +588,13 @@ test("preserves Hermes profiles that indent external_dirs list items by two spac
 });
 
 test("normalizes scalar external_dirs without mutating dry-runs or repeat installs", async () => {
-  const body = "model:\n  provider: openrouter\nskills:\n  external_dirs: /Users/filo/aios/skills\n  enabled: true\nlogging:\n  level: info\n";
+  const body = "model:\n  provider: openrouter\nskills:\n  external_dirs: /Users/tester/aios/skills\n  enabled: true\nlogging:\n  level: info\n";
   const p = await writeCfg(body);
-  const expected = "model:\n  provider: openrouter\nskills:\n  external_dirs:\n    - /Users/filo/aios/skills\n  enabled: true\nlogging:\n  level: info\n";
+  const expected = "model:\n  provider: openrouter\nskills:\n  external_dirs:\n    - /Users/tester/aios/skills\n  enabled: true\nlogging:\n  level: info\n";
 
   const dryRun = await ensureExternalSkillsDir({
     configPath: p,
-    skillsPath: "/Users/filo/aios/skills",
+    skillsPath: "/Users/tester/aios/skills",
     dryRun: true,
   });
   assert.equal(dryRun.action, "would-add");
@@ -602,30 +602,30 @@ test("normalizes scalar external_dirs without mutating dry-runs or repeat instal
 
   const firstInstall = await ensureExternalSkillsDir({
     configPath: p,
-    skillsPath: "/Users/filo/aios/skills",
+    skillsPath: "/Users/tester/aios/skills",
   });
   assert.equal(firstInstall.action, "added");
   assert.equal(await fs.readFile(p, "utf8"), expected);
 
   const secondInstall = await ensureExternalSkillsDir({
     configPath: p,
-    skillsPath: "/Users/filo/aios/skills",
+    skillsPath: "/Users/tester/aios/skills",
   });
   assert.equal(secondInstall.action, "already-present");
   assert.equal(await fs.readFile(p, "utf8"), expected);
 });
 
 test("normalizes scalar external_dirs paths that contain spaces", async () => {
-  const skillsPath = "/Users/filo/My AIOS/skills";
+  const skillsPath = "/Users/tester/My AIOS/skills";
   const p = await writeCfg(`skills:\n  external_dirs: ${skillsPath}\n`);
   const res = await ensureExternalSkillsDir({ configPath: p, skillsPath });
   assert.equal(res.action, "added");
-  assert.match(await fs.readFile(p, "utf8"), /- \/Users\/filo\/My AIOS\/skills/);
+  assert.match(await fs.readFile(p, "utf8"), /- \/Users\/tester\/My AIOS\/skills/);
 });
 
 test("prunes missing DotAIOS temporary external dirs while preserving the canonical path", async () => {
   const stale = path.join(os.tmpdir(), "dotaios-setup-dead", "aios", "skills");
-  const canonical = "/Users/filo/aios/skills";
+  const canonical = "/Users/tester/aios/skills";
   const p = await writeCfg([
     "skills:",
     "  external_dirs:",
@@ -659,7 +659,7 @@ test("never prunes and reinserts the requested canonical path as stale temp stat
 test("keeps a live DotAIOS-looking temporary external dir", async () => {
   const live = path.join(os.tmpdir(), "dotaios-live", "aios", "skills");
   await fs.mkdir(live, { recursive: true });
-  const canonical = "/Users/filo/aios/skills";
+  const canonical = "/Users/tester/aios/skills";
   const p = await writeCfg([
     "skills:",
     "  external_dirs:",
@@ -680,7 +680,7 @@ test("substring path is NOT a false already-present", async () => {
 });
 
 test("does not find the canonical path in a later YAML section", async () => {
-  const canonical = "/Users/filo/aios/skills";
+  const canonical = "/Users/tester/aios/skills";
   const p = await writeCfg([
     "skills:",
     "  external_dirs:",

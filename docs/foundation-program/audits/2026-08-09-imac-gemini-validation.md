@@ -6,7 +6,7 @@ Implementation commit: `78313d8476e6da7b568b10fbb1d815f6c8956fc9`
 
 ## Identity and isolation
 
-- Host: iMac-di-Morena, macOS 26.4
+- Host: independent iMac validation host, macOS 26.4
 - Node: v22.22.3
 - npm: 10.9.8
 - Complete-history bundle SHA-256:
