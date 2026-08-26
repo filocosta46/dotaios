@@ -11,8 +11,10 @@ import {
   bridgeManagedBlock,
   bridgePath,
   findManagedBlock,
+  isClaudeCodeAgent,
   isAgentInstalled,
   loadAgentRegistry,
+  resolveClaudeConfigRoot,
   resolveCliInvocation
 } from "../../../core/src/bridges.mjs";
 import {
@@ -98,7 +100,7 @@ export function catalogConflictActivationResult(skillsIndex) {
   };
 }
 
-export async function activateCommand(args, { lifecycle = {}, quiet = false } = {}) {
+export async function activateCommand(args, { lifecycle = {}, quiet = false, env = process.env } = {}) {
   if (hasHelpFlag(args)) {
     printActivateHelp();
     return;
@@ -139,7 +141,10 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false } = 
   // Detection must be observed before reconciliation creates native projection
   // directories. A projected path is evidence of projection only; it must never
   // bootstrap itself into a claim that the corresponding client is installed.
-  const detectedAgentNames = await detectInstalledAgentNames(aiosPath, homePath, options);
+  const detectedAgentNames = await detectInstalledAgentNames(aiosPath, homePath, options, env);
+  if (!options.dryRun) {
+    await fs.mkdir(resolveClaudeConfigRoot(homePath, { env }), { recursive: true });
+  }
 
   // Refresh before writing bridges. Dry-run renders the same catalog in memory
   // so its bridge preview is current without touching INDEX.md or RESOLVER.md.
@@ -153,7 +158,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false } = 
   try {
     ({ skillsIndex, skillsCatalog } = options.dryRun
       ? await previewSkillsIndex(aiosPath)
-      : await reconcileGlobalSkillStore(aiosPath, homePath));
+      : await reconcileGlobalSkillStore(aiosPath, homePath, { env }));
   } catch (error) {
     skillStoreFailure = error;
     ({ skillsIndex, skillsCatalog } = await previewSkillsIndex(aiosPath));
@@ -180,7 +185,8 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false } = 
     skillsFirst,
     skillsCatalog,
     lifecycle,
-    detectedAgentNames
+    detectedAgentNames,
+    env
   );
   const results = [...global.results];
   const projectBlockedBridges = [];
@@ -268,8 +274,8 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false } = 
   };
 }
 
-async function reconcileGlobalSkillStore(aiosPath, homePath) {
-  const store = createManagedSkillStore({ aiosPath, homePath });
+async function reconcileGlobalSkillStore(aiosPath, homePath, { env = process.env } = {}) {
+  const store = createManagedSkillStore({ aiosPath, homePath, env });
   const proof = await store.reconcile();
   const applied = await store.reconcile({
     apply: true,
@@ -411,7 +417,8 @@ async function createGlobalBridges(
   skillsFirst = false,
   skillsCatalog,
   lifecycle = {},
-  detectedAgentNames = new Set()
+  detectedAgentNames = new Set(),
+  env = process.env
 ) {
   const registry = await loadAgentRegistry(aiosPath);
   // Resolve once per run rather than once per bridge: every bridge must name
@@ -426,7 +433,7 @@ async function createGlobalBridges(
   const configuredAgentNames = [];
 
   for (const agent of registry) {
-    const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
+    const destination = bridgePath(homePath, agent, { env }) || path.join(homePath, agent.detect);
     const installed = detectedAgentNames.has(agent.name.toLowerCase());
 
     if (!installed) {
@@ -456,7 +463,9 @@ async function createGlobalBridges(
         await bridgeContent(agent, aiosPath, { managedBlock }),
         {
           ...options,
-          boundaryRoot: homePath,
+          boundaryRoot: isClaudeCodeAgent(agent)
+            ? resolveClaudeConfigRoot(homePath, { env })
+            : homePath,
           beforeReplace: lifecycle.beforeBridgeReplace,
           beforePublish: lifecycle.beforeBridgePublish,
           beforeCommit: lifecycle.beforeBridgeCommit
@@ -479,7 +488,8 @@ async function createGlobalBridges(
     homePath,
     options,
     registry,
-    lifecycle
+    lifecycle,
+    env
   );
   return {
     results: [...results, ...skills],
@@ -491,11 +501,11 @@ async function createGlobalBridges(
   };
 }
 
-async function detectInstalledAgentNames(aiosPath, homePath, options) {
+async function detectInstalledAgentNames(aiosPath, homePath, options, env = process.env) {
   const registry = await loadAgentRegistry(aiosPath);
   const detected = new Set();
   for (const agent of registry) {
-    if (options.all || await isAgentInstalled(homePath, agent)) {
+    if (options.all || await isAgentInstalled(homePath, agent, { env })) {
       detected.add(agent.name.toLowerCase());
     }
   }
@@ -540,7 +550,8 @@ async function installAllSkills(
   homePath,
   options,
   registry,
-  lifecycle = {}
+  lifecycle = {},
+  env = process.env
 ) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
@@ -561,7 +572,9 @@ async function installAllSkills(
   // reconciles all of them through ManagedSkillStore, so narrowing the preview
   // here made --dry-run promise less than the run writes.
   for (const target of symlinkTargets(registry)) {
-    const targetDir = path.join(homePath, target.dir);
+    const targetDir = target.dir.replaceAll("\\", "/") === ".claude/skills"
+      ? path.join(resolveClaudeConfigRoot(homePath, { env }), "skills")
+      : path.join(homePath, target.dir);
     // A real activation has already reconciled canonical projections through
     // ManagedSkillStore. Keep the legacy installer only for zero-write preview;
     // the remaining passes own alias/stale cleanup rather than publication.

@@ -89,6 +89,41 @@ test("skills probe dry-run never spawns the client, including a version probe", 
   }
 });
 
+test("Claude probe stays project-local when CLAUDE_CONFIG_DIR relocates the user root", () => {
+  const { root, aiosPath } = setupAios();
+  const activeRoot = path.join(root, "profiles", "personal");
+  try {
+    const result = spawnSync(
+      process.execPath,
+      [
+        cli,
+        "skills",
+        "probe",
+        "--client",
+        "claude-code",
+        "--dry-run",
+        "--json",
+        "--path",
+        aiosPath
+      ],
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        env: { ...process.env, CLAUDE_CONFIG_DIR: activeRoot }
+      }
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = JSON.parse(result.stdout);
+    assert.equal(receipt.evidence.discoverable, "path-ready");
+    assert.match(receipt.targetPath, /project[\\/]\.claude[\\/]skills$/);
+    assert.match(receipt.command.join(" "), /--setting-sources project/);
+    assert.equal(JSON.stringify(receipt).includes(activeRoot), false);
+    assert.equal(JSON.stringify(receipt).includes(path.join(os.homedir(), ".claude")), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skills probe requires an explicit client", () => {
   const { root, aiosPath } = setupAios();
   try {

@@ -43,6 +43,110 @@ async function runDoctor({ aiosPath, homePath, detection }) {
 // the sandbox home, which is what each of these fixtures is controlling.
 const noAgentBinaries = { env: { PATH: "" } };
 
+describe("doctor Claude config root", () => {
+  it("reports the default root without claiming host selection when CLAUDE_CONFIG_DIR is unset", async () => {
+    const homePath = path.join(os.tmpdir(), "dotaios-doctor-claude-default-home");
+    const { checkClaudeConfigRoot } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    const check = checkClaudeConfigRoot(homePath, { env: {} });
+
+    assert.equal(check.status, "ok");
+    assert.match(check.detail, /No CLAUDE_CONFIG_DIR override is visible/);
+    assert.ok(check.detail.includes(path.join(homePath, ".claude")));
+  });
+
+  it("warns when CLAUDE_CONFIG_DIR selects a different user root", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-claude-root-"));
+    const homePath = path.join(root, "home");
+    const activeRoot = path.join(root, "profiles", "personal");
+    const { checkClaudeConfigRoot } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+    try {
+      const check = checkClaudeConfigRoot(homePath, {
+        env: { CLAUDE_CONFIG_DIR: activeRoot }
+      });
+
+      assert.equal(check.status, "warn");
+      assert.match(check.detail, /CLAUDE_CONFIG_DIR/);
+      assert.ok(check.detail.includes(path.join(homePath, ".claude")));
+      assert.ok(check.detail.includes(activeRoot));
+      assert.match(check.detail, /default-root bridge and skill projection is not evidence/i);
+      assert.equal(check.fix, undefined);
+      assert.doesNotMatch(JSON.stringify(check), /symlink|\bcopy\b|activate/i);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("treats an explicit default root as non-divergent", async () => {
+    const homePath = path.join(os.tmpdir(), "dotaios-doctor-claude-explicit-home");
+    const defaultRoot = path.join(homePath, ".claude");
+    const { checkClaudeConfigRoot } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    const check = checkClaudeConfigRoot(homePath, {
+      env: { CLAUDE_CONFIG_DIR: defaultRoot }
+    });
+
+    assert.equal(check.status, "ok");
+    assert.match(check.detail, /CLAUDE_CONFIG_DIR selects the default/);
+  });
+
+  it("uses the default root for a relative CLAUDE_CONFIG_DIR", async () => {
+    const homePath = path.join(os.tmpdir(), "dotaios-doctor-claude-relative-home");
+    const { checkClaudeConfigRoot } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    const check = checkClaudeConfigRoot(homePath, {
+      env: { CLAUDE_CONFIG_DIR: "profiles/personal" }
+    });
+
+    assert.equal(check.status, "ok");
+    assert.match(check.detail, /not absolute/i);
+    assert.ok(check.detail.includes(path.join(homePath, ".claude")));
+  });
+
+  it("does not report an unread default Claude bridge as healthy", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-claude-bridge-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    const activeRoot = path.join(root, "profiles", "personal");
+    const defaultBridge = path.join(homePath, ".claude", "CLAUDE.md");
+    const defaultBridgeText = [
+      "<!-- dotaios-managed:start -->",
+      `DotAIOS keeps the user's personal context in a folder at ${aiosPath} (entrypoint: ${path.join(aiosPath, "AGENTS.md")}).`,
+      "<!-- dotaios-managed:end -->",
+      ""
+    ].join("\n");
+    await fs.mkdir(path.dirname(defaultBridge), { recursive: true });
+    await fs.writeFile(defaultBridge, defaultBridgeText);
+
+    try {
+      const { output } = await runDoctor({
+        aiosPath,
+        homePath,
+        detection: { env: { PATH: "", CLAUDE_CONFIG_DIR: activeRoot } }
+      });
+
+      assert.match(output, /\[warn\] Claude Code configuration root/);
+      assert.match(output, /CLAUDE_CONFIG_DIR/);
+      assert.ok(output.includes(activeRoot));
+      assert.doesNotMatch(output, /\[ok\] Claude Code bridge/);
+      assert.doesNotMatch(output, /not connected to this AIOS folder yet/i);
+      assert.doesNotMatch(output, /run `npx dotaios(?:@[^ ]+)? activate`/i);
+      assert.equal(await fs.readFile(defaultBridge, "utf8"), defaultBridgeText);
+      await assert.rejects(fs.access(activeRoot), { code: "ENOENT" });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("doctor secret boundary", () => {
   it("requires a local .env to be a private regular file without reading it", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-secret-"));
@@ -564,6 +668,45 @@ describe("doctor command reachability", () => {
       });
       assert.equal(result.status, "fail");
       assert.match(result.detail, /1 agent bridge .* tells assistants/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("ignores a stale default Claude bridge when the host selected another config root", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-relocated-claude-cli-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    const bridgeFile = path.join(homePath, ".claude", "CLAUDE.md");
+    await fs.mkdir(path.dirname(bridgeFile), { recursive: true });
+    await fs.writeFile(
+      bridgeFile,
+      [
+        "<!-- dotaios-managed:start -->",
+        "Run `npx dotaios@2.0.10 brief --compact --memory shared`.",
+        "<!-- dotaios-managed:end -->",
+        ""
+      ].join("\n")
+    );
+    await fs.writeFile(
+      path.join(aiosPath, "AGENTS.md"),
+      "Use `npx dotaios@2.0.11 brief --compact --memory shared`.\n"
+    );
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    try {
+      const result = await checkCliReachable(aiosPath, homePath, {
+        env: { CLAUDE_CONFIG_DIR: path.join(root, "profiles", "personal") },
+        loadRegistry: async () => [{ name: "Claude Code", bridge: ".claude/CLAUDE.md" }],
+        resolveInvocation: async () => "npx dotaios@2.0.11"
+      });
+
+      assert.equal(result.status, "ok");
+      assert.match(result.detail, /files? this check (?:could )?read/i);
+      assert.match(result.detail, /Claude Code/i);
+      assert.doesNotMatch(result.detail, /^Every file that names/i);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

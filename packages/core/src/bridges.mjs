@@ -374,6 +374,29 @@ export function normalizeAgentRegistry(data) {
   return list.map(normalizeAgent).filter(Boolean);
 }
 
+export function resolveClaudeConfigRoot(homePath, { env = process.env } = {}) {
+  const raw = typeof env?.CLAUDE_CONFIG_DIR === "string"
+    ? env.CLAUDE_CONFIG_DIR
+    : "";
+  return raw !== "" && path.isAbsolute(raw)
+    ? path.resolve(raw)
+    : path.resolve(homePath, ".claude");
+}
+
+export function isClaudeCodeAgent(agent) {
+  return String(agent?.name || "").toLowerCase() === "claude code";
+}
+
+function claudeConfigPath(homePath, declaredPath, { env = process.env } = {}) {
+  const normalized = String(declaredPath || "").replaceAll("\\", "/");
+  if (normalized === ".claude") return resolveClaudeConfigRoot(homePath, { env });
+  if (!normalized.startsWith(".claude/")) return path.join(homePath, declaredPath);
+  return path.join(
+    resolveClaudeConfigRoot(homePath, { env }),
+    ...normalized.slice(".claude/".length).split("/")
+  );
+}
+
 // Load the shipped agent registry, then merge any user-defined registry at
 // <aiosPath>/agents.json. User entries with the same name override the
 // defaults; new names are appended. This is how anyone adds a new AI tool
@@ -479,12 +502,18 @@ async function readStrictRegistryJson(filePath, { allowMissing = false } = {}) {
   }
 }
 
-export function bridgePath(homePath, agent) {
-  return agent.bridge ? path.join(homePath, agent.bridge) : null;
+export function bridgePath(homePath, agent, { env = process.env } = {}) {
+  if (!agent.bridge) return null;
+  return isClaudeCodeAgent(agent)
+    ? claudeConfigPath(homePath, agent.bridge, { env })
+    : path.join(homePath, agent.bridge);
 }
 
-function detectPath(homePath, agent) {
-  return path.join(homePath, agent.detect);
+function detectPaths(homePath, agent, { env = process.env } = {}) {
+  if (!isClaudeCodeAgent(agent)) return [path.join(homePath, agent.detect)];
+  const selected = claudeConfigPath(homePath, agent.detect, { env });
+  const fallback = path.join(homePath, agent.detect);
+  return selected === fallback ? [selected] : [selected, fallback];
 }
 
 // A declared command is the strongest signal on a fresh host, before the
@@ -495,12 +524,16 @@ export async function isAgentInstalled(
   { env = process.env, platform = process.platform } = {}
 ) {
   if (agent.command && await isCommandAvailable(agent.command, { env, platform })) return true;
-  try {
-    await fs.access(detectPath(homePath, agent));
-    return true;
-  } catch {
-    return false;
+  for (const candidate of detectPaths(homePath, agent, { env })) {
+    try {
+      await fs.access(candidate);
+      return true;
+    } catch {
+      // Try the next exact detection path. Claude may have a selected root and
+      // a legacy default root, but activation writes only the selected root.
+    }
   }
+  return false;
 }
 
 async function findCommandsOnPath(

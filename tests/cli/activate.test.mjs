@@ -47,7 +47,7 @@ describe("activateCommand — symlinks", () => {
       "--path", dirs.aiosPath,
       "--home", dirs.homePath,
       "--all"
-    ]);
+    ], { env: { PATH: "" } });
     assert.ok(activation.configuredContextCount > 0);
     assert.ok(activation.detectedClientCount > 0);
     assert.deepEqual(
@@ -69,6 +69,34 @@ describe("activateCommand — symlinks", () => {
     const skillFile = path.join(symlinkPath, "SKILL.md");
     const content = await fs.readFile(skillFile, "utf8");
     assert.ok(content.includes("Test Skill"), "symlink should resolve to skill content");
+  });
+
+  it("writes Claude bridge and skills only to an absolute CLAUDE_CONFIG_DIR", async () => {
+    const selected = await makeTmpDirs();
+    const selectedRoot = path.join(selected.base, "claude-profile");
+    const defaultRoot = path.join(selected.homePath, ".claude");
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    try {
+      const activation = await activateCommand([
+        "--path", selected.aiosPath,
+        "--home", selected.homePath,
+        "--all"
+      ], {
+        env: { PATH: "", CLAUDE_CONFIG_DIR: selectedRoot }
+      });
+
+      assert.ok(activation.configuredClientNames.includes("Claude Code"));
+      assert.match(await fs.readFile(path.join(selectedRoot, "CLAUDE.md"), "utf8"), /dotaios-managed:start/);
+      const skillLink = path.join(selectedRoot, "skills", "test-skill");
+      assert.equal((await fs.lstat(skillLink)).isSymbolicLink(), true);
+      assert.equal(await fs.readlink(skillLink), path.join(selected.aiosPath, "skills", "test-skill"));
+      await assert.rejects(fs.access(defaultRoot), { code: "ENOENT" });
+    } finally {
+      await fs.rm(selected.base, { recursive: true, force: true });
+    }
   });
 
   it("returns the full stable activation result shape for a catalog conflict", async () => {
