@@ -32,6 +32,7 @@ const candidateVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
 ).version;
 const candidateInvocation = `npx dotaios@${candidateVersion}`;
+const sessionReloadNotice = "Start a new agent session so your AI hosts reload the updated instructions.";
 test("upgrade remains a shallow sequencer with no migration writer, PATH runner, or new lock", () => {
   const source = fs.readFileSync(
     path.join(repoRoot, "packages", "cli", "src", "commands", "upgrade.mjs"),
@@ -191,6 +192,103 @@ test("public upgrade prints bare doctor guidance for an unsupported future schem
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stderr, new RegExp(`(?:^|\\n)${escapeRegExp(candidateInvocation)} doctor`));
   assert.doesNotMatch(result.stderr, /migrate/);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, new RegExp(escapeRegExp(sessionReloadNotice)));
+
+  const applied = spawnSync(process.execPath, [
+    cli,
+    "upgrade",
+    "--apply",
+    "--id",
+    "upgrade-000000000000000000000000",
+    "--fingerprint",
+    `sha256:${"0".repeat(64)}`,
+    "--path",
+    fixture.aiosPath
+  ], { cwd: repoRoot, encoding: "utf8" });
+  assert.equal(applied.status, 1, applied.stderr);
+  assert.match(applied.stderr, /recovery is required/i);
+  assert.doesNotMatch(
+    `${applied.stdout}\n${applied.stderr}`,
+    new RegExp(escapeRegExp(sessionReloadNotice))
+  );
+});
+
+test("public verified upgrade prints one session reload notice when a managed bridge updates", async (t) => {
+  const fixture = await createUpgradeFixture(t);
+  const beforeBridge = fs.readFileSync(fixture.bridgePath);
+  const env = publicUpgradeEnv(fixture.homePath);
+  const preview = spawnSync(process.execPath, [
+    cli,
+    "upgrade",
+    "--dry-run",
+    "--path",
+    fixture.aiosPath
+  ], { cwd: repoRoot, encoding: "utf8", env });
+  assert.equal(preview.status, 0, preview.stderr);
+  const id = /^Preview ID: (upgrade-[a-f0-9]{24})$/m.exec(preview.stdout)?.[1];
+  const fingerprint = /^Fingerprint: (sha256:[a-f0-9]{64})$/m.exec(preview.stdout)?.[1];
+  assert.ok(id, preview.stdout);
+  assert.ok(fingerprint, preview.stdout);
+
+  const applied = spawnSync(process.execPath, [
+    cli,
+    "upgrade",
+    "--apply",
+    "--id",
+    id,
+    "--fingerprint",
+    fingerprint,
+    "--path",
+    fixture.aiosPath
+  ], { cwd: repoRoot, encoding: "utf8", env });
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.deepEqual(
+    applied.stdout.split(/\r?\n/).filter((line) => line === sessionReloadNotice),
+    [sessionReloadNotice]
+  );
+  assert.notDeepEqual(fs.readFileSync(fixture.bridgePath), beforeBridge);
+});
+
+test("public verified upgrade omits the reload notice when only skills and schedules change", async (t) => {
+  const fixture = await createUpgradeFixture(t);
+  const codex = (await loadAgentRegistry(fixture.aiosPath)).find(({ name }) => name === "Codex");
+  fs.writeFileSync(
+    fixture.bridgePath,
+    await bridgeContent(codex, fixture.aiosPath, {
+      skillsFirst: false,
+      cli: candidateInvocation
+    })
+  );
+  const beforeBridge = fs.readFileSync(fixture.bridgePath);
+  const env = publicUpgradeEnv(fixture.homePath);
+  const preview = spawnSync(process.execPath, [
+    cli,
+    "upgrade",
+    "--dry-run",
+    "--path",
+    fixture.aiosPath
+  ], { cwd: repoRoot, encoding: "utf8", env });
+  assert.equal(preview.status, 0, preview.stderr);
+  const id = /^Preview ID: (upgrade-[a-f0-9]{24})$/m.exec(preview.stdout)?.[1];
+  const fingerprint = /^Fingerprint: (sha256:[a-f0-9]{64})$/m.exec(preview.stdout)?.[1];
+  assert.ok(id, preview.stdout);
+  assert.ok(fingerprint, preview.stdout);
+
+  const applied = spawnSync(process.execPath, [
+    cli,
+    "upgrade",
+    "--apply",
+    "--id",
+    id,
+    "--fingerprint",
+    fingerprint,
+    "--path",
+    fixture.aiosPath
+  ], { cwd: repoRoot, encoding: "utf8", env });
+  assert.equal(applied.status, 0, applied.stderr);
+  assert.match(fs.readFileSync(fixture.schedulesPath, "utf8"), new RegExp(candidateInvocation));
+  assert.deepEqual(fs.readFileSync(fixture.bridgePath), beforeBridge);
+  assert.doesNotMatch(applied.stdout, new RegExp(escapeRegExp(sessionReloadNotice)));
 });
 
 test("public upgrade rejects an unsafe path without rendering its terminal control", () => {
@@ -559,7 +657,10 @@ test("public upgrade preserves a bounded npx-only predecessor fixture through co
   ], { cwd: repoRoot, encoding: "utf8", env });
   assert.equal(applied.status, 1, applied.stderr);
   assert.match(applied.stderr, /preserved one or more conflicts/i);
-  assert.doesNotMatch(`${applied.stdout}\n${applied.stderr}`, /restart|all current/i);
+  assert.doesNotMatch(
+    `${applied.stdout}\n${applied.stderr}`,
+    /restart|all current|start a new agent session|reload the updated instructions/i
+  );
   assert.deepEqual(fs.readFileSync(path.join(auditRoot, "SKILL.md")), personalAudit);
   assert.deepEqual(fs.readFileSync(promptPath), promptBytes);
   assert.equal(fs.statSync(promptPath).mode & 0o7777, promptMode);
@@ -624,6 +725,16 @@ async function createUpgradeFixture(t, { skillsFirst = false } = {}) {
 
 function writeAiosConfig(aiosPath, value) {
   fs.writeFileSync(path.join(aiosPath, "aios.json"), `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function publicUpgradeEnv(homePath) {
+  const env = {
+    ...process.env,
+    HOME: homePath,
+    USERPROFILE: homePath
+  };
+  delete env.CLAUDE_CONFIG_DIR;
+  return env;
 }
 
 function writePathTripwire(destination, marker) {

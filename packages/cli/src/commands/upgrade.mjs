@@ -598,6 +598,11 @@ function printPreview(preview) {
 function printApply(result) {
   if (result.status === "verified") {
     console.log("[ok] Managed scaffold upgrade verified.");
+    if (result.results?.some(({ domain, action }) => (
+      domain === "managed-bridges" && action === "updated"
+    ))) {
+      console.log("Start a new agent session so your AI hosts reload the updated instructions.");
+    }
     return;
   }
   if (result.status === "recovery-required") {
