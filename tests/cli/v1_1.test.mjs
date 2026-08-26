@@ -266,7 +266,10 @@ test("schedule doctor and install dry-run explain local OS handoff", () => {
 
   const doctor = run(["schedule", "doctor", "--path", aiosPath]);
   assert.match(doctor.stdout, /DotAIOS schedule doctor/);
-  assert.match(doctor.stdout, /npx dotaios@2\.0\.10 schedule run-due/);
+  assert.match(
+    doctor.stdout,
+    new RegExp(`npx dotaios@${packageVersion.replaceAll(".", "\\.")} schedule run-due`)
+  );
   assert.doesNotMatch(doctor.stdout, /(?:^|[`: ])dotaios schedule (?:install|run-due)/m);
 
   const cron = run(["schedule", "install", "--dry-run", "--target", "cron", "--path", aiosPath]);
