@@ -1459,7 +1459,7 @@ async function officialTreeMatchesCleanupAuthority(
     const desired = target.desired_files[index];
     if (
       file.path !== desired.path
-      || (!ENFORCES_POSIX_MODES || file.mode !== desired.mode)
+      || (ENFORCES_POSIX_MODES && file.mode !== desired.mode)
     ) return false;
     const authority = await officialCleanupAuthorityBytes(
       settings,
