@@ -739,7 +739,11 @@ function conflictingOfficialTarget(skill, rootIdentity, conflicts) {
     files: [],
     overlays: [],
     conflicts,
-    current_manifest: rootIdentity ? { root_identity: rootIdentity, mode: Number(rootIdentity.mode) & POSIX_MODE_MASK, files: [] } : null
+    current_manifest: rootIdentity ? {
+      root_identity: stableProofIdentity(rootIdentity),
+      mode: Number(rootIdentity.mode) & POSIX_MODE_MASK,
+      files: []
+    } : null
   };
 }
 
@@ -861,9 +865,13 @@ async function commitOfficialSkillBatch(settings, state, plan) {
     await checkpoint(settings, "official_prepared", journal);
     await ensureDirectoryChain(skillsRoot, stageRoot, 0o700);
     for (const target of journal.targets) {
-      await createDurableDirectory(target.staged_path, 0o755);
-      target.stage_root_identity = statIdentity(await fs.lstat(target.staged_path, { bigint: true }));
+      await createDurableDirectory(target.staged_path, 0o700);
+      await checkpoint(settings, "official_stage_root_created", { name: target.name });
+      target.stage_root_identity = directoryProofIdentity(
+        statIdentity(await fs.lstat(target.staged_path, { bigint: true }))
+      );
       await transitionJournal(state, journal, journal.state);
+      await checkpoint(settings, "official_stage_root_identity_persisted", { name: target.name });
       await stageOfficialTarget(settings, target, officialByName.get(target.name));
       target.staged_manifest = await snapshotFlatOfficialTree(settings, target.staged_path);
       if (!officialTreeMatchesDesired(target.staged_manifest, target.desired_files, target.stage_root_identity)) {
@@ -1065,12 +1073,17 @@ async function snapshotFlatOfficialTree(settings, root) {
   };
 }
 
-function directoryProofIdentity(identity) {
+function stableProofIdentity(identity) {
   return identity ? {
-    type: "directory",
+    type: identity.type,
     dev: String(identity.dev),
     ino: String(identity.ino)
   } : null;
+}
+
+function directoryProofIdentity(identity) {
+  const proof = stableProofIdentity(identity);
+  return proof?.type === "directory" ? proof : null;
 }
 
 function officialTreeMatchesDesired(observed, desiredFiles, expectedRootIdentity) {
@@ -1181,12 +1194,10 @@ async function rollbackOfficialBatch(settings, state, journal) {
       }
 
       if (stagedStats) {
-        await removePartialOfficialTree(
-          settings,
-          target.staged_path,
-          target.staged_manifest?.files || target.desired_files,
-          target.stage_root_identity
-        );
+        await removeOfficialStagedTree(settings, target, {
+          allowIncomplete: journal.state === "official_prepared",
+          candidateVersion: journal.candidate_version
+        });
       }
     }
     // A conflict batch repairs only safe official roots and never publishes
@@ -1220,12 +1231,9 @@ async function finishCommittedOfficialBatch(settings, state, journal) {
         );
       }
       if (await lstatIfPresent(target.staged_path)) {
-        await removePartialOfficialTree(
-          settings,
-          target.staged_path,
-          target.staged_manifest?.files || target.desired_files,
-          target.stage_root_identity
-        );
+        await removeOfficialStagedTree(settings, target, {
+          candidateVersion: journal.candidate_version
+        });
       }
       if (await lstatIfPresent(target.rollback_path)) {
         await removePartialOfficialTree(
@@ -1244,7 +1252,13 @@ async function finishCommittedOfficialBatch(settings, state, journal) {
   }
 }
 
-async function removePartialOfficialTree(settings, root, allowedFiles, expectedRootIdentity) {
+async function removePartialOfficialTree(
+  settings,
+  root,
+  allowedFiles,
+  expectedRootIdentity,
+  { beforeUnlink = null } = {}
+) {
   const rootStats = await lstatIfPresent(root, { bigint: true });
   if (!rootStats) return;
   if (
@@ -1267,10 +1281,244 @@ async function removePartialOfficialTree(settings, root, allowedFiles, expectedR
       || sha256(observed.bytes) !== expected.sha256
       || (expected.identity && !matchesLeafProofIdentity(statIdentity(observed.stats), expected.identity))
     ) throw managedError("recovery_required", "official_cleanup_file_changed");
+    if (beforeUnlink) await beforeUnlink(expected, observed);
     await unlinkAndSync(path.join(root, entry.name));
     await checkpoint(settings, "official_cleanup_file_removed", { root, path: entry.name });
   }
   await removeEmptyDirectoryAndSync(root);
+}
+
+async function removeOfficialStagedTree(
+  settings,
+  target,
+  { allowIncomplete = false, candidateVersion = null } = {}
+) {
+  const rootStats = await lstatIfPresent(target.staged_path, { bigint: true });
+  if (!rootStats) return;
+  if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) {
+    throw managedError("recovery_required", "official_cleanup_root_changed");
+  }
+
+  if (!target.stage_root_identity) {
+    if (!allowIncomplete) {
+      throw managedError("recovery_required", "official_cleanup_manifest_missing");
+    }
+    const entries = await readDirectoryEntries(target.staged_path, {
+      maxEntries: settings.limits.maxEntries
+    });
+    if (entries.length > 0) {
+      throw managedError("recovery_required", "official_cleanup_tree_changed");
+    }
+    await removeEmptyDirectoryAndSync(target.staged_path);
+    return;
+  }
+
+  if (!matchesDirectoryProofIdentity(statIdentity(rootStats), target.stage_root_identity)) {
+    throw managedError("recovery_required", "official_cleanup_root_changed");
+  }
+  if (target.staged_manifest) {
+    await removePartialOfficialTree(
+      settings,
+      target.staged_path,
+      target.staged_manifest.files,
+      target.stage_root_identity
+    );
+    return;
+  }
+  if (!allowIncomplete || !candidateVersion) {
+    throw managedError("recovery_required", "official_cleanup_manifest_missing");
+  }
+
+  const rootMode = Number(rootStats.mode) & POSIX_MODE_MASK;
+  if (!ENFORCES_POSIX_MODES || rootMode === 0o700) {
+    await removeIncompleteOfficialStage(settings, target, candidateVersion);
+    return;
+  }
+  if (ENFORCES_POSIX_MODES && rootMode !== 0o755) {
+    throw managedError("recovery_required", "official_cleanup_root_changed");
+  }
+
+  const observed = await snapshotFlatOfficialTree(settings, target.staged_path);
+  if (!await officialTreeMatchesCleanupAuthority(
+    settings,
+    target,
+    observed,
+    candidateVersion
+  )) {
+    throw managedError("recovery_required", "official_cleanup_tree_changed");
+  }
+  await removePartialOfficialTree(
+    settings,
+    target.staged_path,
+    target.desired_files,
+    target.stage_root_identity,
+    {
+      beforeUnlink: async (desired, staged) => {
+        const authority = await officialCleanupAuthorityBytes(
+          settings,
+          target,
+          desired,
+          candidateVersion
+        );
+        if (
+          staged.bytes.length !== authority.length
+          || !staged.bytes.equals(authority)
+        ) throw managedError("recovery_required", "official_cleanup_file_changed");
+      }
+    }
+  );
+}
+
+async function removeIncompleteOfficialStage(settings, target, candidateVersion) {
+  const allowed = new Map(target.desired_files.map((file) => [file.path, file]));
+  const entries = await readDirectoryEntries(target.staged_path, {
+    maxEntries: settings.limits.maxEntries
+  });
+  const leaves = [];
+  for (const entry of entries) {
+    const expected = allowed.get(entry.name);
+    if (!expected || entry.kind !== "file") {
+      throw managedError("recovery_required", "official_cleanup_tree_changed");
+    }
+    let observed;
+    try {
+      observed = await readBoundedRegularFile(
+        path.join(target.staged_path, entry.name),
+        expected.bytes
+      );
+    } catch {
+      throw managedError("recovery_required", "official_cleanup_file_changed");
+    }
+    const authority = await officialCleanupAuthorityBytes(
+      settings,
+      target,
+      expected,
+      candidateVersion
+    );
+    if (
+      observed.bytes.length > authority.length
+      || !observed.bytes.equals(authority.subarray(0, observed.bytes.length))
+    ) throw managedError("recovery_required", "official_cleanup_file_changed");
+    leaves.push({
+      path: path.join(target.staged_path, entry.name),
+      expected,
+      identity: statIdentity(observed.stats)
+    });
+  }
+
+  const rootStats = await lstatIfPresent(target.staged_path, { bigint: true });
+  if (
+    !rootStats?.isDirectory()
+    || rootStats.isSymbolicLink()
+    || (ENFORCES_POSIX_MODES && (Number(rootStats.mode) & POSIX_MODE_MASK) !== 0o700)
+    || !matchesDirectoryProofIdentity(statIdentity(rootStats), target.stage_root_identity)
+  ) throw managedError("recovery_required", "official_cleanup_root_changed");
+
+  for (const leaf of leaves) {
+    let current;
+    try {
+      current = await readBoundedRegularFile(leaf.path, leaf.expected.bytes);
+    } catch {
+      throw managedError("recovery_required", "official_cleanup_file_changed");
+    }
+    if (!matchesProofIdentity(statIdentity(current.stats), leaf.identity)) {
+      throw managedError("recovery_required", "official_cleanup_file_changed");
+    }
+    const authority = await officialCleanupAuthorityBytes(
+      settings,
+      target,
+      leaf.expected,
+      candidateVersion
+    );
+    if (
+      current.bytes.length > authority.length
+      || !current.bytes.equals(authority.subarray(0, current.bytes.length))
+    ) throw managedError("recovery_required", "official_cleanup_file_changed");
+    await unlinkAndSync(leaf.path);
+    await checkpoint(settings, "official_cleanup_file_removed", {
+      root: target.staged_path,
+      path: path.basename(leaf.path)
+    });
+  }
+  await removeEmptyDirectoryAndSync(target.staged_path);
+}
+
+async function officialTreeMatchesCleanupAuthority(
+  settings,
+  target,
+  observed,
+  candidateVersion
+) {
+  if (
+    (ENFORCES_POSIX_MODES && observed?.mode !== 0o755)
+    || !matchesDirectoryProofIdentity(observed?.root_identity, target.stage_root_identity)
+    || observed.files.length !== target.desired_files.length
+  ) return false;
+  for (let index = 0; index < observed.files.length; index += 1) {
+    const file = observed.files[index];
+    const desired = target.desired_files[index];
+    if (
+      file.path !== desired.path
+      || (!ENFORCES_POSIX_MODES || file.mode !== desired.mode)
+    ) return false;
+    const authority = await officialCleanupAuthorityBytes(
+      settings,
+      target,
+      desired,
+      candidateVersion
+    );
+    if (file.bytes !== authority.length || file.sha256 !== sha256(authority)) return false;
+  }
+  return true;
+}
+
+async function officialCleanupAuthorityBytes(settings, target, desired, candidateVersion) {
+  if (desired.kind === "candidate") {
+    const definition = officialSkillManifest().skills
+      .find(({ name }) => name === target.name)
+      ?.files.find(({ path: relative }) => relative === desired.path);
+    let packed;
+    let installed;
+    try {
+      packed = decodeCanonicalBase64(desired.packed_base64, settings.limits.maxFileBytes);
+      installed = materializeOfficialCandidateBytes(packed, definition?.render, candidateVersion);
+    } catch {
+      throw managedError("recovery_required", "official_cleanup_file_changed");
+    }
+    if (
+      !definition
+      || packed.length !== definition.bytes
+      || sha256(packed) !== definition.packed_sha256
+      || installed.length !== desired.bytes
+      || sha256(installed) !== desired.sha256
+    ) throw managedError("recovery_required", "official_cleanup_file_changed");
+    return installed;
+  }
+
+  const declaredOverlay = officialSkillManifest().skills
+    .find(({ name }) => name === target.name)
+    ?.generated_overlays.find(({ path: relative }) => relative === desired.path);
+  if (!declaredOverlay || desired.kind !== "overlay") {
+    throw managedError("recovery_required", "official_cleanup_file_changed");
+  }
+  let source;
+  try {
+    source = await readBoundedRegularFile(
+      path.join(target.destination, desired.path),
+      settings.limits.maxFileBytes
+    );
+  } catch {
+    throw managedError("recovery_required", "official_cleanup_file_changed");
+  }
+  if (
+    source.stats.nlink !== 1n
+    || (ENFORCES_POSIX_MODES && (Number(source.stats.mode) & POSIX_MODE_MASK) !== declaredOverlay.mode)
+    || source.bytes.length !== desired.bytes
+    || sha256(source.bytes) !== desired.sha256
+    || !matchesProofIdentity(statIdentity(source.stats), desired.source_identity)
+    || !isRecognizedOfficialSkillOverlay(target.name, desired.path, source.bytes)
+  ) throw managedError("recovery_required", "official_cleanup_file_changed");
+  return source.bytes;
 }
 
 async function cleanupOfficialBatchParents(aiosPath, operationId) {
@@ -3648,6 +3896,10 @@ async function validateOfficialBatchJournal(settings, journal) {
     if (target.staged_manifest && !target.stage_root_identity) {
       throw managedError("unsafe_state", "invalid_official_batch_stage_identity");
     }
+    if (
+      !["official_prepared", "needs_attention"].includes(journal.state)
+      && (!target.stage_root_identity || !target.staged_manifest)
+    ) throw managedError("unsafe_state", "incomplete_official_batch_staged_authority");
     if (target.staged_manifest) {
       if (
         !matchesDirectoryProofIdentity(

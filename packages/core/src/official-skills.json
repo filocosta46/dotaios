@@ -262,8 +262,8 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 3435,
-          "packed_sha256": "09e7c733bd18c4ab362d35c2ac7f76d2165ac5b164f219abc33a61aa05dfaf36",
+          "bytes": 3437,
+          "packed_sha256": "fbac81624767155301fa0f8d37f41601e97ad7aa8acc1908ae95eedf69843421",
           "render": {
             "kind": "exact-candidate-version/v1",
             "token_count": 7

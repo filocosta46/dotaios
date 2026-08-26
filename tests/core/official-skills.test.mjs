@@ -5,6 +5,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import {
   isRecognizedOfficialSkillOverlay,
   loadOfficialSkillPackage,
@@ -14,7 +15,7 @@ import {
 import { createManagedSkillStore } from "../../packages/core/src/managed-skill-store.mjs";
 import { snapshotTree } from "../helpers/managed-skills.mjs";
 
-const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
+const repoRoot = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const packageVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
 ).version;
@@ -633,6 +634,53 @@ const POSIX_ONLY_CONFLICT_CASES = new Set([
   "official special leaf"
 ]);
 
+test("official-batch fingerprints blocked roots with stable type-preserving identity", {
+  skip: process.platform === "win32" ? "POSIX filesystem semantics" : false
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-blocked-identity-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writePredecessorSkills(aiosPath);
+
+  const auditRoot = path.join(aiosPath, "skills", "audit");
+  fs.chmodSync(auditRoot, 0o700);
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const before = await store.previewOfficialBatch();
+  const beforeAudit = before.targets.find(({ name }) => name === "audit");
+  const stats = fs.statSync(auditRoot, { bigint: true });
+
+  assert.equal(beforeAudit.action, "blocked");
+  assert.deepEqual(beforeAudit.current_manifest.root_identity, {
+    type: "directory",
+    dev: String(stats.dev),
+    ino: String(stats.ino)
+  });
+
+  fs.utimesSync(auditRoot, new Date(946684800000), new Date(946684800000));
+  const after = await store.previewOfficialBatch();
+  assert.equal(after.plan_fingerprint, before.plan_fingerprint);
+
+  fs.rmSync(auditRoot, { recursive: true });
+  fs.writeFileSync(auditRoot, "foreign root\n");
+  const beforeFile = await store.previewOfficialBatch();
+  const beforeFileAudit = beforeFile.targets.find(({ name }) => name === "audit");
+  const fileStats = fs.lstatSync(auditRoot, { bigint: true });
+
+  assert.equal(beforeFileAudit.action, "blocked");
+  assert.deepEqual(beforeFileAudit.current_manifest.root_identity, {
+    type: "file",
+    dev: String(fileStats.dev),
+    ino: String(fileStats.ino)
+  });
+
+  fs.utimesSync(auditRoot, new Date(978307200000), new Date(978307200000));
+  const afterFile = await store.previewOfficialBatch();
+  assert.equal(afterFile.plan_fingerprint, beforeFile.plan_fingerprint);
+});
+
 test("official-batch blocks the complete foreign/conflict matrix without refreshing dependent catalogs", async (t) => {
   for (const [label, mutate] of conflictCases) {
     if (process.platform === "win32" && POSIX_ONLY_CONFLICT_CASES.has(label)) {
@@ -886,6 +934,74 @@ test("official-batch journals canonical overlay mode when Windows reports synthe
   assert.deepEqual(fs.readFileSync(promptPath), promptBytes);
 });
 
+test("official-batch recovers truncated incomplete staging when Windows reports synthetic permissions", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-windows-stage-recovery-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writePredecessorSkills(aiosPath);
+  const official = await loadOfficialSkillPackage();
+  const auditInstructions = official.skills
+    .find(({ name }) => name === "audit")
+    .files.find(({ path: relative }) => relative === "SKILL.md")
+    .installed_bytes;
+  const stagedPrefix = auditInstructions.subarray(0, 32);
+
+  const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+    let preview;
+    let injected = false;
+    const store = createManagedSkillStore({
+      aiosPath: ${JSON.stringify(aiosPath)},
+      homePath: ${JSON.stringify(homePath)},
+      hooks: { checkpoint: async (name, detail) => {
+        if (name !== "official_stage_root_identity_persisted" || injected) return;
+        injected = true;
+        const stagedPath = path.join(
+          ${JSON.stringify(aiosPath)},
+          "skills",
+          ".managed-skill-store",
+          "staging",
+          preview.operation_id,
+          detail.name
+        );
+        await fs.writeFile(
+          path.join(stagedPath, "SKILL.md"),
+          Buffer.from(${JSON.stringify(stagedPrefix.toString("base64"))}, "base64"),
+          { flag: "wx", mode: 0o644 }
+        );
+        throw new Error("injected synthetic Windows staging interruption");
+      } }
+    });
+    preview = await store.previewOfficialBatch();
+    try {
+      await store.applyOfficialBatch({
+        operationId: preview.operation_id,
+        planFingerprint: preview.plan_fingerprint
+      });
+      process.exit(96);
+    } catch (error) {
+      if (error.message !== "injected synthetic Windows staging interruption") throw error;
+    }
+    const retried = await store.applyOfficialBatch({
+      operationId: preview.operation_id,
+      planFingerprint: preview.plan_fingerprint
+    });
+    if (retried.status !== "verified") process.exit(97);
+    const current = await store.previewOfficialBatch();
+    if (current.targets.some(({ classification }) => classification !== "candidate-official")) process.exit(98);
+  `], { encoding: "utf8" });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.existsSync(path.join(homePath, ".dotaios", "managed-skills", "transaction.json")), false);
+});
+
 test("official-batch revalidates candidate source after staging and rolls back without touching the destination", async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-source-race-"));
   const aiosPath = path.join(root, "aios");
@@ -1096,6 +1212,533 @@ test("official-batch restores every root when publication fails after the first 
     /injected publication failure/
   );
   assert.deepEqual(snapshotTree(aiosPath), before);
+});
+
+test("official-batch recovers a hard interruption after creating an empty unjournaled stage root", {
+  skip: process.platform === "win32" ? "POSIX staged-root modes" : false
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-stage-empty-interrupt-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writePredecessorSkills(aiosPath);
+
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const preview = await store.previewOfficialBatch();
+  const interruptedTarget = preview.targets.find(({ action }) => action === "repair").name;
+  const stagedPath = path.join(
+    aiosPath,
+    "skills",
+    ".managed-skill-store",
+    "staging",
+    preview.operation_id,
+    interruptedTarget
+  );
+  const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+  const interrupted = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+    const store = createManagedSkillStore({
+      aiosPath: ${JSON.stringify(aiosPath)},
+      homePath: ${JSON.stringify(homePath)},
+      hooks: { checkpoint: async (name) => {
+        if (name === "official_stage_root_created") process.exit(81);
+      } }
+    });
+    await store.applyOfficialBatch({
+      operationId: ${JSON.stringify(preview.operation_id)},
+      planFingerprint: ${JSON.stringify(preview.plan_fingerprint)}
+    });
+  `], { encoding: "utf8" });
+
+  assert.equal(interrupted.status, 81, interrupted.stderr);
+  assert.equal(fs.statSync(stagedPath).mode & 0o777, 0o700);
+  assert.deepEqual(fs.readdirSync(stagedPath), []);
+
+  const recovered = await store.applyOfficialBatch({
+    operationId: preview.operation_id,
+    planFingerprint: preview.plan_fingerprint
+  });
+  assert.equal(recovered.status, "verified");
+  assert.equal(fs.existsSync(path.join(homePath, ".dotaios", "managed-skills", "transaction.json")), false);
+  assert.equal(fs.existsSync(path.join(aiosPath, "skills", ".managed-skill-store")), false);
+});
+
+test("official-batch recovers a hard interruption with a truncated declared stage file", {
+  skip: process.platform === "win32" ? "POSIX staged-root modes" : false
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-stage-truncated-interrupt-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writePredecessorSkills(aiosPath);
+
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const preview = await store.previewOfficialBatch();
+  const interruptedTarget = preview.targets.find(({ action }) => action === "repair").name;
+  const official = await loadOfficialSkillPackage();
+  const expectedInstructions = official.skills
+    .find(({ name }) => name === interruptedTarget)
+    .files.find(({ path: relative }) => relative === "SKILL.md")
+    .installed_bytes;
+  const stagedPrefix = expectedInstructions.subarray(0, 32);
+  const stagedPath = path.join(
+    aiosPath,
+    "skills",
+    ".managed-skill-store",
+    "staging",
+    preview.operation_id,
+    interruptedTarget
+  );
+  const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+  const interrupted = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+    const store = createManagedSkillStore({
+      aiosPath: ${JSON.stringify(aiosPath)},
+      homePath: ${JSON.stringify(homePath)},
+      hooks: { checkpoint: async (name) => {
+        if (name !== "official_stage_root_identity_persisted") return;
+        await fs.writeFile(
+          path.join(${JSON.stringify(stagedPath)}, "SKILL.md"),
+          Buffer.from(${JSON.stringify(stagedPrefix.toString("base64"))}, "base64"),
+          { flag: "wx", mode: 0o644 }
+        );
+        process.exit(82);
+      } }
+    });
+    await store.applyOfficialBatch({
+      operationId: ${JSON.stringify(preview.operation_id)},
+      planFingerprint: ${JSON.stringify(preview.plan_fingerprint)}
+    });
+  `], { encoding: "utf8" });
+
+  assert.equal(interrupted.status, 82, interrupted.stderr);
+  assert.equal(fs.statSync(stagedPath).mode & 0o777, 0o700);
+  assert.deepEqual(fs.readFileSync(path.join(stagedPath, "SKILL.md")), stagedPrefix);
+
+  const recovered = await store.applyOfficialBatch({
+    operationId: preview.operation_id,
+    planFingerprint: preview.plan_fingerprint
+  });
+  assert.equal(recovered.status, "verified");
+  assert.equal(fs.existsSync(path.join(homePath, ".dotaios", "managed-skills", "transaction.json")), false);
+  assert.equal(fs.existsSync(path.join(aiosPath, "skills", ".managed-skill-store")), false);
+});
+
+test("official-batch recovers a staged overlay prefix only while its live source remains proved", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-stage-overlay-prefix-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writePredecessorSkills(aiosPath);
+
+  const promptPath = path.join(aiosPath, "skills", "plan-today", "prompt.md");
+  const promptBytes = Buffer.from(renderGeneratedPrompt("staged-overlay-prefix"));
+  fs.writeFileSync(promptPath, promptBytes, { mode: 0o644 });
+  fs.chmodSync(promptPath, 0o644);
+  const promptPrefix = promptBytes.subarray(0, 32);
+  const official = await loadOfficialSkillPackage();
+  const planTodayFiles = official.skills
+    .find(({ name }) => name === "plan-today")
+    .files.map((file) => ({
+      path: file.path,
+      bytes: file.installed_bytes.toString("base64")
+    }));
+
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const preview = await store.previewOfficialBatch();
+  const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+  const interrupted = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+    const store = createManagedSkillStore({
+      aiosPath: ${JSON.stringify(aiosPath)},
+      homePath: ${JSON.stringify(homePath)},
+      hooks: { checkpoint: async (name, detail) => {
+        if (name !== "official_stage_root_identity_persisted" || detail.name !== "plan-today") return;
+        const stagedPath = path.join(
+          ${JSON.stringify(aiosPath)},
+          "skills",
+          ".managed-skill-store",
+          "staging",
+          ${JSON.stringify(preview.operation_id)},
+          "plan-today"
+        );
+        for (const file of ${JSON.stringify(planTodayFiles)}) {
+          await fs.writeFile(
+            path.join(stagedPath, file.path),
+            Buffer.from(file.bytes, "base64"),
+            { flag: "wx", mode: 0o644 }
+          );
+        }
+        await fs.writeFile(
+          path.join(stagedPath, "prompt.md"),
+          Buffer.from(${JSON.stringify(promptPrefix.toString("base64"))}, "base64"),
+          { flag: "wx", mode: 0o644 }
+        );
+        process.exit(85);
+      } }
+    });
+    await store.applyOfficialBatch({
+      operationId: ${JSON.stringify(preview.operation_id)},
+      planFingerprint: ${JSON.stringify(preview.plan_fingerprint)}
+    });
+  `], { encoding: "utf8" });
+
+  assert.equal(interrupted.status, 85, interrupted.stderr);
+  const recovered = await store.applyOfficialBatch({
+    operationId: preview.operation_id,
+    planFingerprint: preview.plan_fingerprint
+  });
+  assert.equal(recovered.status, "verified");
+  assert.deepEqual(fs.readFileSync(promptPath), promptBytes);
+  assert.equal(fs.existsSync(path.join(homePath, ".dotaios", "managed-skills", "transaction.json")), false);
+});
+
+test("official-batch rechecks live overlay authority immediately before cleanup unlink", async (t) => {
+  for (const scenario of [
+    { name: "incomplete 0700 stage", complete: false, exitCode: 87 },
+    { name: "complete 0755 stage before manifest", complete: true, exitCode: 88 }
+  ]) {
+    await t.test(scenario.name, {
+      skip: scenario.complete && process.platform === "win32" ? "POSIX staged-root modes" : false
+    }, async (t) => {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-stage-overlay-race-"));
+      const aiosPath = path.join(root, "aios");
+      const homePath = path.join(root, "home");
+      fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+      fs.mkdirSync(homePath);
+      t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+      writePredecessorSkills(aiosPath);
+
+      const promptPath = path.join(aiosPath, "skills", "plan-today", "prompt.md");
+      const promptBytes = Buffer.from(renderGeneratedPrompt(`overlay-race-old-${scenario.name}`));
+      const changedPromptBytes = Buffer.from(renderGeneratedPrompt(`overlay-race-new-longer-${scenario.name}`));
+      fs.writeFileSync(promptPath, promptBytes, { mode: 0o644 });
+      fs.chmodSync(promptPath, 0o644);
+      const stagedPromptBytes = scenario.complete ? promptBytes : promptBytes.subarray(0, 32);
+      const official = await loadOfficialSkillPackage();
+      const planTodayFiles = official.skills
+        .find(({ name }) => name === "plan-today")
+        .files.map((file) => ({
+          path: file.path,
+          bytes: file.installed_bytes.toString("base64")
+        }));
+
+      const store = createManagedSkillStore({ aiosPath, homePath });
+      const preview = await store.previewOfficialBatch();
+      const stagedPath = path.join(
+        aiosPath,
+        "skills",
+        ".managed-skill-store",
+        "staging",
+        preview.operation_id,
+        "plan-today"
+      );
+      const stagedPromptPath = path.join(stagedPath, "prompt.md");
+      const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+      const interrupted = spawnSync(process.execPath, ["--input-type=module", "-e", `
+        const fs = await import("node:fs/promises");
+        const path = await import("node:path");
+        const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+        const store = createManagedSkillStore({
+          aiosPath: ${JSON.stringify(aiosPath)},
+          homePath: ${JSON.stringify(homePath)},
+          hooks: { checkpoint: async (name, detail) => {
+            if (name !== "official_stage_root_identity_persisted" || detail.name !== "plan-today") return;
+            for (const file of ${JSON.stringify(planTodayFiles)}) {
+              await fs.writeFile(
+                path.join(${JSON.stringify(stagedPath)}, file.path),
+                Buffer.from(file.bytes, "base64"),
+                { flag: "wx", mode: 0o644 }
+              );
+            }
+            await fs.writeFile(
+              ${JSON.stringify(stagedPromptPath)},
+              Buffer.from(${JSON.stringify(stagedPromptBytes.toString("base64"))}, "base64"),
+              { flag: "wx", mode: 0o644 }
+            );
+            if (${JSON.stringify(scenario.complete)}) await fs.chmod(${JSON.stringify(stagedPath)}, 0o755);
+            process.exit(${JSON.stringify(scenario.exitCode)});
+          } }
+        });
+        await store.applyOfficialBatch({
+          operationId: ${JSON.stringify(preview.operation_id)},
+          planFingerprint: ${JSON.stringify(preview.plan_fingerprint)}
+        });
+      `], { encoding: "utf8" });
+      assert.equal(interrupted.status, scenario.exitCode, interrupted.stderr);
+      if (process.platform !== "win32") {
+        assert.equal(fs.statSync(stagedPath).mode & 0o777, scenario.complete ? 0o755 : 0o700);
+      }
+
+      let mutated = false;
+      const recoveringStore = createManagedSkillStore({
+        aiosPath,
+        homePath,
+        hooks: {
+          checkpoint: async (name, detail) => {
+            if (name !== "official_cleanup_file_removed" || detail.root !== stagedPath || mutated) return;
+            mutated = true;
+            fs.writeFileSync(promptPath, changedPromptBytes, { mode: 0o644 });
+          }
+        }
+      });
+      await assert.rejects(
+        recoveringStore.applyOfficialBatch({
+          operationId: preview.operation_id,
+          planFingerprint: preview.plan_fingerprint
+        }),
+        (error) => error?.code === "recovery_required"
+          && error.reason === "official_cleanup_file_changed"
+      );
+      assert.equal(mutated, true);
+      assert.deepEqual(fs.readFileSync(stagedPromptPath), stagedPromptBytes);
+      assert.deepEqual(fs.readFileSync(promptPath), changedPromptBytes);
+      const journal = JSON.parse(fs.readFileSync(
+        path.join(homePath, ".dotaios", "managed-skills", "transaction.json"),
+        "utf8"
+      ));
+      assert.equal(journal.state, "needs_attention");
+    });
+  }
+});
+
+test("official-batch rechecks each staged leaf immediately before unlinking it", {
+  skip: process.platform === "win32" ? "POSIX staged-root modes" : false
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-stage-cleanup-race-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writePredecessorSkills(aiosPath);
+
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const preview = await store.previewOfficialBatch();
+  const interruptedTarget = preview.targets.find(({ action }) => action === "repair").name;
+  const official = await loadOfficialSkillPackage();
+  const stagedPrefixes = official.skills
+    .find(({ name }) => name === interruptedTarget)
+    .files.slice(0, 2)
+    .map((file) => ({
+      path: file.path,
+      bytes: file.installed_bytes.subarray(0, 32).toString("base64")
+    }));
+  assert.equal(stagedPrefixes.length, 2);
+  const stagedPath = path.join(
+    aiosPath,
+    "skills",
+    ".managed-skill-store",
+    "staging",
+    preview.operation_id,
+    interruptedTarget
+  );
+  const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+  const interrupted = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+    const store = createManagedSkillStore({
+      aiosPath: ${JSON.stringify(aiosPath)},
+      homePath: ${JSON.stringify(homePath)},
+      hooks: { checkpoint: async (name) => {
+        if (name !== "official_stage_root_identity_persisted") return;
+        for (const file of ${JSON.stringify(stagedPrefixes)}) {
+          await fs.writeFile(
+            path.join(${JSON.stringify(stagedPath)}, file.path),
+            Buffer.from(file.bytes, "base64"),
+            { flag: "wx", mode: 0o644 }
+          );
+        }
+        process.exit(86);
+      } }
+    });
+    await store.applyOfficialBatch({
+      operationId: ${JSON.stringify(preview.operation_id)},
+      planFingerprint: ${JSON.stringify(preview.plan_fingerprint)}
+    });
+  `], { encoding: "utf8" });
+  assert.equal(interrupted.status, 86, interrupted.stderr);
+
+  const laterPath = path.join(stagedPath, stagedPrefixes[1].path);
+  let replaced = false;
+  const recoveringStore = createManagedSkillStore({
+    aiosPath,
+    homePath,
+    hooks: {
+      checkpoint: async (name, detail) => {
+        if (
+          name !== "official_cleanup_file_removed"
+          || detail.root !== stagedPath
+          || detail.path !== stagedPrefixes[0].path
+          || replaced
+        ) return;
+        replaced = true;
+        fs.unlinkSync(laterPath);
+        fs.writeFileSync(laterPath, "foreign replacement\n", { mode: 0o644 });
+      }
+    }
+  });
+
+  await assert.rejects(
+    recoveringStore.applyOfficialBatch({
+      operationId: preview.operation_id,
+      planFingerprint: preview.plan_fingerprint
+    }),
+    (error) => error?.code === "recovery_required"
+      && error.reason === "official_cleanup_file_changed"
+  );
+  assert.equal(replaced, true);
+  assert.equal(fs.readFileSync(laterPath, "utf8"), "foreign replacement\n");
+  const journal = JSON.parse(fs.readFileSync(
+    path.join(homePath, ".dotaios", "managed-skills", "transaction.json"),
+    "utf8"
+  ));
+  assert.equal(journal.state, "needs_attention");
+});
+
+test("official-batch preserves an undeclared entry found in interrupted 0700 staging", {
+  skip: process.platform === "win32" ? "POSIX staged-root modes" : false
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-stage-foreign-interrupt-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  writePredecessorSkills(aiosPath);
+
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const preview = await store.previewOfficialBatch();
+  const interruptedTarget = preview.targets.find(({ action }) => action === "repair").name;
+  const stagedPath = path.join(
+    aiosPath,
+    "skills",
+    ".managed-skill-store",
+    "staging",
+    preview.operation_id,
+    interruptedTarget
+  );
+  const foreignPath = path.join(stagedPath, "foreign.txt");
+  const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+  const interrupted = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    const fs = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+    const store = createManagedSkillStore({
+      aiosPath: ${JSON.stringify(aiosPath)},
+      homePath: ${JSON.stringify(homePath)},
+      hooks: { checkpoint: async (name) => {
+        if (name !== "official_stage_root_identity_persisted") return;
+        await fs.writeFile(path.join(${JSON.stringify(stagedPath)}, "foreign.txt"), "foreign sentinel\\n", { flag: "wx", mode: 0o644 });
+        process.exit(83);
+      } }
+    });
+    await store.applyOfficialBatch({
+      operationId: ${JSON.stringify(preview.operation_id)},
+      planFingerprint: ${JSON.stringify(preview.plan_fingerprint)}
+    });
+  `], { encoding: "utf8" });
+
+  assert.equal(interrupted.status, 83, interrupted.stderr);
+  const before = snapshotTree(stagedPath);
+  await assert.rejects(
+    store.applyOfficialBatch({
+      operationId: preview.operation_id,
+      planFingerprint: preview.plan_fingerprint
+    }),
+    (error) => error?.code === "recovery_required"
+      && error.reason === "official_cleanup_tree_changed"
+  );
+  assert.deepEqual(snapshotTree(stagedPath), before);
+  assert.equal(fs.readFileSync(foreignPath, "utf8"), "foreign sentinel\n");
+  assert.equal(fs.existsSync(path.join(homePath, ".dotaios", "managed-skills", "transaction.json")), true);
+});
+
+test("official-batch rejects a forged stage identity before deleting foreign declared-name bytes", {
+  skip: process.platform === "win32" ? "POSIX staged-root modes" : false
+}, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-official-stage-forged-identity-"));
+  const aiosPath = path.join(root, "aios");
+  const homePath = path.join(root, "home");
+  fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
+  fs.mkdirSync(homePath);
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const store = createManagedSkillStore({ aiosPath, homePath });
+  const preview = await store.previewOfficialBatch();
+  const moduleUrl = new URL("../../packages/core/src/managed-skill-store.mjs", import.meta.url).href;
+  const interrupted = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    const { createManagedSkillStore } = await import(${JSON.stringify(moduleUrl)});
+    const store = createManagedSkillStore({
+      aiosPath: ${JSON.stringify(aiosPath)},
+      homePath: ${JSON.stringify(homePath)},
+      hooks: { checkpoint: async (name) => {
+        if (name === "official_prepared") process.exit(84);
+      } }
+    });
+    await store.applyOfficialBatch({
+      operationId: ${JSON.stringify(preview.operation_id)},
+      planFingerprint: ${JSON.stringify(preview.plan_fingerprint)}
+    });
+  `], { encoding: "utf8" });
+  assert.equal(interrupted.status, 84, interrupted.stderr);
+
+  const journalPath = path.join(homePath, ".dotaios", "managed-skills", "transaction.json");
+  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+  const target = journal.targets.at(-1);
+  assert.equal(journal.state, "official_prepared");
+  assert.equal(target.stage_root_identity, null);
+  assert.equal(target.staged_manifest, null);
+
+  fs.mkdirSync(target.staged_path, { recursive: true, mode: 0o700 });
+  fs.chmodSync(target.staged_path, 0o700);
+  const foreignPath = path.join(target.staged_path, target.desired_files[0].path);
+  fs.writeFileSync(foreignPath, "foreign sentinel\n", { mode: 0o644 });
+  const stagedStats = fs.lstatSync(target.staged_path, { bigint: true });
+  target.stage_root_identity = {
+    type: "directory",
+    dev: String(stagedStats.dev),
+    ino: String(stagedStats.ino)
+  };
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 });
+
+  const before = snapshotTree(target.staged_path);
+  journal.state = "official_staged";
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 });
+  await assert.rejects(
+    store.applyOfficialBatch({
+      operationId: preview.operation_id,
+      planFingerprint: preview.plan_fingerprint
+    }),
+    (error) => error?.code === "unsafe_state"
+      && error.reason === "incomplete_official_batch_staged_authority"
+  );
+  assert.deepEqual(snapshotTree(target.staged_path), before);
+
+  journal.state = "official_prepared";
+  fs.writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`, { mode: 0o600 });
+  await assert.rejects(
+    store.applyOfficialBatch({
+      operationId: preview.operation_id,
+      planFingerprint: preview.plan_fingerprint
+    }),
+    (error) => error?.code === "recovery_required"
+      && error.reason === "official_cleanup_file_changed"
+  );
+  assert.deepEqual(snapshotTree(target.staged_path), before);
+  assert.equal(fs.readFileSync(foreignPath, "utf8"), "foreign sentinel\n");
+  assert.equal(fs.existsSync(journalPath), true);
 });
 
 test("official-batch recovers an interrupted root publication through the existing journal and retries the exact proof", async (t) => {

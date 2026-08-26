@@ -46,11 +46,13 @@ Try saying:
 2. Run `npx dotaios@<exact-candidate-version> capture list` and note the session id you will attribute each
    change to. Every promotion needs one — there is no free-text promotion.
 3. For each stale or contradicted claim, preview the retirement:
+
    ```bash
    npx dotaios@<exact-candidate-version> memory promote <session-id> --to context \
      --destination context/work.md --operation supersede \
      --match "<the old fact, verbatim>" --summary "<what is true now>"
    ```
+
    `--match` takes the old block's content hash or its summary text, exactly,
    and only resolves blocks that `npx dotaios@<exact-candidate-version> memory promote` itself wrote. A fact
    typed into a file by hand has nothing to match: edit that file directly and
