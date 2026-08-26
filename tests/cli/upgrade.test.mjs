@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -22,6 +21,10 @@ import {
   loadOfficialSkillPackage
 } from "../../packages/core/src/official-skills.mjs";
 import { snapshotTree } from "../helpers/managed-skills.mjs";
+import {
+  renderGeneratedPrompt,
+  writePredecessorSkills
+} from "../helpers/official-skills-fixture.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -29,11 +32,6 @@ const candidateVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
 ).version;
 const candidateInvocation = `npx dotaios@${candidateVersion}`;
-const predecessorFixture = JSON.parse(fs.readFileSync(
-  path.join(repoRoot, "tests", "fixtures", "official-skills-predecessor.json"),
-  "utf8"
-));
-
 test("upgrade remains a shallow sequencer with no migration writer, PATH runner, or new lock", () => {
   const source = fs.readFileSync(
     path.join(repoRoot, "packages", "cli", "src", "commands", "upgrade.mjs"),
@@ -461,43 +459,6 @@ async function createUpgradeFixture(t, { skillsFirst = false } = {}) {
 
 function writeAiosConfig(aiosPath, value) {
   fs.writeFileSync(path.join(aiosPath, "aios.json"), `${JSON.stringify(value, null, 2)}\n`);
-}
-
-function writePredecessorSkills(aiosPath) {
-  assert.equal(predecessorFixture.format, "dotaios-official-skill-predecessor-fixture/v1");
-  for (const file of predecessorFixture.files) {
-    const destination = path.join(aiosPath, "skills", ...file.path.split("/"));
-    const bytes = Buffer.from(predecessorFixture.blobs[file.sha256], "base64");
-    assert.equal(createHash("sha256").update(bytes).digest("hex"), file.sha256, file.path);
-    fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o755 });
-    fs.writeFileSync(destination, bytes, { mode: file.mode });
-    fs.chmodSync(destination, file.mode);
-  }
-}
-
-function renderGeneratedPrompt(origin, guidance) {
-  return [
-    "# plan-today personalization",
-    "",
-    guidance,
-    "Skills should prefer this compiled file over reading the individual context files.",
-    "",
-    "## Who you are",
-    `Fixture owner — origin ${origin}`,
-    "",
-    "## What you're working on",
-    "Preserve these exact personalized bytes.",
-    "",
-    "## What matters this week",
-    "Safe official adoption.",
-    "",
-    "## Planning preferences",
-    "- Plan style: focused",
-    "- Priorities per day: 3",
-    "- Time blocks: yes",
-    "- Frog definition: overdue tasks",
-    ""
-  ].join("\n");
 }
 
 function writePathTripwire(destination, marker) {

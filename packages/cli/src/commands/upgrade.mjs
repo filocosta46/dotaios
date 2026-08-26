@@ -22,6 +22,7 @@ import {
   ensureAiosFolder,
   expandHome
 } from "../../../core/src/paths.mjs";
+import { compareUtf8Bytes } from "../../../core/src/skills.mjs";
 import {
   applyManagedScheduleFile,
   previewManagedScheduleFile
@@ -523,7 +524,7 @@ function shellQuote(value) {
 }
 
 function comparePathEntry([left], [right]) {
-  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
+  return compareUtf8Bytes(left, right);
 }
 
 function compareCanonical(left, right) {
@@ -583,14 +584,10 @@ function sortCanonicalValue(value) {
   if (Array.isArray(value)) return value.map(sortCanonicalValue);
   if (!value || typeof value !== "object") return value;
   const sorted = {};
-  for (const key of Object.keys(value).sort(compareUtf8)) {
+  for (const key of Object.keys(value).sort(compareUtf8Bytes)) {
     if (value[key] !== undefined) sorted[key] = sortCanonicalValue(value[key]);
   }
   return sorted;
-}
-
-function compareUtf8(left, right) {
-  return Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8"));
 }
 
 function sha256(value) {
