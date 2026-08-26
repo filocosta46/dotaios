@@ -28,6 +28,12 @@ import {
   previewManagedScheduleFile
 } from "./schedule.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+import {
+  assertSafeTerminalText,
+  guidanceShellLabel,
+  renderGuidanceCommand,
+  visibleTerminalText
+} from "../lib/command-guidance.mjs";
 
 const UPGRADE_FORMAT = "dotaios-upgrade-preview/v1";
 const upgradeDomains = new WeakMap();
@@ -41,6 +47,8 @@ const OFFICIAL_APPLY_RECOVERY_CODES = new Set([
   "recovery_required",
   "unsafe_state"
 ]);
+
+class SkillsFirstCatalogDriftError extends Error {}
 
 const HELP_TEXT = `Usage:
   dotaios upgrade [--dry-run] [--path <dir>]
@@ -70,7 +78,8 @@ export async function previewUpgrade(input = {}) {
     return recoveryRequiredPreview(context, {
       reason: error?.code || "migration-state-unavailable",
       detail: error?.message || "Migration compatibility state could not be inspected.",
-      recover: false
+      recover: false,
+      guidanceAction: "doctor"
     });
   }
   if (migration.status !== "current") {
@@ -133,6 +142,7 @@ export async function previewUpgrade(input = {}) {
     for (const agent of agents) {
       const destination = bridgePath(context.homePath, agent);
       if (!destination || destinations.has(destination)) continue;
+      assertSafeTerminalText(destination, "Agent bridge path");
       destinations.set(destination, agent);
     }
     for (const [destination, agent] of [...destinations.entries()].sort(comparePathEntry)) {
@@ -203,6 +213,7 @@ export async function previewUpgrade(input = {}) {
   };
   upgradeDomains.set(preview, {
     store,
+    officialComposition,
     officialProof,
     schedulePlan,
     bridgeEntries
@@ -210,7 +221,7 @@ export async function previewUpgrade(input = {}) {
   return deepFreeze(preview);
 }
 
-export async function applyUpgrade(input = {}) {
+export async function applyUpgrade(input = {}, lifecycle = {}) {
   const preview = await previewUpgrade(input);
   if (preview.status === "recovery-required") return preview;
 
@@ -277,7 +288,8 @@ export async function applyUpgrade(input = {}) {
     {
       boundaryRoot: preview.aios_path,
       candidateVersion: preview.candidate_version,
-      expectedFingerprint: domains.schedulePlan.fingerprint
+      expectedFingerprint: domains.schedulePlan.fingerprint,
+      beforeVerify: lifecycle.beforeScheduleVerify
     }
   );
   results.push({ domain: "managed-schedules", ...schedule });
@@ -299,7 +311,29 @@ export async function applyUpgrade(input = {}) {
     });
   }
 
-  if (suppressSkillsFirstBridges && domains.bridgeEntries.length > 0) {
+  if (preview.skills_first && !suppressSkillsFirstBridges && domains.bridgeEntries.length > 0) {
+    const catalogCheck = await skillsFirstCatalogCheck(domains, preview);
+    if (!catalogCheck.current) {
+      suppressSkillsFirstBridges = true;
+      conflicts.push({
+        domain: "managed-bridges",
+        reason: "skills-first-catalog-changed",
+        detail: "Skills-first bridge refresh was suppressed because the published catalog changed after official verification."
+      });
+      results.push({
+        domain: "managed-bridges",
+        status: "blocked-conflict",
+        action: "skipped",
+        reason: "skills-first-catalog-changed"
+      });
+    }
+  }
+
+  if (
+    suppressSkillsFirstBridges
+    && domains.bridgeEntries.length > 0
+    && !conflicts.some(({ reason }) => reason === "skills-first-catalog-changed")
+  ) {
     conflicts.push({
       domain: "managed-bridges",
       reason: "skills-first-official-apply-blocked",
@@ -314,11 +348,39 @@ export async function applyUpgrade(input = {}) {
   }
 
   for (const entry of suppressSkillsFirstBridges ? [] : domains.bridgeEntries) {
-    const bridge = await applyManagedBridgeFile(entry.destination, entry.generatedContent, {
-      refreshOnly: true,
-      expectedFingerprint: entry.plan.fingerprint,
-      boundaryRoot: preview.home_path
-    });
+    let bridge;
+    try {
+      bridge = await applyManagedBridgeFile(entry.destination, entry.generatedContent, {
+        refreshOnly: true,
+        expectedFingerprint: entry.plan.fingerprint,
+        boundaryRoot: preview.home_path,
+        ...(preview.skills_first ? {
+          beforePublish: async () => {
+            await lifecycle.beforeBridgePublish?.();
+            if (!(await skillsFirstCatalogCheck(domains, preview)).current) {
+              throw new SkillsFirstCatalogDriftError();
+            }
+          }
+        } : {})
+      });
+    } catch (error) {
+      if (!(error instanceof SkillsFirstCatalogDriftError)) throw error;
+      suppressSkillsFirstBridges = true;
+      conflicts.push({
+        domain: "managed-bridges",
+        path: entry.destination,
+        reason: "skills-first-catalog-changed",
+        detail: "Skills-first bridge refresh was suppressed because the catalog changed before bridge publication."
+      });
+      results.push({
+        domain: "managed-bridges",
+        status: "blocked-conflict",
+        action: "skipped",
+        path: entry.destination,
+        reason: "skills-first-catalog-changed"
+      });
+      break;
+    }
     results.push({ domain: "managed-bridges", ...bridge });
     if (["conflict", "unsafe-target", "kept"].includes(bridge.action)) {
       conflicts.push({
@@ -328,6 +390,35 @@ export async function applyUpgrade(input = {}) {
         detail: bridge.note || "The existing bridge was preserved."
       });
     }
+    await lifecycle.afterBridgeApply?.({
+      destination: entry.destination,
+      result: bridge
+    });
+    if (
+      preview.skills_first
+      && bridge.action === "updated"
+      && !(await skillsFirstCatalogCheck(domains, preview)).current
+    ) {
+      suppressSkillsFirstBridges = true;
+      conflicts.push({
+        domain: "managed-bridges",
+        reason: "skills-first-catalog-changed",
+        detail: "Skills-first catalogs changed while bridges were being published; rerun upgrade before treating the bridge refresh as verified."
+      });
+      break;
+    }
+  }
+
+  if (
+    preview.skills_first
+    && !suppressSkillsFirstBridges
+    && !(await skillsFirstCatalogCheck(domains, preview)).current
+  ) {
+    conflicts.push({
+      domain: "managed-bridges",
+      reason: "skills-first-catalog-changed",
+      detail: "Skills-first catalogs changed before aggregate verification; rerun upgrade before treating the bridge refresh as verified."
+    });
   }
 
   const uniqueConflicts = uniqueCanonical(conflicts);
@@ -411,6 +502,8 @@ function parseOptions(args = []) {
 async function resolveUpgradeContext(input) {
   const aiosPath = path.resolve(expandHome(input.aiosPath || defaultAiosPath()));
   const homePath = path.resolve(expandHome(input.homePath || os.homedir()));
+  assertSafeTerminalText(aiosPath, "AIOS path");
+  assertSafeTerminalText(homePath, "Home path");
   const candidateVersion = input.candidateVersion ?? await readPackageVersion();
   return {
     aiosPath,
@@ -420,9 +513,12 @@ async function resolveUpgradeContext(input) {
   };
 }
 
-function recoveryRequiredPreview(context, { reason, detail, recover }) {
+function recoveryRequiredPreview(context, { reason, detail, recover, guidanceAction = "migrate" }) {
   const guidance = [
-    `${context.candidateInvocation} migrate${recover ? " --recover" : ""}${pathOption(context.aiosPath)}`
+    renderGuidanceCommand(
+      `${context.candidateInvocation} ${guidanceAction}${recover ? " --recover" : ""}`,
+      { targetPath: context.aiosPath, defaultPath: path.resolve(expandHome(defaultAiosPath())) }
+    )
   ];
   return deepFreeze({
     format: UPGRADE_FORMAT,
@@ -435,6 +531,7 @@ function recoveryRequiredPreview(context, { reason, detail, recover }) {
     home_path: context.homePath,
     targets: [],
     conflicts: [{ domain: "migration", reason, detail }],
+    guidance_shell: guidanceShellLabel(),
     guidance
   });
 }
@@ -472,24 +569,29 @@ function buildTargetSummaries(officialProof, schedulePlan, bridgeEntries) {
 }
 
 function printPreview(preview) {
-  console.log(`DotAIOS managed-scaffold upgrade preview for ${preview.aios_path}`);
+  console.log(`DotAIOS managed-scaffold upgrade preview for ${visibleTerminalText(preview.aios_path)}`);
   if (preview.status === "recovery-required") {
-    console.error(`[blocked] ${preview.conflicts[0].detail}`);
-    for (const command of preview.guidance) console.error(`Run: ${command}`);
+    console.error(`[blocked] ${visibleTerminalText(preview.conflicts[0].detail)}`);
+    console.error(`Run in ${visibleTerminalText(preview.guidance_shell)}:`);
+    for (const command of preview.guidance) console.error(visibleTerminalText(command));
     console.log("No files changed.");
     process.exitCode = 1;
     return;
   }
   for (const target of preview.targets) {
-    console.log(`[${target.status}] ${target.domain}${target.path ? ` ${target.path}` : ""}`);
+    console.log(`[${target.status}] ${target.domain}${target.path ? ` ${visibleTerminalText(target.path)}` : ""}`);
   }
   for (const conflict of preview.conflicts) {
-    console.error(`[conflict] ${conflict.domain}: ${conflict.detail || conflict.reason}`);
+    console.error(`[conflict] ${visibleTerminalText(conflict.domain)}: ${visibleTerminalText(conflict.detail || conflict.reason)}`);
   }
   console.log(`Preview ID: ${preview.id}`);
   console.log(`Fingerprint: ${preview.fingerprint}`);
   console.log("No files changed.");
-  console.log(`Apply exactly this preview with: ${preview.candidate_invocation} upgrade --apply --id ${preview.id} --fingerprint ${preview.fingerprint}${pathOption(preview.aios_path)}`);
+  console.log(`Apply exactly this preview in ${guidanceShellLabel()}:`);
+  console.log(renderGuidanceCommand(
+    `${preview.candidate_invocation} upgrade --apply --id ${preview.id} --fingerprint ${preview.fingerprint}`,
+    { targetPath: preview.aios_path, defaultPath: path.resolve(expandHome(defaultAiosPath())) }
+  ));
   if (preview.status === "blocked-conflict") process.exitCode = 1;
 }
 
@@ -501,30 +603,54 @@ function printApply(result) {
   if (result.status === "recovery-required") {
     console.error("[blocked] Recovery is required before managed scaffold upgrade can continue.");
     for (const conflict of result.conflicts || []) {
-      console.error(`  ${conflict.domain}: ${conflict.detail || conflict.reason}`);
+      console.error(`  ${visibleTerminalText(conflict.domain)}: ${visibleTerminalText(conflict.detail || conflict.reason)}`);
     }
-    for (const command of result.guidance || []) console.error(`Run: ${command}`);
+    if (result.guidance_shell) {
+      console.error(`Run in ${visibleTerminalText(result.guidance_shell)}:`);
+    }
+    for (const command of result.guidance || []) console.error(visibleTerminalText(command));
   } else {
     console.error("[blocked] Managed scaffold upgrade preserved one or more conflicts.");
     for (const conflict of result.conflicts) {
-      console.error(`  ${conflict.domain}: ${conflict.detail || conflict.reason}`);
+      console.error(`  ${visibleTerminalText(conflict.domain)}: ${visibleTerminalText(conflict.detail || conflict.reason)}`);
     }
   }
   process.exitCode = 1;
 }
 
-function pathOption(target) {
-  const defaultPath = path.resolve(expandHome(defaultAiosPath()));
-  return target === defaultPath ? "" : ` --path ${shellQuote(target)}`;
-}
-
-function shellQuote(value) {
-  if (/^[A-Za-z0-9_./:-]+$/.test(value)) return value;
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
 function comparePathEntry([left], [right]) {
   return compareUtf8Bytes(left, right);
+}
+
+async function skillsFirstCatalogCheck(domains, preview) {
+  try {
+    const [observed, config] = await Promise.all([
+      domains.store.previewOfficialBatchComposition(),
+      readAiosConfig(preview.aios_path)
+    ]);
+    const expected = domains.officialComposition.proof;
+    const proof = observed.proof;
+    return {
+      current: Boolean(observed.skillsCatalog)
+        && proof.conflicts.length === 0
+        && proof.effects.repair_official_skills.length === 0
+        && proof.effects.publish_catalogs === false
+        && proof.candidate_invocation === expected.candidate_invocation
+        && proof.source_fingerprint === expected.source_fingerprint
+        && sameCatalogDigests(proof.desired_catalogs, expected.desired_catalogs)
+        && sameCatalogDigests(proof.catalogs, expected.desired_catalogs)
+        && Boolean(config.skills_first) === preview.skills_first
+    };
+  } catch {
+    return { current: false };
+  }
+}
+
+function sameCatalogDigests(left, right) {
+  return Boolean(left && right)
+    && left.registry_sha256 === right.registry_sha256
+    && left.index_sha256 === right.index_sha256
+    && left.resolver_sha256 === right.resolver_sha256;
 }
 
 function compareCanonical(left, right) {

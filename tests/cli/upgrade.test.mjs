@@ -85,6 +85,7 @@ test("upgrade preview is read-only and exact aggregate proof gates every write",
   assert.match(fs.readFileSync(fixture.bridgePath, "utf8"), new RegExp(
     `${escapeRegExp(candidateInvocation)} brief --compact --memory shared`
   ));
+  assert.doesNotMatch(fs.readFileSync(fixture.bridgePath, "utf8"), /# Installed Skills|# Skill Resolver/);
   assert.equal(fs.readFileSync(unmanaged, "utf8"), "# Personal Claude instructions\n");
 
   const afterApplied = snapshotTree(fixture.root);
@@ -131,6 +132,27 @@ test("upgrade gates outdated schema and open migration recovery with zero writes
         );
       },
       guidance: /npx dotaios@[^\s]+ migrate --recover/
+    },
+    {
+      name: "future schema",
+      arrange({ aiosPath }) {
+        writeAiosConfig(aiosPath, { schema_version: "9.0.0", skills_first: false });
+      },
+      guidance: /npx dotaios@[^\s]+ doctor(?: --path|$)/
+    },
+    {
+      name: "unsupported schema",
+      arrange({ aiosPath }) {
+        writeAiosConfig(aiosPath, { schema_version: "0.5.0", skills_first: false });
+      },
+      guidance: /npx dotaios@[^\s]+ doctor(?: --path|$)/
+    },
+    {
+      name: "invalid config",
+      arrange({ aiosPath }) {
+        fs.writeFileSync(path.join(aiosPath, "aios.json"), "not json\n");
+      },
+      guidance: /npx dotaios@[^\s]+ doctor(?: --path|$)/
     }
   ]) {
     await t.test(scenario.name, async (t) => {
@@ -142,6 +164,7 @@ test("upgrade gates outdated schema and open migration recovery with zero writes
       assert.equal(preview.status, "recovery-required");
       assert.equal(preview.id, null);
       assert.equal(preview.fingerprint, null);
+      assert.equal(preview.guidance_shell, process.platform === "win32" ? "PowerShell" : "POSIX shell");
       assert.match(preview.guidance.join("\n"), scenario.guidance);
       assert.doesNotMatch(preview.guidance.join("\n"), /npx -y|dotaios migrate --apply/);
       assert.deepEqual(snapshotTree(fixture.root), before);
@@ -155,6 +178,148 @@ test("upgrade gates outdated schema and open migration recovery with zero writes
       assert.deepEqual(snapshotTree(fixture.root), before);
     });
   }
+});
+
+test("public upgrade prints bare doctor guidance for an unsupported future schema", async (t) => {
+  const fixture = await createUpgradeFixture(t);
+  writeAiosConfig(fixture.aiosPath, { schema_version: "9.0.0", skills_first: false });
+  const result = spawnSync(process.execPath, [cli, "upgrade", "--dry-run", "--path", fixture.aiosPath], {
+    cwd: repoRoot,
+    encoding: "utf8"
+  });
+
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stderr, new RegExp(`(?:^|\\n)${escapeRegExp(candidateInvocation)} doctor`));
+  assert.doesNotMatch(result.stderr, /migrate/);
+});
+
+test("public upgrade rejects an unsafe path without rendering its terminal control", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-upgrade-unsafe-path-"));
+  const unsafePath = path.join(root, "unsafe\u001b[2J");
+  try {
+    const result = spawnSync(process.execPath, [cli, "upgrade", "--dry-run", "--path", unsafePath], {
+      cwd: repoRoot,
+      encoding: "utf8"
+    });
+    const output = `${result.stdout}\n${result.stderr}`;
+    assert.equal(result.status, 1, output);
+    assert.match(output, /U\+001B/);
+    assert.doesNotMatch(output, /\u001b/);
+    assert.equal(fs.existsSync(unsafePath), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skills-first upgrade blocks bridge publication when the lifecycle edits a catalog", async (t) => {
+  const fixture = await createUpgradeFixture(t, { skillsFirst: true });
+  const preview = await previewUpgrade(fixture);
+  const indexPath = path.join(fixture.aiosPath, "skills", "INDEX.md");
+  const beforeBridge = fs.readFileSync(fixture.bridgePath, "utf8");
+  const result = await applyUpgrade({
+    ...fixture,
+    id: preview.id,
+    fingerprint: preview.fingerprint
+  }, {
+    beforeBridgePublish: () => fs.writeFileSync(indexPath, "# concurrent catalog edit\n")
+  });
+  assert.equal(result.status, "blocked-conflict");
+  assert.match(JSON.stringify(result.conflicts), /skills-first.*catalog.*changed|catalog.*changed/i);
+  assert.equal(fs.readFileSync(fixture.bridgePath, "utf8"), beforeBridge);
+});
+
+test("skills-first upgrade does not verify catalog drift after bridge publication", async (t) => {
+  const fixture = await createUpgradeFixture(t, { skillsFirst: true });
+  const preview = await previewUpgrade(fixture);
+  const resolverPath = path.join(fixture.aiosPath, "skills", "RESOLVER.md");
+  const beforeBridge = fs.readFileSync(fixture.bridgePath, "utf8");
+  const result = await applyUpgrade({
+    ...fixture,
+    id: preview.id,
+    fingerprint: preview.fingerprint
+  }, {
+    afterBridgeApply: ({ destination }) => {
+      if (destination === fixture.bridgePath) {
+        fs.writeFileSync(resolverPath, "# post-publication catalog edit\n");
+      }
+    }
+  });
+  assert.equal(result.status, "blocked-conflict");
+  assert.match(JSON.stringify(result.conflicts), /skills-first.*catalog.*changed|catalog.*changed/i);
+  assert.notEqual(
+    fs.readFileSync(fixture.bridgePath, "utf8"),
+    beforeBridge,
+    JSON.stringify(result.results, null, 2)
+  );
+  assert.match(fs.readFileSync(fixture.bridgePath, "utf8"), new RegExp(
+    `${escapeRegExp(candidateInvocation)} brief --compact --memory shared`
+  ));
+  assert.equal(fs.readFileSync(resolverPath, "utf8"), "# post-publication catalog edit\n");
+});
+
+test("skills-first upgrade blocks a pending official repair before bridge publication", async (t) => {
+  const fixture = await createUpgradeFixture(t, { skillsFirst: true });
+  const preview = await previewUpgrade(fixture);
+  const beforeBridge = fs.readFileSync(fixture.bridgePath, "utf8");
+  const result = await applyUpgrade({
+    ...fixture,
+    id: preview.id,
+    fingerprint: preview.fingerprint
+  }, {
+    beforeBridgePublish: () => fs.rmSync(path.join(fixture.aiosPath, "skills", "closeday", "SKILL.md"))
+  });
+  assert.equal(result.status, "blocked-conflict");
+  assert.match(JSON.stringify(result.conflicts), /skills-first.*catalog.*changed|catalog.*changed/i);
+  assert.equal(fs.readFileSync(fixture.bridgePath, "utf8"), beforeBridge);
+});
+
+test("skills-first upgrade blocks bridge publication when configuration drifts", async (t) => {
+  const fixture = await createUpgradeFixture(t, { skillsFirst: true });
+  const preview = await previewUpgrade(fixture);
+  const beforeBridge = fs.readFileSync(fixture.bridgePath, "utf8");
+  const result = await applyUpgrade({
+    ...fixture,
+    id: preview.id,
+    fingerprint: preview.fingerprint
+  }, {
+    beforeBridgePublish: () => writeAiosConfig(fixture.aiosPath, { schema_version: "1.2.0", skills_first: false })
+  });
+  assert.equal(result.status, "blocked-conflict");
+  assert.match(JSON.stringify(result.conflicts), /skills-first.*catalog.*changed|catalog.*changed/i);
+  assert.equal(fs.readFileSync(fixture.bridgePath, "utf8"), beforeBridge);
+});
+
+test("skills-first upgrade fails closed when configuration inspection fails", async (t) => {
+  const fixture = await createUpgradeFixture(t, { skillsFirst: true });
+  const preview = await previewUpgrade(fixture);
+  const beforeBridge = fs.readFileSync(fixture.bridgePath, "utf8");
+  const result = await applyUpgrade({
+    ...fixture,
+    id: preview.id,
+    fingerprint: preview.fingerprint
+  }, {
+    beforeBridgePublish: () => fs.writeFileSync(
+      path.join(fixture.aiosPath, "aios.json"),
+      "{ invalid json"
+    )
+  });
+  assert.equal(result.status, "blocked-conflict");
+  assert.match(JSON.stringify(result.conflicts), /skills-first.*catalog.*changed|catalog.*changed/i);
+  assert.equal(fs.readFileSync(fixture.bridgePath, "utf8"), beforeBridge);
+});
+
+test("upgrade aggregates a missing schedule postimage as recovery-required", async (t) => {
+  const fixture = await createUpgradeFixture(t);
+  const preview = await previewUpgrade(fixture);
+  const result = await applyUpgrade({
+    ...fixture,
+    id: preview.id,
+    fingerprint: preview.fingerprint
+  }, {
+    beforeScheduleVerify: () => fs.rmSync(fixture.schedulesPath)
+  });
+  assert.equal(result.status, "recovery-required");
+  assert.equal(fs.existsSync(fixture.schedulesPath), false);
 });
 
 test("official conflict suppresses skills-first bridges while independent repairs continue", async (t) => {

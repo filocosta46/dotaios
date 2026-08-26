@@ -243,6 +243,102 @@ test("the schedule domain owner binds preview identity and publishes through the
   }
 });
 
+test("the schedule domain owner refuses verified status when the postimage disappears", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-schedule-postimage-"));
+  const aiosPath = path.join(root, "aios");
+  const schedulesPath = path.join(aiosPath, "schedules.yml");
+  const source = [
+    "schedules:",
+    "  - name: daily-brief",
+    "    command: \"npx dotaios@2.0.10 brief\"",
+    ""
+  ].join("\n");
+  fs.mkdirSync(aiosPath, { recursive: true });
+  fs.writeFileSync(schedulesPath, source);
+  const preview = await previewManagedScheduleFile(schedulesPath, {
+    boundaryRoot: aiosPath,
+    candidateVersion
+  });
+  try {
+    const result = await applyManagedScheduleFile(schedulesPath, {
+      boundaryRoot: aiosPath,
+      candidateVersion,
+      expectedFingerprint: preview.fingerprint,
+      beforeVerify: () => fs.rmSync(schedulesPath)
+    });
+    assert.equal(result.status, "recovery-required");
+    assert.equal(fs.existsSync(schedulesPath), false);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the schedule domain owner refuses verified status for a semantically current byte drift", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-schedule-byte-drift-"));
+  const aiosPath = path.join(root, "aios");
+  const schedulesPath = path.join(aiosPath, "schedules.yml");
+  const source = [
+    "schedules:",
+    "  - name: daily-brief",
+    "    command: \"npx dotaios@2.0.10 brief\"",
+    ""
+  ].join("\n");
+  fs.mkdirSync(aiosPath, { recursive: true });
+  fs.writeFileSync(schedulesPath, source);
+  const preview = await previewManagedScheduleFile(schedulesPath, {
+    boundaryRoot: aiosPath,
+    candidateVersion
+  });
+  try {
+    const result = await applyManagedScheduleFile(schedulesPath, {
+      boundaryRoot: aiosPath,
+      candidateVersion,
+      expectedFingerprint: preview.fingerprint,
+      beforeVerify: () => fs.appendFileSync(schedulesPath, "# concurrent comment\n")
+    });
+    assert.equal(result.status, "recovery-required");
+    assert.match(fs.readFileSync(schedulesPath, "utf8"), /concurrent comment/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the schedule domain owner refuses a symlinked postimage with identical bytes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-schedule-postimage-symlink-"));
+  const aiosPath = path.join(root, "aios");
+  const schedulesPath = path.join(aiosPath, "schedules.yml");
+  const backingPath = path.join(root, "published.yml");
+  const source = [
+    "schedules:",
+    "  - name: daily-brief",
+    "    command: \"npx dotaios@2.0.10 brief\"",
+    ""
+  ].join("\n");
+  fs.mkdirSync(aiosPath, { recursive: true });
+  fs.writeFileSync(schedulesPath, source);
+  const preview = await previewManagedScheduleFile(schedulesPath, {
+    boundaryRoot: aiosPath,
+    candidateVersion
+  });
+  try {
+    const result = await applyManagedScheduleFile(schedulesPath, {
+      boundaryRoot: aiosPath,
+      candidateVersion,
+      expectedFingerprint: preview.fingerprint,
+      beforeVerify: ({ next }) => {
+        fs.writeFileSync(backingPath, next);
+        fs.rmSync(schedulesPath);
+        fs.symlinkSync(backingPath, schedulesPath);
+      }
+    });
+    assert.equal(result.status, "recovery-required");
+    assert.equal(fs.lstatSync(schedulesPath).isSymbolicLink(), true);
+    assert.match(fs.readFileSync(backingPath, "utf8"), new RegExp(candidateInvocation));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the schedule domain owner refuses a symlinked schedule file", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-schedule-file-symlink-"));
   const aiosPath = path.join(root, "aios");

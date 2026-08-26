@@ -165,12 +165,13 @@ async function readStableScheduleSource(schedulesPath) {
   if (!before.isFile() || before.isSymbolicLink()) {
     throw new Error(`Refusing to read an unsafe schedules file: ${schedulesPath}`);
   }
-  const source = await fs.readFile(schedulesPath, "utf8");
+  const bytes = await fs.readFile(schedulesPath);
+  const source = bytes.toString("utf8");
   const after = await fs.lstat(schedulesPath);
   if (!sameRegularFile(after, before)) {
     throw new Error(`Schedules changed while being read: ${schedulesPath}`);
   }
-  return { source, stats: after };
+  return { bytes, source, stats: after };
 }
 
 function printSchedules(schedules) {
@@ -396,7 +397,8 @@ export async function previewManagedScheduleFile(
         preimageMetadata: null
       }),
       "",
-      null
+      null,
+      Buffer.alloc(0)
     );
   }
 
@@ -411,7 +413,8 @@ export async function previewManagedScheduleFile(
       preimageMetadata: regularFilePreimageMetadata(stable.stats)
     }),
     stable.source,
-    stable.stats
+    stable.stats,
+    stable.bytes
   );
 }
 
@@ -424,7 +427,8 @@ export async function applyManagedScheduleFile(
     beforeReplace = null,
     beforePublish = null,
     beforeCommit = null,
-    beforeRename = null
+    beforeRename = null,
+    beforeVerify = null
   } = {}
 ) {
   if (typeof expectedFingerprint !== "string" || !expectedFingerprint) {
@@ -480,23 +484,36 @@ export async function applyManagedScheduleFile(
     };
   }
 
-  const verified = await previewManagedScheduleFile(targetPath, {
-    candidateVersion,
-    boundaryRoot
-  });
-  if (verified.status !== "current") {
-    return {
-      action: "updated",
-      status: "recovery-required",
-      path: targetPath,
-      note: "schedule fields were published but post-write verification did not reach current",
-      ...(replacement.preservedPath ? { preservedPath: replacement.preservedPath } : {})
-    };
+  const nextBytes = Buffer.from(next, "utf8");
+  try {
+    await beforeVerify?.({ destination: targetPath, next: nextBytes });
+    const verified = await previewManagedScheduleFile(targetPath, {
+      candidateVersion,
+      boundaryRoot
+    });
+    if (
+      verified.status === "current"
+      && verified._stats?.isFile()
+      && !verified._stats.isSymbolicLink()
+      && verified.preimage_fingerprint === fingerprintText(next)
+      && verified._bytes.equals(nextBytes)
+    ) {
+      return {
+        action: "updated",
+        status: "verified",
+        path: targetPath,
+        ...(replacement.preservedPath ? { preservedPath: replacement.preservedPath } : {})
+      };
+    }
+  } catch {
+    // Verification is intentionally fail-closed after publication: concurrent
+    // bytes stay in place for the caller to inspect rather than being restored.
   }
   return {
     action: "updated",
-    status: "verified",
+    status: "recovery-required",
     path: targetPath,
+    note: "schedule fields were published but post-write verification did not reach current",
     ...(replacement.preservedPath ? { preservedPath: replacement.preservedPath } : {})
   };
 }
@@ -713,8 +730,9 @@ function finalizeScheduleRepairPlan(plan) {
   };
 }
 
-function attachScheduleFileEvidence(plan, source, stats) {
+function attachScheduleFileEvidence(plan, source, stats, bytes) {
   Object.defineProperties(plan, {
+    _bytes: { value: bytes },
     _source: { value: source },
     _stats: { value: stats }
   });
