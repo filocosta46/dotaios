@@ -75,7 +75,7 @@ export async function collectSkills(aiosPath, { reader = null, root = aiosPath }
   return skills;
 }
 
-function parseSkillMetadata(content) {
+export function parseSkillMetadata(content) {
   if (content === "") {
     return { name: "", description: "", triggers: [], whenToUse: [] };
   }
@@ -267,24 +267,24 @@ export async function writeResolver(aiosPath) {
 // transactional INDEX.md + RESOLVER.md publication for managed-skill lifecycle
 // operations; this wrapper delegates exact artifact creation to the pure
 // renderers above.
-export async function writeSkillsIndex(aiosPath, { writeMode = "overwrite" } = {}) {
+export async function writeSkillsIndex(aiosPath, { writeMode = "overwrite", skills = null } = {}) {
   if (!["overwrite", "preserve"].includes(writeMode)) {
     throw new Error(`Unsupported skill catalog write mode: ${writeMode}`);
   }
   const skillsDir = await ensureRealSkillsDirectory(aiosPath);
-  const skills = await collectSkills(aiosPath);
+  const catalogSkills = skills || await collectSkills(aiosPath);
   const indexPath = path.join(skillsDir, "INDEX.md");
   const resolverPath = path.join(skillsDir, "RESOLVER.md");
   await assertSafeCatalogFiles([indexPath, resolverPath]);
   const indexResult = await writeCatalogFile(
     indexPath,
-    renderSkillsIndexBytes(skills),
+    renderSkillsIndexBytes(catalogSkills),
     writeMode,
     aiosPath
   );
   const resolverResult = await writeCatalogFile(
     resolverPath,
-    renderResolverBytes(skills),
+    renderResolverBytes(catalogSkills),
     writeMode,
     aiosPath
   );
@@ -292,7 +292,7 @@ export async function writeSkillsIndex(aiosPath, { writeMode = "overwrite" } = {
   return {
     path: indexPath,
     resolverPath,
-    count: skills.length,
+    count: catalogSkills.length,
     results,
     conflicts: results.filter(({ action }) => action === "kept")
   };

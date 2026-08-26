@@ -126,6 +126,16 @@ async function createOrKeepWithTemporaryFile(destination, createTemporary) {
   }
 }
 
+async function writeExactModeTemporary(temporary, content, mode) {
+  const handle = await fs.open(temporary, "wx", mode);
+  try {
+    await handle.writeFile(content);
+    await handle.chmod(mode);
+  } finally {
+    await handle.close();
+  }
+}
+
 async function validateDestinationParent(
   destination,
   boundaryRoot,
@@ -195,7 +205,7 @@ export async function writeFileSafe(
   destination,
   content,
   writeMode = "preserve",
-  { boundaryRoot = null, mode = 0o666 } = {}
+  { boundaryRoot = null, mode = 0o666, exactMode = false } = {}
 ) {
   const existing = await lstatIfPresent(destination);
   assertSafeOverwriteTarget(destination, existing);
@@ -205,15 +215,20 @@ export async function writeFileSafe(
   }
 
   if (!existing && writeMode === "preserve") {
-    const created = await createOrKeepWithTemporaryFile(destination, (temporary) =>
-      fs.writeFile(temporary, content, { flag: "wx", mode })
-    );
+    const created = await createOrKeepWithTemporaryFile(destination, (temporary) => (
+      exactMode
+        ? writeExactModeTemporary(temporary, content, mode)
+        : fs.writeFile(temporary, content, { flag: "wx", mode })
+    ));
     return { action: created ? "created" : "kept", path: destination };
   }
   await replaceWithTemporaryFile(destination, async (temporary) => {
-    const fileMode = existing ? existing.mode & 0o777 : mode;
-    await fs.writeFile(temporary, content, { flag: "wx", mode: fileMode });
-    if (existing) await fs.chmod(temporary, fileMode);
+    const fileMode = exactMode ? mode : (existing ? existing.mode & 0o777 : mode);
+    if (exactMode) await writeExactModeTemporary(temporary, content, fileMode);
+    else {
+      await fs.writeFile(temporary, content, { flag: "wx", mode: fileMode });
+      if (existing) await fs.chmod(temporary, fileMode);
+    }
   });
   return { action: existing ? "updated" : "created", path: destination };
 }

@@ -31,6 +31,8 @@ const store = createManagedSkillStore({ aiosPath, homePath, hooks? });
 await store.inspect();
 await store.previewAdoption({ sourcePath, sourceKind? });
 await store.applyAdoption({ operationId, planFingerprint, sourcePath });
+await store.previewOfficialBatch();
+await store.applyOfficialBatch({ operationId, planFingerprint });
 await store.reconcile({ apply: false, operationId?, planFingerprint? });
 await store.remove({ name, apply: false, operationId?, planFingerprint? });
 ```
@@ -104,6 +106,12 @@ It returns one of:
 - `already_adopted`: same canonical digest/provenance/projections already committed;
 - stable refusal by throwing `ManagedSkillStoreError` with `code`, bounded `reason`, and no absolute path in default CLI output.
 
+### `previewOfficialBatch()` and `applyOfficialBatch()`
+
+Official-skill adoption is one batch over the package-owned per-file manifest. Preview classifies every declared root and file as the exact candidate, an accepted 2.0.9/2.0.10 predecessor, missing, the sole recognized generated overlay (`plan-today/prompt.md`), or a conflict. Apply may repair safe targets while leaving a conflicting target byte-for-byte untouched, but it publishes `_registry.json`, `INDEX.md`, and `RESOLVER.md` only after every official target verifies as the candidate.
+
+The batch reuses the same store lock, journal, staging roots, guarded root swaps, verification, and rollback engine as the other ManagedSkillStore operations. It creates no official receipt and uses no folder-level bundle digest: official authority is the bundled file manifest plus the exact candidate version, and interrupted recovery carries the manifest-bound candidate bytes in the existing journal.
+
 ### `reconcile()`
 
 Reconcile previews by default. It inventories owned real directories, bounded portable rows, catalogs, and exact native projections; then emits a fingerprinted plan containing only derivable repairs. Receipts remain adoption/removal authority and are not required for ordinary routing reconciliation. Managed provenance is rebuilt only from strict receipts whose current canonical digest and root identity still match; a drifted pair loses its managed row without affecting real-directory routing. Apply requires the exact plan tokens and uses the same transaction engine.
@@ -173,6 +181,8 @@ Every file is opened only after an `lstat` single-link regular-file check, read 
 Manifest order is unsigned UTF-8 byte order by normalized `/` relative path. Owned names, collisions, projections, and catalog rows use the same byte comparator and never `localeCompare()`. Each manifest row contains relative path, byte length, normalized executable bit, classification/content-type hint, and content SHA-256. The bundle digest hashes a canonical versioned encoding of the full ordered manifest plus validated skill identity metadata. Opaque invalid-UTF-8 asset bytes are valid and must round-trip exactly; invalid UTF-8 in the root `SKILL.md` refuses.
 
 No modification time enters the portable bundle digest; timestamps enter source identity and stale-proof checks only. Copy preserves bytes and executable intent, not source ownership, timestamps, setuid/setgid/sticky bits, or group/world writability.
+
+Official skills are the deliberate exception to the personal-adoption bundle digest above. Their package manifest lists every official root and leaf with canonical POSIX mode, packed SHA-256, deterministic candidate-version rendering, and the accepted predecessor SHA-256/mode pairs. Classification and repair remain per file; an unknown extra or unrecognized byte is a conflict, while the manifest-declared `plan-today/prompt.md` overlay is preserved by its bounded grammar. Dependent catalogs are derived only from a fully verified all-official candidate state.
 
 ### Name policy
 

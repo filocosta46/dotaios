@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -24,6 +25,24 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   const packageRoot = path.join(unpacked, "package");
   assert.equal(fs.existsSync(path.join(packageRoot, "templates", "gitignore.template")), true);
   assert.equal(fs.existsSync(path.join(packageRoot, "templates", ".gitignore")), false);
+  const officialManifestPath = path.join(packageRoot, "packages", "core", "src", "official-skills.json");
+  assert.equal(fs.existsSync(officialManifestPath), true, "the package must carry its official-skill manifest");
+  const officialManifest = JSON.parse(fs.readFileSync(officialManifestPath, "utf8"));
+  for (const skill of officialManifest.skills) {
+    const skillRoot = path.join(packageRoot, "skills", skill.name);
+    if (process.platform !== "win32") {
+      assert.equal(fs.statSync(skillRoot).mode & 0o7777, skill.mode, `${skill.name} packed root mode`);
+    }
+    for (const file of skill.files) {
+      const packedPath = path.join(skillRoot, file.path);
+      const bytes = fs.readFileSync(packedPath);
+      assert.equal(bytes.length, file.bytes, `${skill.name}/${file.path} packed size`);
+      assert.equal(sha256(bytes), file.packed_sha256, `${skill.name}/${file.path} packed digest`);
+      if (process.platform !== "win32") {
+        assert.equal(fs.statSync(packedPath).mode & 0o7777, file.mode, `${skill.name}/${file.path} packed mode`);
+      }
+    }
+  }
 
   // The packed source resolves its normal dependencies through the checkout's
   // installed node_modules. The package files themselves remain untouched.
@@ -64,6 +83,15 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   );
 
   run(process.execPath, [cli, "init", "--yes", "--path", aiosPath], { cwd: packageRoot });
+
+  for (const skill of officialManifest.skills) {
+    const instructions = fs.readFileSync(path.join(aiosPath, "skills", skill.name, "SKILL.md"), "utf8");
+    assert.doesNotMatch(instructions, /<exact-candidate-version>/, `${skill.name} placeholder must be materialized`);
+    assert.doesNotMatch(instructions, /\bnpx\s+dotaios(?!@)/, `${skill.name} must not use PATH-resolved DotAIOS`);
+    for (const match of instructions.matchAll(/\bnpx\s+dotaios@([^\s`"'\\]+)/g)) {
+      assert.equal(match[1], expectedVersion, `${skill.name} must invoke the packed candidate version`);
+    }
+  }
 
   const ignorePath = path.join(aiosPath, ".gitignore");
   const ignoreBeforeRestore = fs.readFileSync(ignorePath, "utf8");
@@ -115,6 +143,10 @@ function dependencyNodeModules(start) {
   const candidate = path.join(start, "node_modules");
   if (fs.existsSync(candidate)) return candidate;
   throw new Error(`Could not locate the repository-local dependency tree at ${candidate}.`);
+}
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
 }
 
 function escapeRegExp(value) {

@@ -1,14 +1,20 @@
 import fs from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
 import { readPackageVersion, resolveCliInvocation } from "../../../core/src/bridges.mjs";
-import { copyFileSafe, listFiles, pathExists, writeFileSafe } from "../../../core/src/files.mjs";
+import { pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
+import {
+  isRecognizedOfficialSkillOverlay,
+  loadOfficialSkillPackage,
+  officialSkillNames
+} from "../../../core/src/official-skills.mjs";
 import { planTemplateTree, renderTemplate, renderTemplateTree } from "../../../core/src/render.mjs";
 import { createAiosConfig } from "../../../core/src/schema.mjs";
-import { writeSkillsIndex } from "../../../core/src/skills.mjs";
+import { collectSkills, compareUtf8Bytes, writeSkillsIndex } from "../../../core/src/skills.mjs";
 import { hasStableManagedWorkspaceIgnoreRule } from "../../../core/src/workspace-ignore.mjs";
 import { OFFICIAL_SCHEDULES } from "./schedule.mjs";
 import {
@@ -45,6 +51,8 @@ const BUILT_IN_VAULT_DIRS = [
   "vault/outputs"
 ];
 const SKILL_CATALOG_FILES = ["skills/INDEX.md", "skills/RESOLVER.md"];
+const MAX_OFFICIAL_INIT_OVERLAY_BYTES = 1024 * 1024;
+const POSIX_MODE_MASK = 0o7777;
 
 export async function initCommand(args, lifecycle = {}) {
   if (hasHelpFlag(args)) {
@@ -147,9 +155,11 @@ export async function initCommand(args, lifecycle = {}) {
     cli: await resolveCliInvocation(),
     version: await readPackageVersion()
   };
+  const officialSkills = await loadOfficialSkillPackage({ candidateVersion: templateData.version });
 
   if (options.force) {
-    await assertGeneratedDestinationsSafe(target, data, Boolean(config.vault_path));
+    await assertGeneratedDestinationsSafe(target, data, Boolean(config.vault_path), officialSkills);
+    await assertOfficialInitDestinations(target, officialSkills, { allowMissing: true });
   }
 
   await lifecycle.beforeScaffold?.({ config, data });
@@ -158,7 +168,8 @@ export async function initCommand(args, lifecycle = {}) {
   // mutate anything, so a raced descendant or ignore boundary cannot redirect
   // or weaken this run.
   await assertAiosRootSafe(target);
-  await assertGeneratedDestinationsSafe(target, data, Boolean(config.vault_path));
+  await assertGeneratedDestinationsSafe(target, data, Boolean(config.vault_path), officialSkills);
+  await assertOfficialInitDestinations(target, officialSkills, { allowMissing: true });
   if (options.force && !options.overwrite) {
     await assertPreservedWorkspaceIgnoreSafe(target);
   }
@@ -176,9 +187,23 @@ export async function initCommand(args, lifecycle = {}) {
     writeMode,
     { boundaryRoot: target }
   ));
-  results.push(...await copySkills(target, writeMode));
-  results.push(...await createStarterFiles(target, templateData, writeMode));
-  const skillsIndex = await writeSkillsIndex(target, { writeMode });
+  results.push(...await copySkills(target, writeMode, officialSkills));
+  await assertOfficialInitDestinations(target, officialSkills, { allowMissing: false });
+  results.push(...await createStarterFiles(target, templateData, writeMode, officialSkills));
+  const officialNames = new Set(officialSkills.skills.map(({ name }) => name));
+  const personalSkills = (await collectSkills(target)).filter(({ dir }) => !officialNames.has(dir));
+  const catalogSkills = [
+    ...personalSkills,
+    ...officialSkills.skills.map(({ catalog }) => catalog)
+  ].sort((left, right) => (
+    compareUtf8Bytes(left.name, right.name) || compareUtf8Bytes(left.dir, right.dir)
+  ));
+  await assertOfficialInitDestinations(target, officialSkills, { allowMissing: false });
+  results.push(await createStarterRegistry(target, templateData, writeMode, officialSkills, catalogSkills));
+  const skillsIndex = await writeSkillsIndex(target, {
+    writeMode,
+    skills: catalogSkills
+  });
   results.push(...skillsIndex.results);
   if (
     skillsIndex.conflicts.length > 0
@@ -376,9 +401,9 @@ function baseTreeDirs(usesExternalVault) {
     : [...BASE_TREE_DIRS, ...BUILT_IN_VAULT_DIRS];
 }
 
-async function lstatIfPresent(filePath) {
+async function lstatIfPresent(filePath, options = undefined) {
   try {
-    return await fs.lstat(filePath);
+    return await fs.lstat(filePath, options);
   } catch (error) {
     if (error.code === "ENOENT") return null;
     throw error;
@@ -435,16 +460,16 @@ function templateTreeOptions() {
   };
 }
 
-async function planGeneratedPaths(target, data, usesExternalVault) {
+async function planGeneratedPaths(target, data, usesExternalVault, officialSkills) {
   const templateRoot = path.join(repoRoot, "templates");
   const templatePlan = await planTemplateTree(templateRoot, target, data, templateTreeOptions());
-  const skillRoot = path.join(repoRoot, "skills");
-  const skillFiles = await listFiles(skillRoot);
   const files = new Set([
     ...templatePlan.map((item) => item.path),
     path.join(target, "aios.json"),
-    ...skillFiles.map((file) => path.join(target, "skills", path.relative(skillRoot, file))),
-    ...Object.keys(starterFileContents(data)).map((relative) => path.join(target, relative)),
+    ...officialSkills.skills.flatMap((skill) => skill.files.map((file) => (
+      path.join(target, "skills", skill.name, file.path)
+    ))),
+    ...Object.keys(starterFileContents(data, officialSkills)).map((relative) => path.join(target, relative)),
     ...SKILL_CATALOG_FILES.map((relative) => path.join(target, relative))
   ]);
   const directories = new Set(baseTreeDirs(usesExternalVault).map((relative) => path.join(target, relative)));
@@ -472,8 +497,13 @@ async function planGeneratedPaths(target, data, usesExternalVault) {
   return { files: [...files], directories: [...directories] };
 }
 
-async function assertGeneratedDestinationsSafe(target, data, usesExternalVault) {
-  const { files, directories } = await planGeneratedPaths(target, data, usesExternalVault);
+async function assertGeneratedDestinationsSafe(target, data, usesExternalVault, officialSkills) {
+  const { files, directories } = await planGeneratedPaths(
+    target,
+    data,
+    usesExternalVault,
+    officialSkills
+  );
 
   for (const directory of directories.sort((a, b) => a.length - b.length)) {
     const stats = await lstatIfPresent(directory);
@@ -487,6 +517,98 @@ async function assertGeneratedDestinationsSafe(target, data, usesExternalVault) 
     if (stats && (!stats.isFile() || stats.isSymbolicLink())) {
       throw new Error(`Cannot overwrite unsafe generated file: ${file}`);
     }
+  }
+}
+
+async function assertOfficialInitDestinations(target, officialSkills, { allowMissing }) {
+  const skillsRoot = path.join(target, "skills");
+  for (const skill of officialSkills.skills) {
+    const root = path.join(skillsRoot, skill.name);
+    const rootStats = await lstatIfPresent(root, { bigint: true });
+    if (!rootStats) {
+      if (allowMissing) continue;
+      throw new Error(`Official skill is missing after initialization: ${skill.name}`);
+    }
+    if (
+      !rootStats.isDirectory()
+      || rootStats.isSymbolicLink()
+      || (process.platform !== "win32" && (Number(rootStats.mode) & POSIX_MODE_MASK) !== skill.mode)
+    ) throw new Error(`Official skill conflicts with the package manifest: ${skill.name}`);
+
+    const declared = new Map(skill.files.map((file) => [file.path, file]));
+    const overlays = new Map(skill.generated_overlays.map((overlay) => [overlay.path, overlay]));
+    const entries = await fs.readdir(root, { withFileTypes: true });
+    const names = entries.map(({ name }) => name).sort(compareUtf8Bytes);
+    for (const entry of entries) {
+      await assertOfficialInitEntry(skill, root, entry, declared, overlays);
+    }
+    if (!allowMissing) {
+      for (const relative of declared.keys()) {
+        if (!names.includes(relative)) {
+          throw new Error(`Official skill is incomplete after initialization: ${skill.name}/${relative}`);
+        }
+      }
+    }
+    const finalRoot = await lstatIfPresent(root, { bigint: true });
+    const finalEntries = await fs.readdir(root, { withFileTypes: true });
+    const finalNames = finalEntries.map(({ name }) => name).sort(compareUtf8Bytes);
+    if (
+      !finalRoot?.isDirectory()
+      || finalRoot.isSymbolicLink()
+      || finalRoot.dev !== rootStats.dev
+      || finalRoot.ino !== rootStats.ino
+      || (process.platform !== "win32" && (Number(finalRoot.mode) & POSIX_MODE_MASK) !== skill.mode)
+      || names.length !== finalNames.length
+      || names.some((name, index) => name !== finalNames[index])
+    ) throw new Error(`Official skill changed during initialization: ${skill.name}`);
+    for (const entry of finalEntries) {
+      await assertOfficialInitEntry(skill, root, entry, declared, overlays);
+    }
+  }
+}
+
+async function assertOfficialInitEntry(skill, root, entry, declared, overlays) {
+  const expected = declared.get(entry.name);
+  const overlay = overlays.get(entry.name);
+  if ((!expected && !overlay) || !entry.isFile() || entry.isSymbolicLink()) {
+    throw new Error(`Official skill conflicts with the package manifest: ${skill.name}/${entry.name}`);
+  }
+  const observed = await readStableOfficialInitFile(
+    path.join(root, entry.name),
+    expected?.bytes ?? MAX_OFFICIAL_INIT_OVERLAY_BYTES
+  );
+  const expectedMode = expected?.mode ?? overlay.mode;
+  if (
+    observed.stats.nlink !== 1n
+    || (process.platform !== "win32" && observed.mode !== expectedMode)
+    || (expected && !observed.bytes.equals(expected.installed_bytes))
+    || (overlay && !isRecognizedOfficialSkillOverlay(skill.name, entry.name, observed.bytes))
+  ) throw new Error(`Official skill conflicts with the package manifest: ${skill.name}/${entry.name}`);
+}
+
+async function readStableOfficialInitFile(filePath, maxBytes) {
+  const handle = await fs.open(
+    filePath,
+    fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW || 0)
+  );
+  try {
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || before.size > BigInt(maxBytes)) {
+      throw new Error(`Official skill file is unsafe: ${filePath}`);
+    }
+    const bytes = await handle.readFile();
+    const after = await handle.stat({ bigint: true });
+    if (
+      before.dev !== after.dev
+      || before.ino !== after.ino
+      || before.size !== after.size
+      || before.mtimeNs !== after.mtimeNs
+      || before.ctimeNs !== after.ctimeNs
+      || BigInt(bytes.length) !== before.size
+    ) throw new Error(`Official skill file changed during initialization: ${filePath}`);
+    return { bytes, stats: after, mode: Number(after.mode) & POSIX_MODE_MASK };
+  } finally {
+    await handle.close();
   }
 }
 
@@ -533,22 +655,74 @@ async function renderTemplates(target, data, writeMode) {
   });
 }
 
-async function copySkills(target, writeMode) {
-  const skillRoot = path.join(repoRoot, "skills");
-  const files = await listFiles(skillRoot);
+async function copySkills(target, writeMode, officialSkills) {
   const results = [];
 
-  for (const file of files) {
-    const relative = path.relative(skillRoot, file);
-    const destination = path.join(target, "skills", relative);
-    results.push(await copyFileSafe(file, destination, writeMode, { boundaryRoot: target }));
+  for (const skill of officialSkills.skills) {
+    const skillRoot = path.join(target, "skills", skill.name);
+    let createdRoot = false;
+    try {
+      await fs.mkdir(skillRoot, { mode: skill.mode });
+      createdRoot = true;
+    } catch (error) {
+      if (error?.code !== "EEXIST") throw error;
+    }
+    const rootStats = await lstatIfPresent(skillRoot);
+    if (!rootStats?.isDirectory() || rootStats.isSymbolicLink()) {
+      throw new Error(`Cannot initialize through unsafe generated directory: ${skillRoot}`);
+    }
+    const createdRootIdentity = createdRoot
+      ? await normalizeCreatedOfficialRoot(skillRoot, skill.mode)
+      : null;
+    for (const file of skill.files) {
+      const destination = path.join(skillRoot, file.path);
+      const result = await writeFileSafe(destination, file.installed_bytes, writeMode, {
+        boundaryRoot: target,
+        mode: file.mode,
+        exactMode: process.platform !== "win32"
+      });
+      results.push(result);
+    }
+    if (createdRootIdentity) {
+      const finalStats = await fs.lstat(skillRoot, { bigint: true });
+      if (
+        !finalStats.isDirectory()
+        || finalStats.isSymbolicLink()
+        || finalStats.dev !== createdRootIdentity.dev
+        || finalStats.ino !== createdRootIdentity.ino
+      ) throw new Error(`Official skill root changed during initialization: ${skillRoot}`);
+    }
   }
 
   return results;
 }
 
-async function createStarterFiles(target, data, writeMode) {
-  const files = starterFileContents(data);
+async function normalizeCreatedOfficialRoot(skillRoot, mode) {
+  const before = await fs.lstat(skillRoot, { bigint: true });
+  if (!before.isDirectory() || before.isSymbolicLink()) {
+    throw new Error(`Cannot initialize through unsafe generated directory: ${skillRoot}`);
+  }
+  if (process.platform === "win32") return { dev: before.dev, ino: before.ino };
+  const handle = await fs.open(
+    skillRoot,
+    fsConstants.O_RDONLY | (fsConstants.O_DIRECTORY || 0) | (fsConstants.O_NOFOLLOW || 0)
+  );
+  try {
+    const opened = await handle.stat({ bigint: true });
+    if (!opened.isDirectory() || opened.dev !== before.dev || opened.ino !== before.ino) {
+      throw new Error(`Official skill root changed during initialization: ${skillRoot}`);
+    }
+    await handle.chmod(mode);
+    await handle.sync();
+    return { dev: opened.dev, ino: opened.ino };
+  } finally {
+    await handle.close();
+  }
+}
+
+async function createStarterFiles(target, data, writeMode, officialSkills) {
+  const files = starterFileContents(data, officialSkills);
+  delete files["skills/_registry.json"];
   const results = [];
 
   for (const [relative, content] of Object.entries(files)) {
@@ -559,7 +733,19 @@ async function createStarterFiles(target, data, writeMode) {
   return results;
 }
 
-function starterFileContents(data) {
+async function createStarterRegistry(target, data, writeMode, officialSkills, catalogSkills) {
+  const content = starterFileContents(data, officialSkills, catalogSkills)["skills/_registry.json"];
+  return writeFileSafe(path.join(target, "skills", "_registry.json"), content, writeMode, {
+    boundaryRoot: target
+  });
+}
+
+function starterFileContents(data, officialSkills = null, catalogSkills = null) {
+  const names = catalogSkills
+    ? catalogSkills.map(({ dir }) => dir).sort(compareUtf8Bytes)
+    : officialSkills
+      ? officialSkills.skills.map(({ name }) => name)
+    : officialSkillNames();
   return {
     ".env.example": [
       "# Copy this file to .env when plugins require local secrets.",
@@ -592,7 +778,12 @@ function starterFileContents(data) {
         "    enabled: false"
       ])
     ].join("\n") + "\n",
-    "skills/_registry.json": "{\n  \"format\": \"dotaios-skill-install-inventory/v2\",\n  \"skills\": [\"audit\", \"closeday\", \"import-context\", \"ingest\", \"memory-maintenance\", \"plan-today\", \"privacy-brief\", \"process-inbox\", \"research\", \"save-session\", \"summarize-source\", \"today\", \"weekly-review\"],\n  \"managed\": [],\n  \"plugins\": []\n}\n"
+    "skills/_registry.json": `${JSON.stringify({
+      format: "dotaios-skill-install-inventory/v2",
+      skills: names,
+      managed: [],
+      plugins: []
+    }, null, 2)}\n`
   };
 }
 

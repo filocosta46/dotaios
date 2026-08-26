@@ -1,0 +1,701 @@
+{
+  "format": "dotaios-official-skill-manifest/v1",
+  "candidate_version_placeholder": "<exact-candidate-version>",
+  "supported_predecessors": [
+    "2.0.9",
+    "2.0.10"
+  ],
+  "skills": [
+    {
+      "name": "audit",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 1797,
+          "packed_sha256": "6d30d5c8b94a846f537eeaba2dc35cca8ab11dddb9736dc203f51564e86c4e8c",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 1
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "2b502f4b542ccaa201347a778238fb1019e24ff8ccc11f75528be297f384acb4"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "2b502f4b542ccaa201347a778238fb1019e24ff8ccc11f75528be297f384acb4"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "closeday",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 3792,
+          "packed_sha256": "c7f90374a418e0ec0a279ec9cb1fd36933f27299a4dc536d317bb2e33dd8635f",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "c7f90374a418e0ec0a279ec9cb1fd36933f27299a4dc536d317bb2e33dd8635f"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "c7f90374a418e0ec0a279ec9cb1fd36933f27299a4dc536d317bb2e33dd8635f"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "export-okf",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 2007,
+          "packed_sha256": "1eec56615effaf03d510871b6cac57b27731f8f1762c2bc35f8b30157de59c3b",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 3
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "bfc19b6b7d4739e3f7425cf8d4efb1166c673cfe29310f66055cb526058e8597"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "bfc19b6b7d4739e3f7425cf8d4efb1166c673cfe29310f66055cb526058e8597"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "import-context",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 2595,
+          "packed_sha256": "00b9116bf6b2e4dce9b6d0158f359c0161fa8f05c65cdd9689860034cfe7ef0a",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 2
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "852d6ceb0f87d80d40ed75ba98dd55fb6b320b08c0bbdc8f1ad7a197bb46cb11"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "852d6ceb0f87d80d40ed75ba98dd55fb6b320b08c0bbdc8f1ad7a197bb46cb11"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "ingest",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 9798,
+          "packed_sha256": "0126f39be92b49daf8879147d6d458136e78fd0dd3a63f149b5e55d68e08e100",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 12
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "c707d5b2d25bd88998150e299677619e49b72e77ee4e864142e51b4e4da522bc"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "c707d5b2d25bd88998150e299677619e49b72e77ee4e864142e51b4e4da522bc"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "memory-maintenance",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 3437,
+          "packed_sha256": "fbac81624767155301fa0f8d37f41601e97ad7aa8acc1908ae95eedf69843421",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 7
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "ba064dbe53ee8b9775e21744094ffd4413d17ff766c519ffec476946d35f9941"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "ba064dbe53ee8b9775e21744094ffd4413d17ff766c519ffec476946d35f9941"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "plan-today",
+      "mode": 493,
+      "generated_overlays": [
+        {
+          "path": "prompt.md",
+          "kind": "interview-plan-today-prompt/v1",
+          "mode": 420
+        }
+      ],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 2213,
+          "packed_sha256": "b8808de849c211ab3dfee0d7dc97c9159d355e02c3f379fd6386e7fbccfc79a5",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 3
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "9b955f4ec186f4b2bd2e0db05a304599b9549d49ac2b2bdf9c943a2cf7f366a1"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "9b955f4ec186f4b2bd2e0db05a304599b9549d49ac2b2bdf9c943a2cf7f366a1"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "privacy-brief",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 1808,
+          "packed_sha256": "764ed2e1dae0b15cc2a9dbee41f638c883224ba70208ac7b24922279807ae2c0",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "764ed2e1dae0b15cc2a9dbee41f638c883224ba70208ac7b24922279807ae2c0"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "764ed2e1dae0b15cc2a9dbee41f638c883224ba70208ac7b24922279807ae2c0"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "process-inbox",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 3177,
+          "packed_sha256": "839b80769b92fc21cd829d7607380f11db39edd5a520bdb27652384837dcae70",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "839b80769b92fc21cd829d7607380f11db39edd5a520bdb27652384837dcae70"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "839b80769b92fc21cd829d7607380f11db39edd5a520bdb27652384837dcae70"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "research",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 2853,
+          "packed_sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "save-session",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 7487,
+          "packed_sha256": "2bd8c8b4006bd319c8e2514ce21438264773d08a3dd841a1dbc0f8286a30ac1b",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 2
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "a463716e70e127c7c3256b4d94ff1a2d2b74ba4e4023a72f0ec312d29973b28a"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "a463716e70e127c7c3256b4d94ff1a2d2b74ba4e4023a72f0ec312d29973b28a"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "skillify",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 2497,
+          "packed_sha256": "2d6ca8d4aecceb90ff486716efd3bc3792c5cb3f3fd9f508a755678403c904dc",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 1
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "8f486661d147b38495c9f380c2ad73db09416c7f6eb9b22105191bddef0d3842"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "8f486661d147b38495c9f380c2ad73db09416c7f6eb9b22105191bddef0d3842"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "summarize-source",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 1746,
+          "packed_sha256": "a8576263831c1f27f2d406a2604b027d950e5a72fc1bf9160d097f646f295425",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "a8576263831c1f27f2d406a2604b027d950e5a72fc1bf9160d097f646f295425"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "a8576263831c1f27f2d406a2604b027d950e5a72fc1bf9160d097f646f295425"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "today",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 3107,
+          "packed_sha256": "d9bf8551d2e8ae22643e0c498e1770d20b721def1cb822837a46cbb34cae0c12",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 3
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "e1d4fdfff79abe7a571d5c955326af08a045ad2a8dd4b41f28bb4ba6f9643ecb"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "e1d4fdfff79abe7a571d5c955326af08a045ad2a8dd4b41f28bb4ba6f9643ecb"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "weekly-review",
+      "mode": 493,
+      "generated_overlays": [],
+      "files": [
+        {
+          "path": "LICENSE",
+          "mode": 420,
+          "bytes": 1077,
+          "packed_sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf",
+          "render": {
+            "kind": "verbatim"
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            }
+          }
+        },
+        {
+          "path": "SKILL.md",
+          "mode": 420,
+          "bytes": 1618,
+          "packed_sha256": "6cddbb5e4e652e9268f12a495b705d9114bd68f230f4b06dca4a06420d3061d0",
+          "render": {
+            "kind": "exact-candidate-version/v1",
+            "token_count": 1
+          },
+          "accepted_predecessors": {
+            "2.0.9": {
+              "mode": 420,
+              "sha256": "da81c84d7abe67db35bf9f85e930a6f341191f760996cfd807911c6c122a985d"
+            },
+            "2.0.10": {
+              "mode": 420,
+              "sha256": "da81c84d7abe67db35bf9f85e930a6f341191f760996cfd807911c6c122a985d"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

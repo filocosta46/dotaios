@@ -39,7 +39,7 @@ Try saying:
 3. `projects/*/README.md`
 4. `connections/registry.md`, if present
 5. `skills/_registry.json`, if present
-6. `npx dotaios brief --compact` for the bounded recent-memory projection
+6. `npx dotaios@<exact-candidate-version> brief --compact` for the bounded recent-memory projection
 
 ### Check
 
