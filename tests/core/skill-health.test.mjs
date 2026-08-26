@@ -237,6 +237,30 @@ test("inspectSkillHealth separates configured and discoverable from unverified i
   assert.equal(report.healthy, true);
 });
 
+test("inspectSkillHealth keeps filesystem projection distinct from host discovery", async () => {
+  const { aiosPath, homePath } = await makeAios();
+  await installSymlinkSkills({
+    aiosPath,
+    targetDir: path.join(homePath, ".claude", "skills")
+  });
+
+  const report = await inspectSkillHealth({
+    aiosPath,
+    homePath,
+    detection: {
+      env: {
+        PATH: ""
+      }
+    }
+  });
+  const runtime = report.runtimes.find((entry) => entry.name === "Claude Code");
+
+  assert.equal(runtime.capabilities.configured, "yes");
+  assert.equal(runtime.capabilities.projected, "yes");
+  assert.equal(runtime.capabilities.discoverable, "not-probed");
+  assert.doesNotMatch(JSON.stringify(report), /path-ready/);
+});
+
 test("inspectSkillHealth keeps warning-only foreign extras path-ready", async () => {
   const { aiosPath, homePath } = await makeAios();
   const targetDir = path.join(homePath, ".agents", "skills");

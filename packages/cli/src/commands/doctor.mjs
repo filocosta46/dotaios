@@ -14,8 +14,10 @@ import {
   bridgePointer,
   findManagedBlock,
   inspectDotaiosOnPath,
+  isClaudeCodeAgent,
   isAgentInstalled,
   loadAgentRegistry,
+  resolveClaudeConfigRoot,
   resolveCliInvocation
 } from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
@@ -63,6 +65,7 @@ export async function doctorCommand(args, { detection } = {}) {
   const options = parsePathHomeOptions(args.filter((arg) => arg !== "--verbose"));
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   const homePath = path.resolve(expandHome(options.home || os.homedir()));
+  const env = detection?.env ?? process.env;
 
   const checks = [];
 
@@ -80,7 +83,10 @@ export async function doctorCommand(args, { detection } = {}) {
   checks.push(await checkCliInstallations({
     inspectPersistent: () => inspectDotaiosOnPath(detection)
   }));
-  checks.push(await checkCliReachable(target, homePath));
+  if (verbose || claudeConfigRootState(homePath, { env }).kind !== "default") {
+    checks.push(checkClaudeConfigRoot(homePath, { env }));
+  }
+  checks.push(await checkCliReachable(target, homePath, { env }));
   checks.push(...await checkAgentBridges(target, homePath, detection, { verbose }));
 
   console.log("DotAIOS doctor");
@@ -119,6 +125,61 @@ const STATUS_TAGS = { ok: "[ok]", warn: "[warn]", fail: "[fail]" };
 
 function tag(status) {
   return STATUS_TAGS[status] || "[fail]";
+}
+
+function claudeConfigRootState(homePath, { env = process.env } = {}) {
+  const defaultRoot = path.resolve(homePath, ".claude");
+  const raw = typeof env?.CLAUDE_CONFIG_DIR === "string"
+    ? env.CLAUDE_CONFIG_DIR
+    : "";
+  const selectedRoot = resolveClaudeConfigRoot(homePath, { env });
+  if (raw === "") return { kind: "default", defaultRoot, selectedRoot };
+  if (!path.isAbsolute(raw)) {
+    return { kind: "fallback", defaultRoot, selectedRoot, raw };
+  }
+
+  const kind = path.relative(defaultRoot, selectedRoot) === ""
+    ? "same"
+    : "divergent";
+  return { kind, defaultRoot, selectedRoot, raw };
+}
+
+export function checkClaudeConfigRoot(homePath, { env = process.env } = {}) {
+  const state = claudeConfigRootState(homePath, { env });
+  const name = "Claude Code configuration root";
+  if (state.kind === "default") {
+    return {
+      name,
+      status: "ok",
+      detail: `No CLAUDE_CONFIG_DIR override is visible to this doctor process; the default user root is ${state.defaultRoot}.`
+    };
+  }
+  if (state.kind === "same") {
+    return {
+      name,
+      status: "ok",
+      detail: `CLAUDE_CONFIG_DIR selects the default user root ${state.defaultRoot}.`
+    };
+  }
+  if (state.kind === "fallback") {
+    return {
+      name,
+      status: "ok",
+      detail: `CLAUDE_CONFIG_DIR is not absolute (${JSON.stringify(state.raw)}); Claude Code uses the default user root ${state.defaultRoot}.`
+    };
+  }
+
+  return {
+    name,
+    status: "warn",
+    detail: `The default Claude Code user root is ${state.defaultRoot}; the active root from CLAUDE_CONFIG_DIR is ${state.selectedRoot}. A default-root bridge and skill projection is not evidence for the selected host root.`
+  };
+}
+
+function claudeDefaultRootIsUnread(agent, homePath, env) {
+  if (!isClaudeCodeAgent(agent)) return false;
+  const { kind } = claudeConfigRootState(homePath, { env });
+  return kind === "divergent";
 }
 
 export async function checkSecretBoundary(target, {
@@ -729,6 +790,7 @@ export async function checkCliInstallations({
 }
 
 export async function checkCliReachable(target, homePath, {
+  env = process.env,
   loadRegistry = loadAgentRegistry,
   resolveInvocation = resolveCliInvocation
 } = {}) {
@@ -753,14 +815,19 @@ export async function checkCliReachable(target, homePath, {
   }
 
   const staleBridges = [];
+  const skippedDefaultBridges = [];
   for (const agent of registry) {
     if (!agent.bridge) continue;
-    const filePath = bridgePath(homePath, agent);
+    const filePath = bridgePath(homePath, agent, { env });
     if (!filePath) continue;
     let content;
     try {
       content = await fs.readFile(filePath, "utf8");
     } catch {
+      if (
+        claudeDefaultRootIsUnread(agent, homePath, env)
+        && await pathExists(bridgePath(homePath, agent, { env: {} }))
+      ) skippedDefaultBridges.push(agent.name);
       // Not connected yet. checkAgentBridges already reports that.
       continue;
     }
@@ -785,7 +852,10 @@ export async function checkCliReachable(target, homePath, {
   }
 
   if (!staleBridges.length && !staleEntrypoint && !brokenEntrypoint) {
-    return { name, status: "ok", detail: "Every file that names a DotAIOS command names one that runs here." };
+    const detail = skippedDefaultBridges.length > 0
+      ? `Every file this check read names a DotAIOS command that runs here; the ${skippedDefaultBridges.join(", ")} default-root bridge was not read because CLAUDE_CONFIG_DIR selects another root.`
+      : "Every file that names a DotAIOS command names one that runs here.";
+    return { name, status: "ok", detail };
   }
 
   const parts = [];
@@ -817,6 +887,8 @@ async function checkAgentBridges(target, homePath, detection = {}, { verbose = f
   let foundBridge = false;
   let foundNativeRuntime = false;
   let anyInstalled = false;
+  let skippedDefaultClaudeBridge = false;
+  const env = detection?.env ?? process.env;
 
   const registry = await loadAgentRegistry(target);
   const runtimes = await readNativeRuntimes(target, homePath, detection);
@@ -843,11 +915,18 @@ async function checkAgentBridges(target, homePath, detection = {}, { verbose = f
       continue;
     }
 
-    const filePath = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
+    const filePath = bridgePath(homePath, agent, { env }) || path.join(homePath, agent.detect);
     let content;
     try {
       content = await fs.readFile(filePath, "utf8");
     } catch {
+      if (
+        claudeDefaultRootIsUnread(agent, homePath, env)
+        && await pathExists(bridgePath(homePath, agent, { env: {} }))
+      ) {
+        skippedDefaultClaudeBridge = true;
+        continue;
+      }
       results.push({
         name: `${agent.name} bridge`,
         status: "warn",
@@ -930,14 +1009,14 @@ async function checkAgentBridges(target, homePath, detection = {}, { verbose = f
     }
   }
 
-  if (!anyInstalled) {
+  if (!anyInstalled && !skippedDefaultClaudeBridge) {
     results.push({
       name: "Local AI apps",
       status: "warn",
       detail: "No supported local AI app was detected on this machine.",
       fix: "Install Claude Code, Cursor, Codex, or Gemini, then run `npx dotaios activate`."
     });
-  } else if (!foundBridge && !foundNativeRuntime) {
+  } else if (!foundBridge && !foundNativeRuntime && !skippedDefaultClaudeBridge) {
     results.push({
       name: "At least one AI tool connected",
       status: "warn",

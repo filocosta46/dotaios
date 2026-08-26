@@ -5,9 +5,11 @@ import { isPathWithinLexically } from "./paths.mjs";
 import {
   MANAGED_END,
   MANAGED_START,
+  bridgePath,
   isAgentInstalled,
   isCommandAvailable,
-  loadAgentRegistry
+  loadAgentRegistry,
+  resolveClaudeConfigRoot
 } from "./bridges.mjs";
 import { collectSkills, renderResolverBytes, renderSkillsIndexBytes } from "./skills.mjs";
 import { symlinkTargets } from "./skill-targets.mjs";
@@ -31,11 +33,14 @@ export async function inspectSkillHealth({ aiosPath, homePath = os.homedir(), de
 
   const targets = [];
   for (const target of symlinkTargets(registry)) {
-    const targetDir = path.join(homePath, target.dir);
-    const active = await isSkillTargetActive(homePath, targetDir, registry, detection);
+    const targetDir = target.dir.replaceAll("\\", "/") === ".claude/skills"
+      ? path.join(resolveClaudeConfigRoot(homePath, { env: detection?.env ?? process.env }), "skills")
+      : path.join(homePath, target.dir);
+    const active = await isSkillTargetActive(homePath, targetDir, registry, detection, target.dir);
     targets.push(await inspectSkillTarget({
       aiosPath,
       homePath,
+      declaredDir: target.dir,
       targetDir,
       sourceSkills,
       active
@@ -203,7 +208,7 @@ async function compareFile(filePath, expected) {
   }
 }
 
-async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills, active }) {
+async function inspectSkillTarget({ aiosPath, homePath, declaredDir, targetDir, sourceSkills, active }) {
   const linked = [];
   const missing = [];
   const broken = [];
@@ -215,7 +220,7 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
 
   if (!active) {
     return {
-      dir: path.relative(homePath, targetDir),
+      dir: declaredDir ?? path.relative(homePath, targetDir),
       path: targetDir,
       status: "not-detected",
       sourceCount: sourceSkills.length,
@@ -308,7 +313,7 @@ async function inspectSkillTarget({ aiosPath, homePath, targetDir, sourceSkills,
     && broken.length === 0
     && foreign.length === 0;
   return {
-    dir: path.relative(homePath, targetDir),
+    dir: declaredDir ?? path.relative(homePath, targetDir),
     path: targetDir,
     status: "active",
     sourceCount: sourceSkills.length,
@@ -338,21 +343,23 @@ async function inspectBridges({ aiosPath, homePath, detection }) {
       bridges.push({ name: agent.name, path: null, status: "not-applicable", installed, bridge: false });
       continue;
     }
-    const bridgePath = path.join(homePath, agent.bridge);
+    const agentBridgePath = bridgePath(homePath, agent, {
+      env: detection?.env ?? process.env
+    });
     if (!installed) {
-      bridges.push({ name: agent.name, path: bridgePath, status: "not-detected", installed: false });
+      bridges.push({ name: agent.name, path: agentBridgePath, status: "not-detected", installed: false });
       continue;
     }
     let content;
     try {
-      content = await fs.readFile(bridgePath, "utf8");
+      content = await fs.readFile(agentBridgePath, "utf8");
     } catch {
-      bridges.push({ name: agent.name, path: bridgePath, status: "missing", installed: true });
+      bridges.push({ name: agent.name, path: agentBridgePath, status: "missing", installed: true });
       continue;
     }
     const managed = content.includes(MANAGED_START) && content.includes(MANAGED_END);
     const status = !managed ? "unmanaged" : content.includes(aiosPath) ? "healthy" : "stale";
-    bridges.push({ name: agent.name, path: bridgePath, status, installed: true });
+    bridges.push({ name: agent.name, path: agentBridgePath, status, installed: true });
   }
   return bridges;
 }
@@ -391,9 +398,9 @@ async function inspectHermes({ aiosPath, homePath, registry = [] }) {
   return { available: true, canonical: expected, configs };
 }
 
-async function isSkillTargetActive(homePath, targetDir, registry, detection) {
+async function isSkillTargetActive(homePath, targetDir, registry, detection, declaredDir = null) {
   if (await pathExists(targetDir)) return true;
-  const relative = path.relative(homePath, targetDir);
+  const relative = declaredDir ?? path.relative(homePath, targetDir);
   const consumers = registry.filter(
     (agent) => agent.skills?.mode === "symlink" && agent.skills.dir === relative
   );

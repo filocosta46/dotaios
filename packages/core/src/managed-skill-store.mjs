@@ -11,7 +11,7 @@ import {
 } from "./skills.mjs";
 import { acquireOperationLock, releaseOperationLock } from "./operation-lock.mjs";
 import { assertOwnedFileStats, ensureOwnedDirectory } from "./owned-state.mjs";
-import { normalizeAgentRegistry } from "./bridges.mjs";
+import { normalizeAgentRegistry, resolveClaudeConfigRoot } from "./bridges.mjs";
 import {
   isRecognizedOfficialSkillOverlay,
   loadOfficialSkillPackage,
@@ -98,6 +98,7 @@ export function createManagedSkillStore({
   homePath,
   officialPackageRoot = null,
   officialCandidateVersion,
+  env = process.env,
   limits = {},
   hooks = {}
 }) {
@@ -111,6 +112,7 @@ export function createManagedSkillStore({
   const settings = Object.freeze({
     aiosPath: path.resolve(aiosPath),
     homePath: path.resolve(homePath),
+    claudeConfigRoot: resolveClaudeConfigRoot(homePath, { env }),
     officialPackageRoot: officialPackageRoot ? path.resolve(officialPackageRoot) : null,
     officialCandidateVersion,
     limits: Object.freeze(configuredLimits),
@@ -183,7 +185,7 @@ async function inspectManagedSkills(settings) {
   }
 
   for (const target of targets) {
-    if (!(await projectionBoundarySafe(settings.homePath, target.path))) {
+    if (!(await projectionBoundarySafe(target.boundaryRoot, target.path))) {
       excluded.push(excludedEntry(
         target.relativePath,
         "native-root",
@@ -404,8 +406,8 @@ function validateProjectionHistoryRecord(settings, record, expectedOperationId =
       || entry.canonical_identity?.type !== "directory"
       || seen.has(key)
       || !isPathWithinLexically(
-        settings.homePath,
-        path.join(settings.homePath, ...entry.target_relative_path.split("/"), entry.name)
+        projectionBoundaryRoot(settings, entry.target_relative_path),
+        projectionDestination(settings, `${entry.target_relative_path}/${entry.name}`)
       )
     ) throw managedError("unsafe_state", "invalid_projection_history_entry");
     seen.add(key);
@@ -1585,7 +1587,7 @@ async function previewManagedSkillAdoption(settings, input = {}) {
   for (const target of targets) {
     const destination = path.join(target.path, bundle.name);
     const classification = await classifyProjection({
-      homePath: settings.homePath,
+      homePath: target.boundaryRoot,
       destination,
       canonicalPath,
       sourcePath: selectedPath,
@@ -1888,7 +1890,10 @@ async function commitAdoption(settings, state, proof) {
         },
         backup_evidence: null,
         projection_evidence: null,
-        projection_parent_chain: await captureDirectoryChain(settings.homePath, path.dirname(sourcePath))
+        projection_parent_chain: await captureDirectoryChain(
+          projectionBoundaryForDestination(settings, sourcePath),
+          path.dirname(sourcePath)
+        )
       };
       await transitionJournal(state, journal, journal.state);
       await renameAndSync(sourcePath, backup);
@@ -1915,7 +1920,7 @@ async function commitAdoption(settings, state, proof) {
     }
 
     for (const projection of proof.projections) {
-      const destination = path.join(settings.homePath, ...projection.relative_path.split("/"));
+      const destination = projectionDestination(settings, projection.relative_path);
       if (["selected-native-source", "indirect-selected-source", "exact-managed-projection"].includes(projection.classification)) continue;
       const stats = await lstatIfPresent(destination);
       if (stats) throw managedError("destination_changed", "projection_destination_changed");
@@ -1936,7 +1941,7 @@ async function commitAdoption(settings, state, proof) {
     }
     const committedProjections = [];
     for (const projection of proof.projections) {
-      const destination = path.join(settings.homePath, ...projection.relative_path.split("/"));
+      const destination = projectionDestination(settings, projection.relative_path);
       const stats = await lstatIfPresent(destination, { bigint: true });
       committedProjections.push({
         ...projection,
@@ -2040,7 +2045,7 @@ async function buildReconcilePlan(settings) {
     for (const target of targets) {
       const destination = path.join(target.path, skill.dir);
       const classification = await classifyProjection({
-        homePath: settings.homePath,
+        homePath: target.boundaryRoot,
         destination,
         canonicalPath,
         sourcePath: "",
@@ -2104,7 +2109,7 @@ async function commitReconcile(settings, state, proof, desiredRegistry, skills) 
     await publishDerivedArtifacts(settings, desiredRegistry, skills);
     await transitionJournal(state, journal, "reconcile_derived_published");
     for (const repair of proof.repairs.filter(({ kind }) => kind === "projection")) {
-      const destination = path.join(settings.homePath, ...repair.relative_path.split("/"));
+      const destination = projectionDestination(settings, repair.relative_path);
       if (await lstatIfPresent(destination)) throw managedError("destination_changed", "projection_destination_changed");
       await publishManagedProjection(settings, state, journal, destination, repair.target);
       await checkpoint(settings, "reconcile_projection_published", { destination });
@@ -2227,7 +2232,7 @@ async function commitRemoval(settings, state, receipt, proof) {
     if (await lstatIfPresent(archive)) throw managedError("recovery_required", "removal_archive_collision");
     for (const [index, projection] of proof.projections.entries()) {
       if (projection.classification !== "exact-managed-projection") continue;
-      const destination = path.join(settings.homePath, ...projection.relative_path.split("/"));
+      const destination = projectionDestination(settings, projection.relative_path);
       const backup = siblingDetachedProjectionPath(destination, proof.operation_id, index);
       if (await lstatIfPresent(backup)) throw managedError("recovery_required", "projection_backup_collision");
       await assertProvedLink(destination, {
@@ -2239,7 +2244,10 @@ async function commitRemoval(settings, state, receipt, proof) {
         backup,
         evidence: { identity: projection.identity, target: projection.link_target },
         backup_evidence: null,
-        parent_chain: await captureDirectoryChain(settings.homePath, path.dirname(destination)),
+        parent_chain: await captureDirectoryChain(
+          projectionBoundaryForDestination(settings, destination),
+          path.dirname(destination)
+        ),
         state: "planned"
       };
       journal.detached_projection_intents.push(intent);
@@ -2786,7 +2794,43 @@ async function projectionBoundarySafe(homePath, destination) {
   return true;
 }
 
-function projectionTargets(homePath, registry, limits) {
+const CLAUDE_SKILLS_TARGET = ".claude/skills";
+
+function projectionDestination(settings, relativePath) {
+  const normalized = String(relativePath || "").replaceAll("\\", "/");
+  if (normalized === CLAUDE_SKILLS_TARGET) {
+    return path.join(settings.claudeConfigRoot, "skills");
+  }
+  if (normalized.startsWith(`${CLAUDE_SKILLS_TARGET}/`)) {
+    return path.join(
+      settings.claudeConfigRoot,
+      "skills",
+      ...normalized.slice(`${CLAUDE_SKILLS_TARGET}/`.length).split("/")
+    );
+  }
+  return path.join(settings.homePath, ...normalized.split("/"));
+}
+
+function projectionBoundaryRoot(settings, relativePath) {
+  const normalized = String(relativePath || "").replaceAll("\\", "/");
+  const defaultClaudeRoot = path.resolve(settings.homePath, ".claude");
+  if (
+    settings.claudeConfigRoot !== defaultClaudeRoot
+    && (normalized === CLAUDE_SKILLS_TARGET || normalized.startsWith(`${CLAUDE_SKILLS_TARGET}/`))
+  ) return settings.claudeConfigRoot;
+  return settings.homePath;
+}
+
+function projectionBoundaryForDestination(settings, destination) {
+  const defaultClaudeRoot = path.resolve(settings.homePath, ".claude");
+  if (
+    settings.claudeConfigRoot !== defaultClaudeRoot
+    && isPathWithinLexically(settings.claudeConfigRoot, destination)
+  ) return settings.claudeConfigRoot;
+  return settings.homePath;
+}
+
+function projectionTargets(settings, registry, limits) {
   const grouped = new Map();
   const add = (relativePath, hosts) => {
     if (!relativePath) return;
@@ -2813,7 +2857,8 @@ function projectionTargets(homePath, registry, limits) {
   return [...grouped.entries()]
     .map(([relativePath, hosts]) => ({
       relativePath,
-      path: path.join(homePath, ...relativePath.split("/")),
+      path: projectionDestination(settings, relativePath),
+      boundaryRoot: projectionBoundaryRoot(settings, relativePath),
       hosts: [...hosts].sort(compareUtf8)
     }))
     .sort((left, right) => compareUtf8(left.relativePath, right.relativePath));
@@ -2821,7 +2866,7 @@ function projectionTargets(homePath, registry, limits) {
 
 async function projectionTargetsForSettings(settings) {
   const agents = await readAgentRegistryForStore(settings);
-  return projectionTargets(settings.homePath, {
+  return projectionTargets(settings, {
     agents,
     wellKnownSkillDirs: agentRegistry.wellKnownSkillDirs || []
   }, settings.limits);
@@ -3260,7 +3305,12 @@ async function rollbackCreatedDirectories(journal) {
 }
 
 async function publishManagedProjection(settings, state, journal, destination, target) {
-  const chain = await ensureTrackedDirectoryChain(settings.homePath, path.dirname(destination), state, journal);
+  const chain = await ensureTrackedDirectoryChain(
+    projectionBoundaryForDestination(settings, destination),
+    path.dirname(destination),
+    state,
+    journal
+  );
   journal.projection_parent_chains[destination] = chain;
   journal.pending_projection = { destination, target, evidence: null };
   await transitionJournal(state, journal, journal.state);
@@ -3453,7 +3503,10 @@ async function rollbackRemoval(settings, state, journal) {
         await transitionJournal(state, journal, "needs_attention");
         throw managedError("recovery_required", "projection_restore_needs_attention");
       }
-      const chain = await captureDirectoryChain(settings.homePath, path.dirname(intent.destination));
+      const chain = await captureDirectoryChain(
+        projectionBoundaryForDestination(settings, intent.destination),
+        path.dirname(intent.destination)
+      );
       await assertDirectoryChain(chain);
       await renameAndSync(intent.backup, intent.destination);
       await assertDirectoryChain(chain);
@@ -3537,7 +3590,7 @@ async function inspectReceiptProjections(settings, receipt) {
       hosts: target.hosts,
       classification: "absent"
     };
-    const destination = path.join(settings.homePath, ...projection.relative_path.split("/"));
+    const destination = projectionDestination(settings, projection.relative_path);
     const stats = await lstatIfPresent(destination, { bigint: true });
     let classification = "absent";
     let linkTarget = null;
@@ -3659,8 +3712,11 @@ async function validateReceiptAuthority(settings, receipt, expectedName) {
       || !expectedProjections.has(projection.relative_path)
       || observedProjections.has(projection.relative_path)
     ) throw managedError("unsafe_state", "invalid_managed_receipt_projection_path");
-    const destination = path.join(settings.homePath, ...projection.relative_path.split("/"));
-    if (!isPathWithinLexically(settings.homePath, destination)) {
+    const destination = projectionDestination(settings, projection.relative_path);
+    if (!isPathWithinLexically(
+      projectionBoundaryRoot(settings, projection.relative_path),
+      destination
+    )) {
       throw managedError("unsafe_state", "invalid_managed_receipt_projection_path");
     }
     observedProjections.add(projection.relative_path);
@@ -3723,16 +3779,20 @@ async function validateJournalAuthority(settings, state, journal) {
   const targets = await projectionTargetsForSettings(settings);
   const targetRoots = new Set(targets.map(({ path: targetPath }) => path.resolve(targetPath)));
   const validProjectionPath = (candidate, expectedName = null) => {
-    if (typeof candidate !== "string" || !isPathWithinLexically(settings.homePath, candidate)) return false;
+    if (typeof candidate !== "string") return false;
     const parent = path.resolve(path.dirname(candidate));
     return targetRoots.has(parent) && NAME_RE.test(path.basename(candidate))
       && (!expectedName || path.basename(candidate) === expectedName);
   };
   const validCreatedDirectory = (candidate) => {
-    if (typeof candidate !== "string" || !isPathWithinLexically(settings.homePath, candidate)) return false;
+    if (typeof candidate !== "string") return false;
     const resolved = path.resolve(candidate);
-    return resolved !== path.resolve(settings.homePath)
-      && [...targetRoots].some((targetRoot) => isPathWithinLexically(resolved, targetRoot));
+    return [...targetRoots].some((targetRoot) => {
+      const boundaryRoot = projectionBoundaryForDestination(settings, targetRoot);
+      return resolved !== path.resolve(boundaryRoot)
+        && isPathWithinLexically(boundaryRoot, resolved)
+        && isPathWithinLexically(resolved, targetRoot);
+    });
   };
   for (const destination of journal.created_projections || []) {
     const evidence = journal.created_projection_evidence?.[destination];
@@ -3745,7 +3805,7 @@ async function validateJournalAuthority(settings, state, journal) {
       || typeof evidence.target !== "string"
     ) throw managedError("unsafe_state", "invalid_transaction_projection_evidence");
     if (!validRecordedDirectoryChain(
-      settings.homePath,
+      projectionBoundaryForDestination(settings, destination),
       path.dirname(destination),
       journal.projection_parent_chains?.[destination]
     )) throw managedError("unsafe_state", "invalid_transaction_parent_chain");
@@ -3759,7 +3819,7 @@ async function validateJournalAuthority(settings, state, journal) {
       || typeof journal.pending_projection.target !== "string"
       || !isPathWithinLexically(path.join(settings.aiosPath, "skills"), journal.pending_projection.target)
       || !validRecordedDirectoryChain(
-        settings.homePath,
+        projectionBoundaryForDestination(settings, journal.pending_projection.destination),
         path.dirname(journal.pending_projection.destination),
         journal.projection_parent_chains?.[journal.pending_projection.destination]
       )
@@ -3810,7 +3870,11 @@ async function validateJournalAuthority(settings, state, journal) {
           intent.backup || "",
           siblingDetachedProjectionPath(intent.destination, journal.operation_id, index)
         )
-        || !validRecordedDirectoryChain(settings.homePath, path.dirname(intent.destination), intent.parent_chain)
+        || !validRecordedDirectoryChain(
+          projectionBoundaryForDestination(settings, intent.destination),
+          path.dirname(intent.destination),
+          intent.parent_chain
+        )
       ) {
         throw managedError("unsafe_state", "invalid_transaction_projection_path");
       }
@@ -4039,7 +4103,7 @@ function validateReplacedSource(settings, replaced, operationId, name, targets) 
       || (replaced.projection_evidence != null && replaced.projection_evidence?.identity?.type !== "symlink")
       || (replaced.projection_evidence != null && typeof replaced.projection_evidence?.target !== "string")
       || !validRecordedDirectoryChain(
-        settings.homePath,
+        projectionBoundaryForDestination(settings, replaced.original),
         path.dirname(replaced.original),
         replaced.projection_parent_chain
       )
