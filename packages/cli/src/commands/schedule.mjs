@@ -20,7 +20,7 @@ import {
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const MANAGED_SCHEDULE_REPAIR_FORMAT = "dotaios-managed-schedule-repair-plan/v1";
-const SUPPORTED_SCHEDULE_ORIGINS = new Set(["2.0.9", "2.0.10"]);
+const RECOGNIZED_SCHEDULE_PREDECESSORS = new Set(["2.0.9", "2.0.10"]);
 const TERMINAL_SCHEDULE_FIELDS = new Set(["name", "cadence", "command"]);
 const UNSAFE_TERMINAL_TEXT = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]|\p{Bidi_Control}/u;
 export const OFFICIAL_SCHEDULES = Object.freeze([
@@ -375,15 +375,14 @@ function launchdPlist({ node, cli, target }) {
 `;
 }
 
-export function planManagedScheduleRepair(source, { candidateVersion, originVersion } = {}) {
-  return buildManagedScheduleRepairPlan(source, { candidateVersion, originVersion });
+export function planManagedScheduleRepair(source, { candidateVersion } = {}) {
+  return buildManagedScheduleRepairPlan(source, { candidateVersion });
 }
 
 export async function previewManagedScheduleFile(
   schedulesPath,
   {
     candidateVersion,
-    originVersion,
     boundaryRoot = path.dirname(path.resolve(schedulesPath))
   } = {}
 ) {
@@ -393,7 +392,6 @@ export async function previewManagedScheduleFile(
     return attachScheduleFileEvidence(
       buildManagedScheduleRepairPlan("", {
         candidateVersion,
-        originVersion,
         targetPath,
         preimageMetadata: null
       }),
@@ -409,7 +407,6 @@ export async function previewManagedScheduleFile(
   return attachScheduleFileEvidence(
     buildManagedScheduleRepairPlan(stable.source, {
       candidateVersion,
-      originVersion,
       targetPath,
       preimageMetadata: regularFilePreimageMetadata(stable.stats)
     }),
@@ -422,7 +419,6 @@ export async function applyManagedScheduleFile(
   schedulesPath,
   {
     candidateVersion,
-    originVersion,
     expectedFingerprint,
     boundaryRoot = path.dirname(path.resolve(schedulesPath)),
     beforeReplace = null,
@@ -438,7 +434,6 @@ export async function applyManagedScheduleFile(
   const targetPath = path.resolve(schedulesPath);
   const plan = await previewManagedScheduleFile(targetPath, {
     candidateVersion,
-    originVersion,
     boundaryRoot
   });
   if (plan.fingerprint !== expectedFingerprint) {
@@ -487,7 +482,6 @@ export async function applyManagedScheduleFile(
 
   const verified = await previewManagedScheduleFile(targetPath, {
     candidateVersion,
-    originVersion,
     boundaryRoot
   });
   if (verified.status !== "current") {
@@ -511,7 +505,6 @@ function buildManagedScheduleRepairPlan(
   source,
   {
     candidateVersion,
-    originVersion,
     targetPath = null,
     preimageMetadata = null
   } = {}
@@ -526,22 +519,9 @@ function buildManagedScheduleRepairPlan(
     target: targetPath ? { kind: "schedule-command-fields", path: targetPath } : null,
     preimage_fingerprint: preimageFingerprint,
     preimage_metadata: preimageMetadata,
-    origin_version: originVersion ?? null,
     candidate_version: candidateVersion,
     candidate_invocation: candidateInvocation
   };
-
-  if (!SUPPORTED_SCHEDULE_ORIGINS.has(originVersion)) {
-    return finalizeScheduleRepairPlan({
-      ...base,
-      status: "blocked-conflict",
-      changes,
-      conflicts: [{
-        reason: "unsupported-origin",
-        detail: `managed schedule repair supports only 2.0.9 and 2.0.10 origins, not ${originVersion ?? "an unknown origin"}`
-      }]
-    });
-  }
 
   let scheduleMaps;
   try {
@@ -643,7 +623,6 @@ export function applyManagedScheduleRepair(source, plan) {
   }
   const checkedPlan = buildManagedScheduleRepairPlan(source, {
     candidateVersion: plan.candidate_version,
-    originVersion: plan.origin_version,
     targetPath: plan.target?.path || null,
     preimageMetadata: plan.preimage_metadata ?? null
   });
@@ -668,7 +647,6 @@ export function applyManagedScheduleRepair(source, plan) {
 
   const verified = buildManagedScheduleRepairPlan(next, {
     candidateVersion: plan.candidate_version,
-    originVersion: plan.origin_version,
     targetPath: plan.target?.path || null,
     preimageMetadata: plan.preimage_metadata ?? null
   });
@@ -694,7 +672,7 @@ function classifyOfficialScheduleCommand(value, commandTail, current) {
   if (value === current) return "current";
   if (value === `dotaios ${commandTail}`) return "bare-predecessor";
   const match = /^npx dotaios@([^\s]+) (.+)$/.exec(value);
-  if (!match || match[2] !== commandTail || !SUPPORTED_SCHEDULE_ORIGINS.has(match[1])) return null;
+  if (!match || match[2] !== commandTail || !RECOGNIZED_SCHEDULE_PREDECESSORS.has(match[1])) return null;
   return `version-${match[1]}`;
 }
 
@@ -750,7 +728,6 @@ function scheduleRepairPlanFingerprint(plan) {
     status: plan.status,
     preimage_fingerprint: plan.preimage_fingerprint,
     preimage_metadata: plan.preimage_metadata,
-    origin_version: plan.origin_version,
     candidate_version: plan.candidate_version,
     candidate_invocation: plan.candidate_invocation,
     changes: plan.changes.map(({ name, field, from, to, start, end, expected, replacement }) => ({
