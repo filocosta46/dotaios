@@ -71,6 +71,33 @@ test("Off updates and Claude capture hooks never wake portable sync", async () =
   }
 });
 
+test("every upgrade route directly skips portable mirror sync", async () => {
+  const routes = [
+    [],
+    ["--help"],
+    ["--dry-run"],
+    ["--path", "/tmp/aios"],
+    ["--apply", "--id", "upgrade-proof", "--fingerprint", "sha256:proof"],
+    ["--apply", "--id", "stale", "--fingerprint", "stale"],
+    ["--unknown"]
+  ];
+
+  for (const args of routes) {
+    const readOnly = skipsPortableMirrorSync("upgrade", args);
+    assert.equal(readOnly, true, args.join(" ") || "preview");
+    let spawned = false;
+    await fireSyncHook({
+      allowAutoSync: true,
+      command: "upgrade",
+      isSyncEnabled: async () => true,
+      readOnly,
+      spawnImpl: () => { spawned = true; },
+      testContext: null
+    });
+    assert.equal(spawned, false, args.join(" ") || "preview");
+  }
+});
+
 test("search and skill lookup surfaces are classified read-only while skill writers are not", async () => {
   const readOnlyCommands = [
     ["search", ["continuity"]],

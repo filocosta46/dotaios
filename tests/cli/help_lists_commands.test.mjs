@@ -23,3 +23,16 @@ test("every dispatchable command appears in --help", async () => {
   const missing = registered.filter((command) => !new RegExp(`^\\s+${command}\\b`, "m").test(help.stdout));
   assert.deepEqual(missing, [], `commands missing from --help: ${missing.join(", ")}`);
 });
+
+test("help distinguishes memory updates from managed scaffold upgrades", () => {
+  const help = spawnSync(process.execPath, [cli, "--help"], { encoding: "utf8" });
+  assert.equal(help.status, 0, help.stderr);
+  assert.match(help.stdout, /^\s+update \[text\].*memory$/m);
+  assert.match(help.stdout, /^\s+upgrade\s+.*managed scaffold.*no memory.*no sync$/mi);
+
+  const upgrade = spawnSync(process.execPath, [cli, "upgrade", "--help"], { encoding: "utf8" });
+  assert.equal(upgrade.status, 0, upgrade.stderr);
+  assert.match(upgrade.stdout, /preview is the default and writes nothing/i);
+  assert.match(upgrade.stdout, /does not change user memory and does not sync/i);
+  assert.match(upgrade.stdout, /different from `dotaios update \[text\]`/i);
+});
