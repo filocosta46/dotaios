@@ -4,6 +4,22 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.11] - 2026-08-26
+
+### Added
+- `dotaios upgrade` previews, approves, applies, and verifies updates to managed
+  instructions, official skills, and generated schedules without replacing
+  unmanaged content.
+- `dotaios capture save-summary` gives assistants one bounded interface for an
+  intentional session save.
+
+### Fixed
+- Managed surfaces use the exact installed DotAIOS release, and upgrades repair
+  package-generated 2.0.9 and 2.0.10 schedule commands without changing custom
+  schedule bytes.
+- Claude Code activation, skill projection, and diagnostics honor an absolute
+  `CLAUDE_CONFIG_DIR` instead of writing or checking only `~/.claude`.
+
 ## [2.0.10] - 2026-08-18
 
 ### Changed

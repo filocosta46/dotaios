@@ -8,13 +8,14 @@ DotAIOS creates a local `~/aios/` folder that your AI tools can read. Think of i
 > previewing every change and leaving the meaningful choices to you.
 
 ```bash
-npx dotaios@latest setup --dry-run
-npx dotaios@latest setup
+npx dotaios@2.0.11 setup --dry-run
+npx dotaios@2.0.11 setup
 ```
 
 The published package name is `dotaios`. A shorter `aios` binary is also available once the package is installed or linked locally.
 
-Setup and later commands use the current published package (`dotaios@latest`).
+Setup and later commands use the package version pinned in this guide
+(`dotaios@2.0.11`).
 No global install is needed.
 
 The recommended flow is the one request in [Friend Setup](friend-setup.md). The
@@ -38,8 +39,8 @@ separate memory stores.
 For Cursor or project-scoped agents, attach a project folder:
 
 ```bash
-npx dotaios@latest project add /path/to/project --apply
-npx dotaios@latest attach /path/to/project
+npx dotaios@2.0.11 project add /path/to/project --apply
+npx dotaios@2.0.11 attach /path/to/project
 ```
 
 The project catalog syncs the durable README and repository URL. Each machine
@@ -47,8 +48,8 @@ keeps its own checkout path outside the synced AIOS content. On another machine,
 restore committed project state into the ignored managed workspace:
 
 ```bash
-npx dotaios@latest migrate
-npx dotaios@latest project restore <slug-or-id>
+npx dotaios@2.0.11 migrate
+npx dotaios@2.0.11 project restore <slug-or-id>
 ```
 
 `migrate` is a read-only preview. On an older folder, run the exact
@@ -63,7 +64,7 @@ To connect a consultant or client asset folder, preview the consent with
 `dotaios project source connect <project> <folder>`:
 
 ```bash
-npx dotaios@latest project source connect acme-campaign /path/to/assets \
+npx dotaios@2.0.11 project source connect acme-campaign /path/to/assets \
   --source-id campaign-assets \
   --label "Campaign assets" \
   --purpose "Launch campaign assets"
@@ -84,22 +85,22 @@ After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Curs
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
 
 ```bash
-npx dotaios@latest init --vault-path ~/my-vault
+npx dotaios@2.0.11 init --vault-path ~/my-vault
 ```
 
 Check setup health:
 
 ```bash
-npx dotaios@latest status
+npx dotaios@2.0.11 status
 ```
 
 Keep your context fresh:
 
 ```bash
-npx dotaios@latest interview --review
-npx dotaios@latest context
-npx dotaios@latest context work --edit
-npx dotaios@latest context --refresh --review
+npx dotaios@2.0.11 interview --review
+npx dotaios@2.0.11 context
+npx dotaios@2.0.11 context work --edit
+npx dotaios@2.0.11 context --refresh --review
 ```
 
 Use `interview --review` when your role, active work, priorities, or planning style changes. It asks plain-English questions, previews the files it will update, and creates `context/preferences.md` plus planning prompts for supported skills.
@@ -111,23 +112,23 @@ Use `context` when you want to inspect the files directly. Use `context --refres
 Import context from old AI chats:
 
 ```bash
-npx dotaios@latest import ./import.json --dry-run
-npx dotaios@latest import ./import.json --apply
+npx dotaios@2.0.11 import ./import.json --dry-run
+npx dotaios@2.0.11 import ./import.json --apply
 ```
 
 Save a file or URL into the vault:
 
 ```bash
-npx dotaios@latest ingest ./notes.md
-npx dotaios@latest ingest https://example.com/article
+npx dotaios@2.0.11 ingest ./notes.md
+npx dotaios@2.0.11 ingest https://example.com/article
 ```
 
 Route by purpose with `--to` to put things in the right place from the start:
 
 ```bash
-npx dotaios@latest ingest research.pdf --to wiki --name ai-research           # lasting reference
-npx dotaios@latest ingest brief.pdf --to company --name acme --apply          # org record
-npx dotaios@latest ingest call-notes.txt --to signal                          # working note
+npx dotaios@2.0.11 ingest research.pdf --to wiki --name ai-research           # lasting reference
+npx dotaios@2.0.11 ingest brief.pdf --to company --name acme --apply          # org record
+npx dotaios@2.0.11 ingest call-notes.txt --to signal                          # working note
 ```
 
 Durable shelves (`wiki`, `company`, `person`) preview without `--apply` and will not write. A human picking the shelf interactively counts as approval.
@@ -137,12 +138,12 @@ Dynamic or paywalled pages may ingest partial content. If the saved markdown end
 Save selected AI conversations locally so other agents on your machine can find what mattered:
 
 ```bash
-npx dotaios@latest capture enable claude-code     # auto-save every Claude Code session
-npx dotaios@latest capture import paste           # paste any conversation manually
-npx dotaios@latest capture import claude-code     # backfill past sessions (last 30 days)
-npx dotaios@latest capture list                   # browse saved conversations
-npx dotaios@latest capture list --agent claude-code --since 7d
-npx dotaios@latest search "any topic"             # search includes saved sessions
+npx dotaios@2.0.11 capture enable claude-code     # auto-save every Claude Code session
+npx dotaios@2.0.11 capture import paste           # paste any conversation manually
+npx dotaios@2.0.11 capture import claude-code     # backfill past sessions (last 30 days)
+npx dotaios@2.0.11 capture list                   # browse saved conversations
+npx dotaios@2.0.11 capture list --agent claude-code --since 7d
+npx dotaios@2.0.11 search "any topic"             # search includes saved sessions
 ```
 
 For agents that can write local files, you can also ask: "use save-session" or "save this session". It writes a clean summary with decisions, open threads, and action items.
@@ -156,20 +157,20 @@ Sessions you save or capture with an enabled adapter go to `~/aios/memory/sessio
 Write today's local brief into your daily note:
 
 ```bash
-npx dotaios@latest brief
+npx dotaios@2.0.11 brief
 ```
 
 Search your local AIOS files:
 
 ```bash
-npx dotaios@latest search "daily planning" --scope skills
+npx dotaios@2.0.11 search "daily planning" --scope skills
 ```
 
 Validate and install a plugin from a reviewed local folder:
 
 ```bash
-npx dotaios@latest install ./my-plugin --dry-run
-npx dotaios@latest install ./my-plugin
+npx dotaios@2.0.11 install ./my-plugin --dry-run
+npx dotaios@2.0.11 install ./my-plugin
 ```
 
 DotAIOS refuses remote plugin URLs. Pin and download or clone the exact revision
@@ -178,7 +179,7 @@ yourself, inspect it outside DotAIOS, then run the local-folder dry run above.
 List local manual schedules:
 
 ```bash
-npx dotaios@latest schedule list
+npx dotaios@2.0.11 schedule list
 ```
 
 Your daily interface is your existing AI tool. You should not need to open DotAIOS directly except to check status, refresh your context, import material, ingest files, adopt reviewed local Agent Skill bundles, or run manual schedules.
@@ -207,7 +208,7 @@ Projects can carry their own skills without replacing your global library. Put
 `SKILL.md` workflows under a project's `skills/` directory and run:
 
 ```bash
-npx dotaios@latest attach /path/to/project
+npx dotaios@2.0.11 attach /path/to/project
 ```
 
 DotAIOS links project-owned skills into the checkout's Claude Code, shared

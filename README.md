@@ -51,13 +51,13 @@ not need a GitHub or DotAIOS account.
 
 Use Terminal, PowerShell, or another system shell. DotAIOS requires Node.js 20
 or newer. The first command previews without creating `~/aios` or changing app
-configuration; the second runs the current published package:
+configuration; the second runs the exact release version named here:
 
 npm may download and cache the named package.
 
 ```sh
-npx dotaios@latest setup --dry-run
-npx dotaios@latest setup
+npx dotaios@2.0.11 setup --dry-run
+npx dotaios@2.0.11 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the
@@ -67,7 +67,7 @@ configuration. Private GitHub sync is off by default.
 Afterward, verify the local installation with:
 
 ```sh
-npx dotaios@latest doctor
+npx dotaios@2.0.11 doctor
 ```
 
 ## Choose what your AI can remember
@@ -126,160 +126,9 @@ memory. You save the important parts on purpose, in the right place.
 
 ## Technical reference
 
-Verify the package, connect projects, update a release, or remove DotAIOS.
-You do not need this to use the product.
-
-### Verify before running
-
-The package is [`dotaios` on npm](https://www.npmjs.com/package/dotaios),
-published from the [`filocosta46/dotaios` repository](https://github.com/filocosta46/dotaios).
-Setup always uses the current published package (`dotaios@latest`).
-
-These commands inspect registry provenance and packaged contents without
-running DotAIOS setup:
-
-```sh
-npm view dotaios version dist.integrity dist.tarball gitHead _npmUser.name
-npm view dotaios scripts
-npm pack dotaios --dry-run
-```
-
-Those three commands show you the registry publisher (`_npmUser.name`), the
-integrity record, and every file in the package before anything runs. The
-package defines no `preinstall`, `install`, or `postinstall` script, so nothing
-executes until you invoke the CLI yourself. The commands above omit `npx -y`
-on purpose, so npm still asks you to confirm the current package. Interactive
-setup then offers private sync, a daily brief, conversation saving/backfill,
-and the optional Lightpanda helper; every one of them defaults to No.
-[INSTALL.md](INSTALL.md) has the full sequence and
-[the security model](docs/security.md) has the package and permission
-boundaries.
-
-### What setup connects
-
-Activation may add a DotAIOS-managed block to `~/.claude/CLAUDE.md`,
-`~/.codex/AGENTS.md`, `~/.gemini/GEMINI.md`, or
-`~/.config/opencode/AGENTS.md`, plus documented skill links for detected
-clients. Cursor connects per project. Machine-local project path mappings live
-in `~/.dotaios/projects.json`. Existing unmanaged content is preserved.
-
-Claude Code can use managed session capture; other clients use explicit
-saving or import. [Client support](docs/client-support.md) records what each
-client has actually been observed to do.
-
-When you use an AI client, that provider processes the context you send it.
-You can optionally sync selected AIOS files privately between your own
-devices.
-
-Project records sync with AIOS. Managed project repositories sit under its
-ignored `workspaces/` root with their own history and credentials, so source
-code never enters the personal-context mirror.
-
-### Projects and workspaces
-
-Register an existing repository without changing it, inspect the plan, then
-apply it:
-
-```sh
-npx -y dotaios@latest project add /path/to/project
-npx -y dotaios@latest project add /path/to/project --apply
-npx -y dotaios@latest attach /path/to/project --dry-run
-npx -y dotaios@latest attach /path/to/project
-```
-
-The portable project record lives in `~/aios/projects`. The checkout stays
-where it is. On another machine, restore a missing checkout into the ignored
-workspace shelf with:
-
-```sh
-npx -y dotaios@latest project restore <slug-or-id> --dry-run
-npx -y dotaios@latest project restore <slug-or-id>
-```
-
-DotAIOS never copies a project's source code into the personal-context mirror.
-
-### Optional private sync
-
-Sync is opt-in and uses a private GitHub repository you control:
-
-```sh
-npx -y dotaios@latest sync setup
-npx -y dotaios@latest sync now
-npx -y dotaios@latest sync status
-```
-
-Credentials stay on the machine and are not written into the Git remote URL.
-Managed project checkouts, external vault contents, secrets, and ignored
-local state are outside the mirror. Stop syncing and remove the local sync
-credential with `npx -y dotaios@latest sync logout`; the private repository
-remains in your GitHub account.
-
-### Managed Agent Skills
-
-Canonical skills live at `skills/<name>/SKILL.md`. Native agent folders are
-derived projections. Linked shelf entries and skills found only in native
-folders stay unroutable until you adopt them.
-
-```sh
-dotaios skills inventory --json
-dotaios skills adopt /reviewed/local/skill --json
-dotaios skills adopt /reviewed/local/skill \
-  --apply <operation-id> --fingerprint <sha256>
-dotaios skills reconcile --json
-dotaios skills remove <name> --json
-```
-
-Preview commands write nothing. Apply needs both exact tokens from the
-matching preview. Adoption copies the complete bounded regular-file bundle,
-never executes scripts, and refuses links, special or hardlinked files, stale
-proofs, unsafe parents, and foreign collisions.
-
-## Updating
-
-First inspect the newest release metadata without executing it:
-
-```sh
-npm view dotaios@latest version dist.integrity dist.tarball gitHead scripts dependencies
-```
-
-Review the returned source tag, integrity, scripts, and dependencies. Replace
-`<version>` below with that exact reviewed version and keep it identical in
-every command:
-
-```sh
-npx dotaios@<version> --version
-npx dotaios@<version> doctor
-npx dotaios@<version> migrate
-npx dotaios@<version> migrate --apply <plan-id>
-npx dotaios@<version> activate
-npx dotaios@<version> skills doctor
-npx dotaios@<version> capture enable claude-code
-npx dotaios@<version> mcp config --agent <agent>
-```
-
-`migrate` is a read-only preview. Run the `migrate --apply <plan-id>` line only
-when the preview prints that exact plan, using the same release. Re-run capture
-only if Claude Code capture was already enabled. For every configured MCP
-client, run `mcp config --agent <agent>`, merge the printed fragment into that
-client's existing configuration, and restart it. DotAIOS MCP does not edit
-client config automatically. Do not replace `<version>` with `latest`.
-
-## Disconnecting or removing
-
-DotAIOS has no hosted account or background service to cancel. Before removing
-local data, make a backup of anything you want to keep.
-
-```sh
-npx -y dotaios@latest capture disable claude-code
-npx -y dotaios@latest sync logout
-```
-
-Those commands stop managed capture and private sync. The last step is
-deliberately yours: review the DotAIOS-managed bridge blocks and links in your
-client configuration, remove those, then archive or delete `~/aios`. There is
-no one-command wipe, because the same command would have to guess which parts
-of your client configuration are ours — and anything unmanaged is left exactly
-as you wrote it.
+For package provenance and verified install, update, and removal commands, use
+[INSTALL.md](INSTALL.md). It is the command reference for this release.
+Feature-specific workflows are in the linked guides below.
 
 ## Docs
 

@@ -128,7 +128,7 @@ test("Hermes claims a global adapter without inventing a project-local selector"
 
 test("first-time onboarding stays assistant-guided, consent-first, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "2.0.10", "the public onboarding contract must target the release candidate");
+  assert.equal(pkg.version, "2.0.11", "the public onboarding contract must target the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
   }
@@ -146,18 +146,13 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   for (const relativePath of relativeFiles) {
     assert.match(
       documents[relativePath],
-      /npx (?:-y )?dotaios@latest setup --dry-run/,
-      `${relativePath} must preview the current published package`
+      /npx dotaios@2\.0\.11 setup --dry-run/,
+      `${relativePath} must preview the exact release candidate`
     );
     assert.match(
       documents[relativePath],
-      /^npx (?:-y )?dotaios@latest setup$/m,
-      `${relativePath} must retain an @latest manual recovery path`
-    );
-    assert.doesNotMatch(
-      documents[relativePath],
-      /dotaios@\d+\.\d+\.\d+/,
-      `${relativePath} must not pin a release number`
+      /^npx dotaios@2\.0\.11 setup$/m,
+      `${relativePath} must retain an exact-version manual recovery path`
     );
     assert.doesNotMatch(
       documents[relativePath],
@@ -170,6 +165,11 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
     documents["README.md"],
     /Please set up DotAIOS on my computer: https:\/\/github\.com\/filocosta46\/dotaios/,
     "README must keep the unversioned paste line"
+  );
+  assert.deepEqual(
+    documents["README.md"].split(/(?<=\n)/).filter((line) => line.startsWith("> Please set up DotAIOS")),
+    ["> Please set up DotAIOS on my computer: https://github.com/filocosta46/dotaios\n"],
+    "the README hero prompt must remain byte-identical"
   );
   assert.deepEqual(
     extractAssistantInstallRefs([
@@ -186,7 +186,10 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
       `${relativePath} must send the assistant to INSTALL.md on the current page, not a version tag`
     );
   }
-  assert.match(documents["README.md"], /_npmUser\.name/, "README provenance must request the publisher it claims to display");
+  const technicalReference = documents["README.md"].split("## Technical reference")[1] || "";
+  assert.match(technicalReference, /\[INSTALL\.md\]\(INSTALL\.md\)/, "README must point technical commands to INSTALL");
+  assert.doesNotMatch(technicalReference, /```|\bnpx\b|\bnpm (?:view|pack)\b/, "README must not duplicate INSTALL commands");
+  assert.match(documents["INSTALL.md"], /_npmUser\.name/, "INSTALL provenance must request the publisher it claims to display");
   assert.match(documents["INSTALL.md"], /If an AI assistant is helping you/i, "INSTALL must carry the assistant through setup");
   assert.match(documents["docs/friend-setup.md"], /recommended path is to ask a local AI agent/i, "friend setup must recommend the nontechnical path");
   const projectVerificationContract = /explicitly registered project(?=[\s\S]{0,100}\bslug\b)(?=[\s\S]{0,100}\bstable ID\b)[\s\S]{0,200}> Only this project\./i;
@@ -208,12 +211,12 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
-  assert.match(documents["docs/friend-setup.md"], /dotaios@latest setup/, "friend setup must use the current published package");
+  assert.match(documents["docs/friend-setup.md"], /dotaios@2\.0\.11 setup/, "friend setup must use the exact release candidate");
   assert.match(documents["INSTALL.md"], /shared\s+`~\/\.agents\/skills` directory/i, "INSTALL must disclose the shared global skill surface");
   assert.match(documents["INSTALL.md"], /each attached checkout listed in `~\/\.dotaios\/projects\.json`/i, "INSTALL must cover project-local removal");
   assert.doesNotMatch(documents["INSTALL.md"], /use `\/memory-maintenance`/, "INSTALL must use cross-client skill invocation language");
-  assert.match(documents["INSTALL.md"], /npx(?: -y)? dotaios@latest setup/i, "INSTALL must run the current published package");
-  assert.match(documents["INSTALL.md"], /current published package|@latest/i, "INSTALL must not claim a frozen release pin");
+  assert.match(documents["INSTALL.md"], /npx dotaios@2\.0\.11 setup/i, "INSTALL must run the exact release candidate");
+  assert.match(documents["INSTALL.md"], /package version pinned in this guide/i, "INSTALL must explain its frozen release pin");
   assert.match(documents["INSTALL.md"], /`~\/aios\/memory\/sessions`.*private GitHub mirror/is, "INSTALL must disclose capture and sync composition");
   assert.match(documents["INSTALL.md"], /GitHub\s+repository remains.*revoke the token/is, "INSTALL must disclose remote and credential cleanup");
   assert.match(documents["INSTALL.md"], /bundled with the current package[\s\S]{0,40}does not install[\s\S]{0,10}third-party plugins/i, "INSTALL must bound the shared skill surface");
@@ -280,6 +283,39 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(documents["INSTALL.md"], /retired `~\/\.cursor\/skills`.*`~\/\.gemini\/skills`.*`~\/\.gemini\/config\/skills`/is, "INSTALL must cover retired global skill targets");
   assert.match(documents["INSTALL.md"], /\.cursor\/rules\/dotaios\.mdc.*remove only that block/is, "INSTALL must cover the retired project Cursor bridge");
 
+  const pinnedCommandFiles = [
+    "README.md",
+    "INSTALL.md",
+    "docs/adapters.md",
+    "docs/advanced-memory.md",
+    "docs/context-import.md",
+    "docs/friend-setup.md",
+    "docs/getting-started.md",
+    "docs/google-workspace.md",
+    "docs/mcp.md",
+    "docs/plugin-development.md",
+    "docs/schedules.md",
+  ];
+  for (const relativePath of pinnedCommandFiles) {
+    const markdown = await fs.readFile(path.join(repoRoot, relativePath), "utf8");
+    assert.doesNotMatch(markdown, /npx -y\b/, `${relativePath} must retain npm's confirmation`);
+    assert.doesNotMatch(
+      markdown,
+      /\bnpx\s+dotaios@latest\b/,
+      `${relativePath} must not execute mutable @latest`
+    );
+    const commandVersions = Array.from(
+      markdown.matchAll(/\bnpx\s+dotaios@([^\s`]+)/g),
+      (match) => match[1]
+    );
+    assert.ok(commandVersions.length > 0, `${relativePath} must contain at least one pinned command`);
+    assert.equal(
+      commandVersions.every((version) => version === pkg.version || version === "<version>"),
+      true,
+      `${relativePath} commands must name ${pkg.version} (or the reviewed update placeholder)`
+    );
+  }
+
   for (const retiredLauncher of [
     ".github/workflows/release-installers.yml",
     "installers/windows/setup.bat",
@@ -318,14 +354,10 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
 });
 
 test("public update guidance reviews metadata before one exact-version upgrade", async () => {
-  const documents = Object.fromEntries(await Promise.all(
-    ["README.md", "INSTALL.md"].map(async (relativePath) => [
-      relativePath,
-      await fs.readFile(path.join(repoRoot, relativePath), "utf8")
-    ])
-  ));
+  const documents = {
+    "INSTALL.md": await fs.readFile(path.join(repoRoot, "INSTALL.md"), "utf8")
+  };
   const updateSections = {
-    "README.md": documents["README.md"].split("## Updating")[1]?.split(/\n## /)[0] || "",
     "INSTALL.md": documents["INSTALL.md"].split("## Update")[1]?.split(/\n## /)[0] || ""
   };
 

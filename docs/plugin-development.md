@@ -35,7 +35,7 @@ Core rule: plugins may propose durable memory changes, but the user approves wri
 ## Validate A Plugin
 
 ```bash
-npx dotaios@latest install ./my-plugin --dry-run
+npx dotaios@2.0.11 install ./my-plugin --dry-run
 ```
 
 The CLI validates the manifest and prints the permission surface.
@@ -43,7 +43,7 @@ The CLI validates the manifest and prints the permission surface.
 ## Install Locally
 
 ```bash
-npx dotaios@latest install ./my-plugin
+npx dotaios@2.0.11 install ./my-plugin
 ```
 
 This copies the plugin into `~/aios/plugins/<name>/` and updates `~/aios/skills/_registry.json` with the skills the plugin provides.
@@ -54,9 +54,9 @@ For a plugin hosted in Git, pin and clone or download the exact revision outside
 DotAIOS. Review it, then pass the local folder to the dry run:
 
 ```bash
-npx dotaios@latest install ./reviewed-repo --dry-run
-npx dotaios@latest install ./reviewed-repo
-npx dotaios@latest install ./reviewed-repo --subdir packages/my-plugin --dry-run
+npx dotaios@2.0.11 install ./reviewed-repo --dry-run
+npx dotaios@2.0.11 install ./reviewed-repo
+npx dotaios@2.0.11 install ./reviewed-repo --subdir packages/my-plugin --dry-run
 ```
 
 Before installing, confirm:
