@@ -103,7 +103,7 @@ test("a first apply writes one managed block below the user's own text", async (
   const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("first");
 
   try {
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS.");
     await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
 
     const identity = await fs.readFile(identityPath, "utf8");
@@ -111,7 +111,7 @@ test("a first apply writes one managed block below the user's own text", async (
     assert.equal(occurrences(identity, IMPORT_END), 1);
     assert.equal(occurrences(identity, "## Imported Context"), 1);
     assert.match(identity, /^# Identity\n\nHand-written line\.\n/, "text above the block survives");
-    assert.match(identity, /Filippo builds DotAIOS\./);
+    assert.match(identity, /Avery builds DotAIOS\./);
     assert.deepEqual(await backupsIn(contextDir), [], "a first import destroys nothing, so it preserves nothing");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
@@ -122,7 +122,7 @@ test("a second apply of identical content leaves the file byte-for-byte alone", 
   const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("repeat");
 
   try {
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS.");
     await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
     const afterFirst = await fs.readFile(identityPath, "utf8");
 
@@ -142,17 +142,17 @@ test("a second apply of changed content replaces the block and preserves the pre
   const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("changed");
 
   try {
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS.");
     await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
     const beforeEdit = await fs.readFile(identityPath, "utf8");
 
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS and Hermes.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS and Hermes.");
     const logs = await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
 
     const identity = await fs.readFile(identityPath, "utf8");
     assert.equal(occurrences(identity, "## Imported Context"), 1, "a changed re-import replaces, never stacks");
-    assert.match(identity, /Filippo builds DotAIOS and Hermes\./);
-    assert.doesNotMatch(identity, /Filippo builds DotAIOS\.\n/, "the superseded body is gone from the live file");
+    assert.match(identity, /Avery builds DotAIOS and Hermes\./);
+    assert.doesNotMatch(identity, /Avery builds DotAIOS\.\n/, "the superseded body is gone from the live file");
     assert.match(identity, /^# Identity\n\nHand-written line\.\n/, "text outside the block is untouched");
     assert.match(logs, /\[replaced\]/);
 
@@ -173,17 +173,17 @@ test("a dry run previews the replacement and writes nothing", async () => {
   const { root, aiosPath, contextDir, identityPath, sourcePath } = await setupContextImport("dry-run");
 
   try {
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS.");
     await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
     const beforeDryRun = await fs.readFile(identityPath, "utf8");
 
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS and Hermes.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS and Hermes.");
     const changedLogs = await runQuietly([sourcePath, "--path", aiosPath, "--dry-run"]);
     assert.match(changedLogs, /would replace the previous import block/);
     assert.equal(await fs.readFile(identityPath, "utf8"), beforeDryRun, "a dry run writes nothing");
     assert.deepEqual(await backupsIn(contextDir), [], "a dry run preserves nothing either");
 
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS.");
     const unchangedLogs = await runQuietly([sourcePath, "--path", aiosPath, "--dry-run"]);
     assert.match(unchangedLogs, /would skip \(already imported\)/);
     assert.match(unchangedLogs, /every imported block is already in place/);
@@ -200,7 +200,7 @@ test("malformed import markers are not ownership proof, so the file is left alon
   try {
     const mangled = `# Identity\n\n${IMPORT_START}\n\n## Imported Context\n\nHalf a block.\n`;
     await fs.writeFile(identityPath, mangled);
-    await writeImportFile(sourcePath, "Filippo builds DotAIOS.");
+    await writeImportFile(sourcePath, "Avery builds DotAIOS.");
 
     const logs = await runQuietly([sourcePath, "--path", aiosPath, "--apply"]);
 

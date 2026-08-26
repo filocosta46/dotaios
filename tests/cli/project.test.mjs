@@ -440,7 +440,7 @@ test("registerProject preserves stable ids, unknown frontmatter, and the README 
       "project: legacy",
       "status: planning",
       "domain: [make]",
-      "owner: Filippo",
+      "owner: Avery",
       "custom:",
       "  keep: true"
     ].join("\n"),
@@ -468,7 +468,7 @@ test("registerProject preserves stable ids, unknown frontmatter, and the README 
   const readme = await readReadme(readmePath);
   assert.equal(readme.metadata.id, "stable-legacy-id");
   assert.equal(readme.metadata.project_id, "stable-legacy-id");
-  assert.equal(readme.metadata.owner, "Filippo");
+  assert.equal(readme.metadata.owner, "Avery");
   assert.deepEqual(readme.metadata.custom, { keep: true });
   assert.equal(readme.metadata.name, "Legacy Renamed");
   assert.equal(readme.metadata.status, "active");

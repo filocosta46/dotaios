@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -25,6 +26,59 @@ async function npmPackDryRun() {
   const result = JSON.parse(stdout);
   const pack = Array.isArray(result) ? result[0] : Object.values(result)[0];
   return pack.files.map((file) => file.path);
+}
+
+const PRIVATE_IDENTIFIER_MARKERS = [
+  { label: "maintainer name", value: ["fi", "lippo"].join("") },
+  { label: "private family name", value: ["mo", "rena"].join("") },
+  { label: "private family surname", value: ["dal", "monte"].join("") },
+  { label: "machine-local home", value: ["/Users/", "fi", "lo"].join("") },
+  { label: "private device hostname", value: ["iMac-di-", "Mo", "rena"].join("") },
+  { label: "private family context", value: ["mother", "'s business context"].join("") },
+];
+
+async function trackedPublicEntries(root) {
+  const { stdout } = await run("git", ["-C", root, "ls-files", "-z"]);
+  const entries = [];
+  for (const relative of stdout.split("\0").filter(Boolean)) {
+    let content;
+    try {
+      content = await fs.readFile(path.join(root, relative));
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        entries.push({ relative, content: Buffer.alloc(0) });
+        continue;
+      }
+      throw error;
+    }
+    entries.push({ relative, content });
+  }
+  return entries;
+}
+
+function findPrivateIdentifierOffenders(entries) {
+  const offenders = [];
+  for (const { relative, content } of entries) {
+    for (const marker of PRIVATE_IDENTIFIER_MARKERS) {
+      if (relative.toLowerCase().includes(marker.value.toLowerCase())) {
+        offenders.push(`${relative}:path: ${marker.label}`);
+      }
+    }
+    if (content.includes(0)) continue;
+    const text = content.toString("utf8");
+    for (const [index, line] of text.split("\n").entries()) {
+      for (const marker of PRIVATE_IDENTIFIER_MARKERS) {
+        if (!line.toLowerCase().includes(marker.value.toLowerCase())) continue;
+        const intentionalAuthor =
+          relative === "package.json" &&
+          marker.label === "maintainer name" &&
+          line.trim().replace(/,$/, "").toLowerCase() ===
+            `"author": "${marker.value} costa"`;
+        if (!intentionalAuthor) offenders.push(`${relative}:${index + 1}: ${marker.label}`);
+      }
+    }
+  }
+  return offenders;
 }
 
 test("commercial website source stays outside the public repository", async () => {
@@ -560,41 +614,96 @@ test("every heredoc in the docs closes on an unindented delimiter", async () => 
   }
 });
 
-// The npm package is read by strangers. A maintainer's own name in a shipped
-// comment is a private detail leaking into a public artifact, and it dates the
-// code — it reads as "this is one person's project" to someone deciding whether
-// to depend on it. This pins the shipped file set only; CHANGELOG.md and the
-// repo's own docs are not published and may credit people by name.
-test("no personal names ship inside the npm package", async () => {
-  const packageJson = JSON.parse(
-    await fs.readFile(path.join(repoRoot, "package.json"), "utf8")
-  );
-  const NAMES = /\b(filippo|morena|dalmonte|roberto|tomada)\b/i;
-  const offenders = [];
+// Public source may credit its author, but it must not publish private family,
+// device, or machine-local identifiers from the maintainer's environment.
+test("private identifier controls match the exact forbidden values", () => {
+  const controls = [
+    {
+      label: "machine-local home",
+      value: ["/Users/", "fi", "lo", "/aios/skills"].join(""),
+    },
+    {
+      label: "private device hostname",
+      value: ["iMac-di-", "Mo", "rena"].join(""),
+    },
+  ];
 
-  async function scan(relative) {
-    const absolute = path.join(repoRoot, relative);
-    let entry;
-    try {
-      entry = await fs.stat(absolute);
-    } catch {
-      return;
-    }
-    if (entry.isDirectory()) {
-      for (const child of await fs.readdir(absolute)) {
-        await scan(path.join(relative, child));
-      }
-      return;
-    }
-    if (!/\.(mjs|md|json|hbs|template)$/.test(relative)) return;
-    const text = await fs.readFile(absolute, "utf8");
-    for (const [index, line] of text.split("\n").entries()) {
-      // The repository URL is the project's real address, not a personal detail.
-      if (line.includes("github.com/")) continue;
-      if (NAMES.test(line)) offenders.push(`${relative}:${index + 1}: ${line.trim()}`);
-    }
+  for (const control of controls) {
+    const offenders = findPrivateIdentifierOffenders([
+      { relative: "control.txt", content: Buffer.from(control.value) },
+    ]);
+    assert.ok(
+      offenders.some((offender) => offender.endsWith(`: ${control.label}`)),
+      `${control.label} must match its independently assembled positive control`
+    );
   }
+});
 
-  for (const shipped of packageJson.files) await scan(shipped);
-  assert.deepEqual(offenders, [], `personal names in shipped files:\n${offenders.join("\n")}`);
+test("private identifier scan covers every tracked text path", () => {
+  const offenders = findPrivateIdentifierOffenders([
+    {
+      relative: "public/index.html",
+      content: Buffer.from(["<p>", "Fi", "lippo", "</p>"].join("")),
+    },
+    {
+      relative: "scripts/hooks/pre-push",
+      content: Buffer.from(["cd /Users/", "fi", "lo"].join("")),
+    },
+    {
+      relative: ["docs/iMac-di-", "Mo", "rena", ".md"].join(""),
+      content: Buffer.alloc(0),
+    },
+    {
+      relative: "assets/photo.bin",
+      content: Buffer.from([0, ...Buffer.from(["Fi", "lippo"].join(""))]),
+    },
+  ]);
+
+  assert.ok(offenders.includes("public/index.html:1: maintainer name"));
+  assert.ok(offenders.includes("scripts/hooks/pre-push:1: machine-local home"));
+  assert.ok(offenders.some((offender) => offender.endsWith(":path: private device hostname")));
+  assert.equal(offenders.some((offender) => offender.startsWith("assets/photo.bin:")), false);
+});
+
+test("tracked public inventory fails closed outside a Git checkout", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-public-inventory-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  await assert.rejects(trackedPublicEntries(root));
+});
+
+test("tracked path names stay visible when the worktree file is absent", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-public-path-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await run("git", ["-C", root, "init", "--quiet"]);
+  const relative = ["docs/iMac-di-", "Mo", "rena", ".md"].join("");
+  const absolute = path.join(root, relative);
+  await fs.mkdir(path.dirname(absolute), { recursive: true });
+  await fs.writeFile(absolute, "public fixture\n");
+  await run("git", ["-C", root, "add", "--", relative]);
+  await fs.rm(absolute);
+
+  const offenders = findPrivateIdentifierOffenders(await trackedPublicEntries(root));
+  assert.ok(offenders.some((offender) => offender.endsWith(":path: private device hostname")));
+});
+
+test("package author exception covers only the exact author field", () => {
+  const name = ["Fi", "lippo"].join("");
+  const exactAuthor = findPrivateIdentifierOffenders([
+    { relative: "package.json", content: Buffer.from(`  "author": "${name} Costa",`) },
+  ]);
+  const authorPlusLeak = findPrivateIdentifierOffenders([
+    {
+      relative: "package.json",
+      content: Buffer.from(`  "author": "${name} Costa", "note": "${name}"`),
+    },
+  ]);
+
+  assert.deepEqual(exactAuthor, []);
+  assert.deepEqual(authorPlusLeak, ["package.json:1: maintainer name"]);
+});
+
+test("tracked public files contain no private maintainer identifiers", async () => {
+  const offenders = findPrivateIdentifierOffenders(await trackedPublicEntries(repoRoot));
+  assert.deepEqual(offenders, [], `private identifiers in tracked files:\n${offenders.join("\n")}`);
 });

@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { readBullet, readSection, replaceBullet, replaceSection } from "../../packages/core/src/sections.mjs";
 
 test("readBullet extracts value after label", () => {
-  const content = "## Basics\n\n- Name: Filippo\n- Role: builder\n";
-  assert.equal(readBullet(content, "Name"), "Filippo");
+  const content = "## Basics\n\n- Name: Avery\n- Role: builder\n";
+  assert.equal(readBullet(content, "Name"), "Avery");
   assert.equal(readBullet(content, "Role"), "builder");
 });
 
@@ -42,7 +42,7 @@ test("readBullet stops at end of line when bullet is followed by a heading", () 
 });
 
 test("readBullet reads a bullet at end of file without a trailing newline", () => {
-  assert.equal(readBullet("## Basics\n\n- Name: Filippo", "Name"), "Filippo");
+  assert.equal(readBullet("## Basics\n\n- Name: Avery", "Name"), "Avery");
   assert.equal(readBullet("## Basics\n\n- Name:", "Name"), "");
 });
 
@@ -53,8 +53,8 @@ test("replaceBullet fills an empty bullet without touching the next line", () =>
 });
 
 test("replaceBullet fills a whitespace-only bullet with a single separator space", () => {
-  assert.equal(replaceBullet("- Name:   \t\n", "Name", "Filippo"), "- Name: Filippo\n");
-  assert.equal(replaceBullet("- Name:\n", "Name", "Filippo"), "- Name: Filippo\n");
+  assert.equal(replaceBullet("- Name:   \t\n", "Name", "Avery"), "- Name: Avery\n");
+  assert.equal(replaceBullet("- Name:\n", "Name", "Avery"), "- Name: Avery\n");
 });
 
 test("replaceBullet preserves a heading that immediately follows an empty bullet", () => {
@@ -63,7 +63,7 @@ test("replaceBullet preserves a heading that immediately follows an empty bullet
 });
 
 test("replaceBullet fills a bullet at end of file without a trailing newline", () => {
-  assert.equal(replaceBullet("## Basics\n\n- Name:", "Name", "Filippo"), "## Basics\n\n- Name: Filippo");
+  assert.equal(replaceBullet("## Basics\n\n- Name:", "Name", "Avery"), "## Basics\n\n- Name: Avery");
 });
 
 test("replaceBullet leaves the rest of the document untouched for a non-empty bullet", () => {
@@ -100,8 +100,8 @@ test("replaceSection returns null when heading missing", () => {
 });
 
 test("replaceBullet writes a value containing $ patterns literally", () => {
-  const before = "- Name: Filippo\n- Role: old\n";
-  assert.equal(replaceBullet(before, "Role", "R$&D lead"), "- Name: Filippo\n- Role: R$&D lead\n");
-  assert.equal(replaceBullet(before, "Role", "co$1st"), "- Name: Filippo\n- Role: co$1st\n");
-  assert.equal(replaceBullet(before, "Role", "a $` b $' c"), "- Name: Filippo\n- Role: a $` b $' c\n");
+  const before = "- Name: Avery\n- Role: old\n";
+  assert.equal(replaceBullet(before, "Role", "R$&D lead"), "- Name: Avery\n- Role: R$&D lead\n");
+  assert.equal(replaceBullet(before, "Role", "co$1st"), "- Name: Avery\n- Role: co$1st\n");
+  assert.equal(replaceBullet(before, "Role", "a $` b $' c"), "- Name: Avery\n- Role: a $` b $' c\n");
 });

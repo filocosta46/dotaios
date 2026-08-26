@@ -104,7 +104,7 @@ Updated: 2026-08-10
    contract, then align experimental replication posture through issue 017.
 3. Bind host receipts to the immutable candidate artifact (issue 019) and
    certify its complete disposable lifecycle without publishing (issue 020).
-4. Obtain Filippo's approval for the exact `Resolve Before Planning` contract in
+4. Obtain the maintainer's approval for the exact `Resolve Before Planning` contract in
    `docs/plans/2026-08-09-001-feat-foundation-continuity-plan.md`; then enrich it
    with `ce-plan`, create tracer-bullet tickets, implement the acceptance slice,
    and run the selected host receipt.
