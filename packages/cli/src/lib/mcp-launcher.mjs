@@ -1,5 +1,8 @@
 import fs from "node:fs";
-import { exactCandidatePackage } from "../../../core/src/bridges.mjs";
+import {
+  exactCandidatePackage,
+  npxExecutable
+} from "../../../core/src/bridges.mjs";
 
 const packageJson = JSON.parse(
   fs.readFileSync(new URL("../../../../package.json", import.meta.url), "utf8")
@@ -7,9 +10,13 @@ const packageJson = JSON.parse(
 
 export const DOTAIOS_PACKAGE_VERSION = packageJson.version;
 
-export function mcpLauncher(aiosPath, version = DOTAIOS_PACKAGE_VERSION) {
+export function mcpLauncher(
+  aiosPath,
+  version = DOTAIOS_PACKAGE_VERSION,
+  { platform = process.platform } = {}
+) {
   return {
-    command: "npx",
+    command: npxExecutable({ platform }),
     args: [
       "--yes",
       "--package",

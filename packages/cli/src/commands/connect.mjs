@@ -387,7 +387,7 @@ async function connectOpenCode(aiosPath, options) {
   console.log("Native skills use the shared ~/.agents/skills target from `dotaios activate`.");
 }
 
-export async function mergeOpenCodeSettings(settingsPath, aiosPath) {
+export async function mergeOpenCodeSettings(settingsPath, aiosPath, options = {}) {
   let settings = {};
   let raw = null;
   try {
@@ -462,7 +462,7 @@ export async function mergeOpenCodeSettings(settingsPath, aiosPath) {
       `Existing ${settingsPath} has an unrecognized mcp.dotaios entry. Move or remove it, then retry; refusing to overwrite it.`
     );
   }
-  const launcher = mcpLauncher(aiosPath);
+  const launcher = mcpLauncher(aiosPath, undefined, options);
   settings.mcp.dotaios = {
     type: "local",
     command: [launcher.command, ...launcher.args],
@@ -509,7 +509,7 @@ function isManagedCurrentOpenCodeEntry(entry) {
 function isPinnedDotaiosLauncher(command) {
   if (!Array.isArray(command) || command.length !== 7) return false;
   return (
-    command[0] === "npx"
+    ["npx", "npx.cmd"].includes(command[0])
     && command[1] === "--yes"
     && command[2] === "--package"
     && /^dotaios@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(command[3] || "")

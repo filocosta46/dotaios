@@ -50,3 +50,28 @@ jobs:
 
       - name: Verify package contents
         run: npm pack --dry-run
+
+  windows-runtime-handoffs:
+    name: windows runtime handoffs (Node 24)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prove executable Windows handoffs
+        run: node --test tests/cli/runtime_command_handoffs.test.mjs
