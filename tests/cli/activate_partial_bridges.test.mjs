@@ -27,6 +27,8 @@ function makeSandbox() {
   for (const dir of [".claude", ".codex", ".gemini"]) {
     fs.mkdirSync(path.join(homePath, dir), { recursive: true });
   }
+  fs.writeFileSync(path.join(homePath, ".claude", "settings.json"), "{}\n");
+  fs.writeFileSync(path.join(homePath, ".gemini", "settings.json"), "{}\n");
   fs.mkdirSync(path.join(aiosPath, "skills", "test-skill"), { recursive: true });
   fs.writeFileSync(
     path.join(aiosPath, "aios.json"),

@@ -196,6 +196,7 @@ test("a preserved bridge collision leaves a folder the documented retry can fini
   const userBridge = path.join(sandbox.homePath, ".claude", "CLAUDE.md");
   fs.mkdirSync(path.dirname(userBridge), { recursive: true });
   fs.writeFileSync(userBridge, "Always answer in Italian. Never use emoji.\n");
+  fs.writeFileSync(path.join(path.dirname(userBridge), "settings.json"), "{}\n");
 
   const first = runSetup(sandbox, ["--yes"]);
   const markerPath = path.join(sandbox.aiosPath, ".dotaios-setup-transaction.json");

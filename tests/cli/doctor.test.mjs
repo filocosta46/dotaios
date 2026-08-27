@@ -125,6 +125,7 @@ describe("doctor Claude config root", () => {
     ].join("\n");
     await fs.mkdir(path.dirname(defaultBridge), { recursive: true });
     await fs.writeFile(defaultBridge, defaultBridgeText);
+    await fs.writeFile(path.join(path.dirname(defaultBridge), "settings.json"), "{}\n");
 
     try {
       const { output } = await runDoctor({
@@ -480,6 +481,7 @@ describe("doctorCommand", () => {
     const tmpHome = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-home-legacy-"));
     const bridgePath = path.join(tmpHome, ".claude", "CLAUDE.md");
     await fs.mkdir(path.dirname(bridgePath), { recursive: true });
+    await fs.writeFile(path.join(tmpHome, ".claude", "settings.json"), "{}\n");
     await fs.writeFile(bridgePath, [
       "# DotAIOS Claude Code Bridge",
       "<!-- dotaios-managed:start -->",

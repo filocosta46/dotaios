@@ -9,11 +9,17 @@ const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 const quietEnv = { ...process.env, PATH: "/usr/bin:/bin", DOTAIOS_NO_UPDATE_CHECK: "1" };
 
+function installClaude(homePath) {
+  const settingsPath = path.join(homePath, ".claude", "settings.json");
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, "{}\n");
+}
+
 test("default setup preview names only detected clients and keeps operator detail behind --verbose", () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-setup-"));
   const homePath = path.join(tempRoot, "home");
   const aiosPath = path.join(homePath, "aios");
-  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
+  installClaude(homePath);
 
   try {
     const concise = run(["setup", "--dry-run", "--path", aiosPath, "--home", homePath]);
@@ -57,8 +63,8 @@ test("real setup keeps init detail concise by default and restores it with --ver
   const conciseAios = path.join(conciseHome, "aios");
   const verboseHome = path.join(tempRoot, "verbose-home");
   const verboseAios = path.join(verboseHome, "aios");
-  fs.mkdirSync(path.join(conciseHome, ".claude"), { recursive: true });
-  fs.mkdirSync(path.join(verboseHome, ".claude"), { recursive: true });
+  installClaude(conciseHome);
+  installClaude(verboseHome);
 
   try {
     const concise = run([
@@ -116,7 +122,7 @@ test("real setup names only clients whose context bridge was configured", () => 
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-mixed-clients-"));
   const homePath = path.join(tempRoot, "home");
   const aiosPath = path.join(homePath, "aios");
-  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
+  installClaude(homePath);
   fs.mkdirSync(path.join(homePath, ".cursor"), { recursive: true });
 
   try {
@@ -136,7 +142,7 @@ test("setup preview distinguishes bridge clients from bridge-less detected apps"
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-run-mixed-preview-"));
   const homePath = path.join(tempRoot, "home");
   const aiosPath = path.join(homePath, "aios");
-  fs.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
+  installClaude(homePath);
   fs.mkdirSync(path.join(homePath, ".cursor"), { recursive: true });
 
   try {
@@ -237,7 +243,7 @@ test("default doctor explains a wrong-folder connection without operator jargon"
   try {
     const initialized = run(["init", "--yes", "--path", aiosPath]);
     assert.equal(initialized.status, 0, initialized.stderr);
-    fs.mkdirSync(path.dirname(claudeBridge), { recursive: true });
+    installClaude(homePath);
     fs.writeFileSync(claudeBridge, [
       "<!-- dotaios-managed:start -->",
       `Read ${path.join(otherAios, "AGENTS.md")} first.`,

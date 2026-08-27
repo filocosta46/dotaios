@@ -23,6 +23,7 @@ async function sandbox() {
   const aiosPath = path.join(base, "aios");
   const homePath = path.join(base, "home");
   await fs.mkdir(path.join(homePath, ".claude"), { recursive: true });
+  await fs.writeFile(path.join(homePath, ".claude", "settings.json"), "{}\n");
   await run(process.execPath, [cli, "init", "--path", aiosPath, "--yes"]);
   return { base, aiosPath, homePath, bridge: path.join(homePath, ".claude", "CLAUDE.md") };
 }
