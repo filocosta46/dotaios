@@ -329,6 +329,7 @@ test("a build-metadata candidate recognizes its own managed Gemini hook", async 
 test("activate and connect gemini agree on the managed block", () => {
   const { base, aios, bridge } = sandbox();
   try {
+    fs.writeFileSync(path.join(base, ".gemini", "settings.json"), "{}\n");
     const activate = runActivate(base, aios);
     assert.equal(activate.status, 0, activate.stderr);
     const afterActivate = findBlock(fs.readFileSync(bridge, "utf8"));

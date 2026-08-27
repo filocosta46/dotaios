@@ -384,6 +384,35 @@ test("capture status --all prints adapter summary including unsupported", () => 
   assert.match(result.stdout, /claude-code/);
 });
 
+test("capture status distinguishes Gemini settings from DotAIOS skill projections", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-capture-gemini-detection-"));
+  const settingsPath = path.join(home, ".gemini", "settings.json");
+  fs.mkdirSync(path.join(home, ".gemini", "config", "skills"), { recursive: true });
+
+  try {
+    const projectionOnly = run(["capture", "status"], {
+      env: { ...process.env, HOME: home, USERPROFILE: home, PATH: "" }
+    });
+    assert.doesNotMatch(
+      projectionOnly.stdout,
+      /^\s*gemini\s+/mi,
+      "a DotAIOS-managed skill projection is not a Gemini installation"
+    );
+
+    fs.writeFileSync(settingsPath, "{}\n");
+    const installed = run(["capture", "status"], {
+      env: { ...process.env, HOME: home, USERPROFILE: home, PATH: "" }
+    });
+    assert.match(
+      installed.stdout,
+      /^\s*gemini\s+/mi,
+      "Gemini-owned settings must remain installation evidence"
+    );
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test("capture enable with --path and no adapter does not parse path as adapter", () => {
   const { aiosPath, tempRoot } = setupAios();
   const result = run(["capture", "enable", "--path", aiosPath], {

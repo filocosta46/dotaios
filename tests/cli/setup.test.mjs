@@ -120,6 +120,7 @@ test("setup --dry-run reports an unmanaged bridge collision without changing it"
   fsSync.mkdirSync(aiosPath, { recursive: true });
   fsSync.mkdirSync(path.dirname(bridgePath), { recursive: true });
   fsSync.writeFileSync(bridgePath, existing);
+  fsSync.writeFileSync(path.join(path.dirname(bridgePath), "settings.json"), "{}\n");
 
   const result = spawnSync(process.execPath, [
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
@@ -153,6 +154,7 @@ test("setup --dry-run preserves a bridge whose managed markers are reversed", ()
   fsSync.mkdirSync(aiosPath, { recursive: true });
   fsSync.mkdirSync(path.dirname(bridgePath), { recursive: true });
   fsSync.writeFileSync(bridgePath, existing);
+  fsSync.writeFileSync(path.join(path.dirname(bridgePath), "settings.json"), "{}\n");
 
   const result = spawnSync(process.execPath, [
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),
@@ -192,6 +194,7 @@ test("setup --dry-run preserves a bridge with duplicate managed markers", () => 
   fsSync.mkdirSync(aiosPath, { recursive: true });
   fsSync.mkdirSync(path.dirname(bridgePath), { recursive: true });
   fsSync.writeFileSync(bridgePath, existing);
+  fsSync.writeFileSync(path.join(path.dirname(bridgePath), "settings.json"), "{}\n");
 
   const result = spawnSync(process.execPath, [
     path.resolve(repoRoot, "packages/cli/src/index.mjs"),

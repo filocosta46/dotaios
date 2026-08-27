@@ -55,7 +55,7 @@ test("Grok is a first-class skill host with no global instruction bridge", async
 
   assert.ok(grok);
   assert.equal(grok.bridge, null);
-  assert.equal(grok.detect, ".grok");
+  assert.equal(grok.detect, ".grok/config.toml");
   assert.equal(grok.command, "grok");
   assert.equal(grok.skills?.dir, ".grok/skills");
   assert.equal(grok.skills?.project?.dir, ".grok/skills");
@@ -103,6 +103,55 @@ test("agent detection recognizes a declared command on PATH without a config fol
     );
 
     assert.equal(installed, true);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+test("DotAIOS skill projections do not impersonate installed clients", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-agent-projections-"));
+  const homePath = path.join(root, "home");
+  const registry = await loadAgentRegistry();
+  const cases = [
+    {
+      name: "Claude Code",
+      projection: ".claude/skills",
+      marker: ".claude/settings.json"
+    },
+    {
+      name: "Gemini",
+      projection: ".gemini/config/skills",
+      marker: ".gemini/settings.json"
+    },
+    {
+      name: "Grok",
+      projection: ".grok/skills",
+      marker: ".grok/config.toml"
+    }
+  ];
+
+  try {
+    for (const entry of cases) {
+      const agent = registry.find((candidate) => candidate.name === entry.name);
+      assert.ok(agent, `${entry.name} must remain in the bundled registry`);
+      assert.equal(agent.detect, entry.marker);
+
+      await fs.mkdir(path.join(homePath, entry.projection), { recursive: true });
+      assert.equal(
+        await isAgentInstalled(homePath, agent, { env: { PATH: "" } }),
+        false,
+        `${entry.projection} is owned by DotAIOS projection, not ${entry.name}`
+      );
+
+      const markerPath = path.join(homePath, entry.marker);
+      await fs.mkdir(path.dirname(markerPath), { recursive: true });
+      await fs.writeFile(markerPath, "");
+      assert.equal(
+        await isAgentInstalled(homePath, agent, { env: { PATH: "" } }),
+        true,
+        `${entry.marker} is client-owned installation evidence for ${entry.name}`
+      );
+    }
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

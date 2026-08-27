@@ -99,6 +99,39 @@ describe("activateCommand — symlinks", () => {
     }
   });
 
+  it("does not invent absent clients when a second activation sees DotAIOS projections", async () => {
+    const isolated = await makeTmpDirs();
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    try {
+      const args = ["--path", isolated.aiosPath, "--home", isolated.homePath];
+      const first = await activateCommand(args, { quiet: true, env: { PATH: "" } });
+      assert.equal(first.detectedClientCount, 0);
+
+      for (const projection of [
+        ".claude/skills",
+        ".gemini/config/skills",
+        ".grok/skills"
+      ]) {
+        await fs.access(path.join(isolated.homePath, projection));
+      }
+
+      const second = await activateCommand(args, { quiet: true, env: { PATH: "" } });
+      assert.equal(second.detectedClientCount, 0);
+      for (const client of ["Claude Code", "Gemini", "Grok"]) {
+        assert.equal(
+          second.detectedClientNames.includes(client),
+          false,
+          `${client} must remain absent when only its DotAIOS projection exists`
+        );
+      }
+    } finally {
+      await fs.rm(isolated.base, { recursive: true, force: true });
+    }
+  });
+
   it("returns the full stable activation result shape for a catalog conflict", async () => {
     const { catalogConflictActivationResult } = await import(
       path.join(repoRoot, "packages/cli/src/commands/activate.mjs")

@@ -35,6 +35,7 @@ function runDoctor(t, label, bridgeContent, {
   fs.mkdirSync(sandbox.aiosPath, { recursive: true });
   fs.mkdirSync(path.dirname(bridgePath), { recursive: true });
   fs.mkdirSync(sandbox.processHomePath, { recursive: true });
+  fs.writeFileSync(path.join(path.dirname(bridgePath), "settings.json"), "{}\n");
   fs.writeFileSync(
     path.join(sandbox.aiosPath, "aios.json"),
     `${JSON.stringify(createAiosConfig({ aiTools: [] }), null, 2)}\n`
@@ -347,6 +348,7 @@ test("setup fails closed when installed Claude has a malformed bridge", (t) => {
   fs.mkdirSync(path.dirname(bridgePath), { recursive: true });
   fs.mkdirSync(sandbox.processHomePath, { recursive: true });
   fs.writeFileSync(bridgePath, malformedBridge);
+  fs.writeFileSync(path.join(path.dirname(bridgePath), "settings.json"), "{}\n");
 
   const result = spawnSync(process.execPath, [
     cli,

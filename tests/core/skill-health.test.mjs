@@ -84,6 +84,7 @@ test("inspectSkillHealth reports missing, foreign, stale, and absent Hermes surf
   await fs.mkdir(agentsDir, { recursive: true });
   await fs.mkdir(path.join(agentsDir, "today"), { recursive: true });
   await fs.mkdir(path.join(homePath, ".claude"), { recursive: true });
+  await fs.writeFile(path.join(homePath, ".claude", "settings.json"), "{}\n");
   await fs.writeFile(
     path.join(homePath, ".claude", "CLAUDE.md"),
     "<!-- dotaios-managed:start -->\n@/var/folders/old/aios/AGENTS.md\n<!-- dotaios-managed:end -->\n"

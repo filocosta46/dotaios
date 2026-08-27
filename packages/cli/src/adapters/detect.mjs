@@ -162,11 +162,11 @@ async function detectClaudeCode() {
 }
 
 async function detectGemini() {
-  const geminiDir = path.join(HOME, ".gemini");
+  const geminiSettings = path.join(HOME, ".gemini", "settings.json");
   const hasBinary = binaryExists("gemini");
-  const hasDir = await pathExists(geminiDir);
+  const hasSettings = await pathExists(geminiSettings);
 
-  if (!hasBinary && !hasDir) {
+  if (!hasBinary && !hasSettings) {
     return { detected: false, level: ADAPTER_LEVELS.UNSUPPORTED, enabled: false };
   }
 

@@ -2,7 +2,7 @@
   "agents": [
     {
       "name": "Claude Code",
-      "detect": ".claude",
+      "detect": ".claude/settings.json",
       "command": "claude",
       "bridge": ".claude/CLAUDE.md",
       "skills": {
@@ -24,7 +24,7 @@
     },
     {
       "name": "Gemini",
-      "detect": ".gemini",
+      "detect": ".gemini/settings.json",
       "command": "gemini",
       "bridge": ".gemini/GEMINI.md",
       "skills": {
@@ -88,7 +88,7 @@
     },
     {
       "name": "Grok",
-      "detect": ".grok",
+      "detect": ".grok/config.toml",
       "command": "grok",
       "bridge": null,
       "skills": {
