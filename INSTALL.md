@@ -27,23 +27,74 @@ instead of at a shell prompt.
    installed. Say what you are installing as you go, then run `node --version`
    yourself and confirm it prints 20 or newer before continuing.
 
-   - **macOS** — you can carry this yourself, and it needs no password. Set
-     `ARCH` to `arm64` on Apple Silicon or `x64` on Intel (`uname -m` prints
-     `arm64` or `x86_64`), download
-     `https://nodejs.org/dist/latest-v24.x/node-v24.19.0-darwin-$ARCH.tar.gz`
-     with `curl -fsSL`, and extract it into their own home with
-     `tar -xzf <file> -C "$HOME/.local"` after `mkdir -p "$HOME/.local"`.
-     Nothing outside their home directory changes.
+   - **macOS** — you can carry this yourself, and it needs no password. Run the
+     block below as one command. It selects one of two literal, immutable Node
+     `v24.19.0` archives, downloads the matching official checksum manifest into
+     a fresh user-owned temporary directory, and stops before extraction if the
+     SHA-256 check fails. The final install directory is also fresh and
+     unpredictable, so this cannot overwrite a predictable existing Node path.
+     Both directories stay inside their home; the bootstrap makes no admin
+     writes.
 
-     Then run every later command with that prefix in front of PATH **on the
-     same line**, like
-     `PATH="$HOME/.local/node-v24.19.0-darwin-$ARCH/bin:$PATH" npx dotaios@2.0.11 setup --dry-run`.
-     Prepend it inline each time instead of exporting it once: every command you
-     run is a fresh shell, so an exported PATH is gone by the next one — the same
-     reason `nvm` cannot work here. Do not substitute the absolute path to `npx`
-     either; its shebang is `#!/usr/bin/env node`, so it needs `node` on PATH and
-     fails without it. Offer to add the prefix to their shell profile at the end,
-     for their own later use.
+     ```sh
+     set -eu
+     umask 077
+     mkdir -p "$HOME/.local"
+     NODE_TMP="$(mktemp -d "$HOME/.local/dotaios-node-download.XXXXXXXX")"
+     trap 'rm -rf "$NODE_TMP"' EXIT
+     trap 'exit 1' HUP INT TERM
+
+     case "$(uname -m)" in
+       arm64)
+         NODE_ARCHIVE='node-v24.19.0-darwin-arm64.tar.gz'
+         NODE_URL='https://nodejs.org/dist/v24.19.0/node-v24.19.0-darwin-arm64.tar.gz'
+         ;;
+       x86_64)
+         NODE_ARCHIVE='node-v24.19.0-darwin-x64.tar.gz'
+         NODE_URL='https://nodejs.org/dist/v24.19.0/node-v24.19.0-darwin-x64.tar.gz'
+         ;;
+       *)
+         printf 'Unsupported macOS architecture: %s\n' "$(uname -m)" >&2
+         exit 1
+         ;;
+     esac
+
+     curl -fsSLo "$NODE_TMP/$NODE_ARCHIVE" "$NODE_URL"
+     curl -fsSLo "$NODE_TMP/SHASUMS256.txt" \
+       'https://nodejs.org/dist/v24.19.0/SHASUMS256.txt'
+     (
+       cd "$NODE_TMP"
+       grep "  ${NODE_ARCHIVE}\$" SHASUMS256.txt | shasum -a 256 -c -
+     )
+
+     NODE_ROOT="$(mktemp -d "$HOME/.local/dotaios-node.XXXXXXXX")"
+     tar -xzf "$NODE_TMP/$NODE_ARCHIVE" -C "$NODE_ROOT" --strip-components=1
+     printf 'NODE_BIN=%s/bin\n' "$NODE_ROOT"
+     ```
+
+     The block prints one exact absolute directory, such as
+     `NODE_BIN=/Users/example/.local/dotaios-node.A1b2C3d4/bin`. Copy the value
+     after `=` exactly; `NODE_BIN` itself will not exist in the next fresh shell.
+     Put that exact value in front of PATH **on the same line** for the version
+     check and every later `npx` command. For example, replace the placeholder
+     below before running each command:
+
+     ```sh
+     PATH="<exact NODE_BIN value printed above>:$PATH" node --version
+     PATH="<exact NODE_BIN value printed above>:$PATH" npx dotaios@2.0.11 setup --dry-run
+     ```
+
+     Prepend the exact printed directory inline each time instead of exporting
+     it once: every command you run is a fresh shell, so an exported PATH is gone
+     by the next one — the same reason `nvm` cannot work here. Do not substitute
+     the absolute path to `npx` either; its shebang is `#!/usr/bin/env node`, so
+     it needs `node` on PATH and fails without it.
+
+     If they want this Node available in their own later shells, first show the
+     exact profile file and exact `export PATH="<exact NODE_BIN value printed
+     above>:$PATH"` line before changing anything. Ask for their explicit
+     approval of that displayed change, and append it only after they approve.
+     Do not modify a shell profile as part of the bootstrap.
 
      There is no Apple Silicon `.pkg`: nodejs.org publishes `osx-arm64-tar`,
      `osx-x64-tar`, and an x64 `.pkg`, so on an Apple Silicon Mac the tarball is

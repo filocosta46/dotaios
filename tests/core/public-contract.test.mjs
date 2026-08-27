@@ -443,6 +443,85 @@ test("public update guidance reviews metadata before one exact-version upgrade",
   }
 });
 
+test("macOS Node bootstrap is immutable, verified, fresh-shell safe, and approval-gated", async (t) => {
+  const install = await fs.readFile(path.join(repoRoot, "INSTALL.md"), "utf8");
+  const macBootstrap = install.split("   - **macOS**")[1]?.split("   - **Windows**")[0] || "";
+  const unwrapped = macBootstrap.replace(/\s+/g, " ");
+
+  assert.notEqual(macBootstrap, "", "INSTALL must keep a dedicated assistant macOS Node path");
+  for (const archive of [
+    "https://nodejs.org/dist/v24.19.0/node-v24.19.0-darwin-arm64.tar.gz",
+    "https://nodejs.org/dist/v24.19.0/node-v24.19.0-darwin-x64.tar.gz",
+  ]) {
+    assert.match(macBootstrap, new RegExp(archive.replaceAll(".", "\\.")), `${archive} must be literal`);
+  }
+  assert.match(
+    macBootstrap,
+    /https:\/\/nodejs\.org\/dist\/v24\.19\.0\/SHASUMS256\.txt/,
+    "the archive must be checked against the matching official manifest"
+  );
+  assert.doesNotMatch(macBootstrap, /latest-v24|\$ARCH/, "fresh shells must not depend on a rolling URL or ARCH state");
+  assert.match(
+    macBootstrap,
+    /mktemp -d "\$HOME\/\.local\/dotaios-node-download\.XXXXXXXX"/,
+    "downloads must use a fresh, unpredictable, user-owned temporary root"
+  );
+  assert.match(
+    macBootstrap,
+    /mktemp -d "\$HOME\/\.local\/dotaios-node\.XXXXXXXX"/,
+    "the install root must be fresh, unpredictable, and owned by the user"
+  );
+
+  const failFast = macBootstrap.indexOf("set -eu");
+  const download = macBootstrap.indexOf('curl -fsSLo "$NODE_TMP/$NODE_ARCHIVE"');
+  const checksum = macBootstrap.indexOf("shasum -a 256 -c -");
+  const installRoot = macBootstrap.indexOf('NODE_ROOT="$(mktemp -d');
+  const extraction = macBootstrap.indexOf("tar -xzf");
+  assert.ok(failFast >= 0 && failFast < download, "fail-fast shell handling must be active before download");
+  assert.ok(checksum >= 0, "the documented bootstrap must verify the selected archive checksum");
+  assert.ok(installRoot > checksum, "checksum failure must stop before an install root is created");
+  assert.ok(extraction > installRoot, "extraction must happen only after the verified install root is created");
+  assert.match(macBootstrap, /tar -xzf .* -C "\$NODE_ROOT"/, "extraction must target only the fresh install root");
+  assert.match(macBootstrap, /printf 'NODE_BIN=%s\/bin\\n'/, "the bootstrap must print the exact Node bin directory");
+  assert.match(
+    macBootstrap,
+    /PATH="<exact NODE_BIN value printed above>:\$PATH" npx dotaios@2\.0\.11 setup --dry-run/,
+    "later fresh-shell commands must carry the exact printed Node bin directory inline"
+  );
+  assert.match(unwrapped, /show .*exact .*profile.*line.*before .*chang/i, "profile persistence must be previewed");
+  assert.match(unwrapped, /explicit approval/i, "profile persistence must require the person's approval");
+  assert.match(unwrapped, /needs no password/i, "the bootstrap must preserve the no-password boundary");
+  assert.match(unwrapped, /inside their home.*no admin writes/i, "the bootstrap must avoid administrator-owned paths");
+  assert.match(unwrapped, /Do not use Homebrew/i, "the bootstrap must preserve the no-Homebrew boundary");
+  assert.doesNotMatch(macBootstrap, /\bsudo\b|\bnvm install\b/i, "the bootstrap must not require admin access or nvm");
+
+  if (process.platform !== "win32") {
+    const shellBlock = macBootstrap.match(/```sh\n([\s\S]*?)\n\s*```/)?.[1] || "";
+    assert.notEqual(shellBlock, "", "the documented bootstrap must remain one executable shell block");
+    const testHome = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-node-mismatch-"));
+    t.after(() => fs.rm(testHome, { recursive: true, force: true }));
+    const controlledFailure = [
+      "curl() { printf 'controlled mismatch\\n' > \"$2\"; }",
+      "shasum() { return 1; }",
+      shellBlock,
+    ].join("\n");
+
+    await assert.rejects(
+      run("sh", ["-c", controlledFailure], {
+        env: { ...process.env, HOME: testHome },
+        maxBuffer: 1024 * 1024,
+      }),
+      "a checksum mismatch must make the documented block exit nonzero"
+    );
+    const localEntries = await fs.readdir(path.join(testHome, ".local"));
+    assert.deepEqual(
+      localEntries.filter((entry) => entry.startsWith("dotaios-node.")),
+      [],
+      "a checksum mismatch must not create an install root"
+    );
+  }
+});
+
 test("commercial delivery and internal launch gates stay outside the public core", async () => {
   const forbiddenPaths = [
     "docs/beta-testing.md",
