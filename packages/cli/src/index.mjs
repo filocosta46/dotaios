@@ -31,6 +31,7 @@ const commands = {
   mcp: "./commands/mcp.mjs",
   plan: "./commands/plan.mjs",
   project: "./commands/project.mjs",
+  resolve: "./commands/resolve.mjs",
   reveal: "./commands/reveal.mjs",
   schedule: "./commands/schedule.mjs",
   search: "./commands/search.mjs",
@@ -72,6 +73,7 @@ Commands:
   migrate           Preview, apply, or recover a versioned folder migration
   plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
   project <cmd>     Register, restore, and resolve projects across machines
+  resolve "<intent>" Resolve project context, skill, and optional approved tool
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open
   schedule <cmd>    List, inspect, or run local manual schedules
   search <query>    Search across memory, vault, context, projects, skills, references, and plugins

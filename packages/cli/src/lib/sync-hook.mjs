@@ -5,6 +5,7 @@ export function skipsPortableMirrorSync(command, args = []) {
   if (command === "upgrade") return true;
   if (command === "brief" && (args.includes("--compact") || args.includes("--lean"))) return true;
   if (command === "search") return true;
+  if (command === "resolve") return true;
   if (command === "update") {
     let memory = null;
     for (let index = 0; index < args.length; index += 1) {
