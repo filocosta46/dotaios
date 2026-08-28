@@ -71,7 +71,6 @@ function parseOptions(args) {
     budget: undefined,
     dateWindow: undefined,
     home: null,
-    json: false,
     messageId: undefined,
     pageSize: undefined,
     path: null,
@@ -99,7 +98,6 @@ function parseOptions(args) {
     if (arg === "--json") {
       if (seen.has(arg)) throw new Error(`${arg} may only be provided once`);
       seen.add(arg);
-      options.json = true;
       continue;
     }
     const key = valueOptions.get(arg);

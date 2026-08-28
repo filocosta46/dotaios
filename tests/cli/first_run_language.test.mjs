@@ -5,6 +5,8 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { FIRST_TASK_PROMPT } from "../../packages/core/src/bridges.mjs";
+
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 const quietEnv = { ...process.env, PATH: "/usr/bin:/bin", DOTAIOS_NO_UPDATE_CHECK: "1" };
@@ -78,7 +80,7 @@ test("real setup keeps init detail concise by default and restores it with --ver
     assert.match(conciseOutput, /project checkout already attached with `dotaios activate`/i);
     assert.doesNotMatch(conciseOutput, /make it your working directory/i);
     assert.match(conciseOutput, /Opening the AIOS folder itself may let the app read its router before your first prompt/i);
-    assert.match(conciseOutput, /Use my memory/);
+    assert.match(conciseOutput, new RegExp(escapeRegExp(FIRST_TASK_PROMPT)));
     assert.match(conciseOutput, /Only this project/);
     assert.match(conciseOutput, /Private chat/);
     assert.doesNotMatch(

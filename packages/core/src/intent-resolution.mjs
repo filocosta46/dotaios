@@ -56,9 +56,11 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
   let skills;
   let configured;
   try {
-    catalog = await readProjectCatalog({ aiosPath, fs: filesystem });
-    skills = await collectSkills(aiosPath);
-    configured = await inspectConfiguredConnections({ aiosPath, filesystem });
+    [catalog, skills, configured] = await Promise.all([
+      readProjectCatalog({ aiosPath, fs: filesystem }),
+      collectSkills(aiosPath),
+      inspectConfiguredConnections({ aiosPath, filesystem })
+    ]);
   } catch {
     return budgetedRefusal({
       limit: visibleCharacterBudget,
