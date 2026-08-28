@@ -49,7 +49,7 @@ jobs:
         run: pnpm run check
 
       - name: Verify package contents
-        run: npm pack --dry-run
+        run: npm run pack:check
 
   windows-runtime-handoffs:
     name: windows runtime handoffs (Node 24)
@@ -78,3 +78,69 @@ jobs:
 
       - name: Prove executable Windows handoffs
         run: node --test tests/cli/runtime_command_handoffs.test.mjs
+
+  admission-firewall:
+    name: release admission firewall (Node 24)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test release admission owners
+        run: >-
+          node --test
+          tests/cli/onboarding_release_package.test.mjs
+          tests/cli/onboarding_dependency_graph.test.mjs
+          tests/cli/onboarding_registry_artifact.test.mjs
+          tests/cli/onboarding_host_probe.test.mjs
+          tests/cli/onboarding_host_gate.test.mjs
+          tests/cli/onboarding_host_receipt.test.mjs
+          tests/cli/release_safety_regressions.test.mjs
+
+      - name: Build one immutable admission artifact
+        env:
+          REVIEWED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          test "$(git rev-parse HEAD)" = "$REVIEWED_SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          mkdir -p .artifacts
+          npm run pack:admission -- --silent --pack-destination .artifacts
+
+      - name: Admit the exact package bytes
+        env:
+          REVIEWED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          CANDIDATE_ARTIFACT=$(find .artifacts -maxdepth 1 -type f -name 'dotaios-*.tgz' -print -quit)
+          test -n "$CANDIDATE_ARTIFACT"
+          node scripts/onboarding-release-acceptance.mjs \
+            --artifact "$CANDIDATE_ARTIFACT" \
+            --source-commit "$REVIEWED_SOURCE_COMMIT" \
+            > .artifacts/package-admission.json
+
+      - name: Preserve admitted bytes and receipt
+        uses: actions/upload-artifact@v4
+        with:
+          name: dotaios-admission-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            .artifacts/dotaios-*.tgz
+            .artifacts/package-admission.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14

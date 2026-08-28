@@ -9,19 +9,19 @@ importers:
   .:
     dependencies:
       '@mozilla/readability':
-        specifier: ^0.6.0
+        specifier: 0.6.0
         version: 0.6.0
       linkedom:
-        specifier: ^0.18.12
+        specifier: 0.18.12
         version: 0.18.12
       turndown:
-        specifier: ^7.2.4
+        specifier: 7.2.4
         version: 7.2.4
       unpdf:
-        specifier: ^1.6.2
+        specifier: 1.6.2
         version: 1.6.2
       yaml:
-        specifier: ^2.9.0
+        specifier: 2.9.0
         version: 2.9.0
 
   packages/cli: {}
