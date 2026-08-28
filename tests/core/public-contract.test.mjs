@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { promisify } from "node:util";
+import { ADMISSION_NPM_VERSION } from "../../scripts/onboarding-release-acceptance.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const run = promisify(execFile);
@@ -19,7 +20,11 @@ function extractAssistantInstallRefs(markdown) {
 }
 
 async function npmPackDryRun() {
-  const { stdout } = await run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+  const npx = process.platform === "win32" ? "npx.cmd" : "npx";
+  const { stdout } = await run(npx, [
+    "--yes", "--package", `npm@${ADMISSION_NPM_VERSION}`,
+    "npm", "pack", "--dry-run", "--json", "--ignore-scripts",
+  ], {
     cwd: repoRoot,
     maxBuffer: 10 * 1024 * 1024,
   });

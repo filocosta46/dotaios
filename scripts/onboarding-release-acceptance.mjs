@@ -15,7 +15,7 @@ const MAX_UNPACKED_BYTES = 128 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 4_096;
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
-const NPM_VERSION = "11.6.4";
+export const ADMISSION_NPM_VERSION = "11.6.4";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 if (isMain()) {
@@ -568,7 +568,7 @@ function copyRegularSource(source, target) {
 
 function runNpm11(args, cwd, label) {
   const command = process.platform === "win32" ? "npx.cmd" : "npx";
-  const result = spawnSync(command, ["--yes", "--package", `npm@${NPM_VERSION}`, "npm", ...args], {
+  const result = spawnSync(command, ["--yes", "--package", `npm@${ADMISSION_NPM_VERSION}`, "npm", ...args], {
     cwd,
     encoding: "utf8",
     env: { ...process.env, npm_config_ignore_scripts: "true" },
