@@ -706,7 +706,7 @@ function skipReason(skipped) {
 // carry either the bare name or an older exact pin; `activate` now resolves it,
 // so the fix is to re-run it. Capture the invocation separately from its
 // subcommand so every managed command can be compared with the running package.
-const MANAGED_INVOCATION = /`((?:npx\s+)?dotaios(?:@[^\s`]+)?)\s+[a-z]/g;
+const MANAGED_INVOCATION = /`((?:npx(?:\.cmd)?\s+)?dotaios(?:@[^\s`]+)?)\s+[a-z]/g;
 // A refresh that forgot {{cli}} writes `` ` brief `` and `blob/v/docs`.
 // That is worse than a bare name: the command does not exist, and this
 // check used to call the folder healthy because the backtick is not
@@ -717,7 +717,7 @@ const UNVERSIONED_DOC_LINK = /blob\/v\//;
 function hasNonCandidateManagedInvocation(text, candidateInvocation) {
   for (const match of text.matchAll(MANAGED_INVOCATION)) {
     const invocation = match[1];
-    if (invocation === "dotaios" || invocation === "npx dotaios") return true;
+    if (invocation === "dotaios" || invocation === "npx dotaios" || invocation === "npx.cmd dotaios") return true;
     if (candidateInvocation && invocation !== candidateInvocation) return true;
   }
   return false;

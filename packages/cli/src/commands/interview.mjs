@@ -445,7 +445,7 @@ function renderCompiledPrompt(skill, sources, answers, cli) {
   ].join("\n");
 }
 
-const GENERATED_PREFERENCES_GUIDANCE = /^How you want AI agents to plan your day\. Edit by hand(?: or re-run `(?:dotaios|npx dotaios@[0-9A-Za-z.+-]+) interview`|\. The candidate version was unavailable, so this file contains no runnable refresh command)\.$/m;
+const GENERATED_PREFERENCES_GUIDANCE = /^How you want AI agents to plan your day\. Edit by hand(?: or re-run `(?:dotaios|npx(?:\.cmd)? dotaios@[0-9A-Za-z.+-]+) interview`|\. The candidate version was unavailable, so this file contains no runnable refresh command)\.$/m;
 
 function renderPreferencesGuidance(cli) {
   if (cli) {

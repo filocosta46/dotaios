@@ -699,10 +699,11 @@ export async function readPackageVersion() {
 // rendering the surface. Always pin the running package, and fail closed rather
 // than silently selecting unreviewed npm code when its version is unreadable.
 export async function resolveCliInvocation({
-  version
+  version,
+  platform = process.platform
 } = {}) {
   const pinned = version === undefined ? await readPackageVersion() : version;
-  return exactCliInvocation(pinned);
+  return exactCliInvocation(pinned, { platform });
 }
 
 export function exactCandidatePackage(version) {
@@ -721,19 +722,24 @@ export function isExactCandidatePackageSpec(value) {
   }
 }
 
-export function exactCliInvocation(version) {
-  return `npx ${exactCandidatePackage(version)}`;
+export function npxExecutable({ platform = process.platform } = {}) {
+  return platform === "win32" ? "npx.cmd" : "npx";
 }
 
-export function bundledCliInvocation() {
-  return exactCliInvocation(bundledPackageVersion);
+export function exactCliInvocation(version, options = {}) {
+  return `${npxExecutable(options)} ${exactCandidatePackage(version)}`;
+}
+
+export function bundledCliInvocation(options = {}) {
+  return exactCliInvocation(bundledPackageVersion, options);
 }
 
 function assertExactCandidateInvocation(cli) {
+  const match = /^(?:npx|npx\.cmd) (dotaios@[^\s]+)$/.exec(cli || "");
   if (
     typeof cli !== "string"
-    || !cli.startsWith("npx ")
-    || !isExactCandidatePackageSpec(cli.slice("npx ".length))
+    || !match
+    || !isExactCandidatePackageSpec(match[1])
   ) {
     throw new Error("Managed bridges require an exact candidate DotAIOS invocation.");
   }

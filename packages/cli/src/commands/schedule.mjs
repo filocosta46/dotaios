@@ -200,7 +200,9 @@ function printDueSchedules(schedules, now) {
 }
 
 function printScheduleDoctor(schedules, target) {
-  const cli = bundledCliInvocation();
+  const posixCli = bundledCliInvocation({ platform: "linux" });
+  const windowsCli = bundledCliInvocation({ platform: "win32" });
+  const nativeCli = bundledCliInvocation();
   const due = schedules.filter((schedule) => isDue(schedule, new Date()));
   console.log("DotAIOS schedule doctor");
   console.log(`AIOS path: ${target}`);
@@ -208,11 +210,11 @@ function printScheduleDoctor(schedules, target) {
   console.log(`${due.length ? "[due]" : "[ok]"} due now: ${due.length}`);
   console.log("");
   console.log("Local handoff options:");
-  console.log(`- macOS: ${cli} schedule install --dry-run --target launchd`);
-  console.log(`- Linux: ${cli} schedule install --dry-run --target cron`);
-  console.log(`- Windows: ${cli} schedule install --dry-run --target task-scheduler`);
+  console.log(`- macOS: ${posixCli} schedule install --dry-run --target launchd`);
+  console.log(`- Linux: ${posixCli} schedule install --dry-run --target cron`);
+  console.log(`- Windows: ${windowsCli} schedule install --dry-run --target task-scheduler`);
   console.log("");
-  console.log(`DotAIOS does not run a daemon. OS schedulers should call \`${cli} schedule run-due\`.`);
+  console.log(`DotAIOS does not run a daemon. OS schedulers should call \`${nativeCli} schedule run-due\`.`);
 }
 
 async function installScheduleHandoff(schedules, target, options) {
@@ -376,14 +378,18 @@ function launchdPlist({ node, cli, target }) {
 `;
 }
 
-export function planManagedScheduleRepair(source, { candidateVersion } = {}) {
-  return buildManagedScheduleRepairPlan(source, { candidateVersion });
+export function planManagedScheduleRepair(
+  source,
+  { candidateVersion, platform = process.platform } = {}
+) {
+  return buildManagedScheduleRepairPlan(source, { candidateVersion, platform });
 }
 
 export async function previewManagedScheduleFile(
   schedulesPath,
   {
     candidateVersion,
+    platform = process.platform,
     boundaryRoot = path.dirname(path.resolve(schedulesPath))
   } = {}
 ) {
@@ -393,6 +399,7 @@ export async function previewManagedScheduleFile(
     return attachScheduleFileEvidence(
       buildManagedScheduleRepairPlan("", {
         candidateVersion,
+        platform,
         targetPath,
         preimageMetadata: null
       }),
@@ -409,6 +416,7 @@ export async function previewManagedScheduleFile(
   return attachScheduleFileEvidence(
     buildManagedScheduleRepairPlan(stable.source, {
       candidateVersion,
+      platform,
       targetPath,
       preimageMetadata: regularFilePreimageMetadata(stable.stats)
     }),
@@ -422,6 +430,7 @@ export async function applyManagedScheduleFile(
   schedulesPath,
   {
     candidateVersion,
+    platform = process.platform,
     expectedFingerprint,
     boundaryRoot = path.dirname(path.resolve(schedulesPath)),
     beforeReplace = null,
@@ -438,6 +447,7 @@ export async function applyManagedScheduleFile(
   const targetPath = path.resolve(schedulesPath);
   const plan = await previewManagedScheduleFile(targetPath, {
     candidateVersion,
+    platform,
     boundaryRoot
   });
   if (plan.fingerprint !== expectedFingerprint) {
@@ -489,6 +499,7 @@ export async function applyManagedScheduleFile(
     await beforeVerify?.({ destination: targetPath, next: nextBytes });
     const verified = await previewManagedScheduleFile(targetPath, {
       candidateVersion,
+      platform,
       boundaryRoot
     });
     if (
@@ -522,11 +533,12 @@ function buildManagedScheduleRepairPlan(
   source,
   {
     candidateVersion,
+    platform = process.platform,
     targetPath = null,
     preimageMetadata = null
   } = {}
 ) {
-  const candidateInvocation = exactCliInvocation(candidateVersion);
+  const candidateInvocation = exactCliInvocation(candidateVersion, { platform });
   const preimageFingerprint = fingerprintText(source);
   const changes = [];
   const conflicts = [];
@@ -640,6 +652,7 @@ export function applyManagedScheduleRepair(source, plan) {
   }
   const checkedPlan = buildManagedScheduleRepairPlan(source, {
     candidateVersion: plan.candidate_version,
+    platform: platformForInvocation(plan.candidate_invocation),
     targetPath: plan.target?.path || null,
     preimageMetadata: plan.preimage_metadata ?? null
   });
@@ -664,6 +677,7 @@ export function applyManagedScheduleRepair(source, plan) {
 
   const verified = buildManagedScheduleRepairPlan(next, {
     candidateVersion: plan.candidate_version,
+    platform: platformForInvocation(plan.candidate_invocation),
     targetPath: plan.target?.path || null,
     preimageMetadata: plan.preimage_metadata ?? null
   });
@@ -681,16 +695,25 @@ function scheduledCliArgs(command) {
   const argv = parseCommand(command);
   const executable = argv[0];
   if (["dotaios", "aios"].includes(executable)) return argv.slice(1);
-  if (executable === "npx" && isExactCandidatePackageSpec(argv[1])) return argv.slice(2);
+  if (["npx", "npx.cmd"].includes(executable) && isExactCandidatePackageSpec(argv[1])) return argv.slice(2);
   throw new Error("Schedules only run DotAIOS commands. Use cron manually for arbitrary commands.");
 }
 
 function classifyOfficialScheduleCommand(value, commandTail, current) {
   if (value === current) return "current";
   if (value === `dotaios ${commandTail}`) return "bare-predecessor";
-  const match = /^npx dotaios@([^\s]+) (.+)$/.exec(value);
-  if (!match || match[2] !== commandTail || !RECOGNIZED_SCHEDULE_PREDECESSORS.has(match[1])) return null;
+  const match = /^npx(?:\.cmd)? dotaios@([^\s]+) (.+)$/.exec(value);
+  const currentVersion = /^npx(?:\.cmd)? dotaios@([^\s]+) /.exec(current)?.[1];
+  if (
+    !match
+    || match[2] !== commandTail
+    || (match[1] !== currentVersion && !RECOGNIZED_SCHEDULE_PREDECESSORS.has(match[1]))
+  ) return null;
   return `version-${match[1]}`;
+}
+
+function platformForInvocation(invocation) {
+  return invocation.startsWith("npx.cmd ") ? "win32" : "linux";
 }
 
 function parseScheduleMaps(source) {

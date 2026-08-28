@@ -121,8 +121,8 @@ function printInstall(target, options) {
   console.log("Merge the fragment into the existing client config, then restart that client.");
 }
 
-function mcpServerConfig(target) {
-  const launcher = mcpLauncher(target);
+function mcpServerConfig(target, options) {
+  const launcher = mcpLauncher(target, undefined, options);
   return {
     mcpServers: {
       dotaios: {
@@ -133,7 +133,7 @@ function mcpServerConfig(target) {
   };
 }
 
-export function mcpClientConfig(agent, target, homePath) {
+export function mcpClientConfig(agent, target, homePath, options = {}) {
   if (!supportedMcpAgents.has(agent)) {
     throw new Error(`Unsupported MCP agent: ${agent}`);
   }
@@ -149,7 +149,7 @@ export function mcpClientConfig(agent, target, homePath) {
   };
 
   if (agent === "codex") {
-    const server = mcpServerConfig(target).mcpServers.dotaios;
+    const server = mcpServerConfig(target, options).mcpServers.dotaios;
     return {
       target: targets[agent],
       format: "TOML",
@@ -162,7 +162,7 @@ export function mcpClientConfig(agent, target, homePath) {
   }
 
   if (agent === "opencode") {
-    const server = mcpServerConfig(target).mcpServers.dotaios;
+    const server = mcpServerConfig(target, options).mcpServers.dotaios;
     return {
       target: targets[agent],
       format: "JSON",
@@ -181,6 +181,6 @@ export function mcpClientConfig(agent, target, homePath) {
   return {
     target: targets[agent],
     format: "JSON",
-    text: JSON.stringify(mcpServerConfig(target), null, 2)
+    text: JSON.stringify(mcpServerConfig(target, options), null, 2)
   };
 }

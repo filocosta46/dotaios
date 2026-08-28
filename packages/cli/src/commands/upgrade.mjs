@@ -502,14 +502,16 @@ function parseOptions(args = []) {
 async function resolveUpgradeContext(input) {
   const aiosPath = path.resolve(expandHome(input.aiosPath || defaultAiosPath()));
   const homePath = path.resolve(expandHome(input.homePath || os.homedir()));
+  const platform = input.platform ?? process.platform;
   assertSafeTerminalText(aiosPath, "AIOS path");
   assertSafeTerminalText(homePath, "Home path");
   const candidateVersion = input.candidateVersion ?? await readPackageVersion();
   return {
     aiosPath,
     homePath,
+    platform,
     candidateVersion,
-    candidateInvocation: exactCliInvocation(candidateVersion)
+    candidateInvocation: exactCliInvocation(candidateVersion, { platform })
   };
 }
 
@@ -517,7 +519,11 @@ function recoveryRequiredPreview(context, { reason, detail, recover, guidanceAct
   const guidance = [
     renderGuidanceCommand(
       `${context.candidateInvocation} ${guidanceAction}${recover ? " --recover" : ""}`,
-      { targetPath: context.aiosPath, defaultPath: path.resolve(expandHome(defaultAiosPath())) }
+      {
+        targetPath: context.aiosPath,
+        defaultPath: path.resolve(expandHome(defaultAiosPath())),
+        platform: context.platform
+      }
     )
   ];
   return deepFreeze({
@@ -531,7 +537,7 @@ function recoveryRequiredPreview(context, { reason, detail, recover, guidanceAct
     home_path: context.homePath,
     targets: [],
     conflicts: [{ domain: "migration", reason, detail }],
-    guidance_shell: guidanceShellLabel(),
+    guidance_shell: guidanceShellLabel(context.platform),
     guidance
   });
 }
