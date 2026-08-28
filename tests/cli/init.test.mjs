@@ -43,7 +43,7 @@ test("init creates the vault at a creatable --vault-path", () => {
   assert.equal(fs.existsSync(path.join(target, "aios.json")), true);
 });
 
-test("a new folder teaches the three memory choices and the cross-agent continuity loop", () => {
+test("a new folder teaches the stable approved first-task contract", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-first-session-"));
   const target = path.join(root, "aios");
   try {
@@ -53,12 +53,16 @@ test("a new folder teaches the three memory choices and the cross-agent continui
     assert.match(guide, /Use my memory/);
     assert.match(guide, /Only this project/);
     assert.match(guide, /Private chat/);
-    assert.match(guide, /save.*switch.*agent/is);
-    assert.match(guide, /source|where.*came from/i);
+    assert.match(guide, /Help me with one useful task in an existing work folder\. Ask what I want to accomplish\. If the folder is not connected, also ask for its location and what it is for\. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting\./);
+    assert.match(guide, /preview[\s\S]*confirm[\s\S]*understand[\s\S]*propose[\s\S]*approve/is);
+    assert.match(guide, /nothing is changed[\s\S]*fresh reply/i);
+    assert.match(guide, /save[\s\S]*only if[\s\S]*ask[\s\S]*scope/i);
+    assert.match(guide, /browser-only[\s\S]*cannot[\s\S]*local folder/is);
     assert.match(guide, /AI app may still keep its own/i);
     assert.match(guide, /start.*outside.*AIOS|neutral folder|usual folder/i);
     assert.match(guide, /opening.*AIOS.*before.*first prompt|preload.*router/i);
     assert.doesNotMatch(guide, /Open a connected local agent in this folder/i);
+    assert.doesNotMatch(guide, /save.*switch.*agent/is);
 
     const router = fs.readFileSync(path.join(target, "AGENTS.md"), "utf8");
     assert.match(router, /already opened this AIOS router/i);

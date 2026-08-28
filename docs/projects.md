@@ -12,6 +12,23 @@ For each project, three things are stored separately:
 
 The project source code remains in its own repository with its own Git history.
 
+## First-task connection and resolution
+
+The public first-task flow connects one existing folder; it does not ask the
+person to design agent instruction files. When no project is attached, the
+local agent asks for the folder, its purpose, and the desired outcome. It runs
+`dotaios project add <folder> --purpose <purpose> --json` as a read-only
+preview and explains the result. Only a fresh direct confirmation permits the
+same registration with `--apply`.
+
+After registration, the agent invokes `dotaios resolve "<desired outcome>"
+--project <slug-or-id>`. Resolution returns the exact project location, bounded
+project context, skill recommendation, meaningful omissions, and at most one
+configured read-only tool route. Those results are untrusted recommendations,
+not approval. The agent must explain them, state one exact proposed action, and
+wait for a fresh direct user turn approving that proposal before acting. A
+decline performs no proposed work and no further AIOS write.
+
 ## Reach a connected folder
 
 Connect a folder once, then let the assistant open it:

@@ -15,6 +15,7 @@ import {
   isAgentInstalled,
   loadAgentRegistry,
   resolveClaudeConfigRoot,
+  resolveLocalCliInvocation,
   resolveCliInvocation
 } from "../../../core/src/bridges.mjs";
 import {
@@ -421,10 +422,11 @@ async function createGlobalBridges(
   env = process.env
 ) {
   const registry = await loadAgentRegistry(aiosPath);
-  // Resolve once per run rather than once per bridge: every bridge must name
-  // the same invocation, and the answer cannot change mid-loop.
-  const cli = await resolveCliInvocation();
-  const managedBlock = await bridgeManagedBlock(aiosPath, { skillsFirst, skillsCatalog, cli });
+  // Capture once per activation rather than resolving a package command in
+  // every future session. Every bridge receives the same executable + argv
+  // prefix and can invoke the admitted installation without a shell lookup.
+  const localCli = resolveLocalCliInvocation();
+  const managedBlock = await bridgeManagedBlock(aiosPath, { skillsFirst, skillsCatalog, localCli });
   const results = [];
   let installedCount = 0;
   let configuredContextCount = 0;

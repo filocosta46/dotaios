@@ -135,12 +135,33 @@ test("README leads with the nondeveloper continuity outcome before technical ref
   assert.ok(choices > install, "privacy choices must follow the primary activation path");
   assert.ok(afterward > choices, "the memory-choice section must end before the product outcome resumes");
   assert.ok(technical > afterward, "operator material must stay behind a technical-reference boundary");
-  assert.match(readme, /install[\s\S]{0,300}personalize[\s\S]{0,300}save[\s\S]{0,300}switch[\s\S]{0,300}privacy/i);
+  assert.match(readme, /install[\s\S]{0,500}connect[\s\S]{0,500}understand[\s\S]{0,500}propose[\s\S]{0,500}approv/i);
   const memoryChoices = readme.slice(choices, afterward);
   assert.match(memoryChoices, /Codex and Claude Code[\s\S]{0,240}forward[\s\S]{0,120}Off/i);
   assert.match(memoryChoices, /instructions or context.*may already have loaded/i);
   assert.match(memoryChoices, /Off.*cannot (?:undo|erase)/i);
   assert.match(memoryChoices, /AI app may still keep its own chat history/i);
+});
+
+test("public induction is one approved existing-folder task, not an instruction-file design exercise", async () => {
+  const relativeFiles = [
+    "README.md",
+    "docs/getting-started.md",
+    "docs/projects.md",
+    "docs/architecture.md"
+  ];
+  const documents = Object.fromEntries(await Promise.all(relativeFiles.map(async (relativePath) => [
+    relativePath,
+    await fs.readFile(path.join(repoRoot, relativePath), "utf8")
+  ])));
+  const prompt = "Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.";
+
+  assert.match(documents["README.md"], new RegExp(`> ${prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  assert.match(documents["docs/getting-started.md"], new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(documents["docs/projects.md"], /preview[\s\S]*fresh direct confirmation[\s\S]*resolve[\s\S]*one exact proposed action/is);
+  assert.match(documents["docs/architecture.md"], /understand[\s\S]*recommend[\s\S]*fresh direct approval[\s\S]*act/is);
+  assert.match(documents["README.md"], /browser-only chat cannot access a local work folder[\s\S]*supported local agent/i);
+  assert.doesNotMatch(documents["README.md"], /design|edit|write[\s-]+(?:an? )?(?:AGENTS|CLAUDE)\.md/i);
 });
 
 test("Hermes claims a global adapter without inventing a project-local selector", async () => {
@@ -601,6 +622,11 @@ test("public context guidance documents only the current MCP tools and one memor
   ].map((parts) => parts.join("_"));
 
   assert.deepEqual(documentedTools, ["read_working_context", "search_aios", "resolve_skill"]);
+  assert.doesNotMatch(
+    [mcpDocumentation, adaptersDocumentation, architectureDocumentation].join("\n"),
+    /MCP[\s\S]{0,100}(?:open|read|write|retrieve)[\s\S]{0,100}(?:external|existing|local) (?:folder|path)/i,
+    "MCP must not imply direct access to external work-folder paths"
+  );
   assert.equal(retiredToolNames.some((name) => corpus.includes(name)), false);
   assert.match(
     mcpDocumentation,

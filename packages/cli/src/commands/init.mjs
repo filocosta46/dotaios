@@ -4,7 +4,11 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin as input, stdout as output } from "node:process";
-import { readPackageVersion, resolveCliInvocation } from "../../../core/src/bridges.mjs";
+import {
+  FIRST_TASK_PROMPT,
+  readPackageVersion,
+  resolveCliInvocation
+} from "../../../core/src/bridges.mjs";
 import { pathExists, writeFileSafe } from "../../../core/src/files.mjs";
 import { previewMigration } from "../../../core/src/migrations.mjs";
 import {
@@ -823,16 +827,22 @@ This folder is what they read first, so you do not have to.
 
 Open any file, change it, delete it. Nothing here is locked.
 
-## Try it once, it takes two minutes
+## Do one useful task first
 
-1. Open Claude, Cursor, Codex, or whichever AI you use, in your usual folder
-   and not in this one.
-2. Say: \`Use my memory. Tell me what you know about how I work.\`
-3. Tell it something true about how you work, and ask it to save it.
-4. Switch to a different assistant, a completely separate agent, and ask it what
-   you just saved. It will find it, and it will show you where it came from.
+Start Claude Code, Codex, or another supported local agent outside this AIOS
+folder, from your usual work folder. Paste this exact prompt:
 
-That is the whole idea. Say something once, and everything you use knows it.
+> ${FIRST_TASK_PROMPT}
+
+The agent asks for any missing folder, purpose, and desired outcome. If the
+folder is new to DotAIOS, it previews the connection and waits for you to
+confirm it. Then it understands the bounded project context, proposes one exact
+action, and waits again. Nothing is changed until a fresh reply approves the
+proposal you can see. Declining stops the work.
+
+A browser-only chat cannot access your local folder or run this flow. Use a
+supported local agent on this computer; do not paste folder paths into a browser
+chat and assume it can open them.
 
 ## Deciding what an AI can see
 
@@ -855,8 +865,9 @@ somewhere else when you want a conversation that touches none of this.
 
 - When something changes, just tell the assistant and ask it to update your
   context. You do not have to edit files yourself.
-- Nothing is saved unless you ask. It will not quietly remember things you said
-  in passing.
+- Nothing is saved unless you ask. Save only if you explicitly ask for it and
+  name or confirm the Shared or This project scope. It will not quietly remember
+  things you said in passing.
 - Never put passwords, keys, or recovery codes in here.
 
 ## What is in the folder
@@ -878,9 +889,9 @@ Local-first memory and context for AI agents.
 
 1. Read \`FIRST_SESSION.md\`.
 2. Run \`{{cli}} activate\` once.
-3. Keep \`context/\` current.
-4. Add active work under \`projects/<slug>/README.md\`.
-5. Put long-term knowledge in the configured vault.
+3. Paste the stable first-task prompt into a supported local agent.
+4. Approve only the exact folder connection or action you reviewed.
+5. Keep \`context/\` current and put long-term knowledge in the configured vault.
 
 ## Safety
 

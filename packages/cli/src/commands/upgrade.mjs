@@ -9,7 +9,8 @@ import {
   exactCliInvocation,
   loadAgentRegistry,
   previewManagedBridgeFile,
-  readPackageVersion
+  readPackageVersion,
+  resolveLocalCliInvocation
 } from "../../../core/src/bridges.mjs";
 import { readAiosConfig } from "../../../core/src/config.mjs";
 import {
@@ -135,7 +136,7 @@ export async function previewUpgrade(input = {}) {
     const managedBlock = await bridgeManagedBlock(context.aiosPath, {
       skillsFirst,
       ...(skillsFirst ? { skillsCatalog: officialComposition.skillsCatalog } : {}),
-      cli: context.candidateInvocation
+      localCli: resolveLocalCliInvocation()
     });
     const agents = await loadAgentRegistry(context.aiosPath);
     const destinations = new Map();

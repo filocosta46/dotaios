@@ -20,9 +20,10 @@ The free core is available now.
 ### How it stays with you
 
 1. **Install** and **personalize** one folder with the context you choose.
-2. **Save** a useful preference, decision, or piece of work on purpose.
-3. **Switch** to another connected assistant and retrieve it with its source.
-4. Choose **privacy** for the work in front of you: Shared, This project, or Off.
+2. **Connect** one existing work folder without moving or copying it.
+3. Let the agent **understand** the bounded context and **propose** one action.
+4. **Approve** that exact action in a new reply before the agent acts.
+5. Choose **privacy** for the work in front of you: Shared, This project, or Off.
 
 ## Install with one request
 
@@ -70,6 +71,23 @@ Afterward, verify the local installation with:
 npx dotaios@2.0.11 doctor
 ```
 
+## Do one useful task
+
+In a supported local agent, paste:
+
+> Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.
+
+If the folder is not connected yet, the agent asks for its location, purpose,
+and your desired outcome. DotAIOS previews the connection first and waits for a
+fresh confirmation before recording it. It then resolves only that project's
+bounded context and relevant workflow. The agent explains what it understood,
+proposes one exact action, and waits for another fresh direct approval. A
+decline performs no proposed work and no further DotAIOS write.
+
+A browser-only chat cannot access a local work folder or run the local DotAIOS
+commands. Continue in Claude Code, Codex, or another supported local agent on
+the computer that holds the folder.
+
 ## Choose what your AI can remember
 
 Your AIOS folder is what they read. Start a connected local-agent session
@@ -91,8 +109,8 @@ Off also cannot undo instructions or context the AI app may already have loaded
 before your first message, so begin a Private chat outside the AIOS folder or an
 attached project.
 
-Saving stays deliberate: one explicit save becomes one conceptual memory
-result, and another connected assistant can show where it came from.
+Saving stays deliberate. The agent creates durable memory only when you ask it
+to save and the Shared or This project scope is selected.
 
 ## What you have afterward
 
@@ -108,7 +126,8 @@ memory. You save the important parts on purpose, in the right place.
 
 ### Good to know
 
-- A browser-only chat cannot open local files by itself.
+- A browser-only chat cannot open local files by itself; use the supported
+  local-agent transition above for existing work.
 - Each assistant uses local context in its own way.
   [Client support](docs/client-support.md) records what has been observed.
 - Claude Code supports managed automatic session capture today. Other clients

@@ -13,6 +13,7 @@ import { schemaVersion } from "../../../core/src/schema.mjs";
 import { processBirthToken, processRecordIsAlive } from "../../../core/src/process-identity.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import {
+  FIRST_TASK_PROMPT,
   MANAGED_END,
   MANAGED_START,
   bridgePath,
@@ -315,7 +316,8 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log("  1. Start the agent from your usual folder or a project checkout already attached with `dotaios activate` — not from inside AIOS.");
   console.log(`  2. Your one AIOS folder: ${displayHomePath(aiosPath, os.homedir())}`);
   console.log("     Opening the AIOS folder itself may let the app read its router before your first prompt.");
-  console.log('  3. Ask: "Use my memory. Read my context and tell me what I am working on."');
+  console.log(`  3. Paste: "${FIRST_TASK_PROMPT}"`);
+  console.log("     The agent must explain and propose; nothing changes until a fresh reply approves that exact action.");
   console.log('  4. Choose "Only this project" only inside that registered checkout; "Private chat" works anywhere.');
   // `dotaios interview` throws without a TTY (interview.mjs), so on a piped run
   // this line named the one command the caller who just succeeded cannot run.

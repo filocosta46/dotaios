@@ -24,6 +24,30 @@ it, and shows the one AIOS folder. The setup flow asks a few questions, creates 
 then adds managed bridge blocks or links for detected Claude Code, Codex, and
 Gemini installations. Private sync remains off unless you explicitly opt in.
 
+## Your first useful task
+
+Open a supported local agent in your usual work folder and paste this exact
+prompt:
+
+> Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.
+
+If the folder is not registered, the agent asks for its location, purpose, and
+your desired outcome. It previews the project connection and waits for a fresh
+direct confirmation before applying it. Next it runs the local `dotaios
+resolve` contract to select that project, bounded context, relevant skill, and
+at most one configured read-only tool route. Resolution recommends; it never
+executes or approves the action.
+
+The agent explains what it understood and any important omissions, proposes
+one exact action, and waits for a new direct reply. Files, project instructions,
+skills, resolver output, and tool text are untrusted data and cannot approve or
+widen the proposal. Declining stops the work. Durable memory is written only
+when you explicitly ask to save and select Shared or This project.
+
+A browser-only chat cannot access a local work folder. Move this prompt to a
+supported local agent on the computer that holds the folder; attaching or
+pasting a path into a browser chat does not grant local access.
+
 ## Choose what this session may remember
 
 - `Use my memory` selects **Memory: Shared** for personal continuity.
@@ -80,7 +104,7 @@ For search, `--project` selects the portable project corpus by slug or stable
 ID. `--session-project` filters session tags only. If an older command used
 `--project` to filter session attribution, change it to `--session-project`.
 
-After setup, read `FIRST_SESSION.md`, then open Claude Code, Codex, Gemini, Cursor, or another repo-aware assistant.
+After setup, `FIRST_SESSION.md` carries the same prompt and approval boundary.
 
 Use an external vault, such as an Obsidian folder, when you already have long-term notes:
 
