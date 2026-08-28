@@ -427,6 +427,11 @@ test("release admission CI checks out and packs the exact clean reviewed source"
     admissionJob.indexOf("git status --porcelain --untracked-files=no") < admissionJob.indexOf("npm run pack:admission"),
     "clean tracked source must be proved before package creation",
   );
+  assert.match(
+    admissionJob,
+    /uses: actions\/upload-artifact@v4[\s\S]*?include-hidden-files: true/,
+    "the upload step must admit evidence stored under .artifacts",
+  );
 });
 
 test("evidence commit admission permits only reviewed sanitized evidence with unchanged package bytes", () => {
