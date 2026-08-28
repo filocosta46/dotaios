@@ -42,6 +42,19 @@ async function makeRepo(root, name) {
   return projectPath;
 }
 
+async function verifiedPathMapping(projectPath) {
+  const canonicalPath = await fs.realpath(projectPath);
+  const stats = await fs.lstat(canonicalPath, { bigint: true });
+  return {
+    path: projectPath,
+    root_identity: {
+      type: "directory",
+      dev: stats.dev.toString(),
+      ino: stats.ino.toString()
+    }
+  };
+}
+
 async function readReadme(readmePath) {
   const content = await fs.readFile(readmePath, "utf8");
   const match = FRONTMATTER_RE.exec(content);
@@ -122,7 +135,8 @@ test("registerProject previews the durable README by default without writing pro
   });
   assert.deepEqual(preview.receipt.machine_local, {
     state_path: statePath,
-    project_path: projectPath
+    project_path: projectPath,
+    root_identity: (await verifiedPathMapping(projectPath)).root_identity
   });
   assert.match(preview.receipt.durable.after_hash, /^[a-f0-9]{64}$/);
   await assert.rejects(fs.access(preview.readmePath), { code: "ENOENT" });
@@ -137,6 +151,7 @@ test("registerProject writes project truth only with explicit apply or yes", asy
     aiosPath,
     statePath,
     projectPath,
+    purpose: "Coordinate the approved launch work",
     yes: true,
     createId: () => "approved-id",
     readRepoUrl: async () => null
@@ -144,9 +159,11 @@ test("registerProject writes project truth only with explicit apply or yes", asy
 
   assert.equal(applied.applied, true);
   assert.equal(applied.receipt.applied, true);
-  assert.equal((await readReadme(applied.readmePath)).metadata.id, "approved-id");
+  const readme = await readReadme(applied.readmePath);
+  assert.equal(readme.metadata.id, "approved-id");
+  assert.equal(readme.metadata.description, "Coordinate the approved launch work");
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")).paths, {
-    "approved-id": projectPath
+    "approved-id": await verifiedPathMapping(projectPath)
   });
 });
 
@@ -237,6 +254,7 @@ test("project add CLI preview is zero-write and keeps absolute paths out of port
     "project", "add", projectPath,
     "--path", aiosPath,
     "--state-path", statePath,
+    "--purpose", "Keep the launch work understandable and reachable",
     "--json"
   ]);
   const payload = JSON.parse(result.stdout);
@@ -244,11 +262,13 @@ test("project add CLI preview is zero-write and keeps absolute paths out of port
   assert.equal(payload.applied, false);
   assert.equal(payload.plan.operation, "add");
   assert.equal(payload.plan.project.slug, "json-preview");
+  assert.equal(payload.plan.project.description, "Keep the launch work understandable and reachable");
   assert.equal(payload.plan.durable.path, path.join("projects", "json-preview", "README.md"));
   assert.match(payload.plan.preview, /--- \/dev\/null/);
   assert.deepEqual(payload.machine_local, {
     state_path: statePath,
-    project_path: projectPath
+    project_path: projectPath,
+    root_identity: (await verifiedPathMapping(projectPath)).root_identity
   });
   assert.equal(payload.receipt.applied, false);
   assert.equal(payload.receipt.machine_local, undefined);
@@ -256,6 +276,11 @@ test("project add CLI preview is zero-write and keeps absolute paths out of port
     JSON.stringify({ plan: payload.plan, receipt: payload.receipt }).includes(root),
     false,
     "portable JSON sections must not contain machine-local absolute paths"
+  );
+  assert.equal(
+    JSON.stringify({ plan: payload.plan, receipt: payload.receipt }).includes("root_identity"),
+    false,
+    "portable JSON sections must not contain machine-local root identity"
   );
   assert.deepEqual(await fs.readdir(path.join(aiosPath, "projects")), []);
   await assert.rejects(fs.access(statePath), { code: "ENOENT" });
@@ -291,7 +316,7 @@ test("project add CLI applies explicitly and re-adds or updates one stable proje
   assert.equal(updated.plan.project.status, "paused");
   assert.equal((await readReadme(readmePath)).metadata.status, "paused");
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")).paths, {
-    [first.receipt.project_id]: projectPath
+    [first.receipt.project_id]: await verifiedPathMapping(projectPath)
   });
   assert.deepEqual(await fs.readdir(path.join(aiosPath, "projects")), ["repeat-cli"]);
 });
@@ -334,14 +359,40 @@ test("applyProjectRegistration rejects stale README and local-state plans", asyn
   await assert.rejects(fs.access(statePlan.readmePath), { code: "ENOENT" });
 });
 
+test("applyProjectRegistration refuses a replaced project folder without partial state", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "replaced-after-preview");
+  const plan = await planProjectRegistration({
+    aiosPath,
+    statePath,
+    projectPath,
+    purpose: "Keep one exact primary folder",
+    createId: () => "replaced-id",
+    readRepoUrl: async () => null
+  });
+  const originalPath = `${projectPath}-original`;
+  await fs.rename(projectPath, originalPath);
+  await fs.mkdir(projectPath);
+
+  await assert.rejects(
+    applyProjectRegistration(plan),
+    /project folder changed after the preview/i
+  );
+
+  await assert.rejects(fs.access(plan.readmePath), { code: "ENOENT" });
+  await assert.rejects(fs.access(statePath), { code: "ENOENT" });
+  assert.equal(await fs.readFile(path.join(originalPath, "source.txt"), "utf8"), "source for replaced-after-preview\n");
+});
+
 test("project help explains preview, explicit apply, JSON, and local path separation", () => {
   const result = runCli(["project", "--help"]);
 
   assert.match(result.stdout, /read-only preview unless you explicitly pass --apply or --yes/);
   assert.match(result.stdout, /--apply\s+Apply the exact plan/);
   assert.match(result.stdout, /--yes\s+Explicit script-friendly alias/);
+  assert.match(result.stdout, /--purpose <text>\s+Explain what this primary project is for/);
   assert.match(result.stdout, /--json\s+Print the portable plan and receipt/);
-  assert.match(result.stdout, /local path mapping only on this machine/);
+  assert.match(result.stdout, /local path mapping and verified directory\s+identity only on this machine/);
 });
 
 test("registerProject rejects a project README path that escapes through a symlink", async (t) => {
@@ -402,7 +453,7 @@ test("registerProject discovers a Git remote and separates synced metadata from 
 
   const statePath = path.join(homePath, ".dotaios", "projects.json");
   const state = JSON.parse(await fs.readFile(statePath, "utf8"));
-  assert.deepEqual(state.paths, { "project-001": projectPath });
+  assert.deepEqual(state.paths, { "project-001": await verifiedPathMapping(projectPath) });
   assert.equal(await fs.readFile(path.join(projectPath, "source.txt"), "utf8"), "source for Client Portal\n");
   assert.deepEqual(await fs.readdir(path.join(aiosPath, "projects", "client-portal")), ["README.md"]);
 });
@@ -428,6 +479,30 @@ test("registerProject rejects project repositories inside AIOS without modifying
   await assert.rejects(fs.access(statePath), { code: "ENOENT" });
 });
 
+test("registerProject rejects a symlinked primary-folder record without writing", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const actualPath = await makeRepo(root, "actual-primary-folder");
+  const linkedPath = path.join(root, "linked-primary-folder");
+  await fs.symlink(actualPath, linkedPath, "dir");
+
+  await assert.rejects(
+    registerProject({
+      aiosPath,
+      statePath,
+      projectPath: linkedPath,
+      purpose: "Do not trust an aliased project root",
+      apply: true,
+      createId: () => "linked-primary-id",
+      readRepoUrl: async () => null
+    }),
+    /must not be a symbolic link/i
+  );
+
+  assert.deepEqual(await fs.readdir(path.join(aiosPath, "projects")), []);
+  await assert.rejects(fs.access(statePath), { code: "ENOENT" });
+  assert.equal(await fs.readFile(path.join(actualPath, "source.txt"), "utf8"), "source for actual-primary-folder\n");
+});
+
 test("registerProject preserves stable ids, unknown frontmatter, and the README body", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "legacy-repo");
@@ -451,6 +526,7 @@ test("registerProject preserves stable ids, unknown frontmatter, and the README 
     aiosPath,
     statePath,
     projectPath,
+    purpose: "Maintain the launch project",
     apply: true,
     slug: "legacy",
     name: "Legacy Renamed",
@@ -471,6 +547,7 @@ test("registerProject preserves stable ids, unknown frontmatter, and the README 
   assert.equal(readme.metadata.owner, "Avery");
   assert.deepEqual(readme.metadata.custom, { keep: true });
   assert.equal(readme.metadata.name, "Legacy Renamed");
+  assert.equal(readme.metadata.description, "Maintain the launch project");
   assert.equal(readme.metadata.status, "active");
   assert.deepEqual(readme.metadata.domain, ["build", "sell"]);
   assert.equal(readme.metadata.repo_url, "https://github.com/acme/legacy.git");
@@ -486,6 +563,7 @@ test("re-registering the same path reuses its id and updates metadata in place",
     aiosPath,
     statePath,
     projectPath,
+    purpose: "Maintain the launch project",
     apply: true,
     createId: () => "repeat-id",
     readRepoUrl: async () => null
@@ -506,8 +584,32 @@ test("re-registering the same path reuses its id and updates metadata in place",
   assert.equal(second.readmePath, first.readmePath);
   const readme = await readReadme(first.readmePath);
   assert.equal(readme.metadata.status, "paused");
+  assert.equal(readme.metadata.description, "Maintain the launch project");
   const state = JSON.parse(await fs.readFile(statePath, "utf8"));
-  assert.deepEqual(state.paths, { "repeat-id": projectPath });
+  assert.deepEqual(state.paths, {
+    "repeat-id": await verifiedPathMapping(projectPath)
+  });
+});
+
+test("registerProject rejects blank, unsafe, and over-budget purposes without writing", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "invalid-purpose");
+  for (const purpose of ["   ", "line one\nline two", "x".repeat(501)]) {
+    await assert.rejects(
+      registerProject({
+        aiosPath,
+        statePath,
+        projectPath,
+        purpose,
+        apply: true,
+        createId: () => "invalid-purpose-id",
+        readRepoUrl: async () => null
+      }),
+      /purpose must contain 1-500 safe Unicode code points/
+    );
+  }
+  assert.deepEqual(await fs.readdir(path.join(aiosPath, "projects")), []);
+  await assert.rejects(fs.access(statePath), { code: "ENOENT" });
 });
 
 test("listProjects returns sorted portable metadata with local availability", async (t) => {
@@ -561,7 +663,11 @@ test("resolveProject accepts slug or id and explains unavailable paths", async (
   await fs.rm(projectPath, { recursive: true });
   await assert.rejects(
     resolveProject({ aiosPath, statePath, project: "resolvable" }),
-    /registered at .* but that path is missing.*project restore resolve-id --dry-run/
+    (error) => {
+      assert.match(error.message, /cannot be verified.*project restore resolve-id --dry-run/);
+      assert.equal(error.message.includes(projectPath), false);
+      return true;
+    }
   );
 
   await writeProjectReadme(
@@ -576,6 +682,61 @@ test("resolveProject accepts slug or id and explains unavailable paths", async (
   await assert.rejects(
     resolveProject({ aiosPath, statePath, project: "unknown" }),
     /is not registered.*project list/
+  );
+});
+
+test("legacy string mappings stay listable but never disclose an induction location", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const legacyPath = await makeRepo(root, "legacy-string-location");
+  await writeProjectReadme(
+    aiosPath,
+    "legacy-location",
+    "id: legacy-location-id\nproject: legacy-location\nname: Legacy Location\nstatus: active\ndomain: [build]\nrepo_url: null"
+  );
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    paths: { "legacy-location-id": legacyPath }
+  })}\n`);
+
+  const projects = await listProjects({ aiosPath, statePath });
+  assert.equal(projects.length, 1);
+  assert.equal(projects[0].slug, "legacy-location");
+  assert.equal(projects[0].projectPath, null);
+  assert.equal(projects[0].pathAvailable, false);
+
+  await assert.rejects(
+    resolveProject({ aiosPath, statePath, project: "legacy-location" }),
+    (error) => {
+      assert.match(error.message, /re-register/i);
+      assert.equal(error.message.includes(legacyPath), false);
+      return true;
+    }
+  );
+
+  const capture = outputCapture();
+  await projectCommand(["list", "--path", aiosPath, "--state-path", statePath], {
+    output: capture.output
+  });
+  assert.match(capture.lines.join("\n"), /legacy-location/);
+  assert.match(capture.lines.join("\n"), /re-registration required on this machine/);
+  assert.equal(capture.lines.join("\n").includes(legacyPath), false);
+
+  await registerProject({
+    aiosPath,
+    statePath,
+    projectPath: legacyPath,
+    slug: "legacy-location",
+    purpose: "Revalidate this primary folder",
+    apply: true,
+    createId: () => {
+      throw new Error("the durable legacy id must be reused");
+    },
+    readRepoUrl: async () => null
+  });
+  assert.equal(
+    await resolveProject({ aiosPath, statePath, project: "legacy-location" }),
+    legacyPath
   );
 });
 
@@ -771,8 +932,8 @@ test("project list names managed, external, restorable, and local-only states", 
   await fs.writeFile(statePath, `${JSON.stringify({
     version: 1,
     paths: {
-      "managed-id": managedPath,
-      "external-id": externalPath
+      "managed-id": await verifiedPathMapping(managedPath),
+      "external-id": await verifiedPathMapping(externalPath)
     }
   })}\n`);
 

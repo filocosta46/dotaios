@@ -47,11 +47,15 @@ test("a spawned command with HOME pinned never writes outside that home", () => 
   const sandboxState = path.join(homePath, ".dotaios", "projects.json");
   assert.ok(fs.existsSync(sandboxState), "the registry must land inside the pinned HOME");
 
-  // The machine-local registry maps project id -> checkout path only; the
-  // portable name lives in AIOS under projects/<slug>/README.md. Assert on the
-  // path mapping, which is what this file is actually contracted to hold.
+  // The machine-local registry keeps both the checkout path and the directory
+  // identity used to revalidate it before disclosure. Portable project truth
+  // remains in AIOS under projects/<slug>/README.md.
   const state = JSON.parse(fs.readFileSync(sandboxState, "utf8"));
-  assert.deepEqual(Object.values(state.paths || {}), [projectPath]);
+  const mappings = Object.values(state.paths || {});
+  assert.equal(mappings.length, 1);
+  assert.equal(mappings[0].path, projectPath);
+  assert.deepEqual(Object.keys(mappings[0].root_identity).sort(), ["dev", "ino", "type"]);
+  assert.equal(mappings[0].root_identity.type, "directory");
 });
 
 test("the real user registry is untouched by a HOME-pinned run", () => {

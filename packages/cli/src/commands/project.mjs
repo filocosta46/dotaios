@@ -31,12 +31,14 @@ const HELP_TEXT = `Usage:
 
 Keep portable project metadata under projects/<slug>/README.md. Existing
 external repositories stay where they are; restored repositories use the
-ignored workspaces/ shelf, with a local path mapping only on this machine.
+ignored workspaces/ shelf, with a local path mapping and verified directory
+identity only on this machine.
 Project add is a read-only preview unless you explicitly pass --apply or --yes.
 
 Add options:
   --slug <slug>       Override the slug derived from the repository folder
   --name <name>       Set the human-readable project name
+  --purpose <text>    Explain what this primary project is for (1-500 characters)
   --status <status>   Set the project status (default: active)
   --domain <domain>   Set build, make, or sell; repeat for multiple domains
   --repo-url <url>    Override the Git origin URL discovered from the repository
@@ -90,6 +92,7 @@ export async function projectCommand(args = [], dependencies = {}) {
       projectPath: resolveUserPath(positionals[0], coreOptions.homePath),
       slug: addOptions.slug,
       name: addOptions.name,
+      purpose: addOptions.purpose,
       status: addOptions.status,
       domain: addOptions.domains.length > 0 ? addOptions.domains : undefined,
       repoUrl: addOptions.repoUrl,
@@ -255,6 +258,7 @@ function parseOptions(args) {
   const addOptions = {
     slug: null,
     name: null,
+    purpose: undefined,
     status: null,
     domains: [],
     repoUrl: null,
@@ -280,6 +284,9 @@ function parseOptions(args) {
       index += 1;
     } else if (arg === "--name") {
       addOptions.name = readOptionValue(args, index, "--name");
+      index += 1;
+    } else if (arg === "--purpose") {
+      addOptions.purpose = readOptionValue(args, index, "--purpose");
       index += 1;
     } else if (arg === "--status") {
       addOptions.status = readOptionValue(args, index, "--status");
@@ -334,6 +341,7 @@ function assertNoAddOptions(options, subcommand) {
   if (
     options.slug ||
     options.name ||
+    options.purpose !== undefined ||
     options.status ||
     options.domains.length > 0 ||
     options.repoUrl ||
@@ -440,6 +448,7 @@ function projectRegistrationJson(project) {
         id: project.id,
         slug: project.slug,
         name: project.name,
+        ...(project.description ? { description: project.description } : {}),
         status: project.status,
         domain: [...project.domain],
         repo_url: project.repoUrl
@@ -473,7 +482,11 @@ function printProjects(output, projects) {
     const domains = project.domain.join(", ") || "none";
     output.log(`[${state}] ${project.slug}: ${project.name}`);
     output.log(`       status: ${project.status} | domain: ${domains}`);
-    output.log(`       path: ${project.projectPath || "not registered on this machine"}`);
+    const location = project.projectPath
+      || (project.mappingStatus && project.mappingStatus !== "unmapped"
+        ? "re-registration required on this machine"
+        : "not registered on this machine");
+    output.log(`       path: ${location}`);
     if (project.repoUrl) output.log(`       repo: ${project.repoUrl}`);
   }
 }

@@ -57,7 +57,9 @@ export async function planProjectRegistration(options = {}) {
 
   const requestedProjectPath = resolveUserPath(options.projectPath, context.homePath);
   await assertDirectory(context.fs, requestedProjectPath, "Project path");
+  await assertProjectRootPath(requestedProjectPath, context.fs);
   const realProjectPath = await context.fs.realpath(requestedProjectPath);
+  const rootIdentity = await inspectProjectRootIdentity(realProjectPath, context.fs);
 
   const [records, state] = await Promise.all([
     readProjectRecords(context),
@@ -109,6 +111,9 @@ export async function planProjectRegistration(options = {}) {
   }
 
   const name = readRequiredString(options.name ?? existing?.metadata.name ?? path.basename(requestedProjectPath), "name");
+  const description = options.purpose !== undefined
+    ? validateProjectPurpose(options.purpose)
+    : readOptionalString(existing?.metadata.description);
   const status = readRequiredString(options.status ?? existing?.metadata.status ?? "active", "status");
   const domain = normalizeDomains(options.domain ?? existing?.metadata.domain ?? ["build"]);
   const explicitRepoUrlSupplied = options.repoUrl !== undefined && options.repoUrl !== null;
@@ -137,6 +142,7 @@ export async function planProjectRegistration(options = {}) {
     id: id.trim(),
     project: slug,
     name,
+    ...(description ? { description } : {}),
     status,
     domain,
     repo_url: repoUrl
@@ -148,7 +154,10 @@ export async function planProjectRegistration(options = {}) {
       delete nextPaths[otherId];
     }
   }
-  nextPaths[id] = requestedProjectPath;
+  nextPaths[id] = {
+    path: requestedProjectPath,
+    root_identity: rootIdentity
+  };
   const nextState = { ...state, paths: nextPaths };
   const relativeReadmePath = path.relative(context.aiosPath, readmePath);
   const operation = source ? "replace" : "add";
@@ -165,7 +174,8 @@ export async function planProjectRegistration(options = {}) {
     },
     machine_local: {
       state_path: context.statePath,
-      project_path: requestedProjectPath
+      project_path: requestedProjectPath,
+      root_identity: rootIdentity
     },
     applied: false
   };
@@ -177,10 +187,13 @@ export async function planProjectRegistration(options = {}) {
     slug,
     project: slug,
     name,
+    description,
     status,
     domain,
     repoUrl,
     projectPath: requestedProjectPath,
+    canonicalProjectPath: realProjectPath,
+    rootIdentity,
     pathAvailable: true,
     readmePath,
     readme: content,
@@ -211,6 +224,7 @@ export async function applyProjectRegistration(plan, options = {}) {
   await assertProjectReadmePath(context, plan.readmePath);
 
   await withProjectStateLock(context, async () => {
+    await assertProjectRootUnchanged(context, plan);
     const currentSource = await readMarkdownSource(context.fs, plan.readmePath);
     const currentReadmeExists = currentSource !== null;
     const currentReadme = currentSource?.content || "";
@@ -400,8 +414,11 @@ export async function updateProjectPathMapping(options = {}) {
     if (repositoryBefore !== repositoryAfter) {
       throw new Error("Project mapping target changed during verification; restore again before saving the mapping.");
     }
+    const canonicalProjectPath = await context.fs.realpath(projectPath);
+    const rootIdentity = await inspectProjectRootIdentity(canonicalProjectPath, context.fs);
 
     const state = await readProjectState(context);
+    const mapping = await verifyProjectPathMapping(context, state.paths[id]);
     const currentPath = readMappedPath(state.paths[id]);
     if (currentPath !== projectPath) {
       if (hasExpectedPath && currentPath !== expectedPath) {
@@ -416,10 +433,16 @@ export async function updateProjectPathMapping(options = {}) {
         throw new Error(`Project mapping conflict: ${projectPath} is already mapped to ${otherId}.`);
       }
     }
-    if (currentPath === projectPath) {
+    if (currentPath === projectPath && mapping.status === "verified") {
       return { changed: false, id, projectPath, statePath: context.statePath };
     }
-    const nextState = { ...state, paths: { ...state.paths, [id]: projectPath } };
+    const nextState = {
+      ...state,
+      paths: {
+        ...state.paths,
+        [id]: { path: projectPath, root_identity: rootIdentity }
+      }
+    };
     await writeProjectStateFile(context, nextState);
     return { changed: true, id, projectPath, statePath: context.statePath };
   });
@@ -654,6 +677,15 @@ export async function matchProjectRecord(referenceOrOptions, additionalOptions =
 /** Resolve a project reference to its catalog record, requiring a local path. */
 export async function resolveProjectRecord(referenceOrOptions, additionalOptions = {}) {
   const project = await matchProjectRecord(referenceOrOptions, additionalOptions);
+  if (project.mappingStatus !== "verified" && project.mappingStatus !== "unmapped") {
+    const recovery = project.restoreEligible
+      ? restoreRecoveryInstruction(project)
+      : `Run \`dotaios project add <repo-path> --slug ${project.slug} --apply\` to re-register it.`;
+    throw new Error([
+      `Project "${project.slug}" local folder registration cannot be verified.`,
+      recovery
+    ].join(" "));
+  }
   if (!project.projectPath) {
     const recovery = project.restoreEligible
       ? restoreRecoveryInstruction(project)
@@ -934,7 +966,10 @@ async function listProjectRecords(context) {
     readProjectState(context)
   ]);
   return Promise.all(records.map(async (record) => {
-    const projectPath = record.id ? readMappedPath(state.paths[record.id]) : null;
+    const mapping = record.id
+      ? await verifyProjectPathMapping(context, state.paths[record.id])
+      : { status: "unmapped", projectPath: null };
+    const projectPath = mapping.projectPath;
     const placement = await classifyProjectPlacement({
       aiosPath: context.aiosPath,
       projectPath,
@@ -951,6 +986,7 @@ async function listProjectRecords(context) {
       domain: record.domain,
       repoUrl: record.repoUrl,
       projectPath,
+      mappingStatus: mapping.status,
       pathAvailable: placement.pathAvailable,
       placement: placement.placement,
       remoteSafe: record.remote.safe,
@@ -1391,6 +1427,96 @@ async function pathsReferToSameDirectory(context, storedPath, projectPath) {
   }
 }
 
+async function verifyProjectPathMapping(context, value) {
+  if (value === undefined || value === null) {
+    return { status: "unmapped", projectPath: null };
+  }
+  if (typeof value === "string") {
+    return { status: "legacy", projectPath: null };
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { status: "invalid", projectPath: null };
+  }
+  const projectPath = readMappedPath(value);
+  if (!projectPath || typeof value.path !== "string" || !path.isAbsolute(value.path)) {
+    return { status: "invalid", projectPath: null };
+  }
+  const identity = value.root_identity;
+  if (
+    identity?.type !== "directory"
+    || typeof identity.dev !== "string"
+    || !/^\d+$/.test(identity.dev)
+    || typeof identity.ino !== "string"
+    || !/^\d+$/.test(identity.ino)
+  ) {
+    return { status: "invalid", projectPath: null };
+  }
+  try {
+    await assertProjectRootPath(projectPath, context.fs);
+    const canonicalPath = await context.fs.realpath(projectPath);
+    const observed = await inspectProjectRootIdentity(canonicalPath, context.fs);
+    if (!sameProjectRootIdentity(observed, identity)) {
+      return { status: "changed", projectPath: null };
+    }
+    return { status: "verified", projectPath };
+  } catch {
+    return { status: "unavailable", projectPath: null };
+  }
+}
+
+async function inspectProjectRootIdentity(projectPath, fileSystem) {
+  let stats;
+  try {
+    stats = await fileSystem.lstat(projectPath, { bigint: true });
+  } catch {
+    throw new Error("Project folder is unavailable.");
+  }
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error("Project folder must resolve to a real directory.");
+  }
+  return {
+    type: "directory",
+    dev: stats.dev.toString(),
+    ino: stats.ino.toString()
+  };
+}
+
+async function assertProjectRootPath(projectPath, fileSystem) {
+  let stats;
+  try {
+    stats = await fileSystem.lstat(projectPath);
+  } catch {
+    throw new Error("Project folder is unavailable.");
+  }
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error("Project folder must not be a symbolic link.");
+  }
+}
+
+async function assertProjectRootUnchanged(context, plan) {
+  let canonicalPath;
+  let identity;
+  try {
+    await assertProjectRootPath(plan.projectPath, context.fs);
+    canonicalPath = await context.fs.realpath(plan.projectPath);
+    identity = await inspectProjectRootIdentity(canonicalPath, context.fs);
+  } catch {
+    throw new Error("The project folder changed after the preview. Preview project add again.");
+  }
+  if (
+    canonicalPath !== plan.canonicalProjectPath
+    || !sameProjectRootIdentity(identity, plan.rootIdentity)
+  ) {
+    throw new Error("The project folder changed after the preview. Preview project add again.");
+  }
+}
+
+function sameProjectRootIdentity(left, right) {
+  return left?.type === right?.type
+    && left?.dev === right?.dev
+    && left?.ino === right?.ino;
+}
+
 function readMappedPath(value) {
   if (typeof value === "string" && value.trim()) return path.resolve(value);
   if (value && typeof value.path === "string" && value.path.trim()) return path.resolve(value.path);
@@ -1492,6 +1618,19 @@ function readRequiredString(value, field) {
 
 function readOptionalString(value) {
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function validateProjectPurpose(value) {
+  const purpose = typeof value === "string" ? value.trim() : "";
+  if (
+    !purpose
+    || Array.from(purpose).length > 500
+    || /\p{Cc}/u.test(purpose)
+    || /[\uD800-\uDFFF]/u.test(purpose)
+  ) {
+    throw new Error("purpose must contain 1-500 safe Unicode code points");
+  }
+  return purpose;
 }
 
 function unsafeExplicitProjectRemoteError(reason) {

@@ -26,6 +26,7 @@ async function registerWidget(aiosPath, statePath) {
     statePath,
     projectPath,
     slug: "widget",
+    purpose: "Coordinate the widget launch",
     yes: true,
     createId: () => "widget-id",
     readRepoUrl: async () => "https://github.com/acme/widget.git"
@@ -49,6 +50,7 @@ test("a generated project README uses block frontmatter, one key per line", asyn
   );
   assert.match(frontmatter, /^id: widget-id$/m);
   assert.match(frontmatter, /^project: widget$/m);
+  assert.match(frontmatter, /^description: Coordinate the widget launch$/m);
 });
 
 test("a generated project README survives a caller that injects its own key", async (t) => {

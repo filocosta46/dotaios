@@ -65,9 +65,10 @@ test("concurrent identical registration cannot let the loser delete the winner R
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(results.filter((result) => result.status === "rejected").length, 1);
   assert.equal(await fs.readFile(plan.readmePath, "utf8"), plan.readme);
-  assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")).paths, {
-    "widget-id": projectPath
-  });
+  assert.deepEqual(
+    JSON.parse(await fs.readFile(statePath, "utf8")).paths,
+    plan.stateAfter.paths
+  );
 });
 
 test("registration rollback preserves README content replaced after its own write", async (t) => {

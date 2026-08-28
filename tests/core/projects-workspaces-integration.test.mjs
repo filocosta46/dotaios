@@ -37,6 +37,19 @@ async function makeVerifiedManagedCheckout(aiosPath, slug = "widget") {
   return destination;
 }
 
+async function verifiedPathMapping(projectPath) {
+  const canonicalPath = await fs.realpath(projectPath);
+  const stats = await fs.lstat(canonicalPath, { bigint: true });
+  return {
+    path: projectPath,
+    root_identity: {
+      type: "directory",
+      dev: stats.dev.toString(),
+      ino: stats.ino.toString()
+    }
+  };
+}
+
 function verifiedMappingOptions() {
   return {
     expectedRemote: VERIFIED_REMOTE,
@@ -100,7 +113,9 @@ test("legacy unsafe remotes are local-only and are not exposed as clone inputs",
   const legacy = projects.find((project) => project.slug === "legacy");
   const restorable = projects.find((project) => project.slug === "restorable");
   assert.equal(legacy.repoUrl, null);
-  assert.equal(legacy.placement, "external");
+  assert.equal(legacy.projectPath, null);
+  assert.equal(legacy.placement, "missing");
+  assert.equal(legacy.mappingStatus, "legacy");
   assert.equal(legacy.remoteSafe, false);
   assert.equal(legacy.restoreEligible, false);
   assert.equal(legacy.restoreStatus, "local-only");
@@ -173,7 +188,7 @@ test("projects restore facade writes a private atomic managed mapping after veri
   assert.equal(receipt.ok, true);
   assert.equal(receipt.results[0].action, "cloned");
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")).paths, {
-    "widget-id": destination
+    "widget-id": await verifiedPathMapping(destination)
   });
   assert.equal((await fs.stat(statePath)).mode & 0o777, 0o600);
   assert.equal((await listProjects({ aiosPath, statePath }))[0].placement, "managed");
