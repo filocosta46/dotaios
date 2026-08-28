@@ -260,10 +260,14 @@ export function admitPackageArtifact({ artifact, sourceCommit }) {
     fs.mkdirSync(extractRoot, { mode: 0o700 });
     fs.mkdirSync(processHome, { mode: 0o700 });
     fs.writeFileSync(verifiedArtifact, artifactBytes, { flag: "wx", mode: 0o600 });
-    const extracted = spawnSync(tarExecutable(), ["-xzf", verifiedArtifact, "-C", extractRoot], {
+    const ownedTar = tarExecutable();
+    const extracted = spawnSync(ownedTar, ["-xzf", verifiedArtifact, "-C", extractRoot], {
       cwd: runRoot,
       encoding: "utf8",
-      env: admissionEnvironment(processHome),
+      env: {
+        ...admissionEnvironment(processHome),
+        PATH: path.dirname(ownedTar),
+      },
       timeout: 60_000,
     });
     if (extracted.status !== 0) {

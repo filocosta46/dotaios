@@ -36,7 +36,7 @@ test("the publishable package freezes one deterministic dependency graph", { tim
   }
 });
 
-test("package admission runs only the bundled graph and returns a bounded package verdict", { timeout: 120_000 }, (t) => {
+test("package admission extracts with owned OS tools and returns a bounded package verdict", { timeout: 120_000 }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-package-admission-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const artifact = pack(path.join(root, "artifact"));
@@ -49,7 +49,7 @@ test("package admission runs only the bundled graph and returns a bounded packag
     cwd: repoRoot,
     encoding: "utf8",
     env: {
-      PATH: process.env.PATH,
+      PATH: "",
     },
   });
 
