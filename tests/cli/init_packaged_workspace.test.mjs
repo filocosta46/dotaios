@@ -13,7 +13,7 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   run(process.platform === "win32" ? "npm.cmd" : "npm", [
-    "pack", "--silent", "--pack-destination", root
+    "run", "pack:admission", "--", "--silent", "--pack-destination", root
   ], { cwd: repoRoot });
 
   const tarball = fs.readdirSync(root).find((entry) => entry.endsWith(".tgz"));
@@ -44,23 +44,19 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
     }
   }
 
-  // The packed source resolves its normal dependencies through the checkout's
-  // installed node_modules. The package files themselves remain untouched.
-  fs.symlinkSync(
-    dependencyNodeModules(repoRoot),
-    path.join(packageRoot, "node_modules"),
-    process.platform === "win32" ? "junction" : "dir"
-  );
+  // The release artifact must be runnable from its own admitted dependency
+  // bytes. An ambient checkout symlink would bypass the npm 12 firewall this
+  // packaged-workspace test is supposed to exercise.
+  const bundledModules = path.join(packageRoot, "node_modules");
+  assert.equal(fs.lstatSync(bundledModules).isDirectory(), true);
+  assert.equal(fs.lstatSync(bundledModules).isSymbolicLink(), false);
+  assert.equal(fs.existsSync(path.join(packageRoot, "npm-shrinkwrap.json")), true);
 
   const cli = path.join(packageRoot, "packages", "cli", "src", "index.mjs");
   const aiosPath = path.join(root, "aios");
   const homePath = path.join(root, "home");
   fs.mkdirSync(homePath);
 
-  // Derived, not written down. As a literal this asserted 2.0.5 and failed the
-  // first release that moved past it -- a version bump should be caught by the
-  // public onboarding contract, which pins the docs deliberately, not by a
-  // second copy of the number nobody remembers to update.
   const expectedVersion = JSON.parse(
     fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
   ).version;
@@ -138,12 +134,6 @@ test("the packed CLI initializes a restorable, ignored workspace shelf", (t) => 
   assert.equal(receipt.machine_local.results[0].destination, path.join(aiosPath, "workspaces", "packed-project"));
   assert.equal(fs.readFileSync(ignorePath, "utf8"), ignoreBeforeRestore, "restore must not rewrite the boundary");
 });
-
-function dependencyNodeModules(start) {
-  const candidate = path.join(start, "node_modules");
-  if (fs.existsSync(candidate)) return candidate;
-  throw new Error(`Could not locate the repository-local dependency tree at ${candidate}.`);
-}
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");

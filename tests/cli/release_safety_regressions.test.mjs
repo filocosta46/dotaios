@@ -8,6 +8,12 @@ import { MANAGED_END, MANAGED_START, bridgePointer } from "../../packages/core/s
 import { SETUP_TRANSACTION_FILE } from "../../packages/core/src/paths.mjs";
 import { createAiosConfig } from "../../packages/core/src/schema.mjs";
 import { initCommand } from "../../packages/cli/src/commands/init.mjs";
+import {
+  REQUIRED_RELEASE_CHECKS,
+  verifyReviewedSource,
+} from "../../scripts/verify-release-source.mjs";
+import { verifyEvidenceCommit } from "../../scripts/verify-release-evidence-commit.mjs";
+import { evaluateReleaseAdmission } from "../../scripts/release-checklist.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -374,3 +380,280 @@ test("setup fails closed when installed Claude has a malformed bridge", (t) => {
   assert.match(output, /Folder created\. Tool connection needs attention/i);
   assert.doesNotMatch(output, /Install Claude Code/i);
 });
+
+test("release source admission requires a reviewed PR head and every exact required check", () => {
+  const input = reviewedSourceFixture();
+  const receipt = verifyReviewedSource(input);
+  assert.equal(receipt.schema, "dotaios.reviewed-source.v1");
+  assert.equal(receipt.source_go, "GO");
+  assert.equal(receipt.source_commit, input.source_commit);
+  assert.equal(receipt.reviewed_pr.number, input.pr.number);
+  assert.equal(receipt.reviewed_pr.head, input.source_commit);
+  assert.match(receipt.reviewed_pr.required_checks_sha256, /^[a-f0-9]{64}$/);
+
+  const cases = [
+    ["direct main", { pr: { ...input.pr, head_branch: "main" } }],
+    ["unreviewed", { pr: { ...input.pr, approved_head_sha: "f".repeat(40) } }],
+    ["open", { pr: { ...input.pr, state: "OPEN", merged: false } }],
+    ["wrong commit", { source_commit: "e".repeat(40) }],
+    ["required check subset", { required_checks: REQUIRED_RELEASE_CHECKS.slice(0, -1) }],
+    ["invented required check", { required_checks: [...REQUIRED_RELEASE_CHECKS.slice(0, -1), "invented release gate"] }],
+    ["extra required check", { required_checks: [...REQUIRED_RELEASE_CHECKS, "extra release gate"] }],
+    ["missing check", { check_runs: input.check_runs.slice(0, -1) }],
+    ["failed check", { check_runs: input.check_runs.map((check, index) => index === 0 ? { ...check, conclusion: "failure" } : check) }],
+    ["stale check", { check_runs: input.check_runs.map((check, index) => index === 0 ? { ...check, head_sha: "d".repeat(40) } : check) }],
+  ];
+  for (const [label, changed] of cases) {
+    assert.throws(
+      () => verifyReviewedSource({ ...input, ...changed }),
+      /review|source|commit|head|merged|required|check|main/i,
+      label,
+    );
+  }
+});
+
+test("release admission CI checks out and packs the exact clean reviewed source", () => {
+  const workflow = fs.readFileSync(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  const admissionJob = workflow.split("  admission-firewall:")[1];
+  assert.ok(admissionJob, "release admission job must exist");
+  assert.match(admissionJob, /uses: actions\/checkout@v4\n\s+with:\n\s+ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
+  assert.match(admissionJob, /test "\$\(git rev-parse HEAD\)" = "\$REVIEWED_SOURCE_COMMIT"/);
+  assert.match(admissionJob, /test -z "\$\(git status --porcelain --untracked-files=no\)"/);
+  assert.ok(
+    admissionJob.indexOf("git rev-parse HEAD") < admissionJob.indexOf("npm run pack:admission"),
+    "reviewed HEAD must be proved before package creation",
+  );
+  assert.ok(
+    admissionJob.indexOf("git status --porcelain --untracked-files=no") < admissionJob.indexOf("npm run pack:admission"),
+    "clean tracked source must be proved before package creation",
+  );
+});
+
+test("evidence commit admission permits only reviewed sanitized evidence with unchanged package bytes", () => {
+  const input = evidenceCommitFixture();
+  const receipt = verifyEvidenceCommit(input);
+  assert.deepEqual(receipt, {
+    schema: "dotaios.evidence-commit.v1",
+    evidence_go: "GO",
+    candidate_source_commit: input.candidate_source_commit,
+    evidence_commit: input.evidence_commit,
+    reviewed_pr: {
+      number: input.pr.number,
+      head: input.evidence_commit,
+    },
+    package_tree_sha256: input.candidate_package_tree_sha256,
+    evidence_files_sha256: receipt.evidence_files_sha256,
+  });
+  assert.match(receipt.evidence_files_sha256, /^[a-f0-9]{64}$/);
+
+  const cases = [
+    ["package file", { changes: [...input.changes, { path: "package.json", status: "modified", mode: "100644", blob_sha256: "9".repeat(64) }] }],
+    ["tree drift", { evidence_package_tree_sha256: "8".repeat(64) }],
+    ["linked evidence", { changes: input.changes.map((change, index) => index === 0 ? { ...change, mode: "120000" } : change) }],
+    ["unreviewed evidence", { pr: { ...input.pr, approved_head_sha: "7".repeat(40) } }],
+    ["direct main", { pr: { ...input.pr, head_branch: "main" } }],
+  ];
+  for (const [label, changed] of cases) {
+    assert.throws(
+      () => verifyEvidenceCommit({ ...input, ...changed }),
+      /evidence|package|tree|file|link|review|head|main/i,
+      label,
+    );
+  }
+});
+
+test("final admission reports package, native-agent, and public-release states separately", (t) => {
+  const source = verifyReviewedSource(reviewedSourceFixture());
+  const packageReceipt = {
+    schema: "dotaios.package-admission.v1",
+    verdict: "go",
+    package_go: "GO",
+    source_commit: source.source_commit,
+    artifact: {
+      name: "dotaios",
+      version: "2.0.12",
+      sha256: "4".repeat(64),
+      dependency_graph_sha256: "5".repeat(64),
+    },
+    assertions: {
+      archive_regular_files_only: true,
+      artifact_identity_stable: true,
+      bundled_graph_complete: true,
+      candidate_loaded_without_ambient_modules: true,
+      lifecycle_scripts_absent: true,
+      shrinkwrap_admitted: true,
+    },
+  };
+  const admission = evaluateReleaseAdmission({ source, package_receipt: packageReceipt });
+  assert.equal(admission.package_admission, "GO");
+  assert.equal(admission.native_agent_admission, "NO-GO");
+  assert.equal(admission.public_release_admission, "NO-GO");
+
+  const sandbox = makeSandbox(t, "release-checklist");
+  const inputPath = path.join(sandbox.root, "admission.json");
+  const sentinel = path.join(sandbox.root, "must-not-change.txt");
+  fs.writeFileSync(inputPath, JSON.stringify({ source, package_receipt: packageReceipt }));
+  fs.writeFileSync(sentinel, "unchanged\n");
+  const result = spawnSync(process.execPath, [
+    path.join(repoRoot, "scripts", "release-checklist.mjs"), "--admission", inputPath,
+  ], { cwd: repoRoot, encoding: "utf8", env: { PATH: path.dirname(process.execPath) } });
+  assert.equal(result.status, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /Package admission: GO/);
+  assert.match(result.stdout, /Native-agent admission: NO-GO/);
+  assert.match(result.stdout, /Public-release admission: NO-GO/);
+  assert.doesNotMatch(result.stdout, /Safe to publish|npm publish|git push|gh release/i);
+  assert.equal(fs.readFileSync(sentinel, "utf8"), "unchanged\n");
+});
+
+test("public release reaches GO only with both native clients and every separately owned proof", () => {
+  const input = completeReleaseAdmissionFixture();
+  const admitted = evaluateReleaseAdmission(input);
+  assert.equal(admitted.package_admission, "GO");
+  assert.equal(admitted.native_agent_admission, "GO");
+  assert.equal(admitted.public_release_admission, "GO");
+
+  const cases = [
+    ["missing client", { native_admissions: input.native_admissions.slice(0, 1) }],
+    ["registry drift", { registry_receipt: { ...input.registry_receipt, git_head: "f".repeat(40) } }],
+    ["evidence drift", { evidence_commit: { ...input.evidence_commit, candidate_source_commit: "e".repeat(40) } }],
+    ["instruction design", { non_founder_outcome: { ...input.non_founder_outcome, instruction_file_designed: "yes" } }],
+    ["no authority", { public_authority: undefined }],
+  ];
+  for (const [label, changed] of cases) {
+    const result = evaluateReleaseAdmission({ ...input, ...changed });
+    assert.equal(result.public_release_admission, "NO-GO", label);
+  }
+
+  const nativeCases = [
+    ["source", { source_commit: "8".repeat(40) }],
+    ["reviewed head", { reviewed_pr_head: "8".repeat(40) }],
+    ["artifact", { artifact_sha256: "8".repeat(64) }],
+    ["dependency graph", { dependency_graph_sha256: "8".repeat(64) }],
+    ["consume challenge", { consume: { ...input.native_admissions[0].consume, challenge_id: "8".repeat(64) } }],
+    ["consume receipt", { consume: { ...input.native_admissions[0].consume, receipt_sha256: "not-a-sha256" } }],
+  ];
+  for (const [label, changed] of nativeCases) {
+    const nativeAdmissions = input.native_admissions.map((entry, index) => (
+      index === 0 ? { ...entry, ...changed } : entry
+    ));
+    const result = evaluateReleaseAdmission({ ...input, native_admissions: nativeAdmissions });
+    assert.equal(result.native_agent_admission, "NO-GO", label);
+    assert.equal(result.public_release_admission, "NO-GO", label);
+  }
+});
+
+function reviewedSourceFixture() {
+  const head = "a".repeat(40);
+  return {
+    source_commit: head,
+    pr: {
+      number: 123,
+      state: "MERGED",
+      merged: true,
+      base_branch: "main",
+      head_branch: "codex/2-0-12-candidate",
+      head_sha: head,
+      approved_head_sha: head,
+    },
+    required_checks: [...REQUIRED_RELEASE_CHECKS],
+    check_runs: REQUIRED_RELEASE_CHECKS.map((name) => ({
+      name,
+      conclusion: "success",
+      head_sha: head,
+    })),
+  };
+}
+
+function evidenceCommitFixture() {
+  const candidate = "a".repeat(40);
+  const evidence = "b".repeat(40);
+  return {
+    candidate_source_commit: candidate,
+    evidence_commit: evidence,
+    candidate_package_tree_sha256: "c".repeat(64),
+    evidence_package_tree_sha256: "c".repeat(64),
+    pr: {
+      number: 124,
+      state: "MERGED",
+      merged: true,
+      base_branch: "main",
+      head_branch: "codex/2-0-12-evidence",
+      head_sha: evidence,
+      approved_head_sha: evidence,
+    },
+    changes: [
+      { path: "docs/release-evidence/2.0.12/index.json", status: "added", mode: "100644", blob_sha256: "d".repeat(64) },
+      { path: "docs/release-evidence/2.0.12/codex.json", status: "added", mode: "100644", blob_sha256: "e".repeat(64) },
+    ],
+  };
+}
+
+function completeReleaseAdmissionFixture() {
+  const source = verifyReviewedSource(reviewedSourceFixture());
+  const artifactSha256 = "4".repeat(64);
+  const dependencyGraphSha256 = "5".repeat(64);
+  const packageReceipt = {
+    schema: "dotaios.package-admission.v1",
+    verdict: "go",
+    package_go: "GO",
+    source_commit: source.source_commit,
+    artifact: {
+      name: "dotaios",
+      version: "2.0.12",
+      sha256: artifactSha256,
+      dependency_graph_sha256: dependencyGraphSha256,
+    },
+    assertions: {
+      archive_regular_files_only: true,
+      artifact_identity_stable: true,
+      bundled_graph_complete: true,
+      candidate_loaded_without_ambient_modules: true,
+      lifecycle_scripts_absent: true,
+      shrinkwrap_admitted: true,
+    },
+  };
+  const native = (client, digit) => ({
+    schema: "dotaios.native-admission.v1",
+    client,
+    native_agent_go: "GO",
+    challenge_id: digit.repeat(64),
+    source_commit: source.source_commit,
+    reviewed_pr_head: source.reviewed_pr.head,
+    artifact_sha256: artifactSha256,
+    dependency_graph_sha256: dependencyGraphSha256,
+    consume: {
+      challenge_id: digit.repeat(64),
+      receipt_sha256: digit.repeat(64),
+    },
+  });
+  const evidence = verifyEvidenceCommit(evidenceCommitFixture());
+  return {
+    source,
+    package_receipt: packageReceipt,
+    registry_receipt: {
+      schema: "dotaios.registry-artifact.v1",
+      package: "dotaios",
+      version: "2.0.12",
+      artifact_sha256: artifactSha256,
+      dependency_source: "npm-shrinkwrap",
+      git_head: source.source_commit,
+      integrity_sha512: `sha512-${"A".repeat(86)}==`,
+    },
+    native_admissions: [native("codex", "6"), native("claude", "7")],
+    evidence_commit: evidence,
+    non_founder_outcome: {
+      schema: "dotaios.non-founder-outcome.v1",
+      completed: "yes",
+      source_commit: source.source_commit,
+      artifact_sha256: artifactSha256,
+      instruction_file_designed: "no",
+      transcript_retained: "no",
+    },
+    public_authority: {
+      schema: "dotaios.public-release-authority.v1",
+      authorized: "yes",
+      source_commit: source.source_commit,
+      artifact_sha256: artifactSha256,
+    },
+  };
+}
