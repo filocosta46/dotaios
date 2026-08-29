@@ -173,7 +173,7 @@ export function inspectPackageArchive(artifactBytes) {
   assertNoImplicitNativeBuild(entries);
   const packageJson = parseArchiveJson(entries, "package/package.json");
   const shrinkwrap = parseArchiveJson(entries, "package/npm-shrinkwrap.json");
-  return { entries, packageJson, shrinkwrap };
+  return { entries, packageJson, shrinkwrap, payloadSha256: sha256(tarBytes) };
 }
 
 export function admitDependencyGraph({ packageJson, shrinkwrap }) {
@@ -246,7 +246,7 @@ export function admitPackageArtifact({ artifact, sourceCommit }) {
   const canonical = fs.realpathSync(artifact);
   const artifactBytes = fs.readFileSync(canonical);
   const artifactSha256 = sha256(artifactBytes);
-  const { entries, packageJson, shrinkwrap } = inspectPackageArchive(artifactBytes);
+  const { entries, packageJson, shrinkwrap, payloadSha256 } = inspectPackageArchive(artifactBytes);
   if (packageJson.name !== "dotaios") throw new Error("Candidate artifact is not the DotAIOS package.");
   const dependencyGraph = admitDependencyGraph({ packageJson, shrinkwrap });
   admitBundledGraph({ entries, packageJson, dependencyGraph });
@@ -302,6 +302,7 @@ export function admitPackageArtifact({ artifact, sourceCommit }) {
       name: packageJson.name,
       version: packageJson.version,
       sha256: artifactSha256,
+      payload_sha256: payloadSha256,
       dependency_graph_sha256: dependencyGraph.sha256,
     },
     assertions: {

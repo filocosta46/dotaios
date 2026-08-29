@@ -36,6 +36,26 @@ test("the publishable package freezes one deterministic dependency graph", { tim
   }
 });
 
+test("package identity survives runtime-dependent gzip encoding", () => {
+  const source = tarball([
+    { name: "package/package.json", type: "0", body: "{}" },
+    { name: "package/npm-shrinkwrap.json", type: "0", body: "{}" },
+  ]);
+  const tarBytes = gunzipSync(source);
+  const fastGzip = gzipSync(tarBytes, { level: 1, mtime: 0 });
+  const compactGzip = gzipSync(tarBytes, { level: 9, mtime: 0 });
+
+  assert.notEqual(
+    createHash("sha256").update(fastGzip).digest("hex"),
+    createHash("sha256").update(compactGzip).digest("hex"),
+    "the fixture must model two valid runtime-dependent gzip byte streams",
+  );
+  const first = inspectPackageArchive(fastGzip);
+  const second = inspectPackageArchive(compactGzip);
+  assert.match(first.payloadSha256, /^[a-f0-9]{64}$/);
+  assert.equal(first.payloadSha256, second.payloadSha256);
+});
+
 test("package admission extracts with owned OS tools and returns a bounded package verdict", { timeout: 120_000 }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-package-admission-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -63,6 +83,10 @@ test("package admission extracts with owned OS tools and returns a bounded packa
   assert.equal(receipt.package_go, "GO");
   assert.equal(receipt.source_commit, sourceCommit);
   assert.equal(receipt.artifact.sha256, sha256(artifact));
+  assert.equal(
+    receipt.artifact.payload_sha256,
+    createHash("sha256").update(gunzipSync(fs.readFileSync(artifact))).digest("hex"),
+  );
   assert.match(receipt.artifact.dependency_graph_sha256, /^[a-f0-9]{64}$/);
   assert.deepEqual(receipt.assertions, {
     archive_regular_files_only: true,

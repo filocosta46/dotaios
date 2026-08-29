@@ -496,6 +496,7 @@ test("final admission reports package, native-agent, and public-release states s
       name: "dotaios",
       version: "2.0.12",
       sha256: "4".repeat(64),
+      payload_sha256: "3".repeat(64),
       dependency_graph_sha256: "5".repeat(64),
     },
     assertions: {
@@ -624,6 +625,7 @@ function completeReleaseAdmissionFixture() {
       name: "dotaios",
       version: "2.0.12",
       sha256: artifactSha256,
+      payload_sha256: "3".repeat(64),
       dependency_graph_sha256: dependencyGraphSha256,
     },
     assertions: {

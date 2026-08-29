@@ -172,10 +172,11 @@ export function evaluateReleaseAdmission(input) {
     && packageReceipt.verdict === "go"
     && packageReceipt.package_go === "GO"
     && packageReceipt.source_commit === source.source_commit
-    && hasExactKeys(packageReceipt.artifact, ["name", "version", "sha256", "dependency_graph_sha256"])
+    && hasExactKeys(packageReceipt.artifact, ["name", "version", "sha256", "payload_sha256", "dependency_graph_sha256"])
     && packageReceipt.artifact.name === "dotaios"
     && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(packageReceipt.artifact.version || "")
     && HASH_256.test(packageReceipt.artifact.sha256 || "")
+    && HASH_256.test(packageReceipt.artifact.payload_sha256 || "")
     && HASH_256.test(packageReceipt.artifact.dependency_graph_sha256 || "")
     && hasExactKeys(packageAssertions, [
       "archive_regular_files_only", "artifact_identity_stable", "bundled_graph_complete",
