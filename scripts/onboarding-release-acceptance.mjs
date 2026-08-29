@@ -33,7 +33,9 @@ if (isMain()) {
   }
 }
 
-export function buildPackageArtifact({ destination, dryRun = false }) {
+export function buildPackageArtifact({ destination, dryRun = false, sourceCommit = null }) {
+  const reviewedSourceCommit = resolveSourceCommit(sourceCommit);
+  assertCleanSourceCheckout();
   fs.mkdirSync(destination, { recursive: true, mode: 0o700 });
   const destinationStats = fs.lstatSync(destination);
   if (!destinationStats.isDirectory() || destinationStats.isSymbolicLink()) {
@@ -44,7 +46,7 @@ export function buildPackageArtifact({ destination, dryRun = false }) {
   try {
     const stageRoot = path.join(buildRoot, "package");
     fs.mkdirSync(stageRoot, { mode: 0o700 });
-    stagePackageSource(stageRoot);
+    stagePackageSource(stageRoot, reviewedSourceCommit);
     runNpm11([
       "ci", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund",
     ], stageRoot, "Install of the admitted dependency graph failed");
@@ -248,6 +250,9 @@ export function admitPackageArtifact({ artifact, sourceCommit }) {
   const artifactSha256 = sha256(artifactBytes);
   const { entries, packageJson, shrinkwrap, payloadSha256 } = inspectPackageArchive(artifactBytes);
   if (packageJson.name !== "dotaios") throw new Error("Candidate artifact is not the DotAIOS package.");
+  if (packageJson.gitHead !== sourceCommit) {
+    throw new Error("Package manifest source commit does not match the reviewed source commit.");
+  }
   const dependencyGraph = admitDependencyGraph({ packageJson, shrinkwrap });
   admitBundledGraph({ entries, packageJson, dependencyGraph });
 
@@ -511,6 +516,7 @@ function parseBuildArgs(args) {
   let destination = REPO_ROOT;
   let sawMode = false;
   let dryRun = false;
+  let sourceCommit = null;
   for (let index = 0; index < args.length; index += 1) {
     const key = args[index];
     if (key === "--build-package") {
@@ -523,6 +529,14 @@ function parseBuildArgs(args) {
       dryRun = true;
       continue;
     }
+    if (key === "--source-commit") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) throw new Error("--source-commit requires a value.");
+      if (sourceCommit) throw new Error("--source-commit may be provided only once.");
+      sourceCommit = value;
+      index += 1;
+      continue;
+    }
     if (key !== "--pack-destination") throw new Error(`Unknown package build option: ${key}`);
     const value = args[index + 1];
     if (!value || value.startsWith("--")) throw new Error("--pack-destination requires a value.");
@@ -530,10 +544,10 @@ function parseBuildArgs(args) {
     index += 1;
   }
   if (!sawMode) throw new Error("--build-package is required.");
-  return { destination, dryRun };
+  return { destination, dryRun, sourceCommit };
 }
 
-function stagePackageSource(stageRoot) {
+function stagePackageSource(stageRoot, sourceCommit) {
   const manifest = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "package.json"), "utf8"));
   const sourceEntries = ["package.json", ...(manifest.files || [])];
   for (const relative of sourceEntries) {
@@ -546,25 +560,113 @@ function stagePackageSource(stageRoot) {
     ) {
       throw new Error(`Package source path ${JSON.stringify(relative)} is not admitted.`);
     }
-    const source = path.join(REPO_ROOT, relative);
-    const target = path.join(stageRoot, relative);
-    copyRegularSource(source, target);
+  }
+  const trackedFiles = listTrackedPackageFiles(sourceCommit, sourceEntries);
+  for (const relative of sourceEntries) {
+    if (!trackedFiles.some((entry) => entry.path === relative || entry.path.startsWith(`${relative}/`))) {
+      throw new Error(`Package source path ${JSON.stringify(relative)} is absent from the reviewed commit.`);
+    }
+  }
+  for (const entry of trackedFiles) {
+    const target = path.join(stageRoot, entry.path);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, readGitBlob(entry.objectId), {
+      flag: "wx",
+      mode: entry.mode === "100755" ? 0o755 : 0o644,
+    });
+  }
+  fs.writeFileSync(
+    path.join(stageRoot, "package.json"),
+    `${JSON.stringify({ ...manifest, gitHead: sourceCommit }, null, 2)}\n`,
+  );
+}
+
+function listTrackedPackageFiles(sourceCommit, sourceEntries) {
+  const result = spawnSync("git", ["ls-tree", "-r", "-z", sourceCommit, "--", ...sourceEntries], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: sanitizedGitEnvironment(),
+    maxBuffer: 8 * 1024 * 1024,
+    timeout: 10_000,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Reviewed package source could not be enumerated: ${boundedDiagnostic(result)}`);
+  }
+  return result.stdout.split("\0").filter(Boolean).map((record) => {
+    const match = /^(\d{6}) (\S+) ([a-f0-9]{40,64})\t(.+)$/.exec(record);
+    if (!match) throw new Error("Reviewed package source inventory is malformed.");
+    const [, mode, type, objectId, relative] = match;
+    if (type !== "blob" || (mode !== "100644" && mode !== "100755")) {
+      throw new Error(`Reviewed package source ${JSON.stringify(relative)} is not a regular file.`);
+    }
+    if (
+      path.isAbsolute(relative)
+      || relative.includes("\\")
+      || relative.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+    ) {
+      throw new Error("Reviewed package source inventory contains an unsafe path.");
+    }
+    return { path: relative, objectId, mode };
+  });
+}
+
+function readGitBlob(objectId) {
+  const result = spawnSync("git", ["cat-file", "blob", objectId], {
+    cwd: REPO_ROOT,
+    encoding: null,
+    env: sanitizedGitEnvironment(),
+    maxBuffer: MAX_ENTRY_BYTES + 1,
+    timeout: 10_000,
+  });
+  if (result.status !== 0 || !Buffer.isBuffer(result.stdout) || result.stdout.length > MAX_ENTRY_BYTES) {
+    throw new Error(`Reviewed package source file could not be read: ${boundedDiagnostic(result)}`);
+  }
+  return result.stdout;
+}
+
+function resolveSourceCommit(expectedSourceCommit) {
+  if (expectedSourceCommit !== null && !/^[a-f0-9]{40}$/.test(expectedSourceCommit)) {
+    throw new Error("Reviewed source commit must be one lowercase 40-character Git object ID.");
+  }
+  const result = spawnSync("git", ["rev-parse", "HEAD"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: sanitizedGitEnvironment(),
+    timeout: 10_000,
+  });
+  const sourceCommit = result.stdout?.trim();
+  if (result.status !== 0 || !/^[a-f0-9]{40}$/.test(sourceCommit || "")) {
+    throw new Error(`Package source commit could not be resolved: ${boundedDiagnostic(result)}`);
+  }
+  if (expectedSourceCommit !== null && expectedSourceCommit !== sourceCommit) {
+    throw new Error("Reviewed source commit does not match the package source checkout.");
+  }
+  return sourceCommit;
+}
+
+function assertCleanSourceCheckout() {
+  const result = spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=all"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+    env: sanitizedGitEnvironment(),
+    timeout: 10_000,
+  });
+  if (result.status !== 0) {
+    throw new Error(`Package source checkout could not be inspected: ${boundedDiagnostic(result)}`);
+  }
+  if (result.stdout !== "") {
+    throw new Error("Package source checkout must be fully clean before artifact construction.");
   }
 }
 
-function copyRegularSource(source, target) {
-  const stats = fs.lstatSync(source);
-  if (stats.isSymbolicLink()) throw new Error(`Package source ${source} is a symbolic link.`);
-  if (stats.isFile()) {
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    fs.copyFileSync(source, target, fs.constants.COPYFILE_EXCL);
-    return;
-  }
-  if (!stats.isDirectory()) throw new Error(`Package source ${source} is not a regular file or directory.`);
-  fs.mkdirSync(target, { recursive: true, mode: stats.mode & 0o777 });
-  for (const entry of fs.readdirSync(source)) {
-    copyRegularSource(path.join(source, entry), path.join(target, entry));
-  }
+function sanitizedGitEnvironment() {
+  return {
+    ...process.env,
+    GIT_DIR: undefined,
+    GIT_INDEX_FILE: undefined,
+    GIT_OBJECT_DIRECTORY: undefined,
+    GIT_WORK_TREE: undefined,
+  };
 }
 
 function runNpm11(args, cwd, label) {

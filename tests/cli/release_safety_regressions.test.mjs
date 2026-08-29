@@ -436,14 +436,20 @@ test("release admission CI checks out and packs the exact clean reviewed source"
   assert.ok(admissionJob, "release admission job must exist");
   assert.match(admissionJob, /uses: actions\/checkout@v4\n\s+with:\n\s+ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
   assert.match(admissionJob, /test "\$\(git rev-parse HEAD\)" = "\$REVIEWED_SOURCE_COMMIT"/);
-  assert.match(admissionJob, /test -z "\$\(git status --porcelain --untracked-files=no\)"/);
+  assert.match(admissionJob, /test -z "\$\(git status --porcelain\)"/);
+  assert.doesNotMatch(admissionJob, /--untracked-files=no/);
   assert.ok(
     admissionJob.indexOf("git rev-parse HEAD") < admissionJob.indexOf("npm run pack:admission"),
     "reviewed HEAD must be proved before package creation",
   );
   assert.ok(
-    admissionJob.indexOf("git status --porcelain --untracked-files=no") < admissionJob.indexOf("npm run pack:admission"),
-    "clean tracked source must be proved before package creation",
+    admissionJob.indexOf("git status --porcelain") < admissionJob.indexOf("npm run pack:admission"),
+    "a fully clean source checkout must be proved before package creation",
+  );
+  assert.match(
+    admissionJob,
+    /npm run pack:admission -- --silent --source-commit "\$REVIEWED_SOURCE_COMMIT" --pack-destination \.artifacts/,
+    "artifact construction must bind the already-verified source commit",
   );
   assert.match(
     admissionJob,

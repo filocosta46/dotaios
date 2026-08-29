@@ -4,6 +4,13 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.13] - 2026-08-29
+
+### Fixed
+- Prebuilt npm tarballs now carry the exact reviewed source commit in their
+  publication manifest, and local package admission refuses a mismatched
+  manifest before release. Product behavior is unchanged from 2.0.12.
+
 ## [2.0.12] - 2026-08-29
 
 ### Added

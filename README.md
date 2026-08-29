@@ -57,8 +57,8 @@ configuration; the second runs the exact release version named here:
 npm may download and cache the named package.
 
 ```sh
-npx dotaios@2.0.12 setup --dry-run
-npx dotaios@2.0.12 setup
+npx dotaios@2.0.13 setup --dry-run
+npx dotaios@2.0.13 setup
 ```
 
 Setup creates `~/aios`, then connects supported AI apps detected on the
@@ -68,7 +68,7 @@ configuration. Private GitHub sync is off by default.
 Afterward, verify the local installation with:
 
 ```sh
-npx dotaios@2.0.12 doctor
+npx dotaios@2.0.13 doctor
 ```
 
 ## Do one useful task
