@@ -33,7 +33,8 @@ Keep portable project metadata under projects/<slug>/README.md. Existing
 external repositories stay where they are; restored repositories use the
 ignored workspaces/ shelf, with a local path mapping and verified directory
 identity only on this machine.
-Project add is a read-only preview unless you explicitly pass --apply or --yes.
+Project add is a read-only preview. Applying requires --apply or --yes plus the
+operation id and fingerprint displayed by that exact preview.
 
 Add options:
   --slug <slug>       Override the slug derived from the repository folder
@@ -42,8 +43,11 @@ Add options:
   --status <status>   Set the project status (default: active)
   --domain <domain>   Set build, make, or sell; repeat for multiple domains
   --repo-url <url>    Override the Git origin URL discovered from the repository
-  --apply             Apply the exact plan computed and checked by this command
-  --yes               Explicit script-friendly alias for --apply
+  --operation-id <id> Use the operation id displayed by the approved preview
+  --plan-fingerprint <sha256>
+                      Use the fingerprint displayed by the approved preview
+  --apply             Apply only the exact displayed operation id and fingerprint
+  --yes               Script-friendly alias for the same proof-bound apply
 
 Context options:
   --budget <n>        Visible character limit (positive int). Payload field
@@ -87,6 +91,13 @@ export async function projectCommand(args = [], dependencies = {}) {
   }
   if (subcommand === "add") {
     assertPositionals(positionals, 1, "dotaios project add <repo-path>");
+    if (
+      (addOptions.operationId || addOptions.planFingerprint)
+      && addOptions.apply !== true
+      && addOptions.yes !== true
+    ) {
+      throw new Error("Project registration proof options can only be used with --apply or --yes.");
+    }
     const project = await registerProject({
       ...coreOptions,
       projectPath: resolveUserPath(positionals[0], coreOptions.homePath),
@@ -96,6 +107,8 @@ export async function projectCommand(args = [], dependencies = {}) {
       status: addOptions.status,
       domain: addOptions.domains.length > 0 ? addOptions.domains : undefined,
       repoUrl: addOptions.repoUrl,
+      operationId: addOptions.operationId,
+      planFingerprint: addOptions.planFingerprint,
       apply: addOptions.apply,
       yes: addOptions.yes
     });
@@ -262,6 +275,8 @@ function parseOptions(args) {
     status: null,
     domains: [],
     repoUrl: null,
+    operationId: null,
+    planFingerprint: null,
     apply: false,
     yes: false
   };
@@ -297,6 +312,12 @@ function parseOptions(args) {
       index += 1;
     } else if (arg === "--repo-url") {
       addOptions.repoUrl = readOptionValue(args, index, "--repo-url");
+      index += 1;
+    } else if (arg === "--operation-id") {
+      addOptions.operationId = readOptionValue(args, index, "--operation-id");
+      index += 1;
+    } else if (arg === "--plan-fingerprint") {
+      addOptions.planFingerprint = readOptionValue(args, index, "--plan-fingerprint");
       index += 1;
     } else if (arg === "--apply") {
       addOptions.apply = true;
@@ -345,6 +366,8 @@ function assertNoAddOptions(options, subcommand) {
     options.status ||
     options.domains.length > 0 ||
     options.repoUrl ||
+    options.operationId ||
+    options.planFingerprint ||
     options.apply ||
     options.yes
   ) {
@@ -366,8 +389,11 @@ function printProjectRegistration(output, project) {
     output.log("");
     output.log(project.preview);
     output.log("");
-    output.log("Preview only. Re-run with --apply to save the durable record and this machine's path.");
-    output.log("For scripts, --yes is an explicit alias for --apply.");
+    output.log(`  operation id:   ${project.operationId}`);
+    output.log(`  fingerprint:    ${project.planFingerprint}`);
+    output.log("");
+    output.log("Preview only. Re-run the same command with both displayed proof values and --apply.");
+    output.log("For scripts, --yes is an explicit alias for the same proof-bound apply.");
     return;
   }
 
@@ -444,6 +470,8 @@ function projectRegistrationJson(project) {
     plan: {
       version: project.version,
       operation: project.operation,
+      operation_id: project.operationId,
+      plan_fingerprint: project.planFingerprint,
       project: {
         id: project.id,
         slug: project.slug,
@@ -462,6 +490,8 @@ function projectRegistrationJson(project) {
       operation: project.receipt.operation,
       project_id: project.receipt.project_id,
       project: project.receipt.project,
+      operation_id: project.receipt.operation_id,
+      plan_fingerprint: project.receipt.plan_fingerprint,
       durable,
       applied: project.receipt.applied
     },

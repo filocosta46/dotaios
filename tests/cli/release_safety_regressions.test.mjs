@@ -14,6 +14,7 @@ import {
 } from "../../scripts/verify-release-source.mjs";
 import { verifyEvidenceCommit } from "../../scripts/verify-release-evidence-commit.mjs";
 import { evaluateReleaseAdmission } from "../../scripts/release-checklist.mjs";
+import { applyApprovedProjectRegistration } from "../helpers/project-registration.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -28,6 +29,22 @@ function makeSandbox(t, label) {
     homePath: path.join(root, "home"),
     processHomePath: path.join(root, "process-home")
   };
+}
+
+function registerApprovedProject(sandbox, projectPath) {
+  const env = { ...process.env, HOME: sandbox.processHomePath, PATH: isolatedPath };
+  applyApprovedProjectRegistration(
+    (args) => spawnSync(process.execPath, [cli, ...args], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env
+    }),
+    [
+      "project", "add", projectPath,
+      "--path", sandbox.aiosPath,
+      "--home", sandbox.homePath
+    ]
+  );
 }
 
 function runDoctor(t, label, bridgeContent, {
@@ -304,10 +321,11 @@ test("activate and attach report a preserved foreign project bridge as blocking"
     env: { ...process.env, HOME: sandbox.processHomePath, PATH: isolatedPath }
   });
   assert.equal(initialized.status, 0, initialized.stderr);
+  registerApprovedProject(sandbox, projectPath);
 
   for (const args of [
     ["activate", "--path", sandbox.aiosPath, "--home", sandbox.homePath, "--project", projectPath],
-    ["attach", projectPath, "--path", sandbox.aiosPath]
+    ["attach", projectPath, "--path", sandbox.aiosPath, "--home", sandbox.homePath]
   ]) {
     const result = spawnSync(process.execPath, [cli, ...args], {
       cwd: repoRoot,

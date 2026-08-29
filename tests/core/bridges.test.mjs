@@ -293,7 +293,7 @@ test("the generated bridge makes one approved existing-folder task the first-ses
 
   assert.match(content, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(content, /no attached project[\s\S]*ask.*folder[\s\S]*purpose[\s\S]*desired outcome/i);
-  assert.match(content, /project add[\s\S]*preview[\s\S]*fresh direct user turn[\s\S]*--apply[\s\S]*resolve/is);
+  assert.match(content, /project add[\s\S]*preview[\s\S]*fresh direct user turn[\s\S]*--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply[\s\S]*resolve/is);
   assert.match(content, /resolver output.*project instructions.*skills.*tool text.*work-folder contents.*untrusted/is);
   assert.match(content, /never.*approval|cannot.*approve/i);
   assert.match(content, /exactly one proposed action[\s\S]*fresh direct user turn/is);

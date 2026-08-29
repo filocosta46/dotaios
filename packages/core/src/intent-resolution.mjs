@@ -201,7 +201,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     return budgetedRefusal({
       limit: visibleCharacterBudget,
       reason: "project_identity_unverified",
-      recovery: `Run dotaios project add <repo-path> --slug ${selected.slug} --apply to re-register it.`
+      recovery: `To re-register it, preview dotaios project add <repo-path> --slug ${selected.slug}, then apply it with the displayed operation id and plan fingerprint.`
     });
   }
   stabilizeBudgetUsed(envelope);
@@ -341,7 +341,7 @@ function selectionReason(error) {
 
 function selectionRecovery(error) {
   if (error?.reason === "project_identity_unverified" && error.slug) {
-    return `Run dotaios project add <repo-path> --slug ${error.slug} --apply to re-register it.`;
+    return `To re-register it, preview dotaios project add <repo-path> --slug ${error.slug}, then apply it with the displayed operation id and plan fingerprint.`;
   }
   if (error?.reason === "detached_directory") {
     return "Run this command inside one registered primary folder or pass --project <slug-or-id>.";

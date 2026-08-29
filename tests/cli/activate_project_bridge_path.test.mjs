@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { portableAiosPointer } from "../../packages/cli/src/commands/activate.mjs";
+import { applyApprovedProjectRegistration } from "../helpers/project-registration.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -45,6 +46,7 @@ test("attach never writes the author's home path into the project bridge", () =>
       }).status,
       0
     );
+    registerApprovedProject({ aiosPath: aios, homePath: home, projectPath: repo });
     const attach = spawnSync(
       process.execPath,
       [cli, "attach", repo, "--path", aios, "--home", home],
@@ -75,3 +77,48 @@ test("attach never writes the author's home path into the project bridge", () =>
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+test("attach refuses an unregistered project before writing registration or bridge state", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-unregistered-attach-"));
+  const home = path.join(base, "home");
+  const aios = path.join(home, "aios");
+  const repo = path.join(base, "unregistered-project");
+  fs.mkdirSync(repo, { recursive: true });
+
+  try {
+    const initialized = spawnSync(
+      process.execPath,
+      [cli, "init", "--yes", "--path", aios, "--home", home],
+      { encoding: "utf8" }
+    );
+    assert.equal(initialized.status, 0, initialized.stderr);
+
+    for (const args of [
+      ["attach", repo, "--path", aios, "--home", home],
+      ["activate", "--project", repo, "--path", aios, "--home", home]
+    ]) {
+      const result = spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /not registered[\s\S]*project add/i);
+      assert.equal(fs.existsSync(path.join(repo, "AGENTS.md")), false);
+      assert.equal(
+        fs.existsSync(path.join(aios, "projects", "unregistered-project", "README.md")),
+        false
+      );
+      assert.equal(fs.existsSync(path.join(home, ".dotaios", "projects.json")), false);
+    }
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+function registerApprovedProject({ aiosPath, homePath, projectPath }) {
+  applyApprovedProjectRegistration(
+    (args) => spawnSync(process.execPath, [cli, ...args], { encoding: "utf8" }),
+    [
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    "--home", homePath
+    ]
+  );
+}

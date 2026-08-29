@@ -11,6 +11,17 @@ import {
   updateProjectPathMapping
 } from "../../packages/core/src/projects.mjs";
 
+async function registerApprovedProject(options) {
+  const preview = await registerProject({ ...options, apply: false, yes: false });
+  return registerProject({
+    ...options,
+    operationId: preview.operationId,
+    planFingerprint: preview.planFingerprint,
+    apply: true,
+    yes: false
+  });
+}
+
 const VERIFIED_HEAD = "0123456789abcdef0123456789abcdef01234567";
 const VERIFIED_REMOTE = "https://github.com/acme/widget.git";
 
@@ -64,7 +75,7 @@ test("registration permits only the exact managed workspace and canonicalizes a 
   const projectPath = path.join(aiosPath, "workspaces", "widget");
   await fs.mkdir(projectPath, { recursive: true });
 
-  const registered = await registerProject({
+  const registered = await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath,

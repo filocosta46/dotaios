@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { applyApprovedProjectRegistration } from "../helpers/project-registration.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -12,6 +13,7 @@ const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.j
 test("activate creates global and project agent bridges for installed tools", () => {
   const { aiosPath, homePath, projectPath } = setupAios();
   installAgents(homePath);
+  registerApprovedProject({ aiosPath, homePath, projectPath });
 
   run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath]);
 
@@ -311,6 +313,14 @@ function setupAios() {
   run(["init", "--path", aiosPath, "--yes"]);
 
   return { aiosPath, homePath, projectPath, tempRoot };
+}
+
+function registerApprovedProject({ aiosPath, homePath, projectPath }) {
+  applyApprovedProjectRegistration(run, [
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    "--home", homePath
+  ]);
 }
 
 // Simulate the per-tool config folders that DotAIOS uses to detect an

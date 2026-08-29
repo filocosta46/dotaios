@@ -19,7 +19,8 @@ person to design agent instruction files. When no project is attached, the
 local agent asks for the folder, its purpose, and the desired outcome. It runs
 `dotaios project add <folder> --purpose <purpose> --json` as a read-only
 preview and explains the result. Only a fresh direct confirmation permits the
-same registration with `--apply`.
+same registration with the displayed `--operation-id`, displayed
+`--plan-fingerprint`, and `--apply`.
 
 After registration, the agent invokes `dotaios resolve "<desired outcome>"
 --project <slug-or-id>`. Resolution returns the exact project location, bounded
@@ -189,13 +190,15 @@ dotaios project add /path/to/project
 
 The preview is read-only. It shows the exact `projects/<slug>/README.md` change, but it does not create the README or save a local path mapping.
 
-When the preview looks right, apply the same command explicitly:
+When the preview looks right, apply that exact preview with its displayed proof:
 
 ```bash
-dotaios project add /path/to/project --apply
+dotaios project add /path/to/project --operation-id <displayed-id> --plan-fingerprint <displayed-fingerprint> --apply
 ```
 
-`--yes` is an explicit alias for `--apply` for scripts. Neither option is implied, so an unattended command without one of them remains read-only.
+`--yes` is an alias for the same proof-bound apply for scripts. Neither approval
+flag is implied, and neither works without both displayed proof values, so an
+unattended command cannot re-plan and silently apply different bytes.
 
 Applying the plan writes two separate records:
 
@@ -218,7 +221,7 @@ Use `--json` with either preview or apply:
 
 ```bash
 dotaios project add /path/to/project --json
-dotaios project add /path/to/project --apply --json
+dotaios project add /path/to/project --operation-id <displayed-id> --plan-fingerprint <displayed-fingerprint> --apply --json
 ```
 
 The JSON object contains `plan`, `receipt`, and `machine_local` sections. The plan contains portable project metadata and the README preview. The receipt contains the operation, relative durable path, and hashes. Absolute checkout and state paths appear only under `machine_local`.
@@ -227,7 +230,7 @@ Re-adding an existing checkout keeps its stable project ID. You can update its m
 
 ```bash
 dotaios project add /path/to/project --status paused
-dotaios project add /path/to/project --status paused --apply
+dotaios project add /path/to/project --status paused --operation-id <displayed-id> --plan-fingerprint <displayed-fingerprint> --apply
 ```
 
 ## Use it on another machine
@@ -270,7 +273,7 @@ If you prefer another location, clone the repository there and reconnect it:
 
 ```bash
 dotaios project add /new/path/to/project --slug existing-slug
-dotaios project add /new/path/to/project --slug existing-slug --apply
+dotaios project add /new/path/to/project --slug existing-slug --operation-id <displayed-id> --plan-fingerprint <displayed-fingerprint> --apply
 dotaios attach /new/path/to/project
 ```
 

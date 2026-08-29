@@ -30,11 +30,17 @@ function registerProject(aiosPath, tempRoot, slug) {
   const projectPath = path.join(tempRoot, `${slug}-checkout`);
   fs.mkdirSync(projectPath, { recursive: true });
   fs.writeFileSync(path.join(projectPath, "source.txt"), `${slug}\n`);
-  run([
+  const baseArgs = [
     "project", "add", projectPath,
     "--path", aiosPath,
     "--state-path", path.join(tempRoot, "project-state.json"),
-    "--slug", slug,
+    "--slug", slug
+  ];
+  const preview = JSON.parse(run([...baseArgs, "--json"]).stdout);
+  run([
+    ...baseArgs,
+    "--operation-id", preview.plan.operation_id,
+    "--plan-fingerprint", preview.plan.plan_fingerprint,
     "--apply"
   ]);
 }

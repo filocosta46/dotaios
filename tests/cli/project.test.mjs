@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFile, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -96,6 +97,29 @@ function runCli(args) {
   return result;
 }
 
+async function registerApprovedProject(options) {
+  const preview = await registerProject({
+    ...options,
+    apply: false,
+    yes: false
+  });
+  return registerProject({
+    ...options,
+    operationId: preview.operationId,
+    planFingerprint: preview.planFingerprint,
+    apply: true,
+    yes: false
+  });
+}
+
+function approvedCliArgs(preview, applyFlag = "--apply") {
+  return [
+    "--operation-id", preview.plan.operation_id,
+    "--plan-fingerprint", preview.plan.plan_fingerprint,
+    applyFlag
+  ];
+}
+
 test("registerProject previews the durable README by default without writing project truth", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "preview-project");
@@ -147,7 +171,7 @@ test("registerProject writes project truth only with explicit apply or yes", asy
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "approved-project");
 
-  const applied = await registerProject({
+  const applied = await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath,
@@ -287,6 +311,88 @@ test("project add CLI preview is zero-write and keeps absolute paths out of port
   assert.equal(await fs.readFile(path.join(projectPath, "source.txt"), "utf8"), "source for json-preview\n");
 });
 
+test("project add CLI applies only the exact proof from its zero-write preview", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "proved-cli");
+  const baseArgs = [
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    "--state-path", statePath,
+    "--purpose", "Carry one approved plan across the preview boundary",
+    "--json"
+  ];
+
+  const preview = JSON.parse(runCli(baseArgs).stdout);
+  const otherAiosPath = path.join(root, "other-aios");
+  await fs.mkdir(path.join(otherAiosPath, "projects"), { recursive: true });
+  assert.equal(preview.applied, false);
+  assert.match(preview.plan.operation_id, /^[a-f0-9-]{1,64}$/);
+  assert.match(preview.plan.plan_fingerprint, /^[a-f0-9]{64}$/);
+  await assert.rejects(fs.access(path.join(aiosPath, "projects", "proved-cli", "README.md")), { code: "ENOENT" });
+  await assert.rejects(fs.access(statePath), { code: "ENOENT" });
+
+  for (const refusedArgs of [
+    [...baseArgs, "--apply"],
+    [...baseArgs, "--operation-id", "caller-chosen-id"],
+    [
+      ...baseArgs,
+      "--operation-id", "caller-chosen-id",
+      "--plan-fingerprint", preview.plan.plan_fingerprint,
+      "--apply"
+    ],
+    [
+      ...baseArgs,
+      "--operation-id", preview.plan.operation_id,
+      "--plan-fingerprint", "0".repeat(64),
+      "--apply"
+    ]
+  ]) {
+    const refused = spawnSync(process.execPath, [cliPath, ...refusedArgs], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, DOTAIOS_ALLOW_AUTO_SYNC_HOOK: "0" }
+    });
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /proof options can only be used|operation id and plan fingerprint|plan is stale/i);
+    await assert.rejects(fs.access(path.join(aiosPath, "projects", "proved-cli", "README.md")), { code: "ENOENT" });
+    await assert.rejects(fs.access(statePath), { code: "ENOENT" });
+  }
+
+  const redirected = spawnSync(process.execPath, [
+    cliPath,
+    ...baseArgs.map((arg) => arg === aiosPath ? otherAiosPath : arg),
+    "--operation-id", preview.plan.operation_id,
+    "--plan-fingerprint", preview.plan.plan_fingerprint,
+    "--apply"
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, DOTAIOS_ALLOW_AUTO_SYNC_HOOK: "0" }
+  });
+  assert.notEqual(redirected.status, 0);
+  assert.match(redirected.stderr, /plan is stale/i);
+  await assert.rejects(
+    fs.access(path.join(otherAiosPath, "projects", "proved-cli", "README.md")),
+    { code: "ENOENT" }
+  );
+  await assert.rejects(fs.access(statePath), { code: "ENOENT" });
+
+  const applied = JSON.parse(runCli([
+    ...baseArgs,
+    "--operation-id", preview.plan.operation_id,
+    "--plan-fingerprint", preview.plan.plan_fingerprint,
+    "--apply"
+  ]).stdout);
+  assert.equal(applied.applied, true);
+  assert.equal(applied.plan.project.id, preview.plan.project.id);
+  assert.equal(applied.plan.durable.after_hash, preview.plan.durable.after_hash);
+  assert.equal(applied.plan.preview, preview.plan.preview);
+  assert.equal(applied.plan.operation_id, preview.plan.operation_id);
+  assert.equal(applied.plan.plan_fingerprint, preview.plan.plan_fingerprint);
+  const readme = await fs.readFile(path.join(aiosPath, "projects", "proved-cli", "README.md"), "utf8");
+  assert.equal(createHash("sha256").update(readme).digest("hex"), preview.plan.durable.after_hash);
+});
+
 test("project add CLI applies explicitly and re-adds or updates one stable project", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "repeat-cli");
@@ -297,21 +403,25 @@ test("project add CLI applies explicitly and re-adds or updates one stable proje
     "--json"
   ];
 
-  const first = JSON.parse(runCli([...baseArgs, "--apply"]).stdout);
+  const firstPreview = JSON.parse(runCli(baseArgs).stdout);
+  const first = JSON.parse(runCli([...baseArgs, ...approvedCliArgs(firstPreview)]).stdout);
   assert.equal(first.applied, true);
   assert.equal(first.receipt.applied, true);
   assert.equal(first.receipt.operation, "add");
   const readmePath = path.join(aiosPath, first.receipt.durable.path);
   const firstReadme = await fs.readFile(readmePath, "utf8");
 
-  const repeated = JSON.parse(runCli([...baseArgs, "--yes"]).stdout);
+  const repeatedPreview = JSON.parse(runCli(baseArgs).stdout);
+  const repeated = JSON.parse(runCli([...baseArgs, ...approvedCliArgs(repeatedPreview, "--yes")]).stdout);
   assert.equal(repeated.applied, true);
   assert.equal(repeated.receipt.operation, "replace");
   assert.equal(repeated.receipt.project_id, first.receipt.project_id);
   assert.equal(repeated.receipt.durable.before_hash, repeated.receipt.durable.after_hash);
   assert.equal(await fs.readFile(readmePath, "utf8"), firstReadme);
 
-  const updated = JSON.parse(runCli([...baseArgs, "--status", "paused", "--apply"]).stdout);
+  const updatedArgs = [...baseArgs, "--status", "paused"];
+  const updatedPreview = JSON.parse(runCli(updatedArgs).stdout);
+  const updated = JSON.parse(runCli([...updatedArgs, ...approvedCliArgs(updatedPreview)]).stdout);
   assert.equal(updated.receipt.project_id, first.receipt.project_id);
   assert.equal(updated.plan.project.status, "paused");
   assert.equal((await readReadme(readmePath)).metadata.status, "paused");
@@ -359,6 +469,27 @@ test("applyProjectRegistration rejects stale README and local-state plans", asyn
   await assert.rejects(fs.access(statePlan.readmePath), { code: "ENOENT" });
 });
 
+test("applyProjectRegistration rejects a plan mutated after preview", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "mutated-plan");
+  const plan = await planProjectRegistration({
+    aiosPath,
+    statePath,
+    projectPath,
+    purpose: "Keep the applied bytes identical to the approved preview",
+    createId: () => "mutated-plan-id",
+    readRepoUrl: async () => null
+  });
+  plan.readme = `${plan.readme}\nUnapproved mutation.\n`;
+
+  await assert.rejects(
+    applyProjectRegistration(plan),
+    /invalid project registration plan/i
+  );
+  await assert.rejects(fs.access(plan.readmePath), { code: "ENOENT" });
+  await assert.rejects(fs.access(statePath), { code: "ENOENT" });
+});
+
 test("applyProjectRegistration refuses a replaced project folder without partial state", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "replaced-after-preview");
@@ -387,9 +518,9 @@ test("applyProjectRegistration refuses a replaced project folder without partial
 test("project help explains preview, explicit apply, JSON, and local path separation", () => {
   const result = runCli(["project", "--help"]);
 
-  assert.match(result.stdout, /read-only preview unless you explicitly pass --apply or --yes/);
-  assert.match(result.stdout, /--apply\s+Apply the exact plan/);
-  assert.match(result.stdout, /--yes\s+Explicit script-friendly alias/);
+  assert.match(result.stdout, /read-only preview\. Applying requires --apply or --yes plus the\s+operation id and fingerprint/);
+  assert.match(result.stdout, /--apply\s+Apply only the exact displayed/);
+  assert.match(result.stdout, /--yes\s+Script-friendly alias for the same proof-bound apply/);
   assert.match(result.stdout, /--purpose <text>\s+Explain what this primary project is for/);
   assert.match(result.stdout, /--json\s+Print the portable plan and receipt/);
   assert.match(result.stdout, /local path mapping and verified directory\s+identity only on this machine/);
@@ -424,7 +555,7 @@ test("registerProject discovers a Git remote and separates synced metadata from 
   await execFileAsync("git", ["init", "--quiet", projectPath]);
   await execFileAsync("git", ["-C", projectPath, "remote", "add", "upstream", "https://github.com/acme/client-portal.git"]);
 
-  const project = await registerProject({
+  const project = await registerApprovedProject({
     aiosPath,
     homePath,
     projectPath,
@@ -522,7 +653,7 @@ test("registerProject preserves stable ids, unknown frontmatter, and the README 
     originalBody
   );
 
-  const project = await registerProject({
+  const project = await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath,
@@ -559,7 +690,7 @@ test("re-registering the same path reuses its id and updates metadata in place",
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "repeat-project");
 
-  const first = await registerProject({
+  const first = await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath,
@@ -568,7 +699,7 @@ test("re-registering the same path reuses its id and updates metadata in place",
     createId: () => "repeat-id",
     readRepoUrl: async () => null
   });
-  const second = await registerProject({
+  const second = await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath,
@@ -615,7 +746,7 @@ test("registerProject rejects blank, unsafe, and over-budget purposes without wr
 test("listProjects returns sorted portable metadata with local availability", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const zetaPath = await makeRepo(root, "zeta");
-  await registerProject({
+  await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath: zetaPath,
@@ -648,7 +779,7 @@ test("listProjects returns sorted portable metadata with local availability", as
 test("resolveProject accepts slug or id and explains unavailable paths", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "resolvable");
-  await registerProject({
+  await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath,
@@ -722,7 +853,7 @@ test("legacy string mappings stay listable but never disclose an induction locat
   assert.match(capture.lines.join("\n"), /re-registration required on this machine/);
   assert.equal(capture.lines.join("\n").includes(legacyPath), false);
 
-  await registerProject({
+  await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath: legacyPath,
@@ -763,7 +894,7 @@ test("doctorProjects reports missing paths and remote mismatches without writing
     [missingPath, "missing-id", "https://github.com/acme/missing.git"]
   ];
   for (const [projectPath, id, repoUrl] of registrations) {
-    await registerProject({
+    await registerApprovedProject({
       aiosPath,
       statePath,
       projectPath,
@@ -885,6 +1016,8 @@ test("projectCommand exposes add preview data plus list, resolve, and doctor out
     "--name", "CLI Project",
     "--domain", "build",
     "--domain", "make",
+    "--operation-id", preview.operationId,
+    "--plan-fingerprint", preview.planFingerprint,
     "--yes"
   ], dependencies);
   assert.equal(applied.applied, true);

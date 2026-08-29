@@ -24,7 +24,10 @@ import {
   renderSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
-import { registerProject, resolveProjectContext } from "../../../core/src/projects.mjs";
+import {
+  planProjectRegistration,
+  resolveProjectContext
+} from "../../../core/src/projects.mjs";
 import {
   symlinkTargets,
   retiredSymlinkTargets,
@@ -124,6 +127,11 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
     throw new Error("Refusing to connect a temporary AIOS path to the real home; use a permanent AIOS folder.");
   }
   await ensureAiosFolder(aiosPath);
+  if (options.project && !options.dryRun) {
+    const projectPath = resolvePath(options.project);
+    const project = await resolveProjectContext({ aiosPath, homePath, cwd: projectPath });
+    if (!project) throw unregisteredProjectAttachmentError(aiosPath, projectPath);
+  }
   if (!options.dryRun) {
     await fs.mkdir(homePath, { recursive: true });
   }
@@ -621,18 +629,18 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
     cwd: projectPath
   });
   if (!project) {
-    const registration = await registerProject({
+    if (!options.dryRun) throw unregisteredProjectAttachmentError(aiosPath, projectPath);
+    const registrationPlan = await planProjectRegistration({
       aiosPath,
       homePath: resolvePath(options.home || os.homedir()),
-      projectPath,
-      apply: !options.dryRun
+      projectPath
     });
     project = {
-      id: registration.id,
-      slug: registration.slug,
-      project: registration.slug,
+      id: registrationPlan.id,
+      slug: registrationPlan.slug,
+      project: registrationPlan.slug,
       projectPath,
-      registered: registration.applied
+      registered: false
     };
   }
   const registry = await loadAgentRegistry(aiosPath);
@@ -652,6 +660,14 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
   ];
   const skills = await propagateProjectSkills(projectPath, options, registry);
   return [...bridges, skills];
+}
+
+function unregisteredProjectAttachmentError(aiosPath, projectPath) {
+  return new Error([
+    "This project folder is not registered, so project attachment cannot write a bridge yet.",
+    `Preview it first with \`dotaios project add ${projectPath} --path ${aiosPath}\`,`,
+    "apply that exact preview with its displayed operation id and plan fingerprint, then run attach again."
+  ].join(" "));
 }
 
 async function propagateProjectSkills(projectPath, options, registry) {

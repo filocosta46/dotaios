@@ -63,9 +63,13 @@ separate memory stores.
 For Cursor or project-scoped agents, attach a project folder:
 
 ```bash
-npx dotaios@2.0.11 project add /path/to/project --apply
+npx dotaios@2.0.11 project add /path/to/project
+npx dotaios@2.0.11 project add /path/to/project --operation-id <displayed-id> --plan-fingerprint <displayed-fingerprint> --apply
 npx dotaios@2.0.11 attach /path/to/project
 ```
+
+The first command is a zero-write preview. Copy its displayed operation ID and
+fingerprint into the second command so only that exact preview can be applied.
 
 The project catalog syncs the durable README and repository URL. Each machine
 keeps its own checkout path outside the synced AIOS content. On another machine,

@@ -6,6 +6,17 @@ import assert from "node:assert/strict";
 
 import { registerProject } from "../../packages/core/src/projects.mjs";
 
+async function registerApprovedProject(options) {
+  const preview = await registerProject({ ...options, apply: false, yes: false });
+  return registerProject({
+    ...options,
+    operationId: preview.operationId,
+    planFingerprint: preview.planFingerprint,
+    apply: true,
+    yes: false
+  });
+}
+
 async function makeFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-intent-resolution-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -16,7 +27,7 @@ async function makeFixture(t) {
   await fs.mkdir(aiosPath, { recursive: true });
   await fs.mkdir(projectPath, { recursive: true });
   await fs.writeFile(path.join(aiosPath, "aios.json"), "{\"schema_version\":\"1.2.0\"}\n");
-  await registerProject({
+  await registerApprovedProject({
     aiosPath,
     homePath,
     projectPath,
@@ -39,7 +50,7 @@ async function makeFixture(t) {
 async function addProject(fixture, { slug, id, purpose }) {
   const projectPath = path.join(fixture.root, slug);
   await fs.mkdir(projectPath, { recursive: true });
-  await registerProject({
+  await registerApprovedProject({
     aiosPath: fixture.aiosPath,
     homePath: fixture.homePath,
     projectPath,
@@ -234,7 +245,7 @@ test("current-directory inference requires one primary attachment and ignores su
   // rather than choosing the deepest/first attachment.
   const movedNested = path.join(fixture.projectPath, "nested-primary");
   await fs.rename(nestedPrimary, movedNested);
-  await registerProject({
+  await registerApprovedProject({
     aiosPath: fixture.aiosPath,
     homePath: fixture.homePath,
     projectPath: movedNested,

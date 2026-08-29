@@ -6,6 +6,17 @@ import assert from "node:assert/strict";
 
 import { registerProject } from "../../packages/core/src/projects.mjs";
 
+async function registerApprovedProject(options) {
+  const preview = await registerProject({ ...options, apply: false, yes: false });
+  return registerProject({
+    ...options,
+    operationId: preview.operationId,
+    planFingerprint: preview.planFingerprint,
+    apply: true,
+    yes: false
+  });
+}
+
 async function makeFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-resolve-cli-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -16,7 +27,7 @@ async function makeFixture(t) {
   await fs.mkdir(aiosPath, { recursive: true });
   await fs.mkdir(projectPath, { recursive: true });
   await fs.writeFile(path.join(aiosPath, "aios.json"), "{\"schema_version\":\"1.2.0\"}\n");
-  await registerProject({
+  await registerApprovedProject({
     aiosPath,
     homePath,
     projectPath,
