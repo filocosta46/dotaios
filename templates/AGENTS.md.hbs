@@ -46,13 +46,17 @@ Long-term knowledge is configured at `vault/`.
 
 ## Memory Routing
 
-Use `{{cli}} brief --compact --memory shared` for Shared memory. For
-project-only work, require an explicit registered project and run `{{cli}} brief
---compact --memory project --project <slug-or-id>`. This is the canonical
-bounded working-context projection.
+For every DotAIOS CLI operation below, use only the current host-managed `candidate_invocation`; pass its `executable` and append the displayed arguments
+to its `argv_prefix`, without a shell. If absent, stop and ask the user to
+activate this AIOS from its admitted installation; never invent another CLI.
+
+For Shared memory, append `["brief","--compact","--memory","shared"]`. For
+project-only work, require an explicit registered project and append
+`["brief","--compact","--memory","project","--project","<slug-or-id>"]`.
+This is the canonical bounded working-context projection.
 
 Do not preload `memory/events.jsonl`, `memory/signals/`, or `memory/sessions/`,
-and do not invent another recency window. Use `{{cli}} search` for explicit
+and do not invent another recency window. Append `["search",...]` for explicit
 lookups. Load `memory/errors.jsonl` only while debugging. If the optional MCP
 adapter is available, `read_working_context` returns the same projection.
 
@@ -62,7 +66,7 @@ Keeping this memory true is your job, not the user's. When you notice a claim
 here that is stale or contradicted by what you just learned, retire it then —
 do not wait to be asked. Run the `memory-maintenance` skill, which owns the
 promotion and supersession procedure; run it too when the user asks, or when
-`{{cli}} memory audit` reports stale or conflicting memory.
+`["memory","audit"]` reports stale or conflicting memory.
 
 Keep short-lived observations in signals. Durable facts belong in `context/`,
 `projects/`, or `vault/`. Preview durable changes before applying them and
@@ -75,9 +79,9 @@ its stable `id`, `project` or `name`, `domain`, `status`, and `repo_url`.
 
 The README is the synced project record. Managed repositories may live under
 the ignored `workspaces/<slug>/` root; external checkouts remain supported.
-Both keep independent Git histories. Resolve the local checkout with
-`{{cli}} project resolve <slug-or-id>` or restore missing committed state with
-`{{cli}} project restore [slug-or-id]`; never store machine-local paths in the
+Both keep independent Git histories. Resolve the local checkout by appending
+`["project","resolve","<slug-or-id>"]`, or restore missing committed state with
+`["project","restore","<slug-or-id>"]`; never store machine-local paths in the
 project README. Domains are `make`, `sell`, and `build`.
 
 ## Skills
@@ -87,11 +91,10 @@ intent to the most specific workflow. Open the selected `SKILL.md` and follow
 it before acting. If nothing fits and the workflow is likely to repeat, offer
 to run `skillify`; never save a generated skill without approval.
 
-For a programmatic match, run `{{cli}} skills resolve "<intent>"` or call the
-MCP `resolve_skill` tool. `{{cli}} skills resolve --boot-context` prints a
-Markdown prompt block for fleet scripts. Capture it with
-`BOOT_CONTEXT="$({{cli}} skills resolve --boot-context)"`, then append that
-variable to the agent prompt.
+For a programmatic match, append `["skills","resolve","<intent>"]` or call the
+MCP `resolve_skill` tool. Appending `["skills","resolve","--boot-context"]`
+returns a Markdown prompt block for fleet scripts; capture stdout directly and
+append it to the agent prompt.
 
 ## Rules
 
@@ -102,12 +105,12 @@ variable to the agent prompt.
   and https://github.com/filocosta46/dotaios/blob/v{{version}}/docs/plugin-development.md,
   run `--dry-run` first, and review permissions. This takes precedence over
   ordinary URL ingest.
-- When the user shares a URL, run `{{cli}} ingest <url>` to render, read, and
+- When the user shares a URL, append `["ingest","<url>"]` to render, read, and
   save it.
 - Never expose secrets. Ask before writing durable identity, CRM, or wiki
   knowledge.
 - If `memory/inbox/` contains files at session start, run `process-inbox` before
   other work, file each note, then remove the inbox copy.
 - Cross-device sync is optional. Do not mutate sync unless the user enabled it
-  and asked. Use `{{cli}} sync status` for a read-only check.
+  and asked. Append `["sync","status"]` for a read-only check.
 - Before finishing, offer to run `save-session` so useful context is not lost.

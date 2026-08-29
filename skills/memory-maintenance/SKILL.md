@@ -12,7 +12,7 @@ being true and fixes it in place.
 
 ## What this does
 
-- Runs `npx dotaios@<exact-candidate-version> memory audit --all-memory` and works from what it reports: hot files over
+- Runs `["memory","audit","--all-memory"]` through the current host-managed `candidate_invocation` and works from what it reports: hot files over
   budget, conflicting promoted blocks, stale signals, corrupt lines.
 - Reads the flagged claims and decides, per claim, whether it is still true.
 - Retires the ones that are not, with `--operation supersede`, which is
@@ -28,8 +28,8 @@ being true and fixes it in place.
   preview first and getting a yes.
 - It does not invent a replacement fact. If you cannot tell whether a claim is
   still true, ask the user in one sentence.
-- It does not run itself. `npx dotaios@<exact-candidate-version> schedule` only runs DotAIOS commands, so
-  schedule `npx dotaios@<exact-candidate-version> memory audit --all-memory` and run this skill on what it reports.
+- It does not run itself. The scheduler only runs DotAIOS commands, so schedule
+  `["memory","audit","--all-memory"]` and run this skill on what it reports.
 
 ## How to use it
 
@@ -41,20 +41,22 @@ Try saying:
 
 ## Agent steps
 
-1. Run `npx dotaios@<exact-candidate-version> memory audit --all-memory`. Treat its findings as the work list; do not go
+For every DotAIOS operation below, use only the current host-managed
+`candidate_invocation`: launch its `executable` with its `argv_prefix` followed
+by the displayed argument array, without a shell. Stop if the object is absent.
+
+1. Invoke `["memory","audit","--all-memory"]`. Treat its findings as the work list; do not go
    hunting through files it did not flag.
-2. Run `npx dotaios@<exact-candidate-version> capture list` and note the session id you will attribute each
+2. Invoke `["capture","list"]` and note the session id you will attribute each
    change to. Every promotion needs one — there is no free-text promotion.
 3. For each stale or contradicted claim, preview the retirement:
 
-   ```bash
-   npx dotaios@<exact-candidate-version> memory promote <session-id> --to context \
-     --destination context/work.md --operation supersede \
-     --match "<the old fact, verbatim>" --summary "<what is true now>"
+   ```json
+   ["memory","promote","<session-id>","--to","context","--destination","context/work.md","--operation","supersede","--match","<the old fact, verbatim>","--summary","<what is true now>"]
    ```
 
    `--match` takes the old block's content hash or its summary text, exactly,
-   and only resolves blocks that `npx dotaios@<exact-candidate-version> memory promote` itself wrote. A fact
+   and only resolves blocks that `memory promote` itself wrote. A fact
    typed into a file by hand has nothing to match: edit that file directly and
    state in one line what changed.
 4. Show the previews, at most 5 at a time. Re-run with `--apply` once the user

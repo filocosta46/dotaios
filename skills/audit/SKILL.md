@@ -39,7 +39,7 @@ Try saying:
 3. `projects/*/README.md`
 4. `connections/registry.md`, if present
 5. `skills/_registry.json`, if present
-6. `npx dotaios@<exact-candidate-version> brief --compact` for the bounded recent-memory projection
+6. Use the current host-managed `candidate_invocation` and append `["brief","--compact"]` for the bounded recent-memory projection. Launch its `executable` with its `argv_prefix` plus those arguments, without a shell; stop if the object is absent.
 
 ### Check
 

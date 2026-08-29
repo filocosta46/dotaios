@@ -4,8 +4,10 @@ import {
   MANAGED_END,
   MANAGED_START,
   bridgeManagedBlock,
+  bridgePointer,
   exactCandidatePackage,
   findManagedBlock,
+  inspectCandidateInvocationRecord,
   isExactCandidatePackageSpec
 } from "../../../core/src/bridges.mjs";
 import {
@@ -44,16 +46,15 @@ export async function writeGeminiBridge(
     beforePublish = null,
     beforeCommit = null,
     beforeRename = null,
-    preflightOnly = false
+    preflightOnly = false,
+    localCli = null
   } = {}
 ) {
   const stats = await validateManagedFilePath(filePath, boundaryRoot);
-  // The same block `activate` writes, from its one owner. A second body here
-  // meant whichever of the two commands ran last silently replaced the other's,
-  // and connect's older body reinstated the always-on shape this release removed.
-  const block = await bridgeManagedBlock(aiosPath);
   if (!stats) {
+    if (!localCli) throw new Error("Gemini connection requires the admitted local DotAIOS invocation.");
     if (preflightOnly) return { action: "would-create" };
+    const block = await bridgeManagedBlock(aiosPath, { localCli });
     const created = await writeFileSafe(filePath, `# DotAIOS Context\n\n${block}\n`, "preserve", {
       boundaryRoot
     });
@@ -77,14 +78,25 @@ export async function writeGeminiBridge(
   }
 
   const managed = findManagedBlock(existing);
+  if (
+    managed
+    && managed.text.includes(bridgePointer(aiosPath).current)
+    && inspectCandidateInvocationRecord(managed.text).status === "valid"
+  ) return { action: "unchanged" };
+  if (!managed && (existing.includes(MANAGED_START) || existing.includes(MANAGED_END))) {
+    throw new Error(`Could not update ${filePath}: managed markers are malformed. Existing file kept.`);
+  }
+
+  if (!localCli) throw new Error("Gemini connection requires the admitted local DotAIOS invocation.");
+  // Activation owns the canonical body. Connect preserves a current admitted
+  // block byte-for-byte and renders only when the bridge is absent or stale.
+  const block = await bridgeManagedBlock(aiosPath, { localCli });
   let updated;
   let action;
   if (managed) {
     updated = existing.slice(0, managed.start) + block + existing.slice(managed.end);
     if (updated === existing) return { action: "unchanged" };
     action = "updated";
-  } else if (existing.includes(MANAGED_START) || existing.includes(MANAGED_END)) {
-    throw new Error(`Could not update ${filePath}: managed markers are malformed. Existing file kept.`);
   } else {
     const separator = existing.endsWith("\n\n") ? "" : existing.endsWith("\n") ? "\n" : "\n\n";
     updated = `${existing}${separator}${block}\n`;

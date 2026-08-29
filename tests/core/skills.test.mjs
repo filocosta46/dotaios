@@ -13,8 +13,6 @@ import {
 } from "../../packages/core/src/skills.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
-const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
-const exactCli = `npx dotaios@${packageVersion}`;
 
 function makeSkill(skillsDir, dir, name, description) {
   fs.mkdirSync(path.join(skillsDir, dir), { recursive: true });
@@ -50,20 +48,22 @@ test("renderSkillsIndex lists each skill with run instructions", () => {
   assert.match(md, /## audit/);
   assert.match(md, /Health check\./);
   assert.match(md, /skills\/audit\/SKILL\.md/);
-  assert.match(md, new RegExp(`${exactCli.replaceAll(".", "\\.")} activate`));
+  assert.match(md, /activation and managed[\s\S]*skill lifecycle operations refresh it/i);
+  assert.doesNotMatch(md, /\bnpx(?:\.cmd)?\s+dotaios/);
 });
 
 test("renderSkillsIndex handles an empty skill set", () => {
   const md = renderSkillsIndex([]);
   assert.match(md, /No skills installed yet/);
-  assert.match(md, new RegExp(`${exactCli.replaceAll(".", "\\.")} skill add <local-folder>`));
+  assert.match(md, /candidate_invocation/);
   assert.doesNotMatch(md, /`dotaios\s+[a-z]|npx dotaios(?!@)/);
 });
 
 test("generated skill catalogs contain no bare or unpinned executable command", () => {
   const skills = [{ dir: "audit", name: "audit", description: "Health check.", triggers: ["audit"] }];
   for (const catalog of [renderSkillsIndex(skills), renderResolver(skills)]) {
-    assert.match(catalog, new RegExp(`${exactCli.replaceAll(".", "\\.")} activate`));
+    assert.match(catalog, /activation and managed[\s\S]*skill lifecycle operations refresh it/i);
+    assert.doesNotMatch(catalog, /\bnpx(?:\.cmd)?\s+dotaios/);
     assert.doesNotMatch(catalog, /`dotaios\s+[a-z]/);
     assert.doesNotMatch(catalog, /npx dotaios(?!@)/);
   }
@@ -260,12 +260,13 @@ test("bundled save-session skill routes one idempotent request through the verif
   assert.match(content, /capture save-summary/);
   assert.match(content, /"version": 1/);
   assert.match(content, /Generate one unique `operation_id`/);
-  assert.match(content, /`npx dotaios@<exact-candidate-version> capture save-summary/);
-  assert.match(content, /concrete version supplied by the current DotAIOS-managed context/);
-  assert.match(content, /Never guess it from PATH|never guess it from PATH/i);
-  assert.match(content, /If no concrete exact candidate is supplied, decline the local save/);
+  assert.match(content, /`candidate_invocation` object supplied by the current DotAIOS-managed host context/);
+  assert.match(content, /candidate_invocation\.executable/);
+  assert.match(content, /candidate_invocation\.argv_prefix/);
+  assert.doesNotMatch(content, /\bnpx(?:\.cmd)?\s+dotaios/);
+  assert.match(content, /never guess an executable from PATH/i);
+  assert.match(content, /If it is absent, decline the local save/);
   assert.match(content, /structured process API/);
-  assert.match(content, /executable and argv separately/);
   assert.match(content, /write the exact request bytes to the child stdin, then close stdin/i);
   assert.match(content, /records stdin payloads as command text.*decline the local save/i);
   assert.match(content, /Retry only when execution is interrupted before a normal exit is observed/);

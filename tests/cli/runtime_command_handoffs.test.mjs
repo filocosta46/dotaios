@@ -274,8 +274,8 @@ test("doctor recognizes stale npx.cmd instructions instead of silently ignoring 
     resolveInvocation: async () => windowsInvocation
   });
 
-  assert.equal(result.status, "fail");
-  assert.match(result.detail, /1 agent bridge/);
+  assert.equal(result.status, "warn");
+  assert.match(result.detail, /1 connected AI app instruction/);
 });
 
 test("persisted interview overlays recognize exact npx.cmd guidance", () => {

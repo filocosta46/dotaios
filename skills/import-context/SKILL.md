@@ -29,7 +29,7 @@ Try saying:
 - "import this old chat into my AIOS"
 - "merge what Gemini had on this project into DotAIOS"
 
-The agent will propose what to write and where. Review the proposed changes before confirming any write. For pasted chat context, the agent handles routing directly in conversation. The `npx dotaios@<exact-candidate-version> import <file>` command is for structured JSON import files.
+The agent will propose what to write and where. Review the proposed changes before confirming any write. For pasted chat context, the agent handles routing directly in conversation. For structured JSON import files, use only the current host-managed `candidate_invocation`: launch its `executable` with its `argv_prefix` plus `["import","<file>"]`, without a shell. Stop if the object is absent.
 
 ## Agent steps
 
@@ -53,4 +53,4 @@ The agent will propose what to write and where. Review the proposed changes befo
 
 ### Output
 
-Return a proposed DotAIOS import JSON object. Tell the user to preview it with `npx dotaios@<exact-candidate-version> import ./import.json --dry-run` before applying.
+Return a proposed DotAIOS import JSON object. Preview it by appending `["import","./import.json","--dry-run"]` to that same `candidate_invocation` before applying.

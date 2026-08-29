@@ -33,11 +33,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 1797,
-          "packed_sha256": "6d30d5c8b94a846f537eeaba2dc35cca8ab11dddb9736dc203f51564e86c4e8c",
+          "bytes": 1945,
+          "packed_sha256": "402fa12643faf0073f3e61bddbb12b2c341d9c0abebabdfe5397c2110b884720",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 1
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -124,11 +123,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 2007,
-          "packed_sha256": "1eec56615effaf03d510871b6cac57b27731f8f1762c2bc35f8b30157de59c3b",
+          "bytes": 2005,
+          "packed_sha256": "edf9dead30e1bd8c8ff574e12607bece19ba6ee55f063f0d3806805713ac4072",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 3
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -170,11 +168,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 2595,
-          "packed_sha256": "00b9116bf6b2e4dce9b6d0158f359c0161fa8f05c65cdd9689860034cfe7ef0a",
+          "bytes": 2703,
+          "packed_sha256": "91882926c53178306e99a2add3ca7a0ed9c46564e104814f3e41a3c2736aa9e7",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 2
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -216,11 +213,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 9798,
-          "packed_sha256": "0126f39be92b49daf8879147d6d458136e78fd0dd3a63f149b5e55d68e08e100",
+          "bytes": 9716,
+          "packed_sha256": "802b8958ccdfe8df14385984d69ee35efa804c2d4ef70e7d1b29d23ad8f27fdb",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 12
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -262,11 +258,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 3437,
-          "packed_sha256": "fbac81624767155301fa0f8d37f41601e97ad7aa8acc1908ae95eedf69843421",
+          "bytes": 3506,
+          "packed_sha256": "2bc8d4607c251894fc62ed73f30fc1d37ae1c8207c18141206d72a02dda5e724",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 7
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -314,11 +309,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 2213,
-          "packed_sha256": "b8808de849c211ab3dfee0d7dc97c9159d355e02c3f379fd6386e7fbccfc79a5",
+          "bytes": 2366,
+          "packed_sha256": "3b6c6cfd50f0c0154671808d3f5dc2e4a134b524a801cab4b9d521bd7d287f3a",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 3
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -495,11 +489,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 7487,
-          "packed_sha256": "2bd8c8b4006bd319c8e2514ce21438264773d08a3dd841a1dbc0f8286a30ac1b",
+          "bytes": 7289,
+          "packed_sha256": "835e2c641b4f4f864e476ac6b7bd18a5e441f1bd4f1dcb5d84757ef5dc06b63f",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 2
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -541,11 +534,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 2497,
-          "packed_sha256": "2d6ca8d4aecceb90ff486716efd3bc3792c5cb3f3fd9f508a755678403c904dc",
+          "bytes": 2619,
+          "packed_sha256": "039603c71bda0173d391e084493ff52943b1935a777fcaea18446aad784f0f63",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 1
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -632,11 +624,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 3107,
-          "packed_sha256": "d9bf8551d2e8ae22643e0c498e1770d20b721def1cb822837a46cbb34cae0c12",
+          "bytes": 3265,
+          "packed_sha256": "3e616cde480354f0311f7089329fc12048ed0b816ae10b3a6997816a109d3758",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 3
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {
@@ -678,11 +669,10 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 1618,
-          "packed_sha256": "6cddbb5e4e652e9268f12a495b705d9114bd68f230f4b06dca4a06420d3061d0",
+          "bytes": 1761,
+          "packed_sha256": "039963bce01513068fc7fead01e162518d273aef7ed629bd9f257ae9213a1351",
           "render": {
-            "kind": "exact-candidate-version/v1",
-            "token_count": 1
+            "kind": "verbatim"
           },
           "accepted_predecessors": {
             "2.0.9": {

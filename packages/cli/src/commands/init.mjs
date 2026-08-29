@@ -148,10 +148,9 @@ export async function initCommand(args, lifecycle = {}) {
   // Render-time only, deliberately NOT part of `data`. The setup transaction
   // persists `data` and revalidates it with an exact-key check
   // (`isSetupPlan` in setup.mjs), so an extra key there invalidates every
-  // in-flight transaction and breaks crash recovery. These two are machine and
-  // release facts, not the user's answers:
-  //   cli     — AGENTS.md tells every agent how to invoke DotAIOS, and a bare
-  //             command name is unrunnable after the documented npx install.
+  // in-flight transaction and breaks crash recovery. These are machine and
+  // release facts, not the user's answers. `cli` remains only for generated
+  // human-facing setup hints; agent instructions reference candidate_invocation.
   //   version — the doc links are pinned to a release tag, which is how the
   //             hardcoded v2.0.5 pair rotted three releases behind.
   const templateData = {

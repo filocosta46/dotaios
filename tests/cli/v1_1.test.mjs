@@ -125,16 +125,17 @@ test("context prints files and refreshes generated entrypoints", () => {
   assert.match(read(path.join(aiosPath, "CLAUDE.md")), /@AGENTS\.md/);
 });
 
-// The documented rewrite path must keep the same runnable invocation init wrote.
-// A missing {{cli}}/{{version}} becomes an empty command and a dead doc link.
-test("context --refresh still names a command the machine can run", () => {
+// The documented rewrite path must retain the captured-invocation reference.
+// A missing {{version}} still becomes a dead doc link.
+test("context --refresh retains the one managed CLI authority", () => {
   const { aiosPath } = setupAios();
   run(["context", "--refresh", "--path", aiosPath]);
   const router = read(path.join(aiosPath, "AGENTS.md"));
-  assert.doesNotMatch(router, /` brief /, "refresh must not emit an empty command name");
+  assert.match(router, /candidate_invocation/);
+  assert.doesNotMatch(router, /\bnpx(?:\.cmd)?\s+dotaios/, "refresh must not create a package-runner authority");
   assert.doesNotMatch(router, /blob\/v\//, "refresh must not drop the release from doc links");
   assert.doesNotMatch(router, /\{\{\w+\}\}/, "every router placeholder must still be filled");
-  assert.match(router, /npx dotaios@\d+\.\d+\.\d+ brief --compact --memory shared/);
+  assert.match(router, /\["brief","--compact","--memory","shared"\]/);
 });
 
 test("generated managed instruction surfaces contain no bare or unpinned DotAIOS command", () => {

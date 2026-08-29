@@ -9,7 +9,6 @@ import { applyApprovedProjectRegistration } from "../helpers/project-registratio
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
-const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 
 test("an AIOS folder inside home renders as a home-relative pointer", () => {
   assert.equal(
@@ -58,11 +57,9 @@ test("attach never writes the author's home path into the project bridge", () =>
     assert.match(bridge, /~\/aios\/AGENTS\.md/);
     assert.match(bridge, /Memory: This project/);
     assert.match(bridge, /--memory project --project/);
-    assert.match(
-      bridge,
-      new RegExp(`npx dotaios@${packageVersion.replaceAll(".", "\\.")} brief --compact --memory project --project`),
-      "a managed project bridge must name the exact package candidate"
-    );
+    assert.match(bridge, /host-managed `candidate_invocation`/);
+    assert.match(bridge, /\["brief","--compact","--memory","project","--project","[^"]+"\]/);
+    assert.doesNotMatch(bridge, /\bnpx(?:\.cmd)?\s+dotaios/, "a project bridge must not define another CLI authority");
     assert.doesNotMatch(bridge, /`dotaios\s+[a-z]/, "a managed project bridge must never use PATH selection");
     assert.doesNotMatch(bridge, /npx dotaios(?!@)/, "a managed project bridge must never select unpinned npm code");
     assert.match(bridge, /exclude personal, unscoped, and other-project memory/i);

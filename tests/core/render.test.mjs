@@ -61,13 +61,11 @@ test("isHtmlComment identifies HTML comment strings", () => {
   assert.equal(isHtmlComment(null), false);
 });
 
-// These assert the RENDERED router, not the raw template: the invocation is a
-// placeholder resolved at init time, so the raw file no longer contains a
-// runnable command and checking it would prove nothing about what an agent
-// reads. Rendering with a known `cli` also pins the thing that actually broke —
-// a router naming a command the machine cannot run.
+// These assert the rendered router an agent reads. It references the one
+// activation-captured candidate object instead of materializing another
+// executable of its own.
 const ROUTER_TEMPLATE = path.resolve("templates/AGENTS.md.hbs");
-const RENDER_FIXTURE = { cli: "npx dotaios@9.9.9", version: "9.9.9" };
+const RENDER_FIXTURE = { version: "9.9.9" };
 
 async function renderRouter() {
   return renderTemplate(await fs.readFile(ROUTER_TEMPLATE, "utf8"), RENDER_FIXTURE);
@@ -76,11 +74,11 @@ async function renderRouter() {
 test("AGENTS.md.hbs Rules section includes dotaios ingest URL routing rule", async () => {
   const rendered = await renderRouter();
   assert.match(rendered, /## Rules/);
-  assert.match(rendered, /npx dotaios@9\.9\.9 ingest/);
+  assert.match(rendered, /\["ingest","<url>"\]/);
   assert.match(rendered, /URL/);
   const rulesIdx = rendered.indexOf("## Rules");
   assert.ok(
-    rendered.indexOf("npx dotaios@9.9.9 ingest", rulesIdx) > rulesIdx,
+    rendered.indexOf('["ingest","<url>"]', rulesIdx) > rulesIdx,
     "rule must appear under Rules"
   );
 });
@@ -90,7 +88,7 @@ test("AGENTS.md.hbs Rules section includes safe sync and inbox-routing rules", a
   const rulesIdx = rendered.indexOf("## Rules");
   assert.ok(rulesIdx !== -1, "Rules section exists");
   assert.ok(
-    rendered.indexOf("npx dotaios@9.9.9 sync status", rulesIdx) > rulesIdx,
+    rendered.indexOf('["sync","status"]', rulesIdx) > rulesIdx,
     "read-only sync rule under Rules"
   );
   assert.ok(rendered.indexOf("process-inbox", rulesIdx) > rulesIdx, "inbox-routing rule under Rules");
@@ -98,8 +96,8 @@ test("AGENTS.md.hbs Rules section includes safe sync and inbox-routing rules", a
 
 test("AGENTS.md.hbs documents boot context as captured prompt Markdown", async () => {
   const rendered = await renderRouter();
-  assert.match(rendered, /BOOT_CONTEXT="\$\(npx dotaios@9\.9\.9 skills resolve --boot-context\)"/);
-  assert.match(rendered, /append that\s+variable to the agent prompt/);
+  assert.match(rendered, /\["skills","resolve","--boot-context"\]/);
+  assert.match(rendered, /capture stdout directly[\s\S]*append it to the agent prompt/);
   assert.doesNotMatch(rendered, new RegExp(["ready", "to", "source"].join("-"), "i"));
 });
 
@@ -107,6 +105,8 @@ test("AGENTS.md.hbs documents boot context as captured prompt Markdown", async (
 // bare `dotaios`, because the documented npx install links no such binary.
 test("the rendered router never names a command the machine cannot run", async () => {
   const rendered = await renderRouter();
+  assert.match(rendered, /candidate_invocation/);
+  assert.doesNotMatch(rendered, /\bnpx(?:\.cmd)?\s+dotaios/);
   assert.doesNotMatch(rendered, /`dotaios\s+[a-z]/, "no bare invocation may reach the router");
   assert.doesNotMatch(rendered, /\{\{\w+\}\}/, "every placeholder must be substituted");
   assert.doesNotMatch(rendered, /blob\/v(?!9\.9\.9)/, "doc links must follow the real version");
@@ -225,10 +225,10 @@ test("memory-maintenance skill ships in skills/", async () => {
   assert.match(content, /\ndescription: .*\S/);
   assert.match(
     content,
-    /npx dotaios@<exact-candidate-version> memory audit/,
-    "the skill runs on machine-computed staleness through the package-materialized candidate"
+    /candidate_invocation[\s\S]*\["memory","audit","--all-memory"\]/,
+    "the skill runs on machine-computed staleness through the activation-captured candidate"
   );
-  assert.match(content, /npx dotaios@<exact-candidate-version> capture list/);
+  assert.match(content, /\["capture","list"\]/);
   assert.match(content, /--operation supersede/);
   assert.match(content, /--match/);
   assert.match(content, /supersede/);

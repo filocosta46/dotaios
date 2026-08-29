@@ -31,7 +31,7 @@ Try saying:
 
 ## Agent steps
 
-1. Run `npx dotaios@<exact-candidate-version> brief --compact` (with `--project <slug-or-id>` when scoped) for identity, priorities, active work, and bounded recent memory; read active project READMEs and daily notes only when the projection points to them.
+1. Use only the current host-managed `candidate_invocation`: launch its `executable` with its `argv_prefix` plus `["brief","--compact"]`, without a shell (append `"--project","<slug-or-id>"` when scoped). Stop if the object is absent. Use the result for identity, priorities, active work, and bounded recent memory; read active project READMEs and daily notes only when the projection points to them.
 2. Group findings into stale, repeated, blocked, and promotable.
 3. Recommend at most 5 updates.
 4. Ask before durable writes to `context/`, `projects/`, `vault/wiki/`, or `vault/org/`.

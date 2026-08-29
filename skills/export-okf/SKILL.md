@@ -15,10 +15,14 @@ projection, not a migration. Your source files are never modified.
 
 ## How to run
 
-```bash
-npx dotaios@<exact-candidate-version> export-okf                 # writes to <aios>/build/okf-export
-npx dotaios@<exact-candidate-version> export-okf --out ~/share   # choose the output directory
-npx dotaios@<exact-candidate-version> export-okf --path ~/work   # use a non-default AIOS folder
+Use only the current host-managed `candidate_invocation`: launch its
+`executable` with its `argv_prefix` followed by one of these argument arrays,
+without a shell. Stop if the object is absent.
+
+```json
+["export-okf"]
+["export-okf","--out","<output-folder>"]
+["export-okf","--path","<aios-folder>"]
 ```
 
 It injects the OKF-required `type` field at export, generates `index.md` per

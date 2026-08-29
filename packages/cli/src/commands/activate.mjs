@@ -15,8 +15,7 @@ import {
   isAgentInstalled,
   loadAgentRegistry,
   resolveClaudeConfigRoot,
-  resolveLocalCliInvocation,
-  resolveCliInvocation
+  resolveLocalCliInvocation
 } from "../../../core/src/bridges.mjs";
 import {
   collectSkills,
@@ -623,16 +622,17 @@ async function installAllSkills(
 }
 
 async function createProjectBridges(aiosPath, projectPath, options, lifecycle = {}) {
+  const homePath = resolvePath(options.home || os.homedir());
   let project = await resolveProjectContext({
     aiosPath,
-    homePath: resolvePath(options.home || os.homedir()),
+    homePath,
     cwd: projectPath
   });
   if (!project) {
     if (!options.dryRun) throw unregisteredProjectAttachmentError(aiosPath, projectPath);
     const registrationPlan = await planProjectRegistration({
       aiosPath,
-      homePath: resolvePath(options.home || os.homedir()),
+      homePath,
       projectPath
     });
     project = {
@@ -644,9 +644,8 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
     };
   }
   const registry = await loadAgentRegistry(aiosPath);
-  const cli = await resolveCliInvocation();
   const bridges = [
-    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, resolvePath(options.home || os.homedir()), cli), {
+    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, homePath), {
       ...options,
       projectRoot: projectPath,
       beforeReplace: lifecycle.beforeBridgeReplace,
@@ -867,14 +866,14 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
   };
 }
 
-function projectAgentsBridge(aiosPath, project, homePath, cli) {
+function projectAgentsBridge(aiosPath, project, homePath) {
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
     "This attached checkout defaults to `Memory: This project`.",
-    `At session start run \`${cli} brief --compact --memory project --project ${project.id}\`.`,
+    `At session start use the host-managed \`candidate_invocation\`: append [\"brief\",\"--compact\",\"--memory\",\"project\",\"--project\",\"${project.id}\"] to its \`argv_prefix\` and launch its \`executable\` without a shell.`,
     `Keep later searches and explicit saves in the same mode with \`--memory project --project ${project.id}\`.`,
     "This mode may use only this project's files and explicitly attributed sessions, signals, and events; exclude personal, unscoped, and other-project memory.",
-    ...(project.registered ? [] : [`This checkout is not in the project catalog yet; run \`${cli} project add <repo-path>\` to enable automatic writer attribution.`]),
+    ...(project.registered ? [] : ["This checkout is not in the project catalog yet; stop and request proof-bound registration from the active managed context."]),
     "",
     `The DotAIOS entrypoint is ${portableAiosPointer(aiosPath, homePath)}. Do not open personal context from it while this session is in project mode.`,
     "",
