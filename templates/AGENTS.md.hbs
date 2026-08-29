@@ -50,9 +50,9 @@ For every DotAIOS CLI operation below, use only the current host-managed `candid
 to its `argv_prefix`, without a shell. If absent, stop and ask the user to
 activate this AIOS from its admitted installation; never invent another CLI.
 
-For Shared memory, append `["brief","--compact","--memory","shared"]`. For
-project-only work, require an explicit registered project and append
-`["brief","--compact","--memory","project","--project","<slug-or-id>"]`.
+For Shared memory, append `["brief","--compact","--memory","shared"]`; project-only
+work requires non-null `["project","identify","--json"]` host output. An attached
+folder alone is not identity. Then append `["brief","--compact","--memory","project","--project","<id>"]`.
 This is the canonical bounded working-context projection.
 
 Do not preload `memory/events.jsonl`, `memory/signals/`, or `memory/sessions/`,

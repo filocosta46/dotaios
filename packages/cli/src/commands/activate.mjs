@@ -867,13 +867,21 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
 }
 
 function projectAgentsBridge(aiosPath, project, homePath) {
+  const registeredProject = project.registered
+    ? JSON.stringify({ registered_project: { id: project.id, slug: project.slug } })
+    : null;
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
-    "This attached checkout defaults to `Memory: This project`.",
-    `At session start use the host-managed \`candidate_invocation\`: append [\"brief\",\"--compact\",\"--memory\",\"project\",\"--project\",\"${project.id}\"] to its \`argv_prefix\` and launch its \`executable\` without a shell.`,
+    ...(registeredProject ? [
+      "This is the host-written project identity selector:",
+      registeredProject,
+      "At session start use the host-managed `candidate_invocation` from the global bridge and append [\"project\",\"identify\",\"--json\"] from this same attached checkout. Only after its receipt is `Memory: This project` and its `registered_project` exactly matches the record above may you emit that receipt or read project memory.",
+      `Then append [\"brief\",\"--compact\",\"--memory\",\"project\",\"--project\",\"${project.id}\"] to the same \`argv_prefix\` and launch its \`executable\` without a shell.`
+    ] : [
+      "This checkout is not registered. Use `Memory: Off`, keep AIOS closed, and request proof-bound registration."
+    ]),
     `Keep later searches and explicit saves in the same mode with \`--memory project --project ${project.id}\`.`,
     "This mode may use only this project's files and explicitly attributed sessions, signals, and events; exclude personal, unscoped, and other-project memory.",
-    ...(project.registered ? [] : ["This checkout is not in the project catalog yet; stop and request proof-bound registration from the active managed context."]),
     "",
     `The DotAIOS entrypoint is ${portableAiosPointer(aiosPath, homePath)}. Do not open personal context from it while this session is in project mode.`,
     "",

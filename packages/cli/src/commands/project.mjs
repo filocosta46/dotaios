@@ -6,6 +6,7 @@ import {
   matchProjectRecord,
   registerProject,
   resolveProject,
+  resolveProjectContext,
   restoreProjects
 } from "../../../core/src/projects.mjs";
 import { buildSessionDigest } from "../../../core/src/digest.mjs";
@@ -18,6 +19,7 @@ const HELP_TEXT = `Usage:
   dotaios project add <repo-path> [options]
   dotaios project list [options]
   dotaios project restore [slug-or-id] [options]
+  dotaios project identify [options]
   dotaios project resolve <slug-or-id> [options]
   dotaios project doctor [options]
   dotaios project context <slug-or-id> [options]
@@ -153,6 +155,27 @@ export async function projectCommand(args = [], dependencies = {}) {
     const projects = await listProjects(coreOptions);
     printProjects(output, projects);
     return projects;
+  }
+
+  if (subcommand === "identify") {
+    assertPositionals(positionals, 0, "dotaios project identify");
+    const project = await resolveProjectContext({
+      ...coreOptions,
+      cwd: dependencies.cwd || process.cwd()
+    });
+    const result = {
+      receipt: project ? "Memory: This project" : "Memory: Off",
+      registered_project: project ? { id: project.id, slug: project.slug } : null
+    };
+    if (options.json) {
+      output.log(JSON.stringify(result, null, 2));
+    } else {
+      output.log(result.receipt);
+      output.log(project
+        ? `Registered project: ${project.slug} (${project.id})`
+        : "This working directory is not a registered project.");
+    }
+    return result;
   }
 
   if (subcommand === "resolve") {

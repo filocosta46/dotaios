@@ -267,9 +267,14 @@ test("managed bridges route working memory through the canonical projection", as
   assert.match(content, /^.*Private chat.*Memory: Off.*$/im);
   assert.match(content, /^.*Only this project.*Memory: This project.*$/im);
   assert.match(content, /^.*Use my memory.*Memory: Shared.*$/im);
-  assert.match(content, /^Choose memory access for this session before any AIOS read:$/m);
-  assert.match(content, /not registered.*keep AIOS closed.*re-run activation.*never fall back to Shared/is);
-  assert.match(content, /Only after registration and exact identity.*read AGENTS\.md.*append.*brief.*--memory.*project/is);
+  assert.match(content, /^Choose memory access before any AIOS memory read:$/m);
+  assert.match(content, /an attached working directory alone is never project identity/i);
+  assert.match(content, /project["`, ]+identify[\s\S]*same cwd/is);
+  assert.match(content, /Host admission[\s\S]*only registration metadata[\s\S]*receipt[\s\S]*registered_project/is);
+  assert.match(content, /Without `Memory: This project`[\s\S]*non-null[\s\S]*do not claim\/read memory[\s\S]*`Memory: Off`/is);
+  assert.doesNotMatch(content, /In an attached working directory[^\n]*use `Memory: This project`/i);
+  assert.match(content, /keep AIOS closed.*re-activate.*never Shared/is);
+  assert.match(content, /Then read AGENTS\.md.*append.*brief.*--memory.*project/is);
   assert.match(content, /Only in Shared.*read AGENTS\.md.*append.*brief.*--memory.*shared/is);
   assert.match(content, /host.*history/i);
   assert.match(content, /`read_working_context`, `search_aios`, and `resolve_skill`/);

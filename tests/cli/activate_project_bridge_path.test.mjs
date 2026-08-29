@@ -54,8 +54,40 @@ test("attach never writes the author's home path into the project bridge", () =>
     assert.equal(attach.status, 0, attach.stderr);
 
     const bridge = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
+    const projectRecords = bridge
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("{") && line.includes('"registered_project"'));
+    assert.equal(projectRecords.length, 1, "one host-written registered project identity is required");
+    const projectRecord = JSON.parse(projectRecords[0]);
+    assert.deepEqual(Object.keys(projectRecord), ["registered_project"]);
+    assert.deepEqual(Object.keys(projectRecord.registered_project).sort(), ["id", "slug"]);
+    assert.match(projectRecord.registered_project.id, /\S/);
+    assert.match(projectRecord.registered_project.slug, /\S/);
+    const resolved = spawnSync(
+      process.execPath,
+      [
+        cli, "project", "resolve", projectRecord.registered_project.id,
+        "--path", aios, "--home", home
+      ],
+      { encoding: "utf8" }
+    );
+    assert.equal(resolved.status, 0, resolved.stderr);
+    assert.equal(fs.realpathSync(resolved.stdout.trim()), fs.realpathSync(repo));
+    const identified = spawnSync(
+      process.execPath,
+      [cli, "project", "identify", "--json", "--path", aios, "--home", home],
+      { cwd: repo, encoding: "utf8" }
+    );
+    assert.equal(identified.status, 0, identified.stderr);
+    assert.deepEqual(JSON.parse(identified.stdout), {
+      receipt: "Memory: This project",
+      registered_project: projectRecord.registered_project
+    });
     assert.match(bridge, /~\/aios\/AGENTS\.md/);
     assert.match(bridge, /Memory: This project/);
+    assert.match(bridge, /project["`, ]+identify[\s\S]*same attached checkout/is);
+    assert.match(bridge, /Only after[\s\S]*Memory: This project[\s\S]*registered_project/is);
     assert.match(bridge, /--memory project --project/);
     assert.match(bridge, /host-managed `candidate_invocation`/);
     assert.match(bridge, /\["brief","--compact","--memory","project","--project","[^"]+"\]/);
@@ -89,6 +121,17 @@ test("attach refuses an unregistered project before writing registration or brid
       { encoding: "utf8" }
     );
     assert.equal(initialized.status, 0, initialized.stderr);
+
+    const identified = spawnSync(
+      process.execPath,
+      [cli, "project", "identify", "--json", "--path", aios, "--home", home],
+      { cwd: repo, encoding: "utf8" }
+    );
+    assert.equal(identified.status, 0, identified.stderr);
+    assert.deepEqual(JSON.parse(identified.stdout), {
+      receipt: "Memory: Off",
+      registered_project: null
+    });
 
     for (const args of [
       ["attach", repo, "--path", aios, "--home", home],

@@ -874,14 +874,14 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
   const lines = [
     MANAGED_START,
     pointerLine,
-    "Choose memory access for this session before any AIOS read:",
-    "- `Private chat` locks `Memory: Off`: keep AIOS closed — no DotAIOS read, search, save, or capture. Say once that the host may keep its history.",
+    "Choose memory access before any AIOS memory read:",
+    "- `Private chat` locks `Memory: Off`: keep AIOS closed — no read, search, save, or capture. Say the host may keep its history.",
     legacyDotaios
-      ? `- In an attached working directory, or after \`Only this project\`, use \`Memory: This project\` and exclude all other memory. If not registered, keep AIOS closed, say so, offer \`${legacyDotaios} activate\`, and never fall back to Shared. Only after registration and exact identity are verified, read AGENTS.md and run \`${legacyDotaios} brief --compact --memory project --project <slug-or-id>\`.`
-      : "- In an attached working directory, or after `Only this project`, use `Memory: This project` and exclude all other memory. If not registered, keep AIOS closed, ask to re-run activation from the same admitted local installation, and never fall back to Shared. Only after registration and exact identity are verified, read AGENTS.md and append [`brief`,`--compact`,`--memory`,`project`,`--project`,`<slug-or-id>`] to the captured argv below.",
+      ? `- An attached working directory alone is never project identity. For it or \`Only this project\`, run \`${legacyDotaios} project identify --json\` in the same cwd. Host admission reads only registration metadata and returns receipt + \`registered_project\` id/slug; use verbatim. Without \`Memory: This project\` + non-null project, do not claim/read memory: lead \`Memory: Off\`, keep AIOS closed, request registration or \`${legacyDotaios} activate\`, never Shared. Then read AGENTS.md; run \`${legacyDotaios} brief --compact --memory project --project <id>\`.`
+      : "- An attached working directory alone is never project identity. For it or `Only this project`, append [`project`,`identify`,`--json`] below and run in the same cwd. Host admission reads only registration metadata and returns receipt + `registered_project` id/slug; use verbatim. Without `Memory: This project` + non-null project, do not claim/read memory: lead `Memory: Off`, keep AIOS closed, register/re-activate, never Shared. Then read AGENTS.md; append [`brief`,`--compact`,`--memory`,`project`,`--project`,`<id>`].",
     legacyDotaios
-      ? `- When the user asks \`Use my memory\`, use \`Memory: Shared\`; this is the default elsewhere. Only in Shared, read AGENTS.md and run \`${legacyDotaios} brief --compact --memory shared\`.`
-      : "- When the user asks `Use my memory`, use `Memory: Shared`; this is the default elsewhere. Only in Shared, read AGENTS.md and append [`brief`,`--compact`,`--memory`,`shared`] to the captured argv below.",
+      ? `- When the user asks \`Use my memory\`, use \`Memory: Shared\`; default elsewhere. Only in Shared, read AGENTS.md and run \`${legacyDotaios} brief --compact --memory shared\`.`
+      : "- When the user asks `Use my memory`, use `Memory: Shared`; default elsewhere. Only in Shared, read AGENTS.md and append [`brief`,`--compact`,`--memory`,`shared`] below.",
     "Lead every response with the selected receipt: `Memory: Shared`, `Memory: This project`, or `Memory: Off`.",
     "Route events, signals, and saved sessions only through the canonical bounded projection."
   ];
