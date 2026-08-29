@@ -8,10 +8,11 @@ import assert from "node:assert/strict";
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
-function runCli(args, { allowNonZero = false } = {}) {
+function runCli(args, { allowNonZero = false, env = process.env } = {}) {
   const result = spawnSync(process.execPath, [cli, ...args], {
     cwd: repoRoot,
-    encoding: "utf8"
+    encoding: "utf8",
+    env
   });
   if (!allowNonZero) {
     assert.equal(result.status, 0, `dotaios ${args.join(" ")} failed:\n${result.stdout}\n${result.stderr}`);
@@ -86,4 +87,51 @@ test("activation resolves native skill targets from a project-owned registry", (
   assert.equal(customRuntime.capabilities.projected, "no");
   assert.equal(customRuntime.capabilities.discoverable, "not-probed");
   assert.deepEqual(customRuntime.evidence.hermesConfigs.map((entry) => entry.key), ["runner.skill_paths"]);
+});
+
+test("activation projects a custom target only after its client is detected", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-custom-detected-"));
+  const aiosPath = path.join(tempRoot, "aios");
+  const homePath = path.join(tempRoot, "home");
+
+  try {
+    runCli(["init", "--path", aiosPath, "--yes"]);
+    fs.writeFileSync(
+      path.join(aiosPath, "agents.json"),
+      `${JSON.stringify({
+        agents: [{
+          name: "Custom Runner",
+          detect: ".custom-runner",
+          bridge: null,
+          skills: { mode: "symlink", dir: ".custom\\skills" }
+        }]
+      }, null, 2)}\n`
+    );
+    fs.mkdirSync(path.join(homePath, ".custom-runner"), { recursive: true });
+
+    const preview = runCli(
+      ["setup", "--dry-run", "--verbose", "--path", aiosPath, "--home", homePath],
+      { env: { ...process.env, PATH: "" } }
+    );
+    assert.match(
+      preview.stdout,
+      new RegExp(`\\[would create managed skill links\\] ${path.join(homePath, ".custom", "skills")}`)
+    );
+    assert.doesNotMatch(preview.stdout, /would create managed skill links.*\.claude\/skills/);
+    assert.doesNotMatch(preview.stdout, /would create managed skill links.*\.gemini\/config\/skills/);
+    assert.doesNotMatch(preview.stdout, /would create managed skill links.*\.grok\/skills/);
+
+    runCli(
+      ["activate", "--path", aiosPath, "--home", homePath],
+      { env: { ...process.env, PATH: "" } }
+    );
+
+    const link = path.join(homePath, ".custom", "skills", "audit");
+    assert.equal(fs.readlinkSync(link), path.join(aiosPath, "skills", "audit"));
+    assert.equal(fs.existsSync(path.join(homePath, ".claude", "skills")), false);
+    assert.equal(fs.existsSync(path.join(homePath, ".gemini", "config", "skills")), false);
+    assert.equal(fs.existsSync(path.join(homePath, ".grok", "skills")), false);
+  } finally {
+    fs.rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

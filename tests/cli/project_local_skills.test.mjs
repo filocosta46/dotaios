@@ -323,6 +323,8 @@ test("attach dry-run previews legacy Cursor cleanup without changing the file", 
   try {
     const output = run(["attach", projectPath, "--path", aiosPath, "--dry-run"]);
 
+    assert.match(output, /^Attachment preview$/m);
+    assert.doesNotMatch(output, /^DotAIOS attached$/m);
     assert.match(output, /would remove/i);
     assert.equal(fs.readFileSync(rulePath, "utf8"), original);
   } finally {

@@ -53,13 +53,9 @@ test("setup --dry-run previews concrete actions without DotAIOS-managed changes"
   }
 });
 
-// The preview built its own answer to "which skill-link directories get
-// written" instead of reading the one the writer uses. It promised one
-// directory while the run created every default projection root. On a machine
-// with Claude Code installed only the Antigravity line is visibly missing, so
-// this fixture must keep every agent undetected — no client directories and no
-// agent binaries on PATH — or the test passes while .claude/skills is still
-// under-reported.
+// This fixture keeps every client undetected so preview/apply parity proves
+// that the unconditional shared Agent Skills target does not pull absent
+// client-specific targets into a fresh setup.
 function skillDirsUnder(root) {
   const found = [];
   const walk = (dir) => {
@@ -101,11 +97,87 @@ test("setup --dry-run promises every skill-link directory the real run creates",
 
     assert.deepEqual(promised, created, "the preview must name exactly the directories the run creates");
     assert.deepEqual(created, [
+      path.join(homePath, ".agents", "skills")
+    ], "only the shared Agent Skills root is written with nothing detected");
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("setup and activate share the detected-client target plan", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-detected-skilldirs-"));
+  const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
+  const cli = path.resolve(repoRoot, "packages/cli/src/index.mjs");
+  const env = { ...process.env, PATH: "/usr/bin:/bin" };
+  const target = ["--path", aiosPath, "--home", homePath];
+
+  try {
+    fsSync.mkdirSync(path.join(homePath, ".claude"), { recursive: true });
+    fsSync.writeFileSync(path.join(homePath, ".claude", "settings.json"), "{}\n");
+    const preview = spawnSync(process.execPath, [cli, "setup", "--dry-run", "--verbose", ...target], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(preview.status, 0, preview.stderr);
+    const promised = [...preview.stdout.matchAll(/\[would create managed skill links\] (\S+)/g)]
+      .map((match) => match[1])
+      .sort();
+
+    const real = spawnSync(process.execPath, [cli, "setup", "--yes", "--skip-reveal", ...target], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(real.status, 0, `${real.stdout}\n${real.stderr}`);
+    const created = skillDirsUnder(homePath);
+
+    assert.deepEqual(promised, created);
+    assert.deepEqual(created, [
       path.join(homePath, ".agents", "skills"),
-      path.join(homePath, ".claude", "skills"),
-      path.join(homePath, ".gemini", "config", "skills"),
-      path.join(homePath, ".grok", "skills")
-    ].sort(), "every default projection root is written with nothing detected");
+      path.join(homePath, ".claude", "skills")
+    ].sort());
+  } finally {
+    fsSync.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("setup preview and apply share the selected Claude config root", () => {
+  const tmp = fsSync.mkdtempSync(path.join(os.tmpdir(), "dotaios-setup-claude-root-"));
+  const aiosPath = path.join(tmp, "aios");
+  const homePath = path.join(tmp, "home");
+  const claudeConfigRoot = path.join(tmp, "claude-profile");
+  const cli = path.resolve(repoRoot, "packages/cli/src/index.mjs");
+  const env = {
+    ...process.env,
+    PATH: "/usr/bin:/bin",
+    CLAUDE_CONFIG_DIR: claudeConfigRoot
+  };
+  const target = ["--path", aiosPath, "--home", homePath];
+
+  try {
+    fsSync.mkdirSync(claudeConfigRoot, { recursive: true });
+    fsSync.writeFileSync(path.join(claudeConfigRoot, "settings.json"), "{}\n");
+    const preview = spawnSync(process.execPath, [cli, "setup", "--dry-run", "--verbose", ...target], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(preview.status, 0, preview.stderr);
+    const promised = [...preview.stdout.matchAll(/\[would create managed skill links\] (\S+)/g)]
+      .map((match) => match[1])
+      .sort();
+
+    const real = spawnSync(process.execPath, [cli, "setup", "--yes", "--skip-reveal", ...target], {
+      encoding: "utf8",
+      env
+    });
+    assert.equal(real.status, 0, `${real.stdout}\n${real.stderr}`);
+
+    assert.deepEqual(promised, [
+      path.join(homePath, ".agents", "skills"),
+      path.join(claudeConfigRoot, "skills")
+    ].sort());
+    assert.equal(fsSync.existsSync(path.join(claudeConfigRoot, "skills", "audit")), true);
+    assert.equal(fsSync.existsSync(path.join(homePath, ".claude")), false);
   } finally {
     fsSync.rmSync(tmp, { recursive: true, force: true });
   }

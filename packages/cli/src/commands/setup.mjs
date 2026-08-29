@@ -19,9 +19,10 @@ import {
   bridgePath,
   findManagedBlock,
   isAgentInstalled,
-  loadAgentRegistry
+  loadAgentRegistry,
+  resolveSkillTargetPath
 } from "../../../core/src/bridges.mjs";
-import { symlinkTargets } from "../../../core/src/skill-targets.mjs";
+import { planSkillTargets } from "../../../core/src/skill-targets.mjs";
 import {
   LIGHTPANDA_VERSION,
   downloadLightpanda,
@@ -516,16 +517,20 @@ async function previewSetupTarget(aiosPath) {
 }
 
 async function printClientPreview(aiosPath, homePath, { verbose = false } = {}) {
-  const registry = await loadAgentRegistry(null);
-  // The writer projects skills into every symlink target regardless of what is
-  // detected. The preview must read the same set, or it promises less than the
-  // run delivers.
-  const skillDirs = symlinkTargets(registry).map((target) => target.dir);
+  const registry = await loadAgentRegistry(aiosPath);
+  const detections = await Promise.all(registry.map(async (agent) => ({
+    agent,
+    installed: await isAgentInstalled(homePath, agent)
+  })));
+  const detectedAgentNames = new Set(
+    detections.filter(({ installed }) => installed).map(({ agent }) => agent.name)
+  );
+  const skillDirs = planSkillTargets({ registry, detectedAgentNames })
+    .targets.map((target) => target.dir);
   let detectedClientCount = 0;
 
-  for (const agent of registry) {
+  for (const { agent, installed } of detections) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
-    const installed = await isAgentInstalled(homePath, agent);
     if (!installed) {
       if (verbose) console.log(`[would skip] ${destination} (${agent.name} not detected${skillLinkCaveat(agent, homePath, skillDirs)})`);
       continue;
@@ -551,7 +556,7 @@ async function printClientPreview(aiosPath, homePath, { verbose = false } = {}) 
 
   if (!verbose) return detectedClientCount;
   for (const relativeDir of skillDirs) {
-    const targetDir = path.join(homePath, relativeDir);
+    const targetDir = resolveSkillTargetPath(homePath, relativeDir);
     const stats = await lstatIfPresent(targetDir);
     if (!stats) {
       console.log(`[would create managed skill links] ${targetDir}`);

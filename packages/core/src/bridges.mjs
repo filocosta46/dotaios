@@ -386,6 +386,13 @@ export function resolveClaudeConfigRoot(homePath, { env = process.env } = {}) {
     : path.resolve(homePath, ".claude");
 }
 
+export function resolveSkillTargetPath(homePath, targetDir, { env = process.env } = {}) {
+  const normalized = String(targetDir || "").replaceAll("\\", "/");
+  return normalized === ".claude/skills"
+    ? path.join(resolveClaudeConfigRoot(homePath, { env }), "skills")
+    : path.join(homePath, ...normalized.split("/"));
+}
+
 export function isClaudeCodeAgent(agent) {
   return String(agent?.name || "").toLowerCase() === "claude code";
 }

@@ -248,10 +248,12 @@ runtime acceptance remains explicit. DotAIOS does not configure project-local
 Hermes skills: Hermes loads configuration from its selected `HERMES_HOME`, and
 `attach` does not own or change that runtime selector. Global skill links work
 the same way:
-`dotaios activate` links `~/aios/skills` into Claude Code, the shared Agent
-Skills folder for Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode, the
-Antigravity IDE global folder, and every existing Hermes root or discovered
-profile configuration, then verifies filesystem/configuration propagation.
+`dotaios activate` always links `~/aios/skills` into the shared Agent Skills
+folder for Codex, Cursor, Gemini CLI, Kimi Code CLI, and OpenCode. It adds the
+client-specific Claude Code, Antigravity IDE, and Grok targets only when that
+client is detected, unless you explicitly pass `--all`. Existing Hermes roots
+or discovered profile configurations remain detection-aware as well. Activation
+then verifies filesystem/configuration propagation.
 `dotaios skills doctor` reports configuration and filesystem projection
 evidence per surface; it leaves discovery unprobed. A bounded client probe records invocation separately, while only
 `produced=yes` proves that the client used the skill.

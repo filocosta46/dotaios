@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { symlinkTargets } from "../../packages/core/src/skill-targets.mjs";
 
 // Resolve to repo root from this file's location
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
@@ -25,6 +27,20 @@ async function makeTmpDirs() {
     "---\nname: test-skill\ndescription: A test skill.\n---\n\n# Test Skill\n"
   );
   return { base, aiosPath, homePath };
+}
+
+async function projectedSkillDirs(homePath, skillName = "test-skill") {
+  const roots = symlinkTargets().map(({ dir }) => dir);
+  const present = [];
+  for (const root of roots) {
+    try {
+      await fs.access(path.join(homePath, root, skillName));
+      present.push(root);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  return present.sort();
 }
 
 describe("activateCommand — symlinks", () => {
@@ -65,6 +81,13 @@ describe("activateCommand — symlinks", () => {
     const target = await fs.readlink(symlinkPath);
     assert.equal(target, path.join(dirs.aiosPath, "skills", "test-skill"));
 
+    assert.deepEqual(await projectedSkillDirs(dirs.homePath), [
+      ".agents/skills",
+      ".claude/skills",
+      ".gemini/config/skills",
+      ".grok/skills"
+    ].sort(), "--all projects every registered target");
+
     // Verify the symlink is actually traversable (resolves correctly)
     const skillFile = path.join(symlinkPath, "SKILL.md");
     const content = await fs.readFile(skillFile, "utf8");
@@ -99,7 +122,7 @@ describe("activateCommand — symlinks", () => {
     }
   });
 
-  it("does not invent absent clients when a second activation sees DotAIOS projections", async () => {
+  it("projects only shared skills when no clients are detected", async () => {
     const isolated = await makeTmpDirs();
     const { activateCommand } = await import(
       path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
@@ -110,12 +133,22 @@ describe("activateCommand — symlinks", () => {
       const first = await activateCommand(args, { quiet: true, env: { PATH: "" } });
       assert.equal(first.detectedClientCount, 0);
 
+      await fs.access(path.join(isolated.homePath, ".agents/skills/test-skill"));
+      await assert.rejects(
+        fs.access(path.join(isolated.homePath, ".claude")),
+        { code: "ENOENT" },
+        "activation must not create an absent client's config root"
+      );
       for (const projection of [
         ".claude/skills",
         ".gemini/config/skills",
         ".grok/skills"
       ]) {
-        await fs.access(path.join(isolated.homePath, projection));
+        await assert.rejects(
+          fs.access(path.join(isolated.homePath, projection)),
+          { code: "ENOENT" },
+          `${projection} must remain absent when its client is not detected`
+        );
       }
 
       const second = await activateCommand(args, { quiet: true, env: { PATH: "" } });
@@ -127,6 +160,132 @@ describe("activateCommand — symlinks", () => {
           `${client} must remain absent when only its DotAIOS projection exists`
         );
       }
+    } finally {
+      await fs.rm(isolated.base, { recursive: true, force: true });
+    }
+  });
+
+  it("uses only the shared target when Codex is the sole detected client", async () => {
+    const isolated = await makeTmpDirs();
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    try {
+      await fs.mkdir(path.join(isolated.homePath, ".codex"), { recursive: true });
+      const activation = await activateCommand(
+        ["--path", isolated.aiosPath, "--home", isolated.homePath],
+        { quiet: true, env: { PATH: "" } }
+      );
+
+      assert.deepEqual(activation.detectedClientNames, ["Codex"]);
+      assert.deepEqual(await projectedSkillDirs(isolated.homePath), [".agents/skills"]);
+    } finally {
+      await fs.rm(isolated.base, { recursive: true, force: true });
+    }
+  });
+
+  it("adds only Claude's native target when Claude is the sole detected client", async () => {
+    const isolated = await makeTmpDirs();
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    try {
+      await fs.mkdir(path.join(isolated.homePath, ".claude"), { recursive: true });
+      await fs.writeFile(path.join(isolated.homePath, ".claude", "settings.json"), "{}\n");
+      const activation = await activateCommand(
+        ["--path", isolated.aiosPath, "--home", isolated.homePath],
+        { quiet: true, env: { PATH: "" } }
+      );
+
+      assert.deepEqual(activation.detectedClientNames, ["Claude Code"]);
+      assert.deepEqual(await projectedSkillDirs(isolated.homePath), [
+        ".agents/skills",
+        ".claude/skills"
+      ].sort());
+    } finally {
+      await fs.rm(isolated.base, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps activation dry-run and apply on the same target plan", async () => {
+    const isolated = await makeTmpDirs();
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    try {
+      const baseArgs = ["--path", isolated.aiosPath, "--home", isolated.homePath];
+      const preview = await activateCommand(
+        [...baseArgs, "--dry-run"],
+        { quiet: true, env: { PATH: "" } }
+      );
+      const promised = preview.results
+        .filter(({ action }) => action === "would link")
+        .map(({ path: destination }) => path.relative(isolated.homePath, path.dirname(destination)))
+        .sort();
+      assert.deepEqual(promised, [".agents/skills"]);
+      await assert.rejects(fs.access(isolated.homePath), { code: "ENOENT" });
+
+      await activateCommand(baseArgs, { quiet: true, env: { PATH: "" } });
+      assert.deepEqual(await projectedSkillDirs(isolated.homePath), promised);
+    } finally {
+      await fs.rm(isolated.base, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves old managed links without projecting new skills after a client becomes undetected", async () => {
+    const isolated = await makeTmpDirs();
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    try {
+      const settings = path.join(isolated.homePath, ".claude", "settings.json");
+      await fs.mkdir(path.dirname(settings), { recursive: true });
+      await fs.writeFile(settings, "{}\n");
+      const args = ["--path", isolated.aiosPath, "--home", isolated.homePath];
+      await activateCommand(args, { quiet: true, env: { PATH: "" } });
+      await fs.access(path.join(isolated.homePath, ".claude/skills/test-skill"));
+
+      await fs.unlink(settings);
+      await fs.mkdir(path.join(isolated.aiosPath, "skills", "later-skill"));
+      await fs.writeFile(
+        path.join(isolated.aiosPath, "skills", "later-skill", "SKILL.md"),
+        "---\nname: later-skill\ndescription: Added later.\n---\n\n# Later Skill\n"
+      );
+      await activateCommand(args, { quiet: true, env: { PATH: "" } });
+
+      await fs.access(path.join(isolated.homePath, ".claude/skills/test-skill"));
+      await fs.access(path.join(isolated.homePath, ".agents/skills/later-skill"));
+      await assert.rejects(
+        fs.access(path.join(isolated.homePath, ".claude/skills/later-skill")),
+        { code: "ENOENT" }
+      );
+    } finally {
+      await fs.rm(isolated.base, { recursive: true, force: true });
+    }
+  });
+
+  it("labels activation dry-run as a preview", async () => {
+    const isolated = await makeTmpDirs();
+    const cli = path.join(repoRoot, "packages/cli/src/index.mjs");
+
+    try {
+      const result = spawnSync(process.execPath, [
+        cli,
+        "activate",
+        "--dry-run",
+        "--path", isolated.aiosPath,
+        "--home", isolated.homePath
+      ], {
+        encoding: "utf8",
+        env: { ...process.env, PATH: "" }
+      });
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(result.stdout, /^Activation preview$/m);
+      assert.doesNotMatch(result.stdout, /^DotAIOS activated$/m);
     } finally {
       await fs.rm(isolated.base, { recursive: true, force: true });
     }

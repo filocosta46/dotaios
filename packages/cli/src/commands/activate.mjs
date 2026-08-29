@@ -15,6 +15,7 @@ import {
   isAgentInstalled,
   loadAgentRegistry,
   resolveClaudeConfigRoot,
+  resolveSkillTargetPath,
   resolveLocalCliInvocation
 } from "../../../core/src/bridges.mjs";
 import {
@@ -28,7 +29,7 @@ import {
   resolveProjectContext
 } from "../../../core/src/projects.mjs";
 import {
-  symlinkTargets,
+  planSkillTargets,
   retiredSymlinkTargets,
   projectSymlinkTargets
 } from "../../../core/src/skill-targets.mjs";
@@ -149,8 +150,17 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
   // Detection must be observed before reconciliation creates native projection
   // directories. A projected path is evidence of projection only; it must never
   // bootstrap itself into a claim that the corresponding client is installed.
-  const detectedAgentNames = await detectInstalledAgentNames(aiosPath, homePath, options, env);
-  if (!options.dryRun) {
+  const registry = await loadAgentRegistry(aiosPath);
+  const detectedAgentNames = await detectInstalledAgentNames(homePath, options, env, registry);
+  const skillTargetPlan = planSkillTargets({
+    registry,
+    detectedAgentNames,
+    all: options.all
+  });
+  if (
+    !options.dryRun
+    && skillTargetPlan.targets.some(({ dir }) => dir === ".claude/skills")
+  ) {
     await fs.mkdir(resolveClaudeConfigRoot(homePath, { env }), { recursive: true });
   }
 
@@ -166,7 +176,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
   try {
     ({ skillsIndex, skillsCatalog } = options.dryRun
       ? await previewSkillsIndex(aiosPath)
-      : await reconcileGlobalSkillStore(aiosPath, homePath, { env }));
+      : await reconcileGlobalSkillStore(aiosPath, homePath, { env, skillTargetPlan }));
   } catch (error) {
     skillStoreFailure = error;
     ({ skillsIndex, skillsCatalog } = await previewSkillsIndex(aiosPath));
@@ -194,7 +204,9 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
     skillsCatalog,
     lifecycle,
     detectedAgentNames,
-    env
+    env,
+    registry,
+    skillTargetPlan
   );
   const results = [...global.results];
   const projectBlockedBridges = [];
@@ -212,7 +224,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
     }
   }
 
-  if (!quiet) printResults("DotAIOS activated", results);
+  if (!quiet) printResults(options.dryRun ? "Activation preview" : "DotAIOS activated", results);
   const refreshAction = options.dryRun ? "would refresh" : "refreshed";
   if (!quiet) console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} workflow(s) indexed)`);
   if (!quiet && skillsIndex.unresolvedProjections?.length > 0) {
@@ -282,8 +294,17 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
   };
 }
 
-async function reconcileGlobalSkillStore(aiosPath, homePath, { env = process.env } = {}) {
-  const store = createManagedSkillStore({ aiosPath, homePath, env });
+async function reconcileGlobalSkillStore(
+  aiosPath,
+  homePath,
+  { env = process.env, skillTargetPlan = null } = {}
+) {
+  const store = createManagedSkillStore({
+    aiosPath,
+    homePath,
+    env,
+    projectionTargetPlan: skillTargetPlan
+  });
   const proof = await store.reconcile();
   const applied = await store.reconcile({
     apply: true,
@@ -322,7 +343,7 @@ export async function attachCommand(args) {
   await ensureAiosFolder(aiosPath);
 
   const results = await createProjectBridges(aiosPath, projectPath, options);
-  printResults("DotAIOS attached", results);
+  printResults(options.dryRun ? "Attachment preview" : "DotAIOS attached", results);
   if (!isConfiguredBridgeAction(results[0]?.action)) {
     process.exitCode = 1;
     console.error("Attach needs attention: the project bridge was preserved because it could not be safely configured.");
@@ -426,9 +447,10 @@ async function createGlobalBridges(
   skillsCatalog,
   lifecycle = {},
   detectedAgentNames = new Set(),
-  env = process.env
+  env = process.env,
+  registry = [],
+  skillTargetPlan = null
 ) {
-  const registry = await loadAgentRegistry(aiosPath);
   // Capture once per activation rather than resolving a package command in
   // every future session. Every bridge receives the same executable + argv
   // prefix and can invoke the admitted installation without a shell lookup.
@@ -498,7 +520,8 @@ async function createGlobalBridges(
     options,
     registry,
     lifecycle,
-    env
+    env,
+    skillTargetPlan
   );
   return {
     results: [...results, ...skills],
@@ -510,8 +533,7 @@ async function createGlobalBridges(
   };
 }
 
-async function detectInstalledAgentNames(aiosPath, homePath, options, env = process.env) {
-  const registry = await loadAgentRegistry(aiosPath);
+async function detectInstalledAgentNames(homePath, options, env = process.env, registry = []) {
   const detected = new Set();
   for (const agent of registry) {
     if (options.all || await isAgentInstalled(homePath, agent, { env })) {
@@ -560,7 +582,8 @@ async function installAllSkills(
   options,
   registry,
   lifecycle = {},
-  env = process.env
+  env = process.env,
+  skillTargetPlan = null
 ) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
@@ -577,13 +600,8 @@ async function installAllSkills(
       }));
     }
   }
-  // Every symlink target, not just the detected ones: the real activation
-  // reconciles all of them through ManagedSkillStore, so narrowing the preview
-  // here made --dry-run promise less than the run writes.
-  for (const target of symlinkTargets(registry)) {
-    const targetDir = target.dir.replaceAll("\\", "/") === ".claude/skills"
-      ? path.join(resolveClaudeConfigRoot(homePath, { env }), "skills")
-      : path.join(homePath, target.dir);
+  for (const target of skillTargetPlan.targets) {
+    const targetDir = resolveSkillTargetPath(homePath, target.dir, { env });
     // A real activation has already reconciled canonical projections through
     // ManagedSkillStore. Keep the legacy installer only for zero-write preview;
     // the remaining passes own alias/stale cleanup rather than publication.
