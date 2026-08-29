@@ -31,7 +31,7 @@ The agent should then run the preview below. If you are recovering
 manually, run it yourself:
 
 ```sh
-npx dotaios@2.0.11 setup --dry-run
+npx dotaios@2.0.12 setup --dry-run
 ```
 
 npm may ask to download the current package. The DotAIOS preview itself does not
@@ -48,7 +48,7 @@ section, one at a time in the conversation, then pipe the answers straight
 into setup so no answers file is left behind:
 
 ```sh
-npx dotaios@2.0.11 setup --answers - <<'JSON'
+npx dotaios@2.0.12 setup --answers - <<'JSON'
 {
   "name": "...",
   "role": "...",
@@ -61,7 +61,7 @@ If you are recovering manually, run it yourself and answer the short
 questions at the terminal prompt:
 
 ```sh
-npx dotaios@2.0.11 setup
+npx dotaios@2.0.12 setup
 ```
 
 Existing unmanaged files are preserved. Private sync, daily scheduling,
@@ -71,8 +71,8 @@ default to No.
 ## 3. Verify
 
 ```sh
-npx dotaios@2.0.11 doctor
-npx dotaios@2.0.11 skills doctor
+npx dotaios@2.0.12 doctor
+npx dotaios@2.0.12 skills doctor
 ```
 
 Then start a connected local agent from your usual folder or an attached
@@ -99,7 +99,7 @@ managed configuration.
 ## If setup stops
 
 - Existing `~/aios`: do not delete it. Run
-  `npx dotaios@2.0.11 doctor` and inspect the folder.
+  `npx dotaios@2.0.12 doctor` and inspect the folder.
 - Existing AI-tool instructions: DotAIOS preserves them. Read the reported
   collision before deciding whether to change anything.
 - `npx: command not found`: install the Node.js LTS release from
