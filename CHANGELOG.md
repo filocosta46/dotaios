@@ -7,6 +7,7 @@ All notable changes to DotAIOS will be documented in this file.
 ## [2.0.14] - 2026-08-30
 
 ### Added
+
 - Task-first capability routing now resolves curated external project tools
   without exposing provider-specific setup to the person asking for help.
 - Approval-bound project routing discovers an explicitly registered project,
@@ -14,6 +15,7 @@ All notable changes to DotAIOS will be documented in this file.
   to one fresh context rooted at that project.
 
 ### Fixed
+
 - Project routing now fails closed when identity, conventions, approval, or
   client capabilities drift, while preserving compact refusal authority and
   actionable upgrade guidance.
