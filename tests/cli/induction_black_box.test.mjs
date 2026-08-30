@@ -165,8 +165,9 @@ test("the packed product carries one non-founder induction through exact approve
     },
   });
 
+  const approvedAction = "Plan and complete this week's priority.";
   const candidateResolution = JSON.parse(run(process.execPath, [
-    cli, "resolve", "plan my day",
+    cli, "resolve", approvedAction,
     "--supports-conventions", "agents-md",
     "--path", aios, "--home", home,
   ], { cwd: project, env: isolatedEnv }).stdout);
@@ -181,7 +182,7 @@ test("the packed product carries one non-founder induction through exact approve
   assert.match(candidateResolution.next_action.summary, /fresh context/i);
 
   const resolution = JSON.parse(run(process.execPath, [
-    cli, "resolve", "plan my day",
+    cli, "resolve", approvedAction,
     "--project", projectPreview.plan.project.id,
     "--supports-conventions", "agents-md",
     "--approval-binding", candidateResolution.project_route.approval_binding,
