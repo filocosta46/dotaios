@@ -446,6 +446,51 @@ test("EPR-012: final exact revalidation cannot grow the envelope beyond its budg
   assert.equal(result.next_action.summary, "fixed_envelope_exceeds_budget");
 });
 
+test("EPR-012 and EPR-014: final exact revalidation compares the complete public project identity", async (t) => {
+  const {
+    resolveIntentResolution,
+    renderIntentResolution
+  } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  const initialRoute = readyProjectRoute(fixture);
+  const mutations = [
+    ["name", "Replaced client workspace"],
+    ["purpose", "A concurrently replaced purpose."],
+    ["placement", "managed"]
+  ];
+
+  for (const [field, replacement] of mutations) {
+    await t.test(field, async () => {
+      const finalRoute = structuredClone(initialRoute);
+      finalRoute.project[field] = replacement;
+      let routeReads = 0;
+      const result = await resolveIntentResolution({
+        ...fixture,
+        project: "client-work",
+        intent: "plan my day",
+        supportedConventionKinds: ["agents-md"],
+        visibleCharacterBudget: 8000
+      }, {
+        clock: () => new Date("2026-08-29T08:00:00.000Z"),
+        resolveProjectRoute: async () => structuredClone(
+          routeReads++ === 0 ? initialRoute : finalRoute
+        )
+      });
+      const rendered = renderIntentResolution(result);
+
+      assert.equal(routeReads, 2);
+      assert.equal(result.status, "refused");
+      assert.equal(result.location, null);
+      assert.equal(result.project_route.status, "refused");
+      assert.equal(result.project_route.route, null);
+      assert.doesNotMatch(
+        rendered,
+        new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      );
+    });
+  }
+});
+
 test("EPR-012: the compact explicit-tool refusal always fits the 1,024-character minimum", async (t) => {
   const {
     resolveIntentResolution,
@@ -465,6 +510,21 @@ test("EPR-012: the compact explicit-tool refusal always fits the 1,024-character
   assert.equal(result.status, "refused");
   assert.equal(result.location, null);
   assert.ok(rendered.length <= 1024, `${rendered.length} must fit 1024`);
+  assert.deepEqual(result.project_route, {
+    status: "not_evaluated",
+    reason: "tool_selector_precedence",
+    project: null,
+    match: null,
+    routability: null,
+    route: null
+  });
+  assert.deepEqual(result.skill, {
+    status: "not_evaluated",
+    name: null,
+    resource: null,
+    confidence: 0,
+    reason: "project_not_verified"
+  });
   assert.equal(result.budget.limit, 1024);
   assert.equal(result.budget.used, rendered.length);
 });

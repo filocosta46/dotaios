@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { registerProject } from "../../packages/core/src/projects.mjs";
+import { runSkillInvocationProbe } from "../../packages/cli/src/lib/skill-invocation-probe.mjs";
 
 const run = promisify(execFile);
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -25,6 +26,11 @@ test("EPR-005, EPR-013, and EPR-014: two black-box fixtures use one offline read
   await fs.mkdir(homePath, { recursive: true });
   await fs.mkdir(aiosPath, { recursive: true });
   await fs.writeFile(path.join(aiosPath, "aios.json"), "{\"schema_version\":\"1.2.0\"}\n");
+  await fs.mkdir(path.join(aiosPath, "skills", "probe-source"), { recursive: true });
+  await fs.writeFile(
+    path.join(aiosPath, "skills", "probe-source", "SKILL.md"),
+    "---\nname: probe-source\ndescription: Disposable host-probe source.\n---\n"
+  );
 
   const career = await registerFixture({
     aiosPath,
@@ -134,6 +140,50 @@ test("EPR-005, EPR-013, and EPR-014: two black-box fixtures use one offline read
     false
   );
   assert.doesNotMatch(JSON.stringify(gitCalls), /https?:\/\//);
+
+  const probeFixture = await runSkillInvocationProbe({
+    client: "codex",
+    aiosPath,
+    dryRun: true,
+    keep: true
+  });
+  try {
+    const projectRoot = path.join(probeFixture.fixturePath, "project");
+    const repositorySkill = path.join(
+      projectRoot,
+      ".agents",
+      "skills",
+      "dotaios-probe",
+      "SKILL.md"
+    );
+    assert.equal((await fs.lstat(path.join(projectRoot, "AGENTS.md"))).isFile(), true);
+    assert.equal((await fs.stat(repositorySkill)).isFile(), true);
+    const rootFlag = probeFixture.receipt.command.indexOf("-C");
+    assert.equal(probeFixture.receipt.command[rootFlag + 1], projectRoot);
+    assert.equal(probeFixture.receipt.evidence.configured, "yes");
+    assert.equal(probeFixture.receipt.evidence.discoverable, "path-ready");
+  } finally {
+    await fs.rm(probeFixture.fixturePath, { recursive: true, force: true });
+  }
+
+  const liveReceipt = JSON.parse(await fs.readFile(
+    path.join(repoRoot, "docs", "probes", "2026-08-30-codex-project-native-invocation.json"),
+    "utf8"
+  ));
+  assert.equal(liveReceipt.schema, "dotaios.skill-invocation.v1");
+  assert.equal(liveReceipt.client, "Codex");
+  assert.deepEqual(liveReceipt.evidence, {
+    configured: "yes",
+    discoverable: "path-ready",
+    invoked: "yes",
+    produced: "yes"
+  });
+  assert.equal(liveReceipt.targetPath, "<temporary-project>/.agents/skills");
+  assert.equal(liveReceipt.skill.path, "<temporary-project>/skills/dotaios-probe/SKILL.md");
+  assert.equal(liveReceipt.command[liveReceipt.command.indexOf("-C") + 1], "<temporary-project>");
+  assert.equal(liveReceipt.exitCode, 0);
+  assert.match(liveReceipt.limitation, /client said:/);
+  assert.equal(liveReceipt.error, null);
 });
 
 test("EPR-013: shipped router and CLI source contain no fixture identity or capability selector", async () => {

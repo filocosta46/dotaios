@@ -520,13 +520,6 @@ async function loadRegisteredProjects({
     }
     const metadata = parseProjectMetadata(frontmatter, entry.name);
     if (!metadata) continue;
-    if (
-      projectSelector !== null
-      && metadata.id !== projectSelector
-      && metadata.slug !== projectSelector
-    ) {
-      continue;
-    }
     const mapping = await verifyProjectMapping(state.paths?.[metadata.id], filesystem);
     const placement = await classifyProjectPlacement({
       aiosPath,
@@ -546,12 +539,14 @@ async function loadRegisteredProjects({
   const rootOwners = new Map();
   const idOwners = new Map();
   for (const record of records) {
+    if (record.status !== "active") continue;
     idOwners.set(record.id, (idOwners.get(record.id) || 0) + 1);
     if (record.mappingStatus !== "verified" || !record.rootIdentity) continue;
     const key = `${record.rootIdentity.dev}:${record.rootIdentity.ino}`;
     rootOwners.set(key, (rootOwners.get(key) || 0) + 1);
   }
-  return records.map((record) => {
+  const verified = records.map((record) => {
+    if (record.status !== "active") return record;
     const key = record.rootIdentity
       ? `${record.rootIdentity.dev}:${record.rootIdentity.ino}`
       : null;
@@ -565,6 +560,10 @@ async function loadRegisteredProjects({
       rootIdentity: null
     };
   });
+  if (projectSelector === null) return verified;
+  return verified.filter((record) => (
+    record.id === projectSelector || record.slug === projectSelector
+  ));
 }
 
 async function readProjectRouteState(statePath, filesystem) {
@@ -767,8 +766,8 @@ async function inspectLiveRemote(project, { filesystem, runGit }) {
     const remotes = [...new Set(String(rawFetchKeys || "")
       .split(/\r?\n/)
       .map((value) => /^remote\.(.+)\.fetch$/.exec(value.trim())?.[1] || null)
-      .filter((value) => value && value !== "origin" && SAFE_REMOTE_NAME_RE.test(value)))];
-    if (remotes.length !== 1) {
+      .filter((value) => value && value !== "origin"))];
+    if (remotes.length !== 1 || !SAFE_REMOTE_NAME_RE.test(remotes[0])) {
       throw new Error("A unique authoritative local Git remote is required.");
     }
     const fallback = await readLocalFetchRemote(project.projectPath, remotes[0], runGit);

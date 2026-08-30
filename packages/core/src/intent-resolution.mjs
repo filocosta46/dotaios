@@ -329,7 +329,16 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
 
 /** Canonical, human-readable JSON used by the CLI and budget accounting. */
 export function renderIntentResolution(value) {
-  return JSON.stringify(value, null, 2);
+  const readable = JSON.stringify(value, null, 2);
+  if (
+    value?.status === "refused"
+    && value.next_action?.summary === "fixed_envelope_exceeds_budget"
+    && Number.isInteger(value.budget?.limit)
+    && readable.length > value.budget.limit
+  ) {
+    return JSON.stringify(value);
+  }
+  return readable;
 }
 
 async function selectVerifiedProject(options) {
@@ -371,7 +380,10 @@ function sameReadyProjectRoute(left, right) {
     && right?.status === "ready"
     && left.project?.id === right.project?.id
     && left.project?.slug === right.project?.slug
+    && left.project?.name === right.project?.name
+    && left.project?.purpose === right.project?.purpose
     && left.project?.repository === right.project?.repository
+    && left.project?.placement === right.project?.placement
     && left.route?.location === right.route?.location
     && JSON.stringify(left.route?.conventions) === JSON.stringify(right.route?.conventions);
 }
@@ -426,7 +438,6 @@ function budgetedRefusal({
     envelope.recovery.action = null;
     envelope.next_action.summary = "fixed_envelope_exceeds_budget";
     envelope.omissions = ["all_variable_content"];
-    delete envelope.skill.reason;
     envelope.project_route = {
       status: "refused",
       reason: "fixed_envelope_exceeds_budget",

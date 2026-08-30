@@ -580,6 +580,35 @@ test("EPR-001: live remote authority is local-only and requires a local fetch re
   assert.equal(localFetchAuthority.project.slug, "local-authority");
 });
 
+test("EPR-001: an invalidly named second local fetch remote refuses fallback authority", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "invalid-fetch-name",
+    purpose: "Prepare the unique invalid fetch-name audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const registeredRemote = "https://github.com/customer/invalid-fetch-name.git";
+  await run("git", ["-C", fixture.projectPath, "remote", "remove", "origin"]);
+  await run("git", ["-C", fixture.projectPath, "remote", "add", "upstream", registeredRemote]);
+  await run("git", [
+    "-C", fixture.projectPath, "config", "--local",
+    "remote.bad/name.url", "https://github.com/customer/bad-name.git"
+  ]);
+  await run("git", [
+    "-C", fixture.projectPath, "config", "--local",
+    "remote.bad/name.fetch", "+refs/heads/*:refs/remotes/bad-name/*"
+  ]);
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the unique invalid fetch-name audit."
+  });
+
+  assert.equal(result.status, "no_match");
+  assert.equal(result.route, null);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.projectPath));
+});
+
 test("EPR-015: the generic support declaration accepts CLAUDE.md without changing core", async (t) => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const fixture = await createRegisteredFixture(t, {
@@ -907,6 +936,54 @@ test("EPR-001: two forged IDs mapped to one root are ineligible for routing", as
     intent: "Prepare the uniquely forged mapping audit."
   });
   assert.equal(result.status, "no_match");
+  assert.equal(result.route, null);
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.projectPath));
+
+  for (const projectSelector of [forgedSlug, "project-forged-root-001"]) {
+    const exact = await resolveProjectRoute({
+      ...fixture.options,
+      intent: "Prepare the uniquely forged mapping audit.",
+      projectSelector,
+      supportedConventionKinds: ["agents-md"]
+    });
+    assert.equal(exact.status, "refused", projectSelector);
+    assert.equal(exact.reason, "project_identity_unverified", projectSelector);
+    assert.equal(exact.route, null, projectSelector);
+    assert.doesNotMatch(JSON.stringify(exact), new RegExp(fixture.projectPath));
+  }
+});
+
+test("EPR-001 and EPR-004: exact slug selection retains global duplicate-ID conflict detection", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "duplicate-id-owner",
+    purpose: "Prepare the unique duplicate-ID ownership audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const shadowSlug = "duplicate-id-shadow";
+  const shadowDirectory = path.join(fixture.aiosPath, "projects", shadowSlug);
+  await fs.mkdir(shadowDirectory, { recursive: true });
+  await fs.writeFile(path.join(shadowDirectory, "README.md"), [
+    "---",
+    "id: project-duplicate-id-owner-001",
+    `project: ${shadowSlug}`,
+    "name: Duplicate ID shadow",
+    "description: Prepare a shadow registration record.",
+    "status: active",
+    "repo_url: https://github.com/customer/duplicate-id-owner.git",
+    "---",
+    "SHADOW_README_BODY_CANARY"
+  ].join("\n"));
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the unique duplicate-ID ownership audit.",
+    projectSelector: "duplicate-id-owner",
+    supportedConventionKinds: ["agents-md"]
+  });
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.reason, "project_identity_unverified");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.projectPath));
 });
