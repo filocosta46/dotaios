@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { isHtmlComment, renderTemplate, templateOutputPath } from "../../packages/core/src/render.mjs";
@@ -51,6 +52,16 @@ test("renderTemplate strips HTML comment in direct {{key}} substitution", () => 
     user_name: "<!-- Your Name -->"
   });
   assert.equal(rendered, "name: ");
+});
+
+test("renderTemplate handles malformed repeated condition openers in linear time", () => {
+  const template = "{{#if user_name}}" + "{{#if user_name}}a".repeat(30_000);
+  const startedAt = performance.now();
+
+  const rendered = renderTemplate(template, { user_name: "Avery" });
+
+  assert.equal(rendered, template);
+  assert.ok(performance.now() - startedAt < 250, "malformed local templates must not cause backtracking stalls");
 });
 
 test("isHtmlComment identifies HTML comment strings", () => {

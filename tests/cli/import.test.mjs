@@ -163,7 +163,7 @@ test("a second apply of changed content replaces the block and preserves the pre
       beforeEdit,
       "the backup is the pre-edit file, byte for byte"
     );
-    assert.match(logs, new RegExp(`preserved at ${backups[0].replace(/\./g, "\\.")}`), "the command names the backup it kept");
+    assert.match(logs, new RegExp(`preserved at ${backups[0].replaceAll(".", "\\.")}`), "the command names the backup it kept");
   } finally {
     await fs.rm(root, { recursive: true, force: true });
   }

@@ -166,6 +166,14 @@ test("renderResolver builds a trigger->skill table and falls back to description
   assert.match(md, /Weekly health check\./); // description fallback for a no-trigger skill
 });
 
+test("renderResolver keeps a backslash before a pipe inside one markdown table cell", () => {
+  const md = renderResolver([
+    { dir: "audit", name: "audit", description: "Weekly health check.", triggers: ["review \\| audit"] }
+  ]);
+
+  assert.ok(md.includes(`review ${"\\".repeat(3)}| audit`));
+});
+
 test("renderResolver handles an empty skill set", () => {
   assert.match(renderResolver([]), /No skills installed yet/);
 });
