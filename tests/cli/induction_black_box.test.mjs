@@ -10,7 +10,7 @@ import assert from "node:assert/strict";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const packageAdmission = path.join(repoRoot, "scripts", "onboarding-release-acceptance.mjs");
 
-test("the packed product carries one non-founder induction from preview to approved-action boundary", { timeout: 180_000 }, (t) => {
+test("the packed product carries one non-founder induction through exact approved-action routing", { timeout: 180_000 }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-induction-black-box-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const artifactDir = path.join(root, "artifact");
@@ -23,6 +23,10 @@ test("the packed product carries one non-founder induction from preview to appro
   fs.mkdirSync(processHome, { recursive: true });
   fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
   fs.mkdirSync(project, { recursive: true });
+  run("git", ["-C", project, "init", "--initial-branch=main"], { cwd: root });
+  run("git", ["-C", project, "remote", "add", "origin", "https://github.com/customer/friend-work.git"], {
+    cwd: root,
+  });
   const workFile = path.join(project, "next-steps.md");
   fs.writeFileSync(workFile, [
     "# Next steps",
@@ -156,17 +160,35 @@ test("the packed product carries one non-founder induction from preview to appro
     },
   });
 
-  const resolution = JSON.parse(run(process.execPath, [
+  const candidateResolution = JSON.parse(run(process.execPath, [
     cli, "resolve", "plan my day", "--path", aios, "--home", home,
+  ], { cwd: project, env: isolatedEnv }).stdout);
+  assert.equal(candidateResolution.status, "partial");
+  assert.equal(candidateResolution.project, null);
+  assert.equal(candidateResolution.project_route.status, "candidate");
+  assert.equal(candidateResolution.project_route.project.id, projectPreview.plan.project.id);
+  assert.equal(candidateResolution.location, null);
+  assert.equal(candidateResolution.next_action.approval, "direct_user_required");
+  assert.match(candidateResolution.next_action.summary, /immediately.*exact resolution/i);
+  assert.match(candidateResolution.next_action.summary, /fresh context/i);
+
+  const resolution = JSON.parse(run(process.execPath, [
+    cli, "resolve", "plan my day",
+    "--project", projectPreview.plan.project.id,
+    "--supports-conventions", "agents-md,repository-skill",
+    "--path", aios, "--home", home,
   ], { cwd: project, env: isolatedEnv }).stdout);
   assert.equal(resolution.schema, "dotaios.intent-resolution/v1");
   assert.equal(resolution.project.id, projectPreview.plan.project.id);
   assert.equal(resolution.project.purpose, "Plan and complete this week's priority");
+  assert.equal(resolution.project_route.status, "ready");
   assert.equal(resolution.memory.receipt, "Memory: This project");
   assert.equal(fs.realpathSync(resolution.location), fs.realpathSync(project));
   assert.equal(resolution.next_action.state, "approval_required");
   assert.equal(resolution.next_action.approval, "direct_user_required");
-  assert.match(resolution.next_action.summary, /approve before acting/i);
+  assert.match(resolution.next_action.summary, /after direct approval/i);
+  assert.match(resolution.next_action.summary, /immediately exact-resolve/i);
+  assert.match(resolution.next_action.summary, /fresh context/i);
   assert.equal(sha256(fs.readFileSync(workFile)), workBefore, "resolution must not perform the proposed action");
 });
 
