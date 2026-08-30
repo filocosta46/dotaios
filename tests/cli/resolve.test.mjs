@@ -122,13 +122,22 @@ test("dotaios resolve uses one unique cwd attachment without widening to Shared"
 
 test("dotaios resolve accepts one host-neutral convention support declaration", async (t) => {
   const { resolveCommand } = await import("../../packages/cli/src/commands/resolve.mjs");
+  const { PROJECT_NATIVE_CONVENTION_KINDS } = await import(
+    "../../packages/core/src/project-native-routing.mjs"
+  );
   const fixture = await makeFixture(t);
   const captured = captureOutput();
+
+  assert.deepEqual(PROJECT_NATIVE_CONVENTION_KINDS, [
+    "agents-md",
+    "claude-md",
+    "repository-skill"
+  ]);
 
   const result = await resolveCommand([
     "Ship one approved customer action.",
     "--project", "primary",
-    "--supports-conventions", "agents-md,repository-skill",
+    "--supports-conventions", PROJECT_NATIVE_CONVENTION_KINDS.join(","),
     "--path", fixture.aiosPath,
     "--home", fixture.homePath
   ], {

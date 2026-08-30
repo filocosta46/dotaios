@@ -44,7 +44,7 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
   const result = await resolveProjectRoute({
     intent: "Prepare and track this product launch."
   }, {
-    loadRegisteredProjects: async () => projects,
+    readProjectRegistrations: async () => projects,
     inspectLiveRemote: async (project) => {
       inspections.push(["git", project.slug]);
       return project.repository;
@@ -67,7 +67,7 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
     },
     match: {
       kind: "purpose_overlap",
-      confidence: 1,
+      confidence: 0.75,
       fields: ["purpose"]
     },
     routability: {
@@ -101,7 +101,7 @@ test("EPR-003: ordinary intent can match the registered slug when the remote bas
   const result = await resolveProjectRoute({
     intent: "Please work in acme-tax"
   }, {
-    loadRegisteredProjects: async () => [project],
+    readProjectRegistrations: async () => [project],
     inspectLiveRemote: async () => project.repository,
     inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "191")]
   });
@@ -112,6 +112,34 @@ test("EPR-003: ordinary intent can match the registered slug when the remote bas
     kind: "slug_overlap",
     confidence: 1,
     fields: ["slug"]
+  });
+});
+
+test("EPR-004: one weak lexical overlap does not become a confident project match", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-tax-records-001",
+    slug: "annual-compliance",
+    name: "Quarterly filing workspace",
+    purpose: "Prepare annual tax compliance records and archive supporting customer documents.",
+    repository: "https://github.com/customer/ledger-worktree"
+  });
+
+  const result = await resolveProjectRoute({
+    intent: "Please tax"
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "192")]
+  });
+
+  assert.deepEqual(result, {
+    status: "no_match",
+    project: null,
+    match: null,
+    routability: null,
+    route: null,
+    reason: "no_registered_project_match"
   });
 });
 
@@ -138,7 +166,7 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID returns a freshly revalidat
     projectSelector: "project-launch-001",
     supportedConventionKinds: ["agents-md", "repository-skill"]
   }, {
-    loadRegisteredProjects: async () => {
+    readProjectRegistrations: async () => {
       catalogReads += 1;
       return [{ ...project, rootIdentity: { ...project.rootIdentity } }];
     },
@@ -212,7 +240,7 @@ test("EPR-015: a host refuses a project whose only convention it does not suppor
     projectSelector: "research-work",
     supportedConventionKinds: ["agents-md", "repository-skill"]
   }, {
-    loadRegisteredProjects: async () => [project],
+    readProjectRegistrations: async () => [project],
     inspectLiveRemote: async () => project.repository,
     inspectConventionInventory: async () => [convention("claude-md", "CLAUDE.md", "401")]
   });
@@ -246,7 +274,7 @@ test("EPR-004: colliding display-name matches are ambiguous and disclose handles
   const result = await resolveProjectRoute({
     intent: "Use Customer operations to coordinate this account."
   }, {
-    loadRegisteredProjects: async () => projects,
+    readProjectRegistrations: async () => projects,
     inspectLiveRemote: async (project) => project.repository,
     inspectConventionInventory: async (project) => [convention("agents-md", "AGENTS.md", project.id)]
   });
@@ -289,7 +317,7 @@ test("EPR-004: one eligible project containing cwd wins before lexical matching"
     intent: "Do the next approved task.",
     cwd: "/customer/projects/alpha-ops/nested"
   }, {
-    loadRegisteredProjects: async () => projects,
+    readProjectRegistrations: async () => projects,
     inspectLiveRemote: async (project) => project.repository,
     inspectConventionInventory: async (project) => [convention("agents-md", "AGENTS.md", project.id)],
     isPathWithin: async (root, candidate) => candidate.startsWith(`${root}/`)
@@ -305,27 +333,46 @@ test("EPR-004: one eligible project containing cwd wins before lexical matching"
   assert.equal(result.route, null);
 });
 
-test("EPR-014: implicit discovery refuses the 33rd active project before live inspection", async () => {
+test("EPR-014: implicit discovery refuses the 33rd active project before local mapping inspection", async (t) => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
-  const projects = Array.from({ length: 33 }, (_, index) => projectRecord({
-    id: `project-bounded-${String(index).padStart(3, "0")}`,
-    slug: `bounded-${index}`,
-    name: `Bounded ${index}`,
-    purpose: `Handle bounded workflow ${index}.`,
-    repository: `https://github.com/customer/bounded-${index}`
-  }));
-  let inspections = 0;
-
-  const result = await resolveProjectRoute({ intent: "Handle bounded workflow 1." }, {
-    loadRegisteredProjects: async () => projects,
-    inspectLiveRemote: async () => {
-      inspections += 1;
-      throw new Error("the discovery bound must win before Git inspection");
-    },
-    inspectConventionInventory: async () => {
-      inspections += 1;
-      throw new Error("the discovery bound must win before convention inspection");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-active-route-bound-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const homePath = path.join(root, "home");
+  const aiosPath = path.join(root, "aios");
+  const projectsPath = path.join(aiosPath, "projects");
+  const stateRoot = path.join(homePath, ".dotaios");
+  await fs.mkdir(homePath, { recursive: true });
+  await fs.mkdir(projectsPath, { recursive: true });
+  for (let index = 0; index < 33; index += 1) {
+    const slug = `bounded-${String(index).padStart(2, "0")}`;
+    const projectDirectory = path.join(projectsPath, slug);
+    await fs.mkdir(projectDirectory);
+    await fs.writeFile(path.join(projectDirectory, "README.md"), [
+      "---",
+      `id: project-${slug}-001`,
+      `project: ${slug}`,
+      `name: Bounded ${index}`,
+      `description: Handle bounded workflow ${index}.`,
+      "status: active",
+      `repo_url: https://github.com/customer/${slug}.git`,
+      "---",
+      "README_BODY_MUST_STAY_UNREAD"
+    ].join("\n"));
+  }
+  let stateInspections = 0;
+  const filesystem = {
+    ...fs,
+    lstat: async (target, ...args) => {
+      if (path.resolve(String(target)).startsWith(stateRoot)) stateInspections += 1;
+      return fs.lstat(target, ...args);
     }
+  };
+
+  const result = await resolveProjectRoute({
+    aiosPath,
+    homePath,
+    filesystem,
+    intent: "Handle bounded workflow 1."
   });
 
   assert.deepEqual(result, {
@@ -336,7 +383,7 @@ test("EPR-014: implicit discovery refuses the 33rd active project before live in
     route: null,
     reason: "discovery_bound_exceeded"
   });
-  assert.equal(inspections, 0);
+  assert.equal(stateInspections, 0, "the active bound must win before machine-local state inspection");
 });
 
 test("EPR-014: implicit discovery permits at most eight concurrent live-Git observations", async () => {
@@ -352,7 +399,7 @@ test("EPR-014: implicit discovery permits at most eight concurrent live-Git obse
   let maximumGit = 0;
 
   const result = await resolveProjectRoute({ intent: "Prepare the unique launch dossier." }, {
-    loadRegisteredProjects: async () => projects,
+    readProjectRegistrations: async () => projects,
     inspectLiveRemote: async (project) => {
       activeGit += 1;
       maximumGit = Math.max(maximumGit, activeGit);
@@ -391,7 +438,7 @@ test("EPR-004: a slug colliding with another stable ID refuses exact routing as 
     projectSelector: "shared-handle",
     supportedConventionKinds: ["agents-md"]
   }, {
-    loadRegisteredProjects: async () => [alpha, beta],
+    readProjectRegistrations: async () => [alpha, beta],
     inspectLiveRemote: async () => {
       inspections += 1;
       throw new Error("ambiguous handles must not reach Git inspection");
@@ -701,7 +748,7 @@ test("EPR-015: invalid or invented universal convention support refuses before i
     projectSelector: "launch-work",
     supportedConventionKinds: ["all-agents"]
   }, {
-    loadRegisteredProjects: async () => {
+    readProjectRegistrations: async () => {
       reads += 1;
       return [];
     }
@@ -729,7 +776,7 @@ test("EPR-014: exact final root, remote, or convention replacement refuses witho
       projectSelector: "race-work",
       supportedConventionKinds: ["agents-md"]
     }, {
-      loadRegisteredProjects: async () => [{
+      readProjectRegistrations: async () => [{
         ...base,
         rootIdentity: { ...base.rootIdentity, ino: reads++ === 0 ? base.id : "replaced" }
       }],
@@ -746,7 +793,7 @@ test("EPR-014: exact final root, remote, or convention replacement refuses witho
       projectSelector: "race-work",
       supportedConventionKinds: ["agents-md"]
     }, {
-      loadRegisteredProjects: async () => [{ ...base, rootIdentity: { ...base.rootIdentity } }],
+      readProjectRegistrations: async () => [{ ...base, rootIdentity: { ...base.rootIdentity } }],
       inspectLiveRemote: async () => reads++ === 0
         ? base.repository
         : "https://github.com/customer/replaced",
@@ -762,7 +809,7 @@ test("EPR-014: exact final root, remote, or convention replacement refuses witho
       projectSelector: "race-work",
       supportedConventionKinds: ["agents-md"]
     }, {
-      loadRegisteredProjects: async () => [{ ...base, rootIdentity: { ...base.rootIdentity } }],
+      readProjectRegistrations: async () => [{ ...base, rootIdentity: { ...base.rootIdentity } }],
       inspectLiveRemote: async () => base.repository,
       inspectConventionInventory: async () => [
         convention("agents-md", "AGENTS.md", reads++ === 0 ? "501" : "replaced")
@@ -789,7 +836,7 @@ test("EPR-002: an adapter cannot claim a linked, invented, or off-contract conve
     projectSelector: "unsafe-convention",
     supportedConventionKinds: ["agents-md"]
   }, {
-    loadRegisteredProjects: async () => [project],
+    readProjectRegistrations: async () => [project],
     inspectLiveRemote: async () => project.repository,
     inspectConventionInventory: async () => [linked]
   });

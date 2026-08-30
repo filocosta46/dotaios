@@ -66,7 +66,7 @@ test("EPR-005, EPR-013, and EPR-014: two black-box fixtures use one offline read
   const before = await snapshotTrees([aiosPath, homePath, careerPath, reachPath]);
 
   const implicit = await runCli([
-    "Evaluate this job opportunity without applying.",
+    "Evaluate and track job opportunities.",
     "--path", aiosPath,
     "--home", homePath
   ], { preloadPath, environment: guardedEnvironment });

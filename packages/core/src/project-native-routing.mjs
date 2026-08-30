@@ -3,33 +3,31 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { parseDocument } from "yaml";
 
 import {
   inspectContainedPathEntry,
-  readContainedDirectory,
-  readContainedFile
+  readContainedDirectory
 } from "./contained-read.mjs";
 import {
-  classifyProjectPlacement,
   classifyProjectRemote,
   projectRemotesMatch
 } from "./project-workspaces.mjs";
+import {
+  readBoundedProjectRegistrations,
+  validateProjectSelector
+} from "./projects.mjs";
 import { rankSkills } from "./skill-resolver.mjs";
 import { isPathWithin as isContainedPath } from "./paths.mjs";
 
-const MAX_DISCOVERY_PROJECTS = 32;
 const MAX_LIVE_GIT_CONCURRENCY = 8;
-const MAX_PROJECT_CATALOG_ENTRIES = 256;
-const MAX_PROJECT_METADATA_BYTES = 64 * 1024;
-const MAX_PROJECT_FRONTMATTER_BYTES = 16 * 1024;
-const MAX_PROJECT_README_BYTES = 1024 * 1024;
-const MAX_PROJECT_STATE_BYTES = 256 * 1024;
 const MAX_SKILL_CONVENTION_OBSERVATIONS = 64;
-const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
-const SAFE_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const SAFE_REMOTE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/;
-const CONVENTION_KINDS = new Set(["agents-md", "claude-md", "repository-skill"]);
+export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
+  "agents-md",
+  "claude-md",
+  "repository-skill"
+]);
+const CONVENTION_KINDS = new Set(PROJECT_NATIVE_CONVENTION_KINDS);
 const execFileAsync = promisify(execFile);
 
 /** Resolve a registered project route without executing project instructions. */
@@ -41,8 +39,12 @@ export async function resolveProjectRoute({
   ...runtimeOptions
 } = {}, dependencies = {}) {
   if (!validRouteIntent(intent)) return refused("invalid_intent");
-  if (projectSelector !== null && !isSafeHandle(projectSelector)) {
-    return refused("invalid_project_selector");
+  if (projectSelector !== null) {
+    try {
+      validateProjectSelector(projectSelector);
+    } catch {
+      return refused("invalid_project_selector");
+    }
   }
   if (!validSupportedConventionKinds(supportedConventionKinds)) {
     return refused("invalid_host_support");
@@ -53,7 +55,7 @@ export async function resolveProjectRoute({
   };
   let projects;
   try {
-    projects = (await runtime.loadRegisteredProjects({ projectSelector })) || [];
+    projects = (await runtime.readProjectRegistrations({ projectSelector })) || [];
   } catch (error) {
     return refused(isDiscoveryBoundError(error)
       ? "discovery_bound_exceeded"
@@ -68,9 +70,6 @@ export async function resolveProjectRoute({
       projects,
       dependencies: runtime
     });
-  }
-  if (active.length > MAX_DISCOVERY_PROJECTS) {
-    return refused("discovery_bound_exceeded");
   }
   const liveRemoteResults = await mapWithConcurrency(
     active,
@@ -141,9 +140,10 @@ export async function resolveProjectRoute({
   })));
   const winner = ranked[0];
   if (winner && winner.confidence === undefined) {
-    const runnerUp = ranked[1]?.score ?? 0;
-    const total = winner.score + runnerUp;
-    winner.confidence = total > 0 ? winner.score / total : 1;
+    const runnerUp = ranked[1]?.score;
+    winner.confidence = runnerUp === undefined
+      ? Math.min(1, winner.score)
+      : winner.score / (winner.score + runnerUp);
   }
   if (winner && winner.confidence >= 0.67) {
     const selected = routable.find(({ project }) => project.slug === winner.dir);
@@ -220,7 +220,7 @@ async function resolveExactProject({
 
   let currentProjects;
   try {
-    currentProjects = (await dependencies.loadRegisteredProjects({ projectSelector })) || [];
+    currentProjects = (await dependencies.readProjectRegistrations({ projectSelector })) || [];
   } catch (error) {
     return refused(isDiscoveryBoundError(error)
       ? "discovery_bound_exceeded"
@@ -463,186 +463,15 @@ function defaultDependencies(options, overrides) {
   const runGit = overrides.execFileAsync || execFileAsync;
   return {
     filesystem,
-    loadRegisteredProjects: ({ projectSelector }) => loadRegisteredProjects({
+    readProjectRegistrations: ({ projectSelector }) => readBoundedProjectRegistrations({
       aiosPath,
       statePath,
-      filesystem,
+      fs: filesystem,
       projectSelector
     }),
     inspectLiveRemote: (project) => inspectLiveRemote(project, { filesystem, runGit }),
     inspectConventionInventory: (project) => inspectConventionInventory(project, { filesystem })
   };
-}
-
-async function loadRegisteredProjects({
-  aiosPath,
-  statePath,
-  filesystem,
-  projectSelector = null
-}) {
-  const projectsPath = path.join(aiosPath, "projects");
-  const [entries, state] = await Promise.all([
-    readContainedDirectory(aiosPath, projectsPath, {
-      filesystem,
-      maxEntries: MAX_PROJECT_CATALOG_ENTRIES,
-      readdirOptions: { withFileTypes: true },
-      tooManyCode: "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED"
-    }),
-    readProjectRouteState(statePath, filesystem)
-  ]);
-  if (entries === null) return [];
-
-  let metadataBytes = 0;
-  const records = [];
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (!entry.isDirectory() || entry.isSymbolicLink() || !SAFE_SLUG_RE.test(entry.name)) continue;
-    const readmePath = path.join(projectsPath, entry.name, "README.md");
-    let frontmatter;
-    try {
-      frontmatter = await readContainedFile(aiosPath, readmePath, {
-        filesystem,
-        encoding: "utf8",
-        prefixBytes: MAX_PROJECT_FRONTMATTER_BYTES,
-        maxSourceBytes: MAX_PROJECT_README_BYTES,
-        frontmatterOnly: true,
-        stopOnMissingFrontmatter: true,
-        tooLargeCode: "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED"
-      });
-    } catch {
-      continue;
-    }
-    if (frontmatter === null) continue;
-    if (projectSelector === null) {
-      metadataBytes += Buffer.byteLength(frontmatter);
-      if (metadataBytes > MAX_PROJECT_METADATA_BYTES) {
-        throw routeBoundError();
-      }
-    }
-    const metadata = parseProjectMetadata(frontmatter, entry.name);
-    if (!metadata) continue;
-    const mapping = await verifyProjectMapping(state.paths?.[metadata.id], filesystem);
-    const placement = await classifyProjectPlacement({
-      aiosPath,
-      projectPath: mapping.projectPath,
-      slug: metadata.slug,
-      fileSystem: filesystem
-    });
-    records.push({
-      ...metadata,
-      projectPath: mapping.projectPath,
-      mappingStatus: mapping.status,
-      pathAvailable: placement.pathAvailable,
-      placement: placement.placement,
-      rootIdentity: mapping.rootIdentity
-    });
-  }
-  const rootOwners = new Map();
-  const idOwners = new Map();
-  for (const record of records) {
-    if (record.status !== "active") continue;
-    idOwners.set(record.id, (idOwners.get(record.id) || 0) + 1);
-    if (record.mappingStatus !== "verified" || !record.rootIdentity) continue;
-    const key = `${record.rootIdentity.dev}:${record.rootIdentity.ino}`;
-    rootOwners.set(key, (rootOwners.get(key) || 0) + 1);
-  }
-  const verified = records.map((record) => {
-    if (record.status !== "active") return record;
-    const key = record.rootIdentity
-      ? `${record.rootIdentity.dev}:${record.rootIdentity.ino}`
-      : null;
-    if ((!key || rootOwners.get(key) === 1) && idOwners.get(record.id) === 1) return record;
-    return {
-      ...record,
-      projectPath: null,
-      mappingStatus: "conflict",
-      pathAvailable: false,
-      placement: "unsafe",
-      rootIdentity: null
-    };
-  });
-  if (projectSelector === null) return verified;
-  return verified.filter((record) => (
-    record.id === projectSelector || record.slug === projectSelector
-  ));
-}
-
-async function readProjectRouteState(statePath, filesystem) {
-  try {
-    const parent = path.dirname(statePath);
-    const parentStats = await filesystem.lstat(parent);
-    if (!parentStats.isDirectory() || parentStats.isSymbolicLink()) return { paths: {} };
-    const content = await readContainedFile(parent, statePath, {
-      filesystem,
-      encoding: "utf8",
-      maxBytes: MAX_PROJECT_STATE_BYTES,
-      tooLargeCode: "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED"
-    });
-    if (content === null) return { paths: {} };
-    const state = JSON.parse(content);
-    if (!state || typeof state !== "object" || Array.isArray(state)) return { paths: {} };
-    if (!state.paths || typeof state.paths !== "object" || Array.isArray(state.paths)) {
-      return { paths: {} };
-    }
-    return { paths: state.paths };
-  } catch (error) {
-    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") return { paths: {} };
-    throw error;
-  }
-}
-
-function parseProjectMetadata(frontmatter, directorySlug) {
-  const match = FRONTMATTER_RE.exec(frontmatter);
-  if (!match) return null;
-  const document = parseDocument(match[1], { strict: true, uniqueKeys: true });
-  if (document.errors.length > 0) return null;
-  const metadata = document.toJS();
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
-  const primaryId = boundedMetadataString(metadata.id, 200);
-  const legacyId = boundedMetadataString(metadata.project_id, 200);
-  if (primaryId && legacyId && primaryId !== legacyId) return null;
-  const id = primaryId || legacyId;
-  const declaredSlug = boundedMetadataString(metadata.project ?? metadata.slug, 200);
-  const name = boundedMetadataString(metadata.name, 200);
-  const purpose = boundedMetadataString(metadata.description, 1000);
-  const status = boundedMetadataString(metadata.status, 32) || "unknown";
-  const remote = classifyProjectRemote(
-    boundedMetadataString(metadata.repo_url ?? metadata.repo, 2048)
-  );
-  if (
-    !id
-    || !isSafeHandle(id)
-    || declaredSlug !== directorySlug
-    || !name
-    || !purpose
-    || !remote.safe
-  ) {
-    return null;
-  }
-  return {
-    id,
-    slug: directorySlug,
-    name,
-    purpose,
-    repository: remote.canonicalUrl,
-    status
-  };
-}
-
-function boundedMetadataString(value, maxCodePoints) {
-  if (typeof value !== "string" || value.trim() !== value || value.length === 0) return null;
-  if (Array.from(value).length > maxCodePoints || /[\p{Cc}\uD800-\uDFFF]/u.test(value)) return null;
-  return value;
-}
-
-function isSafeHandle(value) {
-  return typeof value === "string"
-    && value.length <= 200
-    && value.trim() === value
-    && !path.isAbsolute(value)
-    && value !== "."
-    && value !== ".."
-    && !/[\/\\]/.test(value)
-    && /^[\p{L}\p{N}](?:[\p{L}\p{N}:._-]*[\p{L}\p{N}])?$/u.test(value);
 }
 
 function validRouteIntent(value) {
@@ -725,32 +554,6 @@ function routeConventionError(code) {
   const error = new Error("Project convention inventory is invalid.");
   error.code = code;
   return error;
-}
-
-async function verifyProjectMapping(value, filesystem) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { status: "unmapped", projectPath: null, rootIdentity: null };
-  }
-  const projectPath = value.path;
-  const expected = value.root_identity;
-  if (
-    typeof projectPath !== "string"
-    || !path.isAbsolute(projectPath)
-    || expected?.type !== "directory"
-    || !/^\d+$/.test(expected.dev || "")
-    || !/^\d+$/.test(expected.ino || "")
-  ) {
-    return { status: "invalid", projectPath: null, rootIdentity: null };
-  }
-  try {
-    const observed = await observeProjectRoot({ projectPath, rootIdentity: expected }, filesystem, false);
-    if (!sameRootIdentity(expected, observed)) {
-      return { status: "changed", projectPath: null, rootIdentity: null };
-    }
-    return { status: "verified", projectPath, rootIdentity: observed };
-  } catch {
-    return { status: "unavailable", projectPath: null, rootIdentity: null };
-  }
 }
 
 async function inspectLiveRemote(project, { filesystem, runGit }) {
@@ -928,10 +731,4 @@ function sameRootIdentity(left, right) {
     && right?.type === "directory"
     && left.dev === right.dev
     && left.ino === right.ino;
-}
-
-function routeBoundError() {
-  const error = new Error("Project route discovery bound exceeded.");
-  error.code = "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED";
-  return error;
 }

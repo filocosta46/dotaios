@@ -184,11 +184,11 @@ test("the packed product carries one non-founder induction through exact approve
   assert.equal(resolution.project_route.status, "ready");
   assert.equal(resolution.memory.receipt, "Memory: This project");
   assert.equal(fs.realpathSync(resolution.location), fs.realpathSync(project));
-  assert.equal(resolution.next_action.state, "approval_required");
-  assert.equal(resolution.next_action.approval, "direct_user_required");
-  assert.match(resolution.next_action.summary, /after direct approval/i);
-  assert.match(resolution.next_action.summary, /immediately exact-resolve/i);
-  assert.match(resolution.next_action.summary, /fresh context/i);
+  assert.deepEqual(resolution.next_action, {
+    state: "fresh_context_required",
+    approval: "not_applicable",
+    summary: "Start a fresh context rooted at the verified project for the approved action; changing directory in this run is insufficient."
+  });
   assert.equal(sha256(fs.readFileSync(workFile)), workBefore, "resolution must not perform the proposed action");
 });
 

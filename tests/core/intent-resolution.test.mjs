@@ -194,6 +194,11 @@ test("EPR-012 and EPR-015: exact native route survives an AIOS skill no-match", 
   assert.equal(Object.hasOwn(result, "tool"), false);
   assert.equal(result.location, fixture.projectPath);
   assert.equal(result.status, "partial");
+  assert.deepEqual(result.next_action, {
+    state: "fresh_context_required",
+    approval: "not_applicable",
+    summary: "Start a fresh context rooted at the verified project for the approved action; changing directory in this run is insufficient."
+  });
 });
 
 test("skill and tool no-match remain explicit without suppressing the verified primary location", async (t) => {

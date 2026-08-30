@@ -5,6 +5,10 @@ import { execFile } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { parseDocument } from "yaml";
+import {
+  readContainedDirectory,
+  readContainedFile
+} from "./contained-read.mjs";
 import { isPathWithin } from "./paths.mjs";
 import { schemaVersion } from "./schema.mjs";
 import { processBirthToken, processRecordIsAlive } from "./process-identity.mjs";
@@ -28,6 +32,12 @@ const PROJECT_STATE_VERSION = 1;
 const PROJECT_STATE_LOCK_FORMAT = "dotaios-project-state-lock/v1";
 const PROJECT_STATE_LOCK_STALE_MS = 5 * 60 * 1000;
 const PROJECT_DOMAINS = new Set(["build", "make", "sell"]);
+const MAX_PROJECT_ROUTE_ACTIVE_RECORDS = 32;
+const MAX_PROJECT_ROUTE_CATALOG_ENTRIES = 256;
+const MAX_PROJECT_ROUTE_METADATA_BYTES = 64 * 1024;
+const MAX_PROJECT_ROUTE_FRONTMATTER_BYTES = 16 * 1024;
+const MAX_PROJECT_ROUTE_README_BYTES = 1024 * 1024;
+const MAX_PROJECT_ROUTE_STATE_BYTES = 256 * 1024;
 const UNSELECTABLE_PROJECT_IDENTITY_CONTENT_ERRORS = new Set([
   "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
   "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID",
@@ -490,6 +500,177 @@ export async function readProjectCatalog(options = {}) {
   const context = createContext(options);
   const records = await readProjectRecords(context);
   return records.map(toProjectCatalogRecord);
+}
+
+/**
+ * Read the minimal bounded registration projection used by project-native
+ * routing. This is the sole owner of portable metadata and machine-local
+ * mapping verification; external instruction and README bodies stay unread.
+ */
+export async function readBoundedProjectRegistrations(options = {}) {
+  const context = createContext(options);
+  const projectSelector = options.projectSelector === null || options.projectSelector === undefined
+    ? null
+    : validateProjectSelector(options.projectSelector);
+  const records = await readBoundedProjectRouteRecords(context, {
+    enforceImplicitBounds: projectSelector === null
+  });
+  const state = await readProjectState(context, {
+    maxBytes: MAX_PROJECT_ROUTE_STATE_BYTES,
+    tooLargeCode: "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED"
+  });
+  const registrations = await Promise.all(records.map(async (record) => {
+    const mapping = await verifyProjectPathMapping(context, state.paths[record.id]);
+    const placement = await classifyProjectPlacement({
+      aiosPath: context.aiosPath,
+      projectPath: mapping.projectPath,
+      slug: record.slug,
+      fileSystem: context.fs
+    });
+    return {
+      ...record,
+      projectPath: mapping.projectPath,
+      mappingStatus: mapping.status,
+      pathAvailable: placement.pathAvailable,
+      placement: placement.placement,
+      rootIdentity: mapping.rootIdentity
+    };
+  }));
+  const verified = rejectConflictingProjectOwners(registrations);
+  if (projectSelector === null) return verified;
+  return verified.filter((record) => (
+    record.id === projectSelector || record.slug === projectSelector
+  ));
+}
+
+async function readBoundedProjectRouteRecords(context, { enforceImplicitBounds }) {
+  const projectsPath = path.join(context.aiosPath, "projects");
+  const entries = await readContainedDirectory(context.aiosPath, projectsPath, {
+    filesystem: context.fs,
+    maxEntries: MAX_PROJECT_ROUTE_CATALOG_ENTRIES,
+    readdirOptions: { withFileTypes: true },
+    tooManyCode: "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED"
+  });
+  if (entries === null) return [];
+
+  let activeRecords = 0;
+  let metadataBytes = 0;
+  const records = [];
+  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+    try {
+      validateSlug(entry.name);
+    } catch {
+      continue;
+    }
+    const readmePath = path.join(projectsPath, entry.name, "README.md");
+    let frontmatter;
+    try {
+      frontmatter = await readContainedFile(context.aiosPath, readmePath, {
+        filesystem: context.fs,
+        encoding: "utf8",
+        prefixBytes: MAX_PROJECT_ROUTE_FRONTMATTER_BYTES,
+        maxSourceBytes: MAX_PROJECT_ROUTE_README_BYTES,
+        frontmatterOnly: true,
+        stopOnMissingFrontmatter: true,
+        tooLargeCode: "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED"
+      });
+    } catch (error) {
+      if (enforceImplicitBounds && error?.code === "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED") {
+        throw error;
+      }
+      continue;
+    }
+    if (frontmatter === null) continue;
+    if (enforceImplicitBounds) {
+      metadataBytes += Buffer.byteLength(frontmatter);
+      if (metadataBytes > MAX_PROJECT_ROUTE_METADATA_BYTES) throw projectRouteBoundError();
+    }
+    let source;
+    try {
+      source = parseMarkdownSource(frontmatter, readmePath);
+    } catch {
+      continue;
+    }
+    const record = toBoundedProjectRouteRecord(entry.name, readmePath, source.metadata);
+    if (!record) continue;
+    records.push(record);
+    if (enforceImplicitBounds && record.status === "active") {
+      activeRecords += 1;
+      if (activeRecords > MAX_PROJECT_ROUTE_ACTIVE_RECORDS) throw projectRouteBoundError();
+    }
+  }
+  return records;
+}
+
+function toBoundedProjectRouteRecord(directorySlug, readmePath, metadata) {
+  const primaryId = boundedProjectMetadataString(metadata.id, 200);
+  const legacyId = boundedProjectMetadataString(metadata.project_id, 200);
+  if (primaryId && legacyId && primaryId !== legacyId) return null;
+  const id = primaryId || legacyId;
+  const slug = boundedProjectMetadataString(metadata.project ?? metadata.slug, 200);
+  const name = boundedProjectMetadataString(metadata.name, 200);
+  const purpose = boundedProjectMetadataString(metadata.description, 1000);
+  const status = boundedProjectMetadataString(metadata.status, 32) || "unknown";
+  const remote = classifyProjectRemote(
+    boundedProjectMetadataString(metadata.repo_url ?? metadata.repo, 2048)
+  );
+  try {
+    validateProjectSelector(id);
+  } catch {
+    return null;
+  }
+  if (slug !== directorySlug || !name || !purpose || !remote.safe) return null;
+  return {
+    id,
+    slug: directorySlug,
+    name,
+    purpose,
+    repository: remote.canonicalUrl,
+    status,
+    readmePath
+  };
+}
+
+function boundedProjectMetadataString(value, maxCodePoints) {
+  if (typeof value !== "string" || value.length === 0 || value.trim() !== value) return null;
+  if (Array.from(value).length > maxCodePoints || /[\p{Cc}\uD800-\uDFFF]/u.test(value)) return null;
+  return value;
+}
+
+function rejectConflictingProjectOwners(records) {
+  const idOwners = new Map();
+  const rootOwners = new Map();
+  for (const record of records) {
+    if (record.status !== "active") continue;
+    idOwners.set(record.id, (idOwners.get(record.id) || 0) + 1);
+    if (record.mappingStatus !== "verified" || !record.rootIdentity) continue;
+    const rootKey = `${record.rootIdentity.dev}:${record.rootIdentity.ino}`;
+    rootOwners.set(rootKey, (rootOwners.get(rootKey) || 0) + 1);
+  }
+  return records.map((record) => {
+    if (record.status !== "active") return record;
+    const rootKey = record.rootIdentity
+      ? `${record.rootIdentity.dev}:${record.rootIdentity.ino}`
+      : null;
+    if ((!rootKey || rootOwners.get(rootKey) === 1) && idOwners.get(record.id) === 1) {
+      return record;
+    }
+    return {
+      ...record,
+      projectPath: null,
+      mappingStatus: "conflict",
+      pathAvailable: false,
+      placement: "unsafe",
+      rootIdentity: null
+    };
+  });
+}
+
+function projectRouteBoundError() {
+  const error = new Error("Project route discovery bound exceeded.");
+  error.code = "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED";
+  return error;
 }
 
 /** Validate the canonical selector shared by project-scoped CLI and MCP reads. */
@@ -1188,6 +1369,10 @@ async function readMarkdownSource(fileSystem, readmePath) {
     throw error;
   }
 
+  return parseMarkdownSource(content, readmePath);
+}
+
+function parseMarkdownSource(content, readmePath) {
   const match = FRONTMATTER_RE.exec(content);
   if (!match) {
     return { body: content, content, document: parseDocument("\n"), metadata: {} };
@@ -1218,14 +1403,22 @@ function renderProjectReadme(source, metadata) {
   return `---\n${frontmatter}\n---\n${body}`;
 }
 
-async function readProjectState(context) {
+async function readProjectState(context, { maxBytes = null, tooLargeCode = null } = {}) {
   let content;
   try {
-    content = await context.fs.readFile(context.statePath, "utf8");
+    content = maxBytes === null
+      ? await context.fs.readFile(context.statePath, "utf8")
+      : await readContainedFile(path.dirname(context.statePath), context.statePath, {
+          filesystem: context.fs,
+          encoding: "utf8",
+          maxBytes,
+          tooLargeCode
+        });
   } catch (error) {
     if (error.code === "ENOENT") return { version: PROJECT_STATE_VERSION, paths: {} };
     throw error;
   }
+  if (content === null) return { version: PROJECT_STATE_VERSION, paths: {} };
 
   let state;
   try {
@@ -1487,7 +1680,7 @@ async function verifyProjectPathMapping(context, value) {
     if (!sameProjectRootIdentity(observed, identity)) {
       return { status: "changed", projectPath: null };
     }
-    return { status: "verified", projectPath };
+    return { status: "verified", projectPath, rootIdentity: observed };
   } catch {
     return { status: "unavailable", projectPath: null };
   }

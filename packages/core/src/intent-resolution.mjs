@@ -39,113 +39,53 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
   };
   const toolRequested = options.tool !== undefined && options.tool !== null;
   const routeResolver = dependencies.resolveProjectRoute || resolveProjectRoute;
+  const routeRequest = {
+    aiosPath,
+    homePath,
+    statePath: options.statePath,
+    filesystem,
+    intent,
+    cwd: options.cwd || process.cwd(),
+    supportedConventionKinds: options.supportedConventionKinds || []
+  };
   let projectRoute = notEvaluatedProjectRoute();
-  let selectedProjectReference = options.projectSelector ?? options.project;
-
   if (!toolRequested) {
-    try {
-      projectRoute = await routeResolver({
-        aiosPath,
-        homePath,
-        statePath: options.statePath,
-        filesystem,
-        intent,
-        projectSelector: selectedProjectReference ?? null,
-        cwd: options.cwd || process.cwd(),
-        supportedConventionKinds: options.supportedConventionKinds || []
-      });
-    } catch {
-      projectRoute = {
-        status: "refused",
-        project: null,
-        match: null,
-        routability: null,
-        route: null,
-        reason: "project_identity_unverified"
-      };
-    }
-    if (projectRoute.status !== "ready") {
-      return budgetedProjectRoute({
-        limit: visibleCharacterBudget,
-        intent,
-        projectRoute
-      });
-    }
-    selectedProjectReference = projectRoute.project.id;
-  }
-
-  let selected;
-  if (toolRequested) {
-    try {
-      selected = await selectVerifiedProject({
-        ...projectOptions,
-        projectSelector: selectedProjectReference,
-        cwd: options.cwd || process.cwd()
-      });
-    } catch (error) {
-      return budgetedRefusal({
-        limit: visibleCharacterBudget,
-        reason: selectionReason(error),
-        recovery: selectionRecovery(error),
-        projectRoute,
-        includeTool: true
-      });
-    }
-  } else {
-    selected = {
-      id: projectRoute.project.id,
-      slug: projectRoute.project.slug,
-      projectPath: projectRoute.route.location,
-      mappingStatus: "verified",
-      pathAvailable: true,
-      placement: projectRoute.project.placement
-    };
-  }
-
-  let portable;
-  let skills;
-  let configured;
-  try {
-    if (toolRequested) {
-      const [catalog, collectedSkills, connections] = await Promise.all([
-        readProjectCatalog({ aiosPath, fs: filesystem }),
-        collectSkills(aiosPath),
-        inspectConfiguredConnections({ aiosPath, filesystem })
-      ]);
-      const portableMatches = catalog.filter((project) => (
-        project.id === selected.id && project.slug === selected.slug
-      ));
-      if (portableMatches.length !== 1) {
-        return budgetedRefusal({
-          limit: visibleCharacterBudget,
-          reason: "project_catalog_changed",
-          recovery: "Run dotaios project doctor, then retry.",
-          projectRoute,
-          includeTool: true
-        });
-      }
-      [portable] = portableMatches;
-      skills = collectedSkills;
-      configured = connections;
-    } else {
-      skills = await collectSkills(aiosPath);
-      portable = {
-        id: projectRoute.project.id,
-        slug: projectRoute.project.slug,
-        name: projectRoute.project.name,
-        description: projectRoute.project.purpose
-      };
-      configured = null;
-    }
-  } catch {
-    return budgetedRefusal({
-      limit: visibleCharacterBudget,
-      reason: "local_authority_unreadable",
-      recovery: "Run dotaios doctor, then retry.",
-      projectRoute,
-      includeTool: toolRequested
+    projectRoute = await safelyResolveProjectRoute(routeResolver, {
+      ...routeRequest,
+      projectSelector: options.projectSelector ?? options.project ?? null
     });
   }
+  if (!toolRequested && projectRoute.status !== "ready") {
+    return budgetedProjectRoute({ limit: visibleCharacterBudget, intent, projectRoute });
+  }
+  const refuse = (reason, recovery, refusedRoute = projectRoute) => budgetedRefusal({
+    limit: visibleCharacterBudget,
+    reason,
+    recovery,
+    projectRoute: refusedRoute,
+    includeTool: toolRequested
+  });
+  let authority;
+  try {
+    authority = toolRequested
+      ? await prepareToolAuthority({
+          aiosPath,
+          filesystem,
+          projectOptions,
+          projectSelector: options.projectSelector ?? options.project,
+          cwd: routeRequest.cwd
+        })
+      : await prepareNativeAuthority({
+          aiosPath,
+          projectRoute,
+          routeRequest,
+          routeResolver
+        });
+  } catch (error) {
+    return refuse(error?.reason || "local_authority_unreadable", error?.recovery || "Run dotaios doctor, then retry.");
+  }
+
+  const { selected, portable, skills, configured } = authority;
   const matchedSkill = resolveIntent(intent, skills, { skillsDir: "skills" });
   const skill = matchedSkill
     ? {
@@ -202,18 +142,12 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     recovery: { required: false, action: null },
     next_action: toolRequested
       ? nextAction(skill, tool)
-      : nativeRouteNextAction(intent, projectRoute),
+      : nativeRouteNextAction(),
     budget: { limit: visibleCharacterBudget, used: 0, truncated: false },
     location: selected.projectPath
   };
   if (renderWithStableUsed(fixed).length > visibleCharacterBudget) {
-    return budgetedRefusal({
-      limit: visibleCharacterBudget,
-      reason: "fixed_envelope_exceeds_budget",
-      recovery: "Retry with a larger --budget value.",
-      projectRoute,
-      includeTool: toolRequested
-    });
+    return refuse("fixed_envelope_exceeds_budget", "Retry with a larger --budget value.");
   }
 
   let contextBudget = Math.max(0, visibleCharacterBudget - renderWithStableUsed(fixed).length);
@@ -230,13 +164,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
         clock: dependencies.clock
       });
     } catch {
-      return budgetedRefusal({
-        limit: visibleCharacterBudget,
-        reason: "project_context_unreadable",
-        recovery: "Run dotaios doctor, then retry.",
-        projectRoute,
-        includeTool: toolRequested
-      });
+      return refuse("project_context_unreadable", "Run dotaios doctor, then retry.");
     }
     envelope = {
       ...fixed,
@@ -259,72 +187,144 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     contextBudget = Math.max(0, contextBudget - (rendered.length - visibleCharacterBudget) - 8);
   }
   if (renderWithStableUsed(envelope).length > visibleCharacterBudget) {
-    return budgetedRefusal({
-      limit: visibleCharacterBudget,
-      reason: "fixed_envelope_exceeds_budget",
-      recovery: "Retry with a larger --budget value.",
-      projectRoute,
-      includeTool: toolRequested
-    });
+    return refuse("fixed_envelope_exceeds_budget", "Retry with a larger --budget value.");
   }
 
   // Re-check the relevant authority immediately before the sole location
   // disclosure. Native routes revalidate root, remote, and conventions again;
   // explicit tools retain the existing primary-directory check.
   try {
-    if (toolRequested) {
-      const verified = await resolveProjectRecord({ ...projectOptions, project: selected.id });
-      if (
-        verified.id !== selected.id
-        || verified.slug !== selected.slug
-        || verified.projectPath !== selected.projectPath
-        || !projectLocationSafe(verified)
-      ) {
-        throw new Error("project mapping changed");
-      }
-    } else {
-      const finalRoute = await routeResolver({
-        aiosPath,
-        homePath,
-        statePath: options.statePath,
-        filesystem,
-        intent,
-        projectSelector: selected.id,
-        cwd: options.cwd || process.cwd(),
-        supportedConventionKinds: options.supportedConventionKinds || []
-      });
-      if (!sameReadyProjectRoute(projectRoute, finalRoute)) {
-        throw new Error("project native route changed");
-      }
+    const finalRoute = await authority.revalidate();
+    if (finalRoute) {
       projectRoute = finalRoute;
       envelope.project_route = finalRoute;
       envelope.location = finalRoute.route.location;
       if (renderWithStableUsed(envelope).length > visibleCharacterBudget) {
-        return budgetedRefusal({
-          limit: visibleCharacterBudget,
-          reason: "fixed_envelope_exceeds_budget",
-          recovery: "Retry with a larger --budget value.",
-          projectRoute: finalRoute,
-          includeTool: false
-        });
+        return refuse("fixed_envelope_exceeds_budget", "Retry with a larger --budget value.", finalRoute);
       }
     }
   } catch {
-    return budgetedRefusal({
-      limit: visibleCharacterBudget,
-      reason: "project_identity_unverified",
-      recovery: `To re-register it, preview dotaios project add <repo-path> --slug ${selected.slug}, then apply it with the displayed operation id and plan fingerprint.`,
-      projectRoute: {
+    return refuse(
+      "project_identity_unverified",
+      `To re-register it, preview dotaios project add <repo-path> --slug ${selected.slug}, then apply it with the displayed operation id and plan fingerprint.`,
+      {
         ...projectRoute,
         status: "refused",
         route: null,
         reason: "project_identity_unverified"
-      },
-      includeTool: toolRequested
-    });
+      }
+    );
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
+}
+
+async function prepareToolAuthority({
+  aiosPath,
+  filesystem,
+  projectOptions,
+  projectSelector,
+  cwd
+}) {
+  let selected;
+  try {
+    selected = await selectVerifiedProject({ ...projectOptions, projectSelector, cwd });
+  } catch (error) {
+    throw resolutionAuthorityError(selectionReason(error), selectionRecovery(error));
+  }
+  let catalog;
+  let skills;
+  let configured;
+  try {
+    [catalog, skills, configured] = await Promise.all([
+      readProjectCatalog({ aiosPath, fs: filesystem }),
+      collectSkills(aiosPath),
+      inspectConfiguredConnections({ aiosPath, filesystem })
+    ]);
+  } catch {
+    throw resolutionAuthorityError("local_authority_unreadable", "Run dotaios doctor, then retry.");
+  }
+  const matches = catalog.filter((project) => (
+    project.id === selected.id && project.slug === selected.slug
+  ));
+  if (matches.length !== 1) {
+    throw resolutionAuthorityError("project_catalog_changed", "Run dotaios project doctor, then retry.");
+  }
+  return {
+    selected,
+    portable: matches[0],
+    skills,
+    configured,
+    revalidate: () => revalidateSelectedProject(projectOptions, selected)
+  };
+}
+
+async function prepareNativeAuthority({ aiosPath, projectRoute, routeRequest, routeResolver }) {
+  let skills;
+  try {
+    skills = await collectSkills(aiosPath);
+  } catch {
+    throw resolutionAuthorityError("local_authority_unreadable", "Run dotaios doctor, then retry.");
+  }
+  const selected = {
+    id: projectRoute.project.id,
+    slug: projectRoute.project.slug,
+    projectPath: projectRoute.route.location,
+    mappingStatus: "verified",
+    pathAvailable: true,
+    placement: projectRoute.project.placement
+  };
+  return {
+    selected,
+    portable: {
+      id: projectRoute.project.id,
+      slug: projectRoute.project.slug,
+      name: projectRoute.project.name,
+      description: projectRoute.project.purpose
+    },
+    skills,
+    configured: null,
+    revalidate: async () => {
+      const finalRoute = await routeResolver({ ...routeRequest, projectSelector: selected.id });
+      if (!sameReadyProjectRoute(projectRoute, finalRoute)) {
+        throw new Error("project native route changed");
+      }
+      return finalRoute;
+    }
+  };
+}
+
+async function safelyResolveProjectRoute(routeResolver, request) {
+  try {
+    return await routeResolver(request);
+  } catch {
+    return {
+      status: "refused",
+      project: null,
+      match: null,
+      routability: null,
+      route: null,
+      reason: "project_identity_unverified"
+    };
+  }
+}
+
+async function revalidateSelectedProject(projectOptions, selected) {
+  const verified = await resolveProjectRecord({ ...projectOptions, project: selected.id });
+  if (
+    verified.id !== selected.id
+    || verified.slug !== selected.slug
+    || verified.projectPath !== selected.projectPath
+    || !projectLocationSafe(verified)
+  ) throw new Error("project mapping changed");
+  return null;
+}
+
+function resolutionAuthorityError(reason, recovery) {
+  const error = new Error(reason);
+  error.reason = reason;
+  error.recovery = recovery;
+  return error;
 }
 
 /** Canonical, human-readable JSON used by the CLI and budget accounting. */
@@ -584,11 +584,11 @@ function projectRouteNextAction(intent, projectRoute) {
   };
 }
 
-function nativeRouteNextAction(intent, projectRoute) {
+function nativeRouteNextAction() {
   return {
-    state: "approval_required",
-    approval: "direct_user_required",
-    summary: `This advisory route authorizes nothing. After direct approval of one action—“${intent}”—immediately exact-resolve ${projectRoute.project.id} again, then start a fresh context rooted at the verified project; changing directory in this run is insufficient.`
+    state: "fresh_context_required",
+    approval: "not_applicable",
+    summary: "Start a fresh context rooted at the verified project for the approved action; changing directory in this run is insufficient."
   };
 }
 
