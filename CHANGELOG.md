@@ -4,11 +4,19 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
-### Changed
-- The post-publication source is now versioned as 2.0.14 (unreleased) so it
-  cannot be mistaken for the immutable 2.0.13 package published from
-  `77350441b706c816c5c5e5e63c175962632e415f`. Customer setup docs remain pinned
-  to the available 2.0.13 package until 2.0.14 is published.
+## [2.0.14] - 2026-08-30
+
+### Added
+- Task-first capability routing now resolves curated external project tools
+  without exposing provider-specific setup to the person asking for help.
+- Approval-bound project routing discovers an explicitly registered project,
+  binds the exact approved action and project conventions, and hands execution
+  to one fresh context rooted at that project.
+
+### Fixed
+- Project routing now fails closed when identity, conventions, approval, or
+  client capabilities drift, while preserving compact refusal authority and
+  actionable upgrade guidance.
 
 ## [2.0.13] - 2026-08-29
 
