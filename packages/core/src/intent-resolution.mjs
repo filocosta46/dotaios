@@ -505,13 +505,22 @@ function projectRouteRecovery(projectRoute) {
   if (projectRoute.status === "no_match") {
     return {
       required: true,
-      action: "Keep the repository where it is and connect it once: preview dotaios project add <folder> --purpose <purpose>, then apply the displayed operation id and plan fingerprint; or retry with --project <slug-or-id>."
+      action: "Keep the repository where it is and connect it once: preview dotaios project add <folder> --purpose <purpose>, then apply the displayed operation id and plan fingerprint. After connection, rerun implicit discovery with the same concrete action."
     };
   }
   if (projectRoute.status === "refused") {
+    if (
+      projectRoute.reason === "approval_binding_required"
+      || projectRoute.reason === "approval_binding_mismatch"
+    ) {
+      return {
+        required: true,
+        action: "Rerun path-free implicit discovery for the unchanged concrete action, obtain a fresh candidate binding, and ask for fresh approval before exact resolution."
+      };
+    }
     return {
       required: true,
-      action: "Run dotaios project doctor, repair or reconnect the registration, then retry with one exact slug or stable id."
+      action: "Run dotaios project doctor and repair or reconnect the registration, then rerun implicit discovery for the concrete action."
     };
   }
   return { required: false, action: null };
@@ -529,7 +538,7 @@ function projectRouteNextAction(intent, projectRoute) {
     return {
       state: "clarification_required",
       approval: "not_applicable",
-      summary: "Choose one displayed slug or stable id, state one concrete action, and retry exact resolution."
+      summary: "Ask the customer to narrow the concrete action, then rerun implicit discovery; do not make an exact request without a fresh candidate binding."
     };
   }
   if (projectRoute.status === "unsupported_by_host") {
@@ -543,7 +552,17 @@ function projectRouteNextAction(intent, projectRoute) {
     return {
       state: "clarification_required",
       approval: "not_applicable",
-      summary: "Connect the existing folder once with its purpose, or retry with one exact registered slug or stable id."
+      summary: "Connect the existing folder once with its purpose, or make the action more concrete, then rerun implicit discovery."
+    };
+  }
+  if (
+    projectRoute.reason === "approval_binding_required"
+    || projectRoute.reason === "approval_binding_mismatch"
+  ) {
+    return {
+      state: "approval_restart_required",
+      approval: "not_applicable",
+      summary: "Rerun implicit discovery for a fresh candidate binding, explain the unchanged proposal, and obtain fresh approval before exact resolution."
     };
   }
   return {

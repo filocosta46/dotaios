@@ -21,6 +21,7 @@ import { rankSkills } from "./skill-resolver.mjs";
 
 const MAX_LIVE_GIT_CONCURRENCY = 8;
 const MAX_SKILL_CONVENTION_OBSERVATIONS = 64;
+const GIT_INSPECTION_TIMEOUT_MS = 5000;
 const PROJECT_ROUTE_APPROVAL_DOMAIN = "dotaios-project-route-approval/v1";
 const SAFE_REMOTE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/;
 export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
@@ -128,7 +129,12 @@ async function observeRoutableProjects(projects, dependencies) {
   return { error: null, routable };
 }
 
-function resolveImplicitProject({ intent, supportedConventionKinds, routable }) {
+function resolveImplicitProject({
+  intent,
+  supportedConventionKinds,
+  routable,
+  minimumConfidence = 0.67
+}) {
   const ranked = rankSkills(String(intent || ""), routable.map(({ project }) => ({
     name: project.slug,
     dir: project.slug,
@@ -147,11 +153,13 @@ function resolveImplicitProject({ intent, supportedConventionKinds, routable }) 
       ? Math.min(1, winner.score)
       : winner.score / (winner.score + runnerUp);
   }
-  if (winner && winner.confidence >= 0.67) {
+  if (winner && winner.confidence >= minimumConfidence) {
     const selected = routable.find(({ project }) => project.slug === winner.dir);
     const match = matchReason(selected.project, winner);
     const supported = supportedConventions(selected.conventions, supportedConventionKinds);
-    if (supported.length === 0) return unsupported(selected.project, selected.conventions);
+    if (supported.length === 0) {
+      return unsupported(selected.project, selected.conventions, match);
+    }
     return candidate(selected, match, { intent, supportedConventionKinds });
   }
   if (winner && ranked.length > 1) {
@@ -197,7 +205,8 @@ async function resolveExactProject({
   const proposal = resolveImplicitProject({
     intent,
     supportedConventionKinds,
-    routable: [observed]
+    routable: [observed],
+    minimumConfidence: 0
   });
   if (
     proposal.status !== "candidate"
@@ -367,11 +376,11 @@ function publicRoutability(conventions) {
   };
 }
 
-function unsupported(project, conventions) {
+function unsupported(project, conventions, match) {
   return {
     status: "unsupported_by_host",
     project: publicProject(project),
-    match: { kind: "exact_handle", confidence: 1, fields: ["slug_or_stable_id"] },
+    match,
     routability: publicRoutability(conventions),
     route: null,
     reason: "no_supported_convention"
@@ -610,7 +619,12 @@ async function gitConfig(projectPath, args, runGit) {
     const { stdout } = await runGit(
       "git",
       ["-C", projectPath, ...args],
-      { encoding: "utf8", env: sanitizedGitEnvironment() }
+      {
+        encoding: "utf8",
+        env: sanitizedGitEnvironment(),
+        timeout: GIT_INSPECTION_TIMEOUT_MS,
+        killSignal: "SIGTERM"
+      }
     );
     const value = String(stdout || "").trim();
     return value || null;

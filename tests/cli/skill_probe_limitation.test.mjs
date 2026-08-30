@@ -116,7 +116,7 @@ test("a marker from a failing client is not compatibility proof", () => {
   fs.writeFileSync(fake, [
     "#!/bin/sh",
     'if [ "$1" = "--version" ]; then echo "9.9.9"; exit 0; fi',
-    "marker=$(awk '/nothing else:/{getline;getline;print;exit}' skills/dotaios-probe/SKILL.md)",
+    "marker=$(awk '/^CWD: <exact-process-working-directory>$/{getline;print;exit}' skills/dotaios-probe/SKILL.md)",
     'echo "$marker"',
     "exit 1"
   ].join("\n") + "\n");
@@ -149,7 +149,8 @@ test("live probe bounds and redacts untrusted client version output", () => {
   fs.writeFileSync(fake, [
     "#!/bin/sh",
     'if [ "$1" = "--version" ]; then echo "Claude 9.9.9 /Users/alice/private alice@example.test token=version-secret"; exit 0; fi',
-    "awk '/nothing else:/{getline;getline;print;exit}' skills/dotaios-probe/SKILL.md",
+    "marker=$(awk '/^CWD: <exact-process-working-directory>$/{getline;print;exit}' skills/dotaios-probe/SKILL.md)",
+    "printf 'CWD: %s\\n%s\\n' \"$PWD\" \"$marker\"",
     "exit 0"
   ].join("\n") + "\n");
   fs.chmodSync(fake, 0o755);

@@ -20,7 +20,7 @@ skill, optional configured read-only tool, omissions, and approval state. This
 command recommends only; it never runs the tool or approves an action.
 
 Options:
-  --project <slug-or-id>  Select one exact registered project (otherwise cwd)
+  --project <slug-or-id>  Continue one approved exact project route
   --tool <capability>     Request one closed, product-owned tool capability
   --query <text>          Bounded Gmail/Drive query for a matching capability
   --message-id <id>       Validated Gmail message id

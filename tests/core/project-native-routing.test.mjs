@@ -102,6 +102,52 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
   assert.equal(exact.status, "ready");
 });
 
+test("R4: exact resolution preserves an approved separated match below the raw-score threshold", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const projects = [
+    projectRecord({
+      id: "project-invoice-001",
+      slug: "invoice-work",
+      name: "Invoice work",
+      purpose: "Billing invoices",
+      repository: "https://github.com/customer/invoice-work"
+    }),
+    projectRecord({
+      id: "project-account-001",
+      slug: "account-work",
+      name: "Account work",
+      purpose: "Billing accounts finance operations administration compliance records review archive planning",
+      repository: "https://github.com/customer/account-work"
+    })
+  ];
+  const dependencies = {
+    readProjectRegistrations: async () => projects,
+    inspectLiveRemote: async (project) => project.repository,
+    inspectConventionInventory: async (project) => [
+      convention("agents-md", "AGENTS.md", project.id === "project-invoice-001" ? "211" : "212")
+    ]
+  };
+  const intent = "Billing reports";
+  const candidate = await resolveProjectRoute({
+    intent,
+    supportedConventionKinds: ["agents-md"]
+  }, dependencies);
+
+  assert.equal(candidate.status, "candidate");
+  assert.equal(candidate.project.id, "project-invoice-001");
+  assert.equal(candidate.match.confidence, 0.75);
+
+  const exact = await resolveProjectRoute({
+    intent,
+    projectSelector: candidate.project.id,
+    supportedConventionKinds: ["agents-md"],
+    approvalBinding: candidate.approval_binding
+  }, dependencies);
+
+  assert.equal(exact.status, "ready");
+  assert.equal(exact.project.id, candidate.project.id);
+});
+
 test("EPR-003: ordinary intent can match the registered slug when the remote basename differs", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const project = projectRecord({
@@ -418,6 +464,8 @@ test("EPR-015: a host refuses a project whose only convention it does not suppor
   assert.equal(result.status, "unsupported_by_host");
   assert.equal(result.route, null);
   assert.equal(result.reason, "no_supported_convention");
+  assert.equal(result.match.kind, "purpose_overlap");
+  assert.deepEqual(result.match.fields, ["purpose"]);
   assert.deepEqual(result.routability.conventions, [{ kind: "claude-md", resource: "CLAUDE.md" }]);
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects\/research-work/);
 });
@@ -588,6 +636,44 @@ test("EPR-014: implicit discovery permits at most eight concurrent live-Git obse
   assert.equal(result.status, "candidate");
   assert.equal(result.project.slug, "concurrent-7");
   assert.ok(maximumGit <= 8, `expected at most 8 concurrent Git observations, saw ${maximumGit}`);
+});
+
+test("EPR-014: stalled local Git inspection returns a path-free no-match within the configured bound", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "git-timeout",
+    purpose: "Prepare the unique Git timeout audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const observedTimeouts = [];
+  const stalledGit = async (_executable, _args, options) => {
+    observedTimeouts.push(options.timeout);
+    if (!Number.isSafeInteger(options.timeout) || options.timeout <= 0) {
+      return new Promise(() => {});
+    }
+    const error = new Error("Git inspection timed out");
+    error.killed = true;
+    error.signal = "SIGTERM";
+    throw error;
+  };
+  const deadline = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("router exceeded the Git inspection bound")), 100);
+  });
+
+  const result = await Promise.race([
+    resolveProjectRoute({
+      ...fixture.options,
+      intent: "Prepare the unique Git timeout audit.",
+      supportedConventionKinds: ["agents-md"]
+    }, { execFileAsync: stalledGit }),
+    deadline
+  ]);
+
+  assert.equal(result.status, "no_match");
+  assert.equal(result.route, null);
+  assert.ok(observedTimeouts.length > 0);
+  assert.ok(observedTimeouts.every((timeout) => Number.isSafeInteger(timeout) && timeout > 0));
+  assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.projectPath));
 });
 
 test("EPR-004: a changed colliding exact handle refuses approval path-free", async () => {

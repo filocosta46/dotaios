@@ -188,5 +188,7 @@ test("dotaios resolve help is readable and promises recommendation without execu
   assert.equal(result, null);
   assert.match(captured.lines[0], /dotaios resolve "<intent>"/);
   assert.match(captured.lines[0], /never runs the tool or approves an action/i);
+  assert.match(captured.lines[0], /approved.*exact project route/i);
+  assert.doesNotMatch(captured.lines[0], /otherwise cwd/i);
   assert.doesNotMatch(captured.lines[0], /approval-binding|supports-conventions/i);
 });

@@ -428,16 +428,27 @@ test("AE1-AE6: one approval-bound journey connects, routes, refuses drift, and s
     client: "codex",
     aiosPath,
     dryRun: true,
+    projectNativeRoute: true,
     keep: true
   });
   try {
     const projectRoot = path.join(probeFixture.fixturePath, "project");
     const rootFlag = probeFixture.receipt.command.indexOf("-C");
-    assert.equal(probeFixture.receipt.command[rootFlag + 1], projectRoot);
+    assert.equal(probeFixture.receipt.command[rootFlag + 1], await fs.realpath(projectRoot));
     assert.equal(probeFixture.receipt.evidence.configured, "yes");
     assert.equal(probeFixture.receipt.evidence.discoverable, "path-ready");
     assert.equal(probeFixture.receipt.evidence.invoked, "not-run");
     assert.equal(probeFixture.receipt.evidence.produced, "not-run");
+    assert.deepEqual(probeFixture.receipt.projectRoute, {
+      schema: "dotaios.project-native-invocation.v1",
+      candidate: "candidate",
+      exact: "ready",
+      approvalBinding: "retained-opaque",
+      exactLocation: "<temporary-project>",
+      launchLocation: "<temporary-project>",
+      rootMatch: "yes",
+      outcomeBoundary: "same-caller-receipt"
+    });
   } finally {
     await fs.rm(probeFixture.fixturePath, { recursive: true, force: true });
   }
@@ -495,6 +506,16 @@ test("AE1-AE6: one approval-bound journey connects, routes, refuses drift, and s
   assert.equal(liveReceipt.targetPath, "<temporary-project>/.agents/skills");
   assert.equal(liveReceipt.skill.path, "<temporary-project>/skills/dotaios-probe/SKILL.md");
   assert.equal(liveReceipt.command[liveReceipt.command.indexOf("-C") + 1], "<temporary-project>");
+  assert.deepEqual(liveReceipt.projectRoute, {
+    schema: "dotaios.project-native-invocation.v1",
+    candidate: "candidate",
+    exact: "ready",
+    approvalBinding: "retained-opaque",
+    exactLocation: "<temporary-project>",
+    launchLocation: "<temporary-project>",
+    rootMatch: "yes",
+    outcomeBoundary: "same-caller-receipt"
+  });
   assert.equal(liveReceipt.marker, "<redacted-marker>");
   assert.equal(liveReceipt.exitCode, 0);
   assert.match(liveReceipt.limitation || "", /exact project root and marker/i);

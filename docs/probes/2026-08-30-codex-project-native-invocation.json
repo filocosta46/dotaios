@@ -6,7 +6,7 @@
   "skill": {
     "name": "dotaios-probe",
     "path": "<temporary-project>/skills/dotaios-probe/SKILL.md",
-    "sha256": "3fd4d401e9f54ba1699f5e013a14e5ed38cf609bcacae30e2ddd710b38242e4e"
+    "sha256": "7b767406cfbeb3c28ae2d27d32078981ad22b1d6497e00b927141c278005252b"
   },
   "evidence": {
     "configured": "yes",
@@ -27,10 +27,20 @@
     "--output-last-message",
     "<temporary-output>"
   ],
+  "projectRoute": {
+    "schema": "dotaios.project-native-invocation.v1",
+    "candidate": "candidate",
+    "exact": "ready",
+    "approvalBinding": "retained-opaque",
+    "exactLocation": "<temporary-project>",
+    "launchLocation": "<temporary-project>",
+    "rootMatch": "yes",
+    "outcomeBoundary": "same-caller-receipt"
+  },
   "marker": "<redacted-marker>",
   "exitCode": 0,
-  "limitation": "Exact project root and marker confirmed; redacted client warnings did not affect exitCode 0.",
+  "limitation": "Candidate binding retained; exact project root and marker confirmed; live Codex launch root matched the resolver location; raw path, marker, and client warnings redacted.",
   "error": null,
-  "startedAt": "2026-08-30T17:54:35.891Z",
-  "finishedAt": "2026-08-30T17:54:49.501Z"
+  "startedAt": "2026-08-30T18:56:36.410Z",
+  "finishedAt": "2026-08-30T18:56:49.734Z"
 }

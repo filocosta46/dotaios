@@ -183,6 +183,57 @@ test("EPR-012: an unsupported host receives path-free guidance before memory or 
   );
 });
 
+test("R4 and R6: unresolved project routes restart path-free discovery instead of an unbound exact call", async () => {
+  const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const routes = [
+    {
+      status: "ambiguous",
+      project: null,
+      match: { kind: "low_separation", confidence: 0.5, fields: ["metadata"] },
+      routability: null,
+      route: null,
+      reason: "multiple_registered_project_matches",
+      candidates: [
+        { id: "project-alpha-001", slug: "alpha", name: "Alpha" },
+        { id: "project-beta-001", slug: "beta", name: "Beta" }
+      ]
+    },
+    {
+      status: "no_match",
+      project: null,
+      match: null,
+      routability: null,
+      route: null,
+      reason: "no_registered_project_match"
+    },
+    {
+      status: "refused",
+      project: null,
+      match: null,
+      routability: null,
+      route: null,
+      reason: "approval_binding_mismatch"
+    }
+  ];
+
+  for (const projectRoute of routes) {
+    const result = await resolveIntentResolution({
+      intent: "Prepare the approved launch."
+    }, {
+      resolveProjectRoute: async () => projectRoute
+    });
+    const guidance = `${result.recovery.action || ""} ${result.next_action.summary || ""}`;
+
+    assert.equal(result.location, null, projectRoute.status);
+    assert.match(guidance, /implicit discovery|discover again|rerun discovery/i, projectRoute.status);
+    assert.doesNotMatch(guidance, /--project|retry exact resolution|choose one displayed slug/i, projectRoute.status);
+    if (projectRoute.reason === "approval_binding_mismatch") {
+      assert.doesNotMatch(guidance, /doctor|repair|reconnect/i);
+      assert.match(guidance, /fresh approval/i);
+    }
+  }
+});
+
 test("EPR-012 and EPR-015: exact native route survives an AIOS skill no-match", async (t) => {
   const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
