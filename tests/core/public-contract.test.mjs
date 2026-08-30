@@ -208,7 +208,8 @@ test("Hermes claims a global adapter without inventing a project-local selector"
 
 test("first-time onboarding stays assistant-guided, consent-first, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  assert.equal(pkg.version, "2.0.13", "the public onboarding contract must target the release candidate");
+  const publishedVersion = "2.0.13";
+  assert.equal(pkg.version, "2.0.14", "the source package contract must identify the unpublished release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
   }
@@ -227,7 +228,7 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
     assert.match(
       documents[relativePath],
       /npx dotaios@2\.0\.13 setup --dry-run/,
-      `${relativePath} must preview the exact release candidate`
+      `${relativePath} must preview the currently published release`
     );
     assert.match(
       documents[relativePath],
@@ -291,11 +292,11 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
-  assert.match(documents["docs/friend-setup.md"], /dotaios@2\.0\.13 setup/, "friend setup must use the exact release candidate");
+  assert.match(documents["docs/friend-setup.md"], /dotaios@2\.0\.13 setup/, "friend setup must use the currently published release");
   assert.match(documents["INSTALL.md"], /shared\s+`~\/\.agents\/skills` directory/i, "INSTALL must disclose the shared global skill surface");
   assert.match(documents["INSTALL.md"], /each attached checkout listed in `~\/\.dotaios\/projects\.json`/i, "INSTALL must cover project-local removal");
   assert.doesNotMatch(documents["INSTALL.md"], /use `\/memory-maintenance`/, "INSTALL must use cross-client skill invocation language");
-  assert.match(documents["INSTALL.md"], /npx dotaios@2\.0\.13 setup/i, "INSTALL must run the exact release candidate");
+  assert.match(documents["INSTALL.md"], /npx dotaios@2\.0\.13 setup/i, "INSTALL must run the currently published release");
   assert.match(documents["INSTALL.md"], /package version pinned in this guide/i, "INSTALL must explain its frozen release pin");
   assert.match(documents["INSTALL.md"], /`~\/aios\/memory\/sessions`.*private GitHub mirror/is, "INSTALL must disclose capture and sync composition");
   assert.match(documents["INSTALL.md"], /GitHub\s+repository remains.*revoke the token/is, "INSTALL must disclose remote and credential cleanup");
@@ -390,9 +391,9 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
     );
     assert.ok(commandVersions.length > 0, `${relativePath} must contain at least one pinned command`);
     assert.equal(
-      commandVersions.every((version) => version === pkg.version || version === "<version>"),
+      commandVersions.every((version) => version === publishedVersion || version === "<version>"),
       true,
-      `${relativePath} commands must name ${pkg.version} (or the reviewed update placeholder)`
+      `${relativePath} commands must name ${publishedVersion} (or the reviewed update placeholder)`
     );
   }
 
