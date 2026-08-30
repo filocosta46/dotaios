@@ -990,6 +990,29 @@ test("EPR-001: origin remains authoritative while multiple non-origin fallbacks 
   assert.doesNotMatch(JSON.stringify(withoutOrigin), new RegExp(fixture.projectPath));
 });
 
+test("EPR-014: one live remote observation launches one bounded local Git query", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "single-git-query",
+    purpose: "Prepare the single Git query audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const configCalls = [];
+  const execFileAsync = async (file, args, options) => {
+    if (file === "git" && args.includes("config")) configCalls.push(args);
+    return run(file, args, options);
+  };
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the single Git query audit.",
+    supportedConventionKinds: ["agents-md"]
+  }, { execFileAsync });
+
+  assert.equal(result.status, "candidate");
+  assert.equal(configCalls.length, 1, "live remote validation must not launch duplicate Git config readers");
+});
+
 test("EPR-001: exactly one safe fallback remote is accepted and conflicting origin URLs are not", async (t) => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const fixture = await createRegisteredFixture(t, {
@@ -1194,6 +1217,48 @@ test("EPR-002 and EPR-014: exactly 66 inert convention observations are accepted
       left.kind.localeCompare(right.kind) || left.resource.localeCompare(right.resource)
     ))
   );
+});
+
+test("EPR-014: repository skill observations use bounded per-project concurrency", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const skillResources = Array.from(
+    { length: 12 },
+    (_, index) => `.agents/skills/skill-${String(index).padStart(2, "0")}/SKILL.md`
+  );
+  const fixture = await createRegisteredFixture(t, {
+    slug: "concurrent-conventions",
+    purpose: "Prepare the concurrent convention audit.",
+    conventions: skillResources
+  });
+  let activeSkillObservations = 0;
+  let maximumSkillObservations = 0;
+  const filesystem = {
+    ...fs,
+    lstat: async (target, ...args) => {
+      const tracked = String(target).endsWith("/SKILL.md");
+      if (tracked) {
+        activeSkillObservations += 1;
+        maximumSkillObservations = Math.max(maximumSkillObservations, activeSkillObservations);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      try {
+        return await fs.lstat(target, ...args);
+      } finally {
+        if (tracked) activeSkillObservations -= 1;
+      }
+    }
+  };
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    filesystem,
+    intent: "Prepare the concurrent convention audit.",
+    supportedConventionKinds: ["repository-skill"]
+  });
+
+  assert.equal(result.status, "candidate");
+  assert.ok(maximumSkillObservations > 1, "skill metadata observations must make concurrent progress");
+  assert.ok(maximumSkillObservations <= 4, `expected at most 4 concurrent skill observations, saw ${maximumSkillObservations}`);
 });
 
 test("EPR-014: a 65th skill convention refuses implicit discovery path-free", async (t) => {

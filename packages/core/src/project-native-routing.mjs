@@ -20,10 +20,11 @@ import {
 import { rankSkills } from "./skill-resolver.mjs";
 
 const MAX_LIVE_GIT_CONCURRENCY = 8;
+const MAX_SKILL_CONVENTION_CONCURRENCY = 4;
 const MAX_SKILL_CONVENTION_OBSERVATIONS = 64;
 const GIT_INSPECTION_TIMEOUT_MS = 5000;
 const PROJECT_ROUTE_APPROVAL_DOMAIN = "dotaios-project-route-approval/v1";
-const SAFE_REMOTE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/;
+const SAFE_LOCAL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/;
 export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
   "agents-md",
   "claude-md",
@@ -613,7 +614,7 @@ async function inspectLiveRemote(project, { filesystem, runGit }) {
       .split(/\r?\n/)
       .map((value) => /^remote\.(.+)\.fetch$/.exec(value.trim())?.[1] || null)
       .filter((value) => value && value !== "origin"))];
-    if (remotes.length !== 1 || !SAFE_REMOTE_NAME_RE.test(remotes[0])) {
+    if (remotes.length !== 1 || !SAFE_LOCAL_NAME_RE.test(remotes[0])) {
       throw new Error("A unique authoritative local Git remote is required.");
     }
     const fallback = await readLocalFetchRemote(project.projectPath, remotes[0], runGit);
@@ -631,21 +632,17 @@ async function inspectLiveRemote(project, { filesystem, runGit }) {
 }
 
 async function readLocalFetchRemote(projectPath, remoteName, runGit) {
-  if (!SAFE_REMOTE_NAME_RE.test(remoteName)) return { present: false, url: null };
-  const [rawUrls, rawFetches] = await Promise.all([
-    gitConfig(
-      projectPath,
-      ["config", "--local", "--no-includes", "--get-all", `remote.${remoteName}.url`],
-      runGit
-    ),
-    gitConfig(
-      projectPath,
-      ["config", "--local", "--no-includes", "--get-all", `remote.${remoteName}.fetch`],
-      runGit
-    )
-  ]);
-  const urls = configValues(rawUrls);
-  const fetches = configValues(rawFetches);
+  if (!SAFE_LOCAL_NAME_RE.test(remoteName)) return { present: false, url: null };
+  const escapedName = remoteName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const rawConfig = await gitConfig(
+    projectPath,
+    [
+      "config", "--local", "--no-includes", "--null", "--get-regexp",
+      `^remote\\.${escapedName}\\.(url|fetch)$`
+    ],
+    runGit
+  );
+  const { urls, fetches } = remoteConfigValues(rawConfig, remoteName);
   const present = urls.length > 0 || fetches.length > 0;
   if (!present) return { present: false, url: null };
   if (urls.length !== 1 || !fetches.some(safeFetchRefspec)) {
@@ -654,11 +651,19 @@ async function readLocalFetchRemote(projectPath, remoteName, runGit) {
   return { present: true, url: urls[0] };
 }
 
-function configValues(value) {
-  return String(value || "")
-    .split(/\r?\n/)
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+function remoteConfigValues(value, remoteName) {
+  const urls = [];
+  const fetches = [];
+  for (const record of String(value || "").split("\0")) {
+    const separator = record.indexOf("\n");
+    if (separator < 0) continue;
+    const key = record.slice(0, separator);
+    const configValue = record.slice(separator + 1).trim();
+    if (!configValue) continue;
+    if (key === `remote.${remoteName}.url`) urls.push(configValue);
+    else if (key === `remote.${remoteName}.fetch`) fetches.push(configValue);
+  }
+  return { urls, fetches };
 }
 
 function safeFetchRefspec(value) {
@@ -695,8 +700,20 @@ function sanitizedGitEnvironment(environment = process.env) {
 async function inspectConventionInventory(project, { filesystem }) {
   const before = await observeProjectRoot(project, filesystem);
   const observations = [];
-  await observeConventionFile(project.projectPath, "AGENTS.md", "agents-md", observations, filesystem);
-  await observeConventionFile(project.projectPath, "CLAUDE.md", "claude-md", observations, filesystem);
+  const agentsConvention = await observeConventionFile(
+    project.projectPath,
+    "AGENTS.md",
+    "agents-md",
+    filesystem
+  );
+  const claudeConvention = await observeConventionFile(
+    project.projectPath,
+    "CLAUDE.md",
+    "claude-md",
+    filesystem
+  );
+  if (agentsConvention) observations.push(agentsConvention);
+  if (claudeConvention) observations.push(claudeConvention);
 
   const skillsPath = path.join(project.projectPath, ".agents", "skills");
   const skillEntries = await readContainedDirectory(project.projectPath, skillsPath, {
@@ -705,36 +722,38 @@ async function inspectConventionInventory(project, { filesystem }) {
     readdirOptions: { withFileTypes: true },
     tooManyCode: "DOTAIOS_PROJECT_ROUTE_CONVENTION_BOUND_EXCEEDED"
   });
-  for (const entry of (skillEntries || []).sort((left, right) => left.name.localeCompare(right.name))) {
-    if (
-      !entry.isDirectory()
-      || entry.isSymbolicLink()
-      || !SAFE_REMOTE_NAME_RE.test(entry.name)
-    ) {
-      continue;
-    }
-    await observeConventionFile(
+  const eligibleSkills = (skillEntries || [])
+    .filter((entry) => (
+      entry.isDirectory()
+      && !entry.isSymbolicLink()
+      && SAFE_LOCAL_NAME_RE.test(entry.name)
+    ))
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const skillConventions = await mapWithConcurrency(
+    eligibleSkills,
+    MAX_SKILL_CONVENTION_CONCURRENCY,
+    (entry) => observeConventionFile(
       project.projectPath,
       `.agents/skills/${entry.name}/SKILL.md`,
       "repository-skill",
-      observations,
       filesystem
-    );
-  }
+    )
+  );
+  observations.push(...skillConventions.filter(Boolean));
   const after = await observeProjectRoot(project, filesystem);
   if (!sameRootIdentity(before, after)) throw new Error("The registered project root changed.");
   return observations.sort(compareConventions);
 }
 
-async function observeConventionFile(root, resource, kind, observations, filesystem) {
+async function observeConventionFile(root, resource, kind, filesystem) {
   const filePath = path.join(root, ...resource.split("/"));
   const snapshot = await inspectContainedPathEntry(root, filePath, { filesystem });
-  if (snapshot?.type !== "regular-file" || Number(snapshot.stats.nlink) !== 1) return;
-  observations.push({
+  if (snapshot?.type !== "regular-file" || Number(snapshot.stats.nlink) !== 1) return null;
+  return {
     kind,
     resource,
     observed_identity: conventionIdentity(snapshot.stats)
-  });
+  };
 }
 
 function conventionIdentity(stats) {
