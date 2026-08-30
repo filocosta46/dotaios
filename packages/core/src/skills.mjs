@@ -162,11 +162,6 @@ export function renderSkillsIndex(skills) {
   return lines.join("\n");
 }
 
-// Escape a markdown table cell: pipes break columns, newlines break rows.
-function escapeCell(value) {
-  return escapeMarkdownTableCell(value);
-}
-
 // Render the agent-facing routing table. The agent matches the user's intent to
 // a row's trigger phrases, then opens that skill's SKILL.md. Skills without
 // triggers fall back to their description. Plain text — the LLM does the match,
@@ -194,7 +189,7 @@ export function renderResolver(skills) {
     const hints = skill.triggers && skill.triggers.length
       ? skill.triggers.join(" · ")
       : (skill.description || skill.name);
-    lines.push(`| ${escapeCell(hints)} | \`skills/${skill.dir}/SKILL.md\` |`);
+    lines.push(`| ${escapeMarkdownTableCell(hints)} | \`skills/${skill.dir}/SKILL.md\` |`);
   }
   lines.push("");
   return lines.join("\n");

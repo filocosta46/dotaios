@@ -38,6 +38,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     fs: filesystem
   };
   const toolRequested = options.tool !== undefined && options.tool !== null;
+  const cwd = options.cwd || process.cwd();
   const routeResolver = dependencies.resolveProjectRoute || resolveProjectRoute;
   const routeRequest = {
     aiosPath,
@@ -45,7 +46,6 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     statePath: options.statePath,
     filesystem,
     intent,
-    cwd: options.cwd || process.cwd(),
     supportedConventionKinds: options.supportedConventionKinds || [],
     approvalBinding: options.approvalBinding ?? null
   };
@@ -75,7 +75,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
           filesystem,
           projectOptions,
           projectSelector: options.projectSelector ?? options.project,
-          cwd: routeRequest.cwd
+          cwd
         })
       : await prepareNativeAuthority({
           aiosPath,

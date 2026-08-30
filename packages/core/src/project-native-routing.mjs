@@ -9,6 +9,7 @@ import {
   inspectContainedPathEntry,
   readContainedDirectory
 } from "./contained-read.mjs";
+import { stableJson } from "./json.mjs";
 import {
   classifyProjectRemote,
   projectRemotesMatch
@@ -523,14 +524,6 @@ function validSupportedConventionKinds(value) {
 
 function validApprovalBinding(value) {
   return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).toSorted().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function validateConventionInventory(value) {

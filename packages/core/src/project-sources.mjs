@@ -12,6 +12,7 @@ import {
   sameContainedFileMetadataSnapshot
 } from "./contained-read.mjs";
 import { createEvidenceReader } from "./evidence-reader.mjs";
+import { stableJson } from "./json.mjs";
 import { withOperationLock } from "./operation-lock.mjs";
 import {
   resolvePortableProjectIdentity,
@@ -1589,12 +1590,4 @@ function taskSyntaxError() {
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).toSorted().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
 }

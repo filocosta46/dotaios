@@ -10,6 +10,7 @@ import {
   syncOwnedDirectory,
   validateOwnedDirectoryIfPresent
 } from "./owned-state.mjs";
+import { stableJson } from "./json.mjs";
 
 const STATE_VERSION = 1;
 const GRANT_GUARD_VERSION = 1;
@@ -680,14 +681,6 @@ function fingerprint(value) {
 
 function sameJson(left, right) {
   return stableJson(left) === stableJson(right);
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).toSorted().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function safeText(value, maximum) {
