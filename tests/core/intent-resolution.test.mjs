@@ -529,6 +529,86 @@ test("EPR-012: the compact explicit-tool refusal always fits the 1,024-character
   assert.equal(result.budget.used, rendered.length);
 });
 
+test("EPR-012: a compact missing-project Google refusal preserves tool precedence", async (t) => {
+  const {
+    resolveIntentResolution,
+    renderIntentResolution
+  } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    project: "missing-project",
+    intent: "plan my day",
+    tool: { capability: "google.gmail.inbox" },
+    visibleCharacterBudget: 1024
+  });
+  const rendered = renderIntentResolution(result);
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.location, null);
+  assert.ok(rendered.length <= 1024, `${rendered.length} must fit 1024`);
+  assert.deepEqual(result.project_route, {
+    status: "not_evaluated",
+    reason: "tool_selector_precedence",
+    project: null,
+    match: null,
+    routability: null,
+    route: null
+  });
+  assert.deepEqual(result.skill, {
+    status: "not_evaluated",
+    name: null,
+    resource: null,
+    confidence: 0,
+    reason: "project_not_verified"
+  });
+  assert.equal(result.budget.used, rendered.length);
+});
+
+test("EPR-012 and EPR-014: a compact exact-root refusal preserves its authority reason", async (t) => {
+  const {
+    resolveIntentResolution,
+    renderIntentResolution
+  } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  await fs.rename(fixture.projectPath, `${fixture.projectPath}-replaced`);
+  await fs.mkdir(fixture.projectPath);
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    project: "client-work",
+    intent: "plan my day",
+    supportedConventionKinds: ["agents-md"],
+    visibleCharacterBudget: 1024
+  });
+  const rendered = renderIntentResolution(result);
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.location, null);
+  assert.ok(rendered.length <= 1024, `${rendered.length} must fit 1024`);
+  assert.deepEqual(result.project_route, {
+    status: "refused",
+    project: null,
+    match: null,
+    routability: null,
+    route: null,
+    reason: "project_identity_unverified"
+  });
+  assert.deepEqual(result.skill, {
+    status: "not_evaluated",
+    name: null,
+    resource: null,
+    confidence: 0,
+    reason: "project_route_not_ready"
+  });
+  assert.equal(result.budget.used, rendered.length);
+  assert.doesNotMatch(
+    rendered,
+    new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
 test("an unreadable local routing authority returns one path-free fixed refusal", async (t) => {
   const { resolveIntentResolution, renderIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);

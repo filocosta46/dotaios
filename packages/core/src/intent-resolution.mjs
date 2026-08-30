@@ -435,17 +435,7 @@ function budgetedRefusal({
     location: null
   };
   if (renderWithStableUsed(envelope).length > limit) {
-    envelope.recovery.action = null;
-    envelope.next_action.summary = "fixed_envelope_exceeds_budget";
-    envelope.omissions = ["all_variable_content"];
-    envelope.project_route = {
-      status: "refused",
-      reason: "fixed_envelope_exceeds_budget",
-      project: null,
-      match: null,
-      routability: null,
-      route: null
-    };
+    compactRefusalEnvelope(envelope);
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
@@ -461,6 +451,39 @@ function refusedProjectRoute(projectRoute, reason) {
     route: null,
     reason
   };
+}
+
+function compactProjectRoute(projectRoute) {
+  if (
+    projectRoute?.project === null
+    && projectRoute.match === null
+    && projectRoute.routability === null
+    && projectRoute.route === null
+  ) {
+    return projectRoute;
+  }
+  return {
+    status: projectRoute?.status || "refused",
+    reason: projectRoute?.reason || "project_route_unavailable",
+    project: null,
+    match: null,
+    routability: null,
+    route: null
+  };
+}
+
+function compactRefusalEnvelope(envelope) {
+  envelope.status = "refused";
+  envelope.project = null;
+  envelope.project_route = compactProjectRoute(envelope.project_route);
+  envelope.omissions = ["all_variable_content"];
+  envelope.recovery = { required: true, action: null };
+  envelope.next_action = {
+    state: "recovery_required",
+    approval: "not_applicable",
+    summary: "fixed_envelope_exceeds_budget"
+  };
+  envelope.location = null;
 }
 
 function budgetedProjectRoute({ limit, intent, projectRoute }) {
@@ -485,20 +508,7 @@ function budgetedProjectRoute({ limit, intent, projectRoute }) {
     location: null
   };
   if (renderWithStableUsed(envelope).length > limit) {
-    return budgetedRefusal({
-      limit,
-      reason: "fixed_envelope_exceeds_budget",
-      recovery: "Retry with a larger --budget value.",
-      projectRoute: {
-        status: "refused",
-        project: null,
-        match: null,
-        routability: null,
-        route: null,
-        reason: "fixed_envelope_exceeds_budget"
-      },
-      includeTool: false
-    });
+    compactRefusalEnvelope(envelope);
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
