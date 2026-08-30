@@ -6,7 +6,11 @@ import {
   resolveIntentResolution
 } from "../../../core/src/intent-resolution.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
+import { PROJECT_NATIVE_CONVENTION_KINDS } from "../../../core/src/project-native-routing.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
+
+const PROJECT_NATIVE_CONVENTION_KIND_SET = new Set(PROJECT_NATIVE_CONVENTION_KINDS);
+const PROJECT_NATIVE_CONVENTION_KIND_LIST = PROJECT_NATIVE_CONVENTION_KINDS.join(", ");
 
 const HELP_TEXT = `Usage:
   dotaios resolve "<intent>" [options]
@@ -16,7 +20,7 @@ skill, optional configured read-only tool, omissions, and approval state. This
 command recommends only; it never runs the tool or approves an action.
 
 Options:
-  --project <slug-or-id>  Select one exact registered project (otherwise cwd)
+  --project <slug-or-id>  Continue one approved exact project route
   --tool <capability>     Request one closed, product-owned tool capability
   --query <text>          Bounded Gmail/Drive query for a matching capability
   --message-id <id>       Validated Gmail message id
@@ -53,6 +57,8 @@ export async function resolveCommand(args = [], dependencies = {}) {
     project: options.project,
     intent: options.positionals[0],
     tool,
+    supportedConventionKinds: options.supportedConventionKinds,
+    approvalBinding: options.approvalBinding,
     visibleCharacterBudget: options.budget
   }, {
     filesystem: dependencies.fs,
@@ -68,6 +74,7 @@ export async function resolveCommand(args = [], dependencies = {}) {
 
 function parseOptions(args) {
   const options = {
+    approvalBinding: null,
     budget: undefined,
     dateWindow: undefined,
     home: null,
@@ -78,9 +85,12 @@ function parseOptions(args) {
     project: null,
     query: undefined,
     statePath: null,
+    supportedConventions: null,
+    supportedConventionKinds: [],
     tool: null
   };
   const valueOptions = new Map([
+    ["--approval-binding", "approvalBinding"],
     ["--budget", "budget"],
     ["--date-window", "dateWindow"],
     ["--home", "home"],
@@ -90,6 +100,7 @@ function parseOptions(args) {
     ["--project", "project"],
     ["--query", "query"],
     ["--state-path", "statePath"],
+    ["--supports-conventions", "supportedConventions"],
     ["--tool", "tool"]
   ]);
   const seen = new Set();
@@ -119,7 +130,21 @@ function parseOptions(args) {
   }
   options.budget = options.budget === undefined ? undefined : Number(options.budget);
   options.pageSize = options.pageSize === undefined ? undefined : Number(options.pageSize);
+  options.supportedConventionKinds = parseSupportedConventionKinds(options.supportedConventions);
   return options;
+}
+
+function parseSupportedConventionKinds(value) {
+  if (value === null) return [];
+  const kinds = value.split(",");
+  if (
+    kinds.length === 0
+    || kinds.some((kind) => !PROJECT_NATIVE_CONVENTION_KIND_SET.has(kind))
+    || new Set(kinds).size !== kinds.length
+  ) {
+    throw new Error(`--supports-conventions requires unique supported convention kinds: ${PROJECT_NATIVE_CONVENTION_KIND_LIST}`);
+  }
+  return kinds;
 }
 
 function buildToolRequest(options) {

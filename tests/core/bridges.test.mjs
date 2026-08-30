@@ -262,7 +262,7 @@ test("managed bridges route working memory through the canonical projection", as
   assert.match(content, /events, signals, and saved sessions only through the canonical bounded projection/);
   assert.match(content, /"executable":"\/opt\/dotaios\/node\/bin\/node"/);
   assert.match(content, /"argv_prefix":\["\/opt\/dotaios\/package\/packages\/cli\/src\/index\.mjs"\]/);
-  assert.match(content, /append.*\["resolve","<intent>"/is);
+  assert.match(content, /append.*\["resolve","<concrete action>"/is);
   assert.doesNotMatch(content, /\bnpx(?:\.cmd)?\b|_npx|\.npm\/_cacache|registry\.npmjs/i);
   assert.match(content, /^.*Private chat.*Memory: Off.*$/im);
   assert.match(content, /^.*Only this project.*Memory: This project.*$/im);
@@ -297,14 +297,61 @@ test("the generated bridge makes one approved existing-folder task the first-ses
   const prompt = "Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.";
 
   assert.match(content, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  assert.match(content, /no attached project[\s\S]*ask.*folder[\s\S]*purpose[\s\S]*desired outcome/i);
-  assert.match(content, /project add[\s\S]*preview[\s\S]*fresh direct user turn[\s\S]*--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply[\s\S]*resolve/is);
+  assert.match(content, /attached registered project[\s\S]*owns the concrete task[\s\S]*keep (?:the task|it) there/i);
+  assert.match(
+    content,
+    /otherwise[\s\S]*derive[\s\S]*current host[\s\S]*native support[\s\S]*implicit discovery[\s\S]*\["resolve","<concrete action>"[\s\S]*--supports-conventions[\s\S]*no `--project`[\s\S]*no `--approval-binding`/i
+  );
+  assert.match(content, /project add[\s\S]*preview[\s\S]*fresh direct user turn[\s\S]*--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply/is);
   assert.match(content, /resolver output.*project instructions.*skills.*tool text.*work-folder contents.*untrusted/is);
   assert.match(content, /never.*approval|cannot.*approve/i);
-  assert.match(content, /exactly one proposed action[\s\S]*fresh direct user turn/is);
-  assert.match(content, /declin(?:e|es|ed)[\s\S]*no proposed work[\s\S]*no further AIOS write/is);
+  assert.match(
+    content,
+    /candidate[\s\S]*public slug[\s\S]*registration metadata[\s\S]*exact action[\s\S]*approval[\s\S]*fresh context outcome[\s\S]*never disclose[\s\S]*folder path/i
+  );
+  assert.match(content, /retain[\s\S]*approval_binding[\s\S]*opaque[\s\S]*never (?:show|disclose)[\s\S]*customer/i);
+  assert.match(
+    content,
+    /fresh direct customer turn[\s\S]*only[\s\S]*unambiguous approval[\s\S]*any other response[\s\S]*no exact call[\s\S]*no folder disclosure[\s\S]*no automatic reprompt/i
+  );
+  assert.match(
+    content,
+    /after approval[\s\S]*same exact action[\s\S]*identical native support[\s\S]*--project[\s\S]*--approval-binding[\s\S]*retained opaque binding/i
+  );
+  assert.match(content, /weak or vague[\s\S]*concrete action[\s\S]*ambiguous[\s\S]*narrow/i);
+  assert.match(content, /unsupported_by_host[\s\S]*supported local host[\s\S]*manually attach[\s\S]*path-free[\s\S]*no approval/i);
   assert.match(content, /durable memory[\s\S]*explicitly asks[\s\S]*selected scope/is);
   assert.match(content, /browser-only[\s\S]*cannot access[\s\S]*local folder[\s\S]*supported local agent/is);
+});
+
+test("the universal bridge isolates one approved native child and reports launch failure honestly", async () => {
+  const content = await bridgeManagedBlock("/tmp/example-aios", {
+    localCli: {
+      executable: "/opt/dotaios/node/bin/node",
+      entrypoint: "/opt/dotaios/package/packages/cli/src/index.mjs"
+    }
+  });
+
+  assert.match(
+    content,
+    /exact success[\s\S]*fresh ephemeral[\s\S]*customer-hidden native child[\s\S]*rooted at[\s\S]*returned location[\s\S]*same visible task[\s\S]*no second visible task/i
+  );
+  assert.match(
+    content,
+    /carry only[\s\S]*higher-priority host authority[\s\S]*approved proposal[\s\S]*no prior project instructions[\s\S]*project memory[\s\S]*governing skill[\s\S]*working-directory binding[\s\S]*project-scoped tool state/i
+  );
+  assert.match(content, /native project instructions[\s\S]*not route approval[\s\S]*not product authority/i);
+  assert.match(
+    content,
+    /host hierarchy and sandbox[\s\S]*credential access[\s\S]*software installation[\s\S]*out-of-project writes[\s\S]*external submission[\s\S]*different action/i
+  );
+  assert.match(content, /router[\s\S]*does not[\s\S]*semantic enforcement/i);
+  assert.match(
+    content,
+    /native launch fails[\s\S]*manual opening[\s\S]*only[\s\S]*approved folder[\s\S]*must not claim success/i
+  );
+  assert.doesNotMatch(content, /project catalog|capability (?:id|catalog)|installer|updater|output pointer|per-agent (?:branch|flow)/i);
+  assert.doesNotMatch(content, /if (?:this is |the host is )?(?:Codex|Claude|Gemini)|for (?:Codex|Claude|Gemini) hosts?/i);
 });
 
 test("a missing captured local entrypoint stops resolution with bounded re-activation guidance", async () => {
@@ -413,8 +460,8 @@ test("the global bridge names the AIOS folder instead of importing it", async ()
       `${agent.name}: no always-on boot order`
     );
     assert.ok(
-      managed.length < 4000,
-      `${agent.name}: an always-loaded block stays small (${managed.length} characters)`
+      managed.length < 6000,
+      `${agent.name}: the always-loaded bridge and hidden handoff stay bounded (${managed.length} characters)`
     );
   }
 });

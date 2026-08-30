@@ -54,6 +54,45 @@ test("a stale owned bridge is an upgrade target and refreshes through the shared
   }
 });
 
+test("the shared planner upgrades the owned block to the universal hidden handoff", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-bridge-handoff-plan-"));
+  const destination = path.join(root, "AGENTS.md");
+  const aiosPath = path.join(root, "aios");
+  const localCli = {
+    executable: "/opt/dotaios/node/bin/node",
+    entrypoint: "/opt/dotaios/package/packages/cli/src/index.mjs"
+  };
+  const generated = await bridgeContent({ name: "Codex" }, aiosPath, { localCli });
+  const handoffRule = "Otherwise derive the current host's native support and invoke implicit discovery";
+  assert.match(generated, new RegExp(handoffRule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  const stale = generated.replace(
+    handoffRule,
+    "Invoke U2 resolve for the outcome and exact slug or stable ID"
+  );
+  await fs.writeFile(destination, stale);
+
+  try {
+    const plan = await previewManagedBridgeFile(destination, generated, {
+      boundaryRoot: root,
+      refreshOnly: true
+    });
+    assert.equal(plan.status, "ready");
+    assert.equal(plan.action, "update-managed-block");
+
+    const result = await applyManagedBridgeFile(destination, generated, {
+      boundaryRoot: root,
+      refreshOnly: true,
+      expectedFingerprint: plan.fingerprint
+    });
+    assert.equal(result.action, "updated");
+    const after = await fs.readFile(destination, "utf8");
+    assert.match(after, new RegExp(handoffRule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.doesNotMatch(after, /Invoke U2 resolve for the outcome and exact slug or stable ID/);
+  } finally {
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
 test("bridge apply refuses a stale preview and preserves the concurrent edit", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-bridge-stale-plan-"));
   const destination = path.join(root, "AGENTS.md");

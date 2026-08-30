@@ -27,7 +27,25 @@ A successful file write proves only configured. Public support requires a reprod
 
 Run `dotaios activate --dry-run` to preview global changes, `dotaios attach <project> --dry-run` for a project, and `dotaios skills doctor` for filesystem-level diagnostics. These checks remain honest about the difference between a configured path and an invoked workflow.
 
-Bounded invocation receipts are committed under `docs/probes/`. On 2026-07-16 Codex produced the probe marker, while Claude Code and Gemini CLI were invoked but could not produce it because their clients rejected authentication or support-tier access. On 2026-08-08 Claude Code 2.1.220 produced the marker with `exitCode: 0`, superseding the 2026-07-16 Claude Code result. Each receipt records what happened in one environment, not a stronger claim.
+To reproduce the project-native Codex diagnostic through the shipped CLI, run:
+
+```bash
+dotaios skills probe --client codex --project-native-route --run --json --path /path/to/aios --receipt /path/to/receipt.json
+```
+
+This creates a disposable registered project, resolves it through candidate and
+exact routing, and invokes Codex at the returned root. `--run` launches the
+external client; use `--dry-run` instead when you only want to inspect the
+route-bound command and receipt shape.
+
+Bounded invocation receipts are committed under `docs/probes/`. On 2026-08-30,
+Codex 0.149.1 reported the exact disposable project root and produced the
+repository skill marker. The receipt
+redacts the temporary path, raw marker, and client warnings. On 2026-08-08,
+Claude Code 2.1.220 also produced its marker with `exitCode: 0`; the earlier
+2026-07-16 Claude Code and Gemini CLI attempts were blocked by authentication
+or support-tier access. Each receipt records what happened in one environment,
+not a stronger claim.
 
 The complete release matrix and required receipts are in
 [Compatibility acceptance](compatibility-acceptance.md).

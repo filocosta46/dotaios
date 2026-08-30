@@ -164,6 +164,72 @@ test("public induction is one approved existing-folder task, not an instruction-
   assert.doesNotMatch(documents["README.md"], /design|edit|write[\s-]+(?:an? )?(?:AGENTS|CLAUDE)\.md/i);
 });
 
+test("project-native routing teaches keep-it-there connection and generic fresh-context entry", async () => {
+  const projects = await fs.readFile(path.join(repoRoot, "docs/projects.md"), "utf8");
+  assert.match(projects, /keep the repository wherever it already is and connect its folder once/i);
+  assert.match(
+    projects,
+    /project add <folder> --purpose <purpose> --json[\s\S]*operation-id[\s\S]*plan-fingerprint[\s\S]*--apply/i
+  );
+  assert.match(projects, /match[\s\S]*not an AIOS recommendation/i);
+  assert.match(
+    projects,
+    /no match[\s\S]*connect[\s\S]{0,80}the existing folder[\s\S]*make the action concrete[\s\S]*name the connected project/i
+  );
+  assert.match(
+    projects,
+    /I found the `<slug>` folder you connected[\s\S]*one action: `<concrete action>`/i
+  );
+  assert.match(projects, /registration metadata matched[\s>]*this action/i);
+  assert.doesNotMatch(projects, /matched from the purpose you registered/i);
+  assert.doesNotMatch(projects, /--supports-conventions|--approval-binding|\bapproval[_ -]binding\b/i);
+  assert.doesNotMatch(projects, /`(?:agents-md|claude-md|repository-skill)`/);
+  assert.match(
+    projects,
+    /after direct approval[\s\S]*host adapter[\s\S]*native support internally[\s\S]*exact-resolves[\s\S]*fresh context/i
+  );
+  assert.match(projects, /customer does not[\s\S]*convention identifiers[\s\S]*handoff protocol/i);
+  assert.match(projects, /changing the[\s\S]{0,20}directory[\s\S]*insufficient/i);
+  assert.match(projects, /unsupported_by_host[\s\S]*manual-open recovery[\s\S]*no route/i);
+  assert.doesNotMatch(projects, /download (?:the|this|a) (?:career|agent|recommended|particular) repository/i);
+});
+
+test("project-native probe documentation is reproducible and stays inside observed evidence", async () => {
+  const support = await fs.readFile(path.join(repoRoot, "docs/client-support.md"), "utf8");
+  assert.match(
+    support,
+    /dotaios skills probe --client codex --project-native-route --run --json --path \/path\/to\/aios --receipt \/path\/to\/receipt\.json/i
+  );
+  assert.match(support, /exact disposable project root[\s\S]*repository skill/i);
+  assert.doesNotMatch(support, /marker from `?AGENTS\.md`? and a repository skill/i);
+});
+
+test("universal project routing ships without deferred design and output-pointer artifacts", async () => {
+  const absentPaths = [
+    "docs/external-project-routing/reviews.md",
+    "docs/external-project-routing/spec.md",
+    "docs/external-project-routing/tickets/01-generic-project-native-routing.md",
+    "docs/external-project-routing/tickets/02-authoritative-output-pointer-store.md",
+    "docs/external-project-routing/tickets/03-output-pointer-cli-return-path.md"
+  ];
+  for (const relativePath of absentPaths) {
+    await assert.rejects(
+      fs.access(path.join(repoRoot, relativePath)),
+      { code: "ENOENT" },
+      relativePath + " must remain in prior Git history, not the launch product"
+    );
+  }
+
+  const context = await fs.readFile(path.join(repoRoot, "CONTEXT.md"), "utf8");
+  const priorDesign = await fs.readFile(
+    path.join(repoRoot, "docs", "external-capability-routing", "design.md"),
+    "utf8"
+  );
+  assert.doesNotMatch(context, /output pointer/i);
+  assert.match(priorDesign, /> \*\*Status:\*\* Proposed for review/);
+  assert.doesNotMatch(priorDesign, /superseded by.*external project routing/i);
+});
+
 test("Hermes claims a global adapter without inventing a project-local selector", async () => {
   const relativeFiles = [
     "docs/adapters.md",

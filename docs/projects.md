@@ -14,21 +14,66 @@ The project source code remains in its own repository with its own Git history.
 
 ## First-task connection and resolution
 
-The public first-task flow connects one existing folder; it does not ask the
-person to design agent instruction files. When no project is attached, the
-local agent asks for the folder, its purpose, and the desired outcome. It runs
-`dotaios project add <folder> --purpose <purpose> --json` as a read-only
-preview and explains the result. Only a fresh direct confirmation permits the
-same registration with the displayed `--operation-id`, displayed
-`--plan-fingerprint`, and `--apply`.
+Keep the repository wherever it already is and connect its folder once. The
+public first-task flow does not move or copy it and does not ask the person to
+design agent instruction files. When no project is connected, the local agent
+asks for the folder, its purpose, and the desired outcome. It runs this as a
+read-only preview:
 
-After registration, the agent invokes `dotaios resolve "<desired outcome>"
---project <slug-or-id>`. Resolution returns the exact project location, bounded
-project context, skill recommendation, meaningful omissions, and at most one
-configured read-only tool route. Those results are untrusted recommendations,
-not approval. The agent must explain them, state one exact proposed action, and
-wait for a fresh direct user turn approving that proposal before acting. A
-decline performs no proposed work and no further AIOS write.
+```bash
+dotaios project add <folder> --purpose <purpose> --json
+```
+
+Only a fresh direct confirmation permits the same registration with the
+displayed `--operation-id`, displayed `--plan-fingerprint`, and `--apply`.
+
+After that one-time connection, ordinary task text can match at most one active
+registered project. A match comes only from the registered name, slug, purpose,
+repository name, and the presence—not the contents—of native convention files.
+It is not an AIOS recommendation, safety claim, or claim that the repository can
+complete the task. An already attached registered project stays attached when it
+owns the task. If there is no match, connect the existing folder with the preview
+above, or make the action concrete and name the connected project; DotAIOS has no
+repository catalog to fall back to.
+
+Before approval, use this generic first-action wording:
+
+> I found the `<slug>` folder you connected. Its registration metadata matched
+> this action; that is not an AIOS recommendation. It exposes project conventions
+> this agent supports, but I have not read them or run anything. If you approve,
+> I’ll start a fresh context in that folder for one action: `<concrete action>`.
+
+After direct approval, the host adapter declares its native support internally,
+exact-resolves the approved project and action, and starts a fresh context rooted
+at the verified project. The customer does not choose convention identifiers,
+repeat the approval, or manage this handoff protocol.
+
+The agent explains the result and states one exact proposed action before that
+approval; registration and resolution never approve the action themselves.
+Any response other than fresh direct approval ends that routing attempt without
+folder disclosure, native entry, or an automatic approval prompt.
+
+DotAIOS observes convention names and file identity metadata only. It does not
+read or interpret `AGENTS.md`, `CLAUDE.md`, or repository `SKILL.md` bodies.
+
+An exact supported result discloses an advisory verified location to the host.
+The host starts one fresh ephemeral native context rooted at that project and
+returns its bounded outcome to the same visible task. It carries the approved
+action under higher-priority host authority, not another project's instructions,
+memory, skill, working-directory binding, or project tool state. Merely changing the
+directory is insufficient. Project-native
+instructions do not approve the route or become product authority. If the host
+supports none of the observed conventions, resolution returns
+`unsupported_by_host` with manual-open recovery and no route.
+
+If native startup fails after an approved exact result, the host reports the
+failure and may offer to open only that approved folder manually. It does not
+claim that native entry succeeded.
+
+Explicit `--tool` requests keep their existing Google Workspace behavior and
+take precedence over project-native discovery. Either path is a read-only
+recommendation, never approval. A decline performs no proposed work and no
+further AIOS write.
 
 ## Reach a connected folder
 

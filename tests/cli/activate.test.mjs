@@ -4,6 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { findManagedBlock } from "../../packages/core/src/bridges.mjs";
 import { symlinkTargets } from "../../packages/core/src/skill-targets.mjs";
 
 // Resolve to repo root from this file's location
@@ -119,6 +120,34 @@ describe("activateCommand — symlinks", () => {
       await assert.rejects(fs.access(defaultRoot), { code: "ENOENT" });
     } finally {
       await fs.rm(selected.base, { recursive: true, force: true });
+    }
+  });
+
+  it("installs one universal customer-hidden project handoff in native host bridges", async () => {
+    const isolated = await makeTmpDirs();
+    const { activateCommand } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/activate.mjs")
+    );
+
+    try {
+      await activateCommand([
+        "--path", isolated.aiosPath,
+        "--home", isolated.homePath,
+        "--all"
+      ], { quiet: true, env: { PATH: "" } });
+      const codex = await fs.readFile(path.join(isolated.homePath, ".codex", "AGENTS.md"), "utf8");
+      const claude = await fs.readFile(path.join(isolated.homePath, ".claude", "CLAUDE.md"), "utf8");
+      const codexBlock = findManagedBlock(codex);
+      const claudeBlock = findManagedBlock(claude);
+
+      assert.ok(codexBlock);
+      assert.ok(claudeBlock);
+      assert.equal(codexBlock.text, claudeBlock.text, "native hosts must receive one shared handoff flow");
+      assert.match(codexBlock.text, /derive the current host's native support[\s\S]*implicit discovery/i);
+      assert.match(codexBlock.text, /fresh direct customer turn[\s\S]*any other response[\s\S]*no automatic reprompt/i);
+      assert.match(codexBlock.text, /fresh ephemeral[\s\S]*customer-hidden native child[\s\S]*same visible task/i);
+    } finally {
+      await fs.rm(isolated.base, { recursive: true, force: true });
     }
   });
 

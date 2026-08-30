@@ -59,6 +59,7 @@ Probe options:
   --receipt <file>  Save the JSON evidence receipt
   --dry-run         Build the disposable fixture but do not invoke a client (default)
   --run             Explicitly invoke the selected client
+  --project-native-route  Diagnostic: bind the client launch to an exact approved project route
   --keep            Keep the disposable fixture for inspection
   --json            Print only the JSON receipt
   --timeout-ms <n>  Bound a client invocation (default 90000)
@@ -293,7 +294,7 @@ async function syncTriggersCommand(args) {
 }
 
 async function probeSkillCommand(args) {
-  const options = { client: null, path: null, receipt: null, keep: false, dryRun: false, run: false, json: false, timeoutMs: 90_000 };
+  const options = { client: null, path: null, receipt: null, keep: false, dryRun: false, run: false, projectNativeRoute: false, json: false, timeoutMs: 90_000 };
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--client") {
@@ -316,6 +317,8 @@ async function probeSkillCommand(args) {
       options.dryRun = true;
     } else if (arg === "--run") {
       options.run = true;
+    } else if (arg === "--project-native-route") {
+      options.projectNativeRoute = true;
     } else if (arg === "--json") {
       options.json = true;
     } else {
