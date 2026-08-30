@@ -34,6 +34,7 @@ const PROJECT_STATE_LOCK_STALE_MS = 5 * 60 * 1000;
 const PROJECT_DOMAINS = new Set(["build", "make", "sell"]);
 const MAX_PROJECT_ROUTE_ACTIVE_RECORDS = 32;
 const MAX_PROJECT_ROUTE_CATALOG_ENTRIES = 256;
+const MAX_PROJECT_ROUTE_MAPPING_CONCURRENCY = 8;
 const MAX_PROJECT_ROUTE_METADATA_BYTES = 64 * 1024;
 const MAX_PROJECT_ROUTE_FRONTMATTER_BYTES = 16 * 1024;
 const MAX_PROJECT_ROUTE_README_BYTES = 1024 * 1024;
@@ -512,6 +513,8 @@ export async function readBoundedProjectRegistrations(options = {}) {
   const projectSelector = options.projectSelector === null || options.projectSelector === undefined
     ? null
     : validateProjectSelector(options.projectSelector);
+  await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
+  await assertStateOutsideAios(context);
   const records = await readBoundedProjectRouteRecords(context, {
     enforceImplicitBounds: projectSelector === null
   });
@@ -519,28 +522,32 @@ export async function readBoundedProjectRegistrations(options = {}) {
     maxBytes: MAX_PROJECT_ROUTE_STATE_BYTES,
     tooLargeCode: "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED"
   });
-  const registrations = await Promise.all(records.map(async (record) => {
-    const mapping = await verifyProjectPathMapping(context, state.paths[record.id]);
-    const placement = await classifyProjectPlacement({
-      aiosPath: context.aiosPath,
-      projectPath: mapping.canonicalProjectPath,
-      slug: record.slug,
-      fileSystem: context.fs
-    });
-    const registration = {
-      ...record,
-      projectPath: mapping.canonicalProjectPath,
-      mappingPath: mapping.canonicalProjectPath,
-      mappingStatus: mapping.status,
-      pathAvailable: placement.pathAvailable,
-      placement: placement.placement,
-      rootIdentity: mapping.rootIdentity
-    };
-    return {
-      ...registration,
-      publicRegistration: toPublicProjectRouteRegistration(registration)
-    };
-  }));
+  const registrations = await mapWithConcurrency(
+    records,
+    MAX_PROJECT_ROUTE_MAPPING_CONCURRENCY,
+    async (record) => {
+      const mapping = await verifyProjectPathMapping(context, state.paths[record.id]);
+      const placement = await classifyProjectPlacement({
+        aiosPath: context.aiosPath,
+        projectPath: mapping.canonicalProjectPath,
+        slug: record.slug,
+        fileSystem: context.fs
+      });
+      const registration = {
+        ...record,
+        projectPath: mapping.canonicalProjectPath,
+        mappingPath: mapping.canonicalProjectPath,
+        mappingStatus: mapping.status,
+        pathAvailable: placement.pathAvailable,
+        placement: placement.placement,
+        rootIdentity: mapping.rootIdentity
+      };
+      return {
+        ...registration,
+        publicRegistration: toPublicProjectRouteRegistration(registration)
+      };
+    }
+  );
   const verified = rejectConflictingProjectOwners(registrations);
   if (projectSelector === null) return verified;
   return verified.filter((record) => (
@@ -669,8 +676,8 @@ function rejectConflictingProjectOwners(records) {
   const idOwners = new Map();
   const rootOwners = new Map();
   for (const record of records) {
-    if (record.status !== "active") continue;
     idOwners.set(record.id, (idOwners.get(record.id) || 0) + 1);
+    if (record.status !== "active") continue;
     if (record.mappingStatus !== "verified" || !record.rootIdentity) continue;
     const rootKey = `${record.rootIdentity.dev}:${record.rootIdentity.ino}`;
     rootOwners.set(rootKey, (rootOwners.get(rootKey) || 0) + 1);
@@ -693,6 +700,20 @@ function rejectConflictingProjectOwners(records) {
       rootIdentity: null
     };
   });
+}
+
+async function mapWithConcurrency(values, limit, operation) {
+  const results = new Array(values.length);
+  let nextIndex = 0;
+  async function worker() {
+    while (nextIndex < values.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await operation(values[index], index);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, () => worker()));
+  return results;
 }
 
 function projectRouteBoundError() {

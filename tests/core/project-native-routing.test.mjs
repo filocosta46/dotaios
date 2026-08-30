@@ -6,7 +6,10 @@ import { promisify } from "node:util";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { registerProject } from "../../packages/core/src/projects.mjs";
+import {
+  readBoundedProjectRegistrations,
+  registerProject
+} from "../../packages/core/src/projects.mjs";
 
 const run = promisify(execFile);
 
@@ -553,7 +556,7 @@ test("EPR-004: a vague action inside a registered cwd does not bypass lexical ma
   });
 });
 
-test("EPR-014: implicit discovery refuses the 33rd active project before local mapping inspection", async (t) => {
+test("EPR-014: implicit discovery refuses the 33rd active project before local mapping content is read", async (t) => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-active-route-bound-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -561,6 +564,7 @@ test("EPR-014: implicit discovery refuses the 33rd active project before local m
   const aiosPath = path.join(root, "aios");
   const projectsPath = path.join(aiosPath, "projects");
   const stateRoot = path.join(homePath, ".dotaios");
+  const statePath = path.join(stateRoot, "projects.json");
   await fs.mkdir(homePath, { recursive: true });
   await fs.mkdir(projectsPath, { recursive: true });
   for (let index = 0; index < 33; index += 1) {
@@ -579,12 +583,12 @@ test("EPR-014: implicit discovery refuses the 33rd active project before local m
       "README_BODY_MUST_STAY_UNREAD"
     ].join("\n"));
   }
-  let stateInspections = 0;
+  let stateReads = 0;
   const filesystem = {
     ...fs,
-    lstat: async (target, ...args) => {
-      if (path.resolve(String(target)).startsWith(stateRoot)) stateInspections += 1;
-      return fs.lstat(target, ...args);
+    readFile: async (target, ...args) => {
+      if (path.resolve(String(target)) === statePath) stateReads += 1;
+      return fs.readFile(target, ...args);
     }
   };
 
@@ -603,7 +607,7 @@ test("EPR-014: implicit discovery refuses the 33rd active project before local m
     route: null,
     reason: "discovery_bound_exceeded"
   });
-  assert.equal(stateInspections, 0, "the active bound must win before machine-local state inspection");
+  assert.equal(stateReads, 0, "the active bound must win before machine-local state content is read");
 });
 
 test("EPR-014: implicit discovery permits at most eight concurrent live-Git observations", async () => {
@@ -636,6 +640,82 @@ test("EPR-014: implicit discovery permits at most eight concurrent live-Git obse
   assert.equal(result.status, "candidate");
   assert.equal(result.project.slug, "concurrent-7");
   assert.ok(maximumGit <= 8, `expected at most 8 concurrent Git observations, saw ${maximumGit}`);
+});
+
+test("EPR-014: bounded registration mapping and placement verification permits at most eight concurrent observations", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-registration-concurrency-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const homePath = path.join(root, "home");
+  const aiosPath = path.join(root, "aios");
+  const projectsPath = path.join(aiosPath, "projects");
+  const statePath = path.join(homePath, ".dotaios", "projects.json");
+  const projectPaths = new Set();
+  const paths = {};
+  await fs.mkdir(projectsPath, { recursive: true });
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+
+  for (let index = 0; index < 16; index += 1) {
+    const slug = `registration-concurrent-${String(index).padStart(2, "0")}`;
+    const id = `project-${slug}-001`;
+    const projectPath = path.join(root, slug);
+    const projectDirectory = path.join(projectsPath, slug);
+    await fs.mkdir(projectPath);
+    await fs.mkdir(projectDirectory);
+    await fs.writeFile(path.join(projectDirectory, "README.md"), [
+      "---",
+      `id: ${id}`,
+      `project: ${slug}`,
+      `name: Registration concurrent ${index}`,
+      `description: Handle registration concurrency workflow ${index}.`,
+      "status: active",
+      `repo_url: https://github.com/customer/${slug}.git`,
+      "---",
+      "README_BODY_MUST_STAY_UNREAD"
+    ].join("\n"));
+    const stats = await fs.lstat(projectPath, { bigint: true });
+    projectPaths.add(path.resolve(projectPath));
+    paths[id] = {
+      path: projectPath,
+      root_identity: {
+        type: "directory",
+        dev: stats.dev.toString(),
+        ino: stats.ino.toString()
+      }
+    };
+  }
+  await fs.writeFile(statePath, `${JSON.stringify({ version: 1, paths }, null, 2)}\n`);
+
+  let activeObservations = 0;
+  let maximumObservations = 0;
+  const filesystem = {
+    ...fs,
+    lstat: async (target, ...args) => {
+      const tracked = projectPaths.has(path.resolve(String(target)));
+      if (tracked) {
+        activeObservations += 1;
+        maximumObservations = Math.max(maximumObservations, activeObservations);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      try {
+        return await fs.lstat(target, ...args);
+      } finally {
+        if (tracked) activeObservations -= 1;
+      }
+    }
+  };
+
+  const registrations = await readBoundedProjectRegistrations({
+    aiosPath,
+    homePath,
+    statePath,
+    fs: filesystem
+  });
+
+  assert.equal(registrations.length, 16);
+  assert.ok(
+    maximumObservations <= 8,
+    `expected at most 8 concurrent mapping observations, saw ${maximumObservations}`
+  );
 });
 
 test("EPR-014: stalled local Git inspection returns a path-free no-match within the configured bound", async (t) => {
@@ -1255,6 +1335,77 @@ test("EPR-001: two forged IDs mapped to one root are ineligible for routing", as
     assert.equal(exact.reason, "project_identity_unverified", projectSelector);
     assert.equal(exact.route, null, projectSelector);
     assert.doesNotMatch(JSON.stringify(exact), new RegExp(fixture.projectPath));
+  }
+});
+
+test("EPR-001 and EPR-004: an inactive duplicate stable ID cannot emit a candidate doomed at exact resolution", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "inactive-duplicate-owner",
+    purpose: "Prepare the unique inactive duplicate ownership audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const shadowSlug = "inactive-duplicate-shadow";
+  const shadowDirectory = path.join(fixture.aiosPath, "projects", shadowSlug);
+  await fs.mkdir(shadowDirectory, { recursive: true });
+  await fs.writeFile(path.join(shadowDirectory, "README.md"), [
+    "---",
+    "id: project-inactive-duplicate-owner-001",
+    `project: ${shadowSlug}`,
+    "name: Inactive duplicate shadow",
+    "description: Prepare an inactive shadow registration record.",
+    "status: inactive",
+    "repo_url: https://github.com/customer/inactive-duplicate-owner.git",
+    "---",
+    "INACTIVE_SHADOW_README_BODY_CANARY"
+  ].join("\n"));
+
+  const candidate = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the unique inactive duplicate ownership audit.",
+    supportedConventionKinds: ["agents-md"]
+  });
+
+  assert.equal(candidate.status, "no_match");
+  assert.equal(candidate.route, null);
+  assert.doesNotMatch(JSON.stringify(candidate), new RegExp(fixture.projectPath));
+});
+
+test("EPR-001: mapping state inside AIOS or reached through a symlink refuses before registration records are read", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "unsafe-state-owner",
+    purpose: "Prepare the unique unsafe state authority audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const safeStatePath = path.join(fixture.homePath, ".dotaios", "projects.json");
+  const unsafeStatePath = path.join(fixture.aiosPath, "portable-projects.json");
+  const symlinkedStatePath = path.join(fixture.root, "linked-projects.json");
+  await fs.copyFile(safeStatePath, unsafeStatePath);
+  await fs.symlink(unsafeStatePath, symlinkedStatePath);
+
+  for (const statePath of [unsafeStatePath, symlinkedStatePath]) {
+    let registrationReads = 0;
+    const filesystem = {
+      ...fs,
+      readFile: async (target, ...args) => {
+        if (path.basename(String(target)) === "README.md") registrationReads += 1;
+        return fs.readFile(target, ...args);
+      }
+    };
+    const result = await resolveProjectRoute({
+      ...fixture.options,
+      statePath,
+      filesystem,
+      intent: "Prepare the unique unsafe state authority audit.",
+      supportedConventionKinds: ["agents-md"]
+    });
+
+    assert.equal(result.status, "refused", statePath);
+    assert.equal(result.reason, "project_identity_unverified", statePath);
+    assert.equal(result.route, null, statePath);
+    assert.equal(registrationReads, 0, statePath);
+    assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.root), statePath);
   }
 });
 

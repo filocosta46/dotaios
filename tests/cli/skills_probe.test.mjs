@@ -52,6 +52,85 @@ test("skills probe dry-run emits a receipt without invoking Codex", () => {
   }
 });
 
+test("skills probe exposes the project-native route through the shipped CLI in dry-run mode", () => {
+  const { root, aiosPath } = setupAios();
+  try {
+    const result = run([
+      "skills", "probe", "--client", "codex", "--project-native-route",
+      "--dry-run", "--json", "--path", aiosPath
+    ]);
+    const receipt = JSON.parse(result.stdout);
+    assert.deepEqual(receipt.projectRoute, {
+      schema: "dotaios.project-native-invocation.v1",
+      candidate: "candidate",
+      exact: "ready",
+      approvalBinding: "retained-opaque",
+      exactLocation: "<temporary-project>",
+      launchLocation: "<temporary-project>",
+      rootMatch: "yes",
+      outcomeBoundary: "same-caller-receipt"
+    });
+    assert.equal(receipt.evidence.invoked, "not-run");
+    assert.equal(receipt.evidence.produced, "not-run");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("skills probe project-native CLI mode reaches a controlled fake client at the exact route root", () => {
+  const { root, aiosPath } = setupAios();
+  const fakeBin = path.join(root, "bin");
+  const invocationLog = path.join(root, "codex-invocations.jsonl");
+  fs.mkdirSync(fakeBin, { recursive: true });
+  const fakeCodex = path.join(fakeBin, "codex");
+  fs.writeFileSync(fakeCodex, [
+    "#!/usr/bin/env node",
+    "const fs = require('node:fs');",
+    "const path = require('node:path');",
+    "const args = process.argv.slice(2);",
+    `fs.appendFileSync(${JSON.stringify(invocationLog)}, JSON.stringify(args) + '\\n');`,
+    "if (args[0] === '--version') { process.stdout.write('codex-fake 1.0\\n'); process.exit(0); }",
+    "const rootIndex = args.indexOf('-C');",
+    "const outputIndex = args.indexOf('--output-last-message');",
+    "if (rootIndex < 0 || outputIndex < 0) process.exit(2);",
+    "const projectRoot = args[rootIndex + 1];",
+    "const skill = fs.readFileSync(path.join(projectRoot, '.agents', 'skills', 'dotaios-probe', 'SKILL.md'), 'utf8');",
+    "const marker = /DOTAIOS_PROBE_OK_[a-f0-9]+/u.exec(skill)?.[0];",
+    "if (!marker) process.exit(3);",
+    "fs.writeFileSync(args[outputIndex + 1], 'CWD: ' + fs.realpathSync(projectRoot) + '\\n' + marker + '\\n');"
+  ].join("\n") + "\n");
+  fs.chmodSync(fakeCodex, 0o755);
+
+  try {
+    const result = spawnSync(process.execPath, [
+      cli,
+      "skills", "probe", "--client", "codex", "--project-native-route",
+      "--run", "--json", "--path", aiosPath
+    ], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` }
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = JSON.parse(result.stdout);
+    assert.equal(receipt.clientVersion, "codex-fake 1.0");
+    assert.equal(receipt.evidence.invoked, "yes");
+    assert.equal(receipt.evidence.produced, "yes");
+    assert.equal(receipt.projectRoute.candidate, "candidate");
+    assert.equal(receipt.projectRoute.exact, "ready");
+    assert.equal(receipt.projectRoute.rootMatch, "yes");
+    const invocations = fs.readFileSync(invocationLog, "utf8")
+      .trim()
+      .split(/\r?\n/u)
+      .map((line) => JSON.parse(line));
+    assert.equal(invocations.length, 2, "one version check and one controlled invocation are expected");
+    assert.equal(invocations[1][0], "exec");
+    assert.ok(invocations[1].includes("-C"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skills probe dry-run never spawns the client, including a version probe", () => {
   const { root, aiosPath } = setupAios();
   const fakeBin = path.join(root, "bin");

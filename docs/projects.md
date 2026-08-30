@@ -38,9 +38,9 @@ repository catalog to fall back to.
 
 Before approval, use this generic first-action wording:
 
-> I found the `<slug>` folder you connected. It matched from the purpose you
-> registered, not an AIOS recommendation. It exposes project conventions this
-> agent supports, but I have not read them or run anything. If you approve,
+> I found the `<slug>` folder you connected. Its registration metadata matched
+> this action; that is not an AIOS recommendation. It exposes project conventions
+> this agent supports, but I have not read them or run anything. If you approve,
 > I’ll start a fresh context in that folder for one action: `<concrete action>`.
 
 After direct approval, the host adapter declares its native support internally,

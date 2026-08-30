@@ -6,7 +6,7 @@
   "skill": {
     "name": "dotaios-probe",
     "path": "<temporary-project>/skills/dotaios-probe/SKILL.md",
-    "sha256": "7b767406cfbeb3c28ae2d27d32078981ad22b1d6497e00b927141c278005252b"
+    "sha256": "2de9a667faae5ceb979ebbe7f188f8a45a6398b09a05b36099916ef7d25f010d"
   },
   "evidence": {
     "configured": "yes",
@@ -27,6 +27,12 @@
     "--output-last-message",
     "<temporary-output>"
   ],
+  "marker": "<redacted-marker>",
+  "exitCode": 0,
+  "limitation": "Candidate binding retained; exact project root and repository-skill marker confirmed through the shipped CLI; raw path, marker, and client warnings redacted.",
+  "error": null,
+  "startedAt": "2026-08-30T19:31:48.755Z",
+  "finishedAt": "2026-08-30T19:32:00.458Z",
   "projectRoute": {
     "schema": "dotaios.project-native-invocation.v1",
     "candidate": "candidate",
@@ -36,11 +42,5 @@
     "launchLocation": "<temporary-project>",
     "rootMatch": "yes",
     "outcomeBoundary": "same-caller-receipt"
-  },
-  "marker": "<redacted-marker>",
-  "exitCode": 0,
-  "limitation": "Candidate binding retained; exact project root and marker confirmed; live Codex launch root matched the resolver location; raw path, marker, and client warnings redacted.",
-  "error": null,
-  "startedAt": "2026-08-30T18:56:36.410Z",
-  "finishedAt": "2026-08-30T18:56:49.734Z"
+  }
 }

@@ -180,6 +180,8 @@ test("project-native routing teaches keep-it-there connection and generic fresh-
     projects,
     /I found the `<slug>` folder you connected[\s\S]*one action: `<concrete action>`/i
   );
+  assert.match(projects, /registration metadata matched[\s>]*this action/i);
+  assert.doesNotMatch(projects, /matched from the purpose you registered/i);
   assert.doesNotMatch(projects, /--supports-conventions|--approval-binding|\bapproval[_ -]binding\b/i);
   assert.doesNotMatch(projects, /`(?:agents-md|claude-md|repository-skill)`/);
   assert.match(
@@ -190,6 +192,16 @@ test("project-native routing teaches keep-it-there connection and generic fresh-
   assert.match(projects, /changing the[\s\S]{0,20}directory[\s\S]*insufficient/i);
   assert.match(projects, /unsupported_by_host[\s\S]*manual-open recovery[\s\S]*no route/i);
   assert.doesNotMatch(projects, /download (?:the|this|a) (?:career|agent|recommended|particular) repository/i);
+});
+
+test("project-native probe documentation is reproducible and stays inside observed evidence", async () => {
+  const support = await fs.readFile(path.join(repoRoot, "docs/client-support.md"), "utf8");
+  assert.match(
+    support,
+    /dotaios skills probe --client codex --project-native-route --run --json --path \/path\/to\/aios --receipt \/path\/to\/receipt\.json/i
+  );
+  assert.match(support, /exact disposable project root[\s\S]*repository skill/i);
+  assert.doesNotMatch(support, /marker from `?AGENTS\.md`? and a repository skill/i);
 });
 
 test("universal project routing ships without deferred design and output-pointer artifacts", async () => {

@@ -242,14 +242,14 @@ function remoteBasename(repository) {
 
 function matchReason(project, winner) {
   const reason = winner.reason || "";
-  let field = "repository";
-  if (reason === "exact name match" || reason.includes(`\"${project.slug}\"`)) {
-    field = "slug";
-  } else if (reason.includes(`\"${project.purpose}\"`)) {
-    field = "purpose";
-  } else if (reason.includes(`\"${project.name}\"`)) {
-    field = "name";
-  }
+  const field = reason === "exact name match"
+    ? "slug"
+    : [
+        ["slug", project.slug],
+        ["name", project.name],
+        ["purpose", project.purpose],
+        ["repository", remoteBasename(project.repository)]
+      ].find(([, value]) => reason === `matched trigger "${value}"`)?.[0] || "repository";
   return {
     kind: MATCH_KIND_BY_FIELD[field],
     confidence: winner.confidence,
