@@ -151,7 +151,7 @@ test("R4: exact resolution preserves an approved separated match below the raw-s
   assert.equal(exact.project.id, candidate.project.id);
 });
 
-test("EPR-003: ordinary intent can match the registered slug when the remote basename differs", async () => {
+test("EPR-003: a concrete action can match the registered slug when the remote basename differs", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const project = projectRecord({
     id: "project-acme-tax-001",
@@ -162,7 +162,7 @@ test("EPR-003: ordinary intent can match the registered slug when the remote bas
   });
 
   const result = await resolveProjectRoute({
-    intent: "Please work in acme-tax",
+    intent: "Please prepare annual compliance records in acme-tax",
     supportedConventionKinds: ["agents-md"]
   }, {
     readProjectRegistrations: async () => [project],
@@ -173,10 +173,37 @@ test("EPR-003: ordinary intent can match the registered slug when the remote bas
   assert.equal(result.status, "candidate");
   assert.equal(result.project.slug, "acme-tax");
   assert.deepEqual(result.match, {
-    kind: "slug_overlap",
-    confidence: 1,
-    fields: ["slug"]
+    kind: "purpose_overlap",
+    confidence: 0.9,
+    fields: ["purpose"]
   });
+});
+
+test("R2: a project handle without a concrete action never requests approval", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-annual-compliance-001",
+    slug: "annual-compliance",
+    name: "Annual compliance",
+    purpose: "Prepare annual compliance records.",
+    repository: "https://github.com/customer/ledger-worktree"
+  });
+  const dependencies = {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "191")]
+  };
+
+  for (const intent of ["annual-compliance", "Please work in annual-compliance"]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, dependencies);
+
+    assert.equal(result.status, "no_match", intent);
+    assert.equal(result.route, null, intent);
+    assert.equal(result.approval_binding, undefined, intent);
+  }
 });
 
 test("EPR-004: one weak lexical overlap does not become a confident project match", async () => {
