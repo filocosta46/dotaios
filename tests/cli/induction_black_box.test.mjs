@@ -24,10 +24,6 @@ test("the packed product carries one non-founder induction through exact approve
   fs.mkdirSync(processHome, { recursive: true });
   fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
   fs.mkdirSync(project, { recursive: true });
-  fs.writeFileSync(
-    path.join(project, "AGENTS.md"),
-    "PROJECT_NATIVE_MARKER=" + nativeMarker + "\nDo not expand beyond the approved action.\n"
-  );
   run("git", ["-C", project, "init", "--initial-branch=main"], { cwd: root });
   run("git", ["-C", project, "remote", "add", "origin", "https://github.com/customer/friend-work.git"], {
     cwd: root,
@@ -154,6 +150,10 @@ test("the packed product carries one non-founder induction through exact approve
     cwd: project,
     env: isolatedEnv,
   });
+  fs.appendFileSync(
+    path.join(project, "AGENTS.md"),
+    "\nPROJECT_NATIVE_MARKER=" + nativeMarker + "\nDo not expand beyond the approved action.\n"
+  );
   const identified = JSON.parse(run(process.execPath, [
     cli, "project", "identify", "--json", "--path", aios, "--home", home,
   ], { cwd: project, env: isolatedEnv }).stdout);
