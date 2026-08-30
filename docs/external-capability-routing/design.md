@@ -1,6 +1,6 @@
 # External Capability Routing
 
-> **Status:** Superseded by [External Project Routing](../external-project-routing/spec.md). The owner rejected the curated repository and capability-ID gate; this file remains prior thinking only.
+> **Status:** Proposed for review
 
 ## 1. Executive summary
 

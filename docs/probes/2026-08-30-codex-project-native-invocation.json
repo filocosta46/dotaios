@@ -6,7 +6,7 @@
   "skill": {
     "name": "dotaios-probe",
     "path": "<temporary-project>/skills/dotaios-probe/SKILL.md",
-    "sha256": "a43b9c502b938fc367a7129c363a3d0890dadba9a777d0a4655138ddb0a46a3d"
+    "sha256": "3fd4d401e9f54ba1699f5e013a14e5ed38cf609bcacae30e2ddd710b38242e4e"
   },
   "evidence": {
     "configured": "yes",
@@ -27,10 +27,10 @@
     "--output-last-message",
     "<temporary-output>"
   ],
-  "marker": "DOTAIOS_PROBE_OK_1f7b8d6ae85a1f15",
+  "marker": "<redacted-marker>",
   "exitCode": 0,
-  "limitation": "client said: Reading additional input from stdin... 2026-08-30T14:30:55.669716Z  WARN codex_rollout::list: state db discrepancy during [REDACTED]: falling_back 2026-08-30T14:30:55.674199Z  WARN codex_rollout::list: state db discrepancy during [REDACTED]: falling_back",
+  "limitation": "Exact project root and marker confirmed; redacted client warnings did not affect exitCode 0.",
   "error": null,
-  "startedAt": "2026-08-30T14:30:54.672Z",
-  "finishedAt": "2026-08-30T14:31:08.995Z"
+  "startedAt": "2026-08-30T17:54:35.891Z",
+  "finishedAt": "2026-08-30T17:54:49.501Z"
 }

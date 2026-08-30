@@ -19,10 +19,15 @@ test("the packed product carries one non-founder induction through exact approve
   const processHome = path.join(root, "process-home");
   const aios = path.join(home, "aios");
   const project = path.join(root, "friend-work");
+  const nativeMarker = "PACKED_PROJECT_NATIVE_MARKER";
   fs.mkdirSync(artifactDir, { recursive: true });
   fs.mkdirSync(processHome, { recursive: true });
   fs.mkdirSync(path.join(home, ".codex"), { recursive: true });
   fs.mkdirSync(project, { recursive: true });
+  fs.writeFileSync(
+    path.join(project, "AGENTS.md"),
+    "PROJECT_NATIVE_MARKER=" + nativeMarker + "\nDo not expand beyond the approved action.\n"
+  );
   run("git", ["-C", project, "init", "--initial-branch=main"], { cwd: root });
   run("git", ["-C", project, "remote", "add", "origin", "https://github.com/customer/friend-work.git"], {
     cwd: root,
@@ -161,12 +166,15 @@ test("the packed product carries one non-founder induction through exact approve
   });
 
   const candidateResolution = JSON.parse(run(process.execPath, [
-    cli, "resolve", "plan my day", "--path", aios, "--home", home,
+    cli, "resolve", "plan my day",
+    "--supports-conventions", "agents-md",
+    "--path", aios, "--home", home,
   ], { cwd: project, env: isolatedEnv }).stdout);
   assert.equal(candidateResolution.status, "partial");
   assert.equal(candidateResolution.project, null);
   assert.equal(candidateResolution.project_route.status, "candidate");
   assert.equal(candidateResolution.project_route.project.id, projectPreview.plan.project.id);
+  assert.match(candidateResolution.project_route.approval_binding, /^[a-f0-9]{64}$/u);
   assert.equal(candidateResolution.location, null);
   assert.equal(candidateResolution.next_action.approval, "direct_user_required");
   assert.match(candidateResolution.next_action.summary, /immediately.*exact resolution/i);
@@ -175,7 +183,8 @@ test("the packed product carries one non-founder induction through exact approve
   const resolution = JSON.parse(run(process.execPath, [
     cli, "resolve", "plan my day",
     "--project", projectPreview.plan.project.id,
-    "--supports-conventions", "agents-md,repository-skill",
+    "--supports-conventions", "agents-md",
+    "--approval-binding", candidateResolution.project_route.approval_binding,
     "--path", aios, "--home", home,
   ], { cwd: project, env: isolatedEnv }).stdout);
   assert.equal(resolution.schema, "dotaios.intent-resolution/v1");
@@ -189,6 +198,27 @@ test("the packed product carries one non-founder induction through exact approve
     approval: "not_applicable",
     summary: "Start a fresh context rooted at the verified project for the approved action; changing directory in this run is insufficient."
   });
+  const child = JSON.parse(run(process.execPath, [
+    "--input-type=module",
+    "--eval",
+    [
+      "import fs from 'node:fs/promises';",
+      "const cwd = await fs.realpath(process.cwd());",
+      "const instructions = await fs.readFile('AGENTS.md', 'utf8');",
+      "const marker = instructions.split(/\\r?\\n/u).find((line) => line.startsWith('PROJECT_NATIVE_MARKER='))?.split('=')[1] || null;",
+      "process.stdout.write(JSON.stringify({ cwd, marker }));"
+    ].join("\n")
+  ], {
+    cwd: resolution.location,
+    env: {
+      HOME: processHome,
+      USERPROFILE: processHome,
+      PATH: controlledPath(),
+      LANG: "C"
+    }
+  }).stdout);
+  assert.equal(child.cwd, fs.realpathSync(resolution.location));
+  assert.equal(child.marker, nativeMarker);
   assert.equal(sha256(fs.readFileSync(workFile)), workBefore, "resolution must not perform the proposed action");
 });
 

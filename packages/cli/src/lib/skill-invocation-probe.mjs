@@ -180,7 +180,7 @@ export async function runSkillInvocationProbe({
     const configured = target.configured ? "yes" : "no";
     const discoverable = target.discoverable ? "path-ready" : "no";
     const digest = await sha256File(skillPath);
-    const prompt = "Please verify project skill invocation. Do not infer or guess the marker from this request. Follow the matching project-owned skill exactly. Do not edit files.";
+    const prompt = "Please verify project skill invocation. Report the exact current working directory and project skill marker only. Do not infer either value from this request. Follow the matching project-owned skill exactly. Do not edit files.";
     if (!definition.runnable) {
       receipt = createInvocationReceipt({
         client: definition.label,
@@ -258,10 +258,15 @@ export async function runSkillInvocationProbe({
         maxBuffer: 2 * 1024 * 1024
       });
       const output = await readOutput(outputPath, result.stdout || "");
+      const canonicalProjectPath = await fs.realpath(projectPath);
       const produced = (
         result.status === 0
         && !result.error
-        && markerWasProduced(output, marker)
+        && probeOutputMatchesProjectRoot(output, {
+          marker,
+          projectPath,
+          canonicalProjectPath
+        })
       );
       const timedOut = result.error?.code === "ETIMEDOUT";
       // A client that refuses usually says why: a missing entitlement, an
@@ -379,8 +384,46 @@ async function assertAiosSkillsSource(aiosPath) {
   if (skills.length === 0) throw new Error(`No readable skills found under ${path.join(aiosPath, "skills")}`);
 }
 
+export function probeOutputMatchesProjectRoot(output, {
+  marker,
+  projectPath,
+  canonicalProjectPath = projectPath
+} = {}) {
+  if (!markerWasProduced(output, marker) || typeof projectPath !== "string") return false;
+  const lines = String(output || "")
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const reportedRoot = lines[0]?.startsWith("CWD: ")
+    ? path.resolve(lines[0].slice("CWD: ".length))
+    : null;
+  const acceptedRoots = new Set([
+    path.resolve(projectPath),
+    path.resolve(canonicalProjectPath)
+  ]);
+  return lines.length === 2
+    && acceptedRoots.has(reportedRoot)
+    && lines[1] === marker;
+}
+
 function probeSkillBody(marker) {
-  return `---\nname: ${PROBE_SKILL}\ndescription: Disposable proof that a client reads a project-owned skill\ntriggers:\n  - verify project skill invocation\n---\n# Disposable invocation probe\n\nWhen the caller asks for the DotAIOS invocation probe, output this exact marker on a line by itself, and nothing else:\n\n${marker}\n\nDo not edit files.\n`;
+  return [
+    "---",
+    "name: " + PROBE_SKILL,
+    "description: Disposable proof that a client reads a project-owned skill",
+    "triggers:",
+    "  - verify project skill invocation",
+    "---",
+    "# Disposable invocation probe",
+    "",
+    "When the caller asks for the DotAIOS invocation probe, determine the process working directory without inferring it from the prompt, then output exactly these two lines and nothing else:",
+    "",
+    "CWD: <exact-process-working-directory>",
+    marker,
+    "",
+    "Do not edit files.",
+    ""
+  ].join("\n");
 }
 
 function commandExists(binary) {

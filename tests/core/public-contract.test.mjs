@@ -192,6 +192,32 @@ test("project-native routing teaches keep-it-there connection and generic fresh-
   assert.doesNotMatch(projects, /download (?:the|this|a) (?:career|agent|recommended|particular) repository/i);
 });
 
+test("universal project routing ships without deferred design and output-pointer artifacts", async () => {
+  const absentPaths = [
+    "docs/external-project-routing/reviews.md",
+    "docs/external-project-routing/spec.md",
+    "docs/external-project-routing/tickets/01-generic-project-native-routing.md",
+    "docs/external-project-routing/tickets/02-authoritative-output-pointer-store.md",
+    "docs/external-project-routing/tickets/03-output-pointer-cli-return-path.md"
+  ];
+  for (const relativePath of absentPaths) {
+    await assert.rejects(
+      fs.access(path.join(repoRoot, relativePath)),
+      { code: "ENOENT" },
+      relativePath + " must remain in prior Git history, not the launch product"
+    );
+  }
+
+  const context = await fs.readFile(path.join(repoRoot, "CONTEXT.md"), "utf8");
+  const priorDesign = await fs.readFile(
+    path.join(repoRoot, "docs", "external-capability-routing", "design.md"),
+    "utf8"
+  );
+  assert.doesNotMatch(context, /output pointer/i);
+  assert.match(priorDesign, /> \*\*Status:\*\* Proposed for review/);
+  assert.doesNotMatch(priorDesign, /superseded by.*external project routing/i);
+});
+
 test("Hermes claims a global adapter without inventing a project-local selector", async () => {
   const relativeFiles = [
     "docs/adapters.md",

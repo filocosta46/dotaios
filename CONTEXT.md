@@ -67,15 +67,3 @@ _Avoid_: configuration check, file presence
 **Personal replica**:
 A recoverable copy of allowlisted canonical knowledge for one person's devices. It does not imply safe concurrent writers, shared-team authority, or automatic conflict resolution.
 _Avoid_: shared workspace, collaboration database, backup
-
-**Registered project**:
-A user-approved durable project record joined to one exact machine-local folder identity. Registration establishes where the project is; it is not an endorsement of the project's code or instructions.
-_Avoid_: curated capability, admitted repository, installed automation
-
-**Project-native route**:
-An inert handoff from DotAIOS to the agent conventions already present in one verified registered project. The conventions may guide a host only after explicit approval and never become DotAIOS product authority.
-_Avoid_: capability execution, command route, trusted prompt
-
-**Output pointer**:
-A project-scoped locator and short label for a durable result that remains owned by its source project and customer. It is not a copy, content index, memory record, or ownership transfer.
-_Avoid_: ingested output, artifact store, search index
