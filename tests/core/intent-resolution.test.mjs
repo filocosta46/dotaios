@@ -126,7 +126,7 @@ test("skill and tool no-match remain explicit without suppressing the verified p
 test("a replaced primary root returns a path-free refusal with no Shared fallback", async (t) => {
   const { resolveIntentResolution, renderIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);
-  await fs.rm(fixture.projectPath, { recursive: true });
+  await fs.rename(fixture.projectPath, `${fixture.projectPath}-replaced`);
   await fs.mkdir(fixture.projectPath);
 
   const result = await resolveIntentResolution({
