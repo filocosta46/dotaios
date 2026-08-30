@@ -29,6 +29,12 @@ export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
   "repository-skill"
 ]);
 const CONVENTION_KINDS = new Set(PROJECT_NATIVE_CONVENTION_KINDS);
+const MATCH_KIND_BY_FIELD = Object.freeze({
+  slug: "slug_overlap",
+  purpose: "purpose_overlap",
+  name: "name_overlap",
+  repository: "remote_name_overlap"
+});
 const execFileAsync = promisify(execFile);
 
 /** Resolve a registered project route without executing project instructions. */
@@ -102,11 +108,13 @@ async function observeRoutableProjects(projects, dependencies) {
       liveRemoteResults[index].ok
       && projectRemotesMatch(project.repository, liveRemote)
     ));
-  const inventoryResults = await Promise.all(remoteVerified.map(({ project }) => (
-    settleInspection(async () => validateConventionInventory(
+  const inventoryResults = await mapWithConcurrency(
+    remoteVerified,
+    MAX_LIVE_GIT_CONCURRENCY,
+    ({ project }) => settleInspection(async () => validateConventionInventory(
       await dependencies.inspectConventionInventory(project)
     ))
-  )));
+  );
   if (inventoryResults.some(({ error }) => isDiscoveryBoundError(error))) {
     return { error: "discovery_bound_exceeded", routable: [] };
   }
@@ -225,21 +233,16 @@ function remoteBasename(repository) {
 
 function matchReason(project, winner) {
   const reason = winner.reason || "";
-  const field = reason === "exact name match" || reason.includes(`\"${project.slug}\"`)
-    ? "slug"
-    : reason.includes(`\"${project.purpose}\"`)
-      ? "purpose"
-      : reason.includes(`\"${project.name}\"`)
-        ? "name"
-        : "repository";
+  let field = "repository";
+  if (reason === "exact name match" || reason.includes(`\"${project.slug}\"`)) {
+    field = "slug";
+  } else if (reason.includes(`\"${project.purpose}\"`)) {
+    field = "purpose";
+  } else if (reason.includes(`\"${project.name}\"`)) {
+    field = "name";
+  }
   return {
-    kind: field === "slug"
-      ? "slug_overlap"
-      : field === "purpose"
-        ? "purpose_overlap"
-        : field === "name"
-          ? "name_overlap"
-          : "remote_name_overlap",
+    kind: MATCH_KIND_BY_FIELD[field],
     confidence: winner.confidence,
     fields: [field]
   };
@@ -254,14 +257,7 @@ function candidate({ project, liveRemote, conventions }, match, {
     status: "candidate",
     project: publicProject(project),
     match,
-    routability: {
-      trust: "registered-user-owned",
-      effect: "unknown",
-      approval: "direct_user_required",
-      conventions: conventions
-        .map(({ kind, resource }) => ({ kind, resource }))
-        .sort(compareConventions)
-    },
+    routability: publicRoutability(conventions),
     route: null,
     reason,
     approval_binding: projectRouteApprovalBinding({
