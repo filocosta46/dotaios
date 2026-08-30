@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -17,10 +18,10 @@ import {
   validateProjectSelector
 } from "./projects.mjs";
 import { rankSkills } from "./skill-resolver.mjs";
-import { isPathWithin as isContainedPath } from "./paths.mjs";
 
 const MAX_LIVE_GIT_CONCURRENCY = 8;
 const MAX_SKILL_CONVENTION_OBSERVATIONS = 64;
+const PROJECT_ROUTE_APPROVAL_DOMAIN = "dotaios-project-route-approval/v1";
 const SAFE_REMOTE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/;
 export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
   "agents-md",
@@ -34,8 +35,8 @@ const execFileAsync = promisify(execFile);
 export async function resolveProjectRoute({
   intent,
   projectSelector = null,
-  cwd = null,
   supportedConventionKinds = [],
+  approvalBinding = null,
   ...runtimeOptions
 } = {}, dependencies = {}) {
   if (!validRouteIntent(intent)) return refused("invalid_intent");
@@ -48,6 +49,9 @@ export async function resolveProjectRoute({
   }
   if (!validSupportedConventionKinds(supportedConventionKinds)) {
     return refused("invalid_host_support");
+  }
+  if (projectSelector !== null && !validApprovalBinding(approvalBinding)) {
+    return refused("approval_binding_required");
   }
   const runtime = {
     ...defaultDependencies(runtimeOptions, dependencies),
@@ -67,66 +71,56 @@ export async function resolveProjectRoute({
       intent,
       projectSelector,
       supportedConventionKinds,
+      approvalBinding,
       projects,
       dependencies: runtime
     });
   }
+  const observation = await observeRoutableProjects(active, runtime);
+  if (observation.error) return refused(observation.error);
+  return resolveImplicitProject({
+    intent,
+    supportedConventionKinds,
+    routable: observation.routable
+  });
+}
+
+async function observeRoutableProjects(projects, dependencies) {
   const liveRemoteResults = await mapWithConcurrency(
-    active,
+    projects,
     MAX_LIVE_GIT_CONCURRENCY,
-    (project) => settleInspection(() => runtime.inspectLiveRemote(project))
+    (project) => settleInspection(async () => canonicalLiveRemote(
+      await dependencies.inspectLiveRemote(project)
+    ))
   );
   if (liveRemoteResults.some(({ error }) => isDiscoveryBoundError(error))) {
-    return refused("discovery_bound_exceeded");
+    return { error: "discovery_bound_exceeded", routable: [] };
   }
-  const remoteVerified = active.filter((project, index) => (
-    liveRemoteResults[index].ok
-    && projectRemotesMatch(project.repository, liveRemoteResults[index].value)
-  ));
-  const inventoryResults = await Promise.all(remoteVerified.map((project) => (
+  const remoteVerified = projects
+    .map((project, index) => ({ project, liveRemote: liveRemoteResults[index].value }))
+    .filter(({ project, liveRemote }, index) => (
+      liveRemoteResults[index].ok
+      && projectRemotesMatch(project.repository, liveRemote)
+    ));
+  const inventoryResults = await Promise.all(remoteVerified.map(({ project }) => (
     settleInspection(async () => validateConventionInventory(
-      await runtime.inspectConventionInventory(project)
+      await dependencies.inspectConventionInventory(project)
     ))
   )));
   if (inventoryResults.some(({ error }) => isDiscoveryBoundError(error))) {
-    return refused("discovery_bound_exceeded");
+    return { error: "discovery_bound_exceeded", routable: [] };
   }
   const routable = remoteVerified
-    .map((project, index) => ({
+    .map(({ project, liveRemote }, index) => ({
       project,
+      liveRemote,
       conventions: inventoryResults[index].ok ? inventoryResults[index].value : null
     }))
     .filter(({ conventions }) => Array.isArray(conventions) && conventions.length > 0);
-  if (cwd !== null) {
-    const contains = runtime.isPathWithin || ((root, candidate) => (
-      isContainedPath(root, candidate, { fileSystem: runtime.filesystem })
-    ));
-    const contained = (await Promise.all(routable.map(async (candidate) => (
-      await contains(candidate.project.projectPath, cwd) ? candidate : null
-    )))).filter(Boolean);
-    if (contained.length === 1) {
-      return candidate(contained[0], {
-        kind: "current_directory",
-        confidence: 1,
-        fields: ["registered_root"]
-      });
-    }
-    if (contained.length > 1) {
-      return ambiguous(contained, {
-        kind: "colliding_registered_root",
-        confidence: 0.5,
-        fields: ["registered_root"]
-      });
-    }
-  }
-  const exactDisplayNames = exactDisplayNameMatches(intent, routable);
-  if (exactDisplayNames.length > 1) {
-    return ambiguous(exactDisplayNames, {
-      kind: "colliding_display_name",
-      confidence: 0.5,
-      fields: ["name"]
-    });
-  }
+  return { error: null, routable };
+}
+
+function resolveImplicitProject({ intent, supportedConventionKinds, routable }) {
   const ranked = rankSkills(String(intent || ""), routable.map(({ project }) => ({
     name: project.slug,
     dir: project.slug,
@@ -147,7 +141,10 @@ export async function resolveProjectRoute({
   }
   if (winner && winner.confidence >= 0.67) {
     const selected = routable.find(({ project }) => project.slug === winner.dir);
-    return candidate(selected, matchReason(selected.project, winner));
+    const match = matchReason(selected.project, winner);
+    const supported = supportedConventions(selected.conventions, supportedConventionKinds);
+    if (supported.length === 0) return unsupported(selected.project, selected.conventions);
+    return candidate(selected, match, { intent, supportedConventionKinds });
   }
   if (winner && ranked.length > 1) {
     const candidates = ranked.slice(0, 2).map((entry) => (
@@ -170,101 +167,46 @@ export async function resolveProjectRoute({
 }
 
 async function resolveExactProject({
+  intent,
   projectSelector,
   supportedConventionKinds,
+  approvalBinding,
   projects,
   dependencies
 }) {
   const matches = projects.filter((project) => (
     project.id === projectSelector || project.slug === projectSelector
   ));
-  if (matches.length === 0) return noMatch("exact_project_not_found");
-  if (matches.length > 1) {
-    return ambiguous(
-      matches.map((project) => ({ project })),
-      { kind: "colliding_handle", confidence: 0.5, fields: ["slug_or_stable_id"] },
-      "ambiguous_project_handle"
-    );
-  }
+  if (matches.length !== 1) return refused("approval_binding_mismatch");
   const selected = matches[0];
   if (!projectEligibleForInspection(selected)) {
     return refused("project_identity_unverified");
   }
-  let initialRemote;
-  try {
-    initialRemote = await dependencies.inspectLiveRemote(selected);
-  } catch {
-    return refused("project_identity_unverified");
-  }
-  if (!projectRemotesMatch(selected.repository, initialRemote)) {
-    return refused("project_identity_unverified");
-  }
-  let initialConventions;
-  try {
-    initialConventions = validateConventionInventory(
-      await dependencies.inspectConventionInventory(selected)
-    );
-  } catch (error) {
-    return refused(isDiscoveryBoundError(error)
-      ? "discovery_bound_exceeded"
-      : "project_not_routable");
-  }
-  if (!Array.isArray(initialConventions) || initialConventions.length === 0) {
-    return refused("project_not_routable");
-  }
-  const supportedKinds = new Set(supportedConventionKinds);
-  const supported = initialConventions.filter(({ kind }) => supportedKinds.has(kind));
-  if (supported.length === 0) {
-    return unsupported(selected, initialConventions);
-  }
-
-  let currentProjects;
-  try {
-    currentProjects = (await dependencies.readProjectRegistrations({ projectSelector })) || [];
-  } catch (error) {
-    return refused(isDiscoveryBoundError(error)
-      ? "discovery_bound_exceeded"
-      : "project_identity_unverified");
-  }
-  const currentMatches = currentProjects.filter((project) => (
-    projectEligibleForInspection(project)
-    && (project.id === projectSelector || project.slug === projectSelector)
-  ));
-  if (currentMatches.length !== 1 || !sameProjectIdentity(selected, currentMatches[0])) {
-    return refused("project_identity_unverified");
-  }
-  const current = currentMatches[0];
-  let finalRemote;
-  try {
-    finalRemote = await dependencies.inspectLiveRemote(current);
-  } catch {
-    return refused("project_identity_unverified");
-  }
+  const observation = await observeRoutableProjects([selected], dependencies);
+  if (observation.error) return refused(observation.error);
+  if (observation.routable.length !== 1) return refused("project_identity_unverified");
+  const observed = observation.routable[0];
+  const proposal = resolveImplicitProject({
+    intent,
+    supportedConventionKinds,
+    routable: [observed]
+  });
   if (
-    !projectRemotesMatch(current.repository, finalRemote)
-    || !projectRemotesMatch(initialRemote, finalRemote)
+    proposal.status !== "candidate"
+    || proposal.project.id !== selected.id
+    || proposal.approval_binding !== approvalBinding
   ) {
-    return refused("project_identity_unverified");
+    return refused("approval_binding_mismatch");
   }
-  let finalConventions;
-  try {
-    finalConventions = validateConventionInventory(
-      await dependencies.inspectConventionInventory(current)
-    );
-  } catch {
-    return refused("project_identity_unverified");
-  }
-  if (!sameConventionInventory(initialConventions, finalConventions)) {
-    return refused("project_identity_unverified");
-  }
-  const finalSupported = finalConventions
-    .filter(({ kind }) => supportedKinds.has(kind))
-    .sort(compareConventions);
+  const finalSupported = supportedConventions(
+    observed.conventions,
+    supportedConventionKinds
+  );
   return ready(
-    current,
-    finalConventions,
+    selected,
+    observed.conventions,
     finalSupported,
-    projectSelector === current.id ? "stable_id" : "slug"
+    projectSelector === selected.id ? "stable_id" : "slug"
   );
 }
 
@@ -303,7 +245,11 @@ function matchReason(project, winner) {
   };
 }
 
-function candidate({ project, conventions }, match) {
+function candidate({ project, liveRemote, conventions }, match, {
+  intent,
+  supportedConventionKinds
+}) {
+  const reason = "unique_registered_project_match";
   return {
     status: "candidate",
     project: publicProject(project),
@@ -317,16 +263,67 @@ function candidate({ project, conventions }, match) {
         .sort(compareConventions)
     },
     route: null,
-    reason: "unique_registered_project_match"
+    reason,
+    approval_binding: projectRouteApprovalBinding({
+      intent,
+      supportedConventionKinds,
+      project,
+      liveRemote,
+      conventions,
+      match,
+      reason
+    })
   };
 }
 
-function exactDisplayNameMatches(intent, routable) {
-  const normalizedIntent = String(intent || "").toLocaleLowerCase("en-US");
-  return routable.filter(({ project }) => {
-    const name = String(project.name || "").toLocaleLowerCase("en-US");
-    return name.length >= 2 && normalizedIntent.includes(name);
+function projectRouteApprovalBinding({
+  intent,
+  supportedConventionKinds,
+  project,
+  liveRemote,
+  conventions,
+  match,
+  reason
+}) {
+  const payload = stableJson({
+    version: 1,
+    action: normalizeRouteAction(intent),
+    host_support: normalizeSupportedConventionKinds(supportedConventionKinds),
+    project_id: project.id,
+    mapping_path: project.mappingPath || project.projectPath,
+    root_identity: project.rootIdentity,
+    live_remote: liveRemote,
+    conventions: [...conventions].sort(compareConventions),
+    registration: publicProject(project),
+    explanation_basis: { kind: match.kind, fields: match.fields },
+    emitted_match_reason: reason
   });
+  return createHash("sha256")
+    .update(PROJECT_ROUTE_APPROVAL_DOMAIN)
+    .update("\u0000")
+    .update(payload)
+    .digest("hex");
+}
+
+function normalizeRouteAction(value) {
+  return String(value).normalize("NFC").replace(/\s+/gu, " ").trim();
+}
+
+function normalizeSupportedConventionKinds(value) {
+  return [...value].sort((left, right) => left.localeCompare(right));
+}
+
+function canonicalLiveRemote(value) {
+  const remote = classifyProjectRemote(value);
+  if (!remote.safe) throw new Error("The live local Git remote is unsafe.");
+  return remote.canonicalUrl;
+}
+
+function supportedConventions(conventions, supportedConventionKinds) {
+  const supportedKinds = new Set(supportedConventionKinds);
+  return conventions
+    .filter(({ kind }) => supportedKinds.has(kind))
+    .sort(compareConventions);
 }
 
 function ambiguous(candidates, match, reason = "multiple_registered_project_matches") {
@@ -353,7 +350,7 @@ function ready(project, conventions, supported, handleField) {
       kind: "project-native",
       project_id: project.id,
       project_slug: project.slug,
-      location: project.projectPath,
+      location: project.mappingPath || project.projectPath,
       advisory: true,
       revalidate_before_entry: true,
       fresh_context_required: true,
@@ -374,26 +371,6 @@ function publicRoutability(conventions) {
   };
 }
 
-function sameProjectIdentity(left, right) {
-  return left.id === right.id
-    && left.slug === right.slug
-    && left.name === right.name
-    && left.purpose === right.purpose
-    && projectRemotesMatch(left.repository, right.repository)
-    && left.projectPath === right.projectPath
-    && left.mappingStatus === right.mappingStatus
-    && left.pathAvailable === right.pathAvailable
-    && left.placement === right.placement
-    && JSON.stringify(left.rootIdentity) === JSON.stringify(right.rootIdentity);
-}
-
-function sameConventionInventory(left, right) {
-  if (!Array.isArray(right) || left.length !== right.length) return false;
-  const leftSorted = [...left].sort(compareConventions);
-  const rightSorted = [...right].sort(compareConventions);
-  return JSON.stringify(leftSorted) === JSON.stringify(rightSorted);
-}
-
 function unsupported(project, conventions) {
   return {
     status: "unsupported_by_host",
@@ -405,16 +382,12 @@ function unsupported(project, conventions) {
   };
 }
 
-function noMatch(reason) {
-  return { status: "no_match", project: null, match: null, routability: null, route: null, reason };
-}
-
 function refused(reason) {
   return { status: "refused", project: null, match: null, routability: null, route: null, reason };
 }
 
 function publicProject(project) {
-  return {
+  return project.publicRegistration || {
     id: project.id,
     slug: project.slug,
     name: project.name,
@@ -487,6 +460,18 @@ function validSupportedConventionKinds(value) {
     && value.length <= CONVENTION_KINDS.size
     && new Set(value).size === value.length
     && value.every((kind) => CONVENTION_KINDS.has(kind));
+}
+
+function validApprovalBinding(value) {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).toSorted().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function validateConventionInventory(value) {

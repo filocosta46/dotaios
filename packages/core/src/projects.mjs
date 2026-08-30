@@ -523,17 +523,22 @@ export async function readBoundedProjectRegistrations(options = {}) {
     const mapping = await verifyProjectPathMapping(context, state.paths[record.id]);
     const placement = await classifyProjectPlacement({
       aiosPath: context.aiosPath,
-      projectPath: mapping.projectPath,
+      projectPath: mapping.canonicalProjectPath,
       slug: record.slug,
       fileSystem: context.fs
     });
-    return {
+    const registration = {
       ...record,
-      projectPath: mapping.projectPath,
+      projectPath: mapping.canonicalProjectPath,
+      mappingPath: mapping.canonicalProjectPath,
       mappingStatus: mapping.status,
       pathAvailable: placement.pathAvailable,
       placement: placement.placement,
       rootIdentity: mapping.rootIdentity
+    };
+    return {
+      ...registration,
+      publicRegistration: toPublicProjectRouteRegistration(registration)
     };
   }));
   const verified = rejectConflictingProjectOwners(registrations);
@@ -604,31 +609,53 @@ async function readBoundedProjectRouteRecords(context, { enforceImplicitBounds }
 }
 
 function toBoundedProjectRouteRecord(directorySlug, readmePath, metadata) {
-  const primaryId = boundedProjectMetadataString(metadata.id, 200);
-  const legacyId = boundedProjectMetadataString(metadata.project_id, 200);
-  if (primaryId && legacyId && primaryId !== legacyId) return null;
-  const id = primaryId || legacyId;
-  const slug = boundedProjectMetadataString(metadata.project ?? metadata.slug, 200);
-  const name = boundedProjectMetadataString(metadata.name, 200);
-  const purpose = boundedProjectMetadataString(metadata.description, 1000);
-  const status = boundedProjectMetadataString(metadata.status, 32) || "unknown";
-  const remote = classifyProjectRemote(
-    boundedProjectMetadataString(metadata.repo_url ?? metadata.repo, 2048)
-  );
+  const boundedMetadata = {
+    id: boundedProjectMetadataString(metadata.id, 200),
+    project_id: boundedProjectMetadataString(metadata.project_id, 200),
+    project: boundedProjectMetadataString(metadata.project ?? metadata.slug, 200),
+    slug: null,
+    name: boundedProjectMetadataString(metadata.name, 200),
+    description: boundedProjectMetadataString(metadata.description, 1000),
+    status: boundedProjectMetadataString(metadata.status, 32),
+    repo_url: boundedProjectMetadataString(metadata.repo_url ?? metadata.repo, 2048),
+    repo: null
+  };
+  let projection;
   try {
-    validateProjectSelector(id);
+    projection = projectMetadataProjection(directorySlug, boundedMetadata, readmePath);
   } catch {
     return null;
   }
-  if (slug !== directorySlug || !name || !purpose || !remote.safe) return null;
+  try {
+    validateProjectSelector(projection.id);
+  } catch {
+    return null;
+  }
+  if (
+    projection.project !== directorySlug
+    || !projection.name
+    || !projection.purpose
+    || !projection.remote.safe
+  ) return null;
   return {
-    id,
+    id: projection.id,
     slug: directorySlug,
-    name,
-    purpose,
-    repository: remote.canonicalUrl,
-    status,
+    name: projection.name,
+    purpose: projection.purpose,
+    repository: projection.remote.canonicalUrl,
+    status: projection.status,
     readmePath
+  };
+}
+
+function toPublicProjectRouteRegistration(project) {
+  return {
+    id: project.id,
+    slug: project.slug,
+    name: project.name,
+    purpose: project.purpose,
+    repository: project.repository,
+    placement: project.placement
   };
 }
 
@@ -659,6 +686,7 @@ function rejectConflictingProjectOwners(records) {
     return {
       ...record,
       projectPath: null,
+      mappingPath: null,
       mappingStatus: "conflict",
       pathAvailable: false,
       placement: "unsafe",
@@ -1296,28 +1324,36 @@ function sameProjectDirectory(left, right) {
 }
 
 function projectRecord(directorySlug, readmePath, source) {
-  const metadata = source.metadata;
-  const id = readProjectId(metadata, readmePath);
-  const project = readOptionalString(metadata.project)
-    || readOptionalString(metadata.slug)
-    || directorySlug;
+  const projection = projectMetadataProjection(directorySlug, source.metadata, readmePath);
   const bodyName = firstHeading(source.body);
-  const remote = classifyProjectRemote(
-    readOptionalString(metadata.repo_url) || readOptionalString(metadata.repo) || null
-  );
   return {
     directorySlug,
-    id,
-    metadata,
-    name: readOptionalString(metadata.name) || bodyName || project,
-    project,
-    status: readOptionalString(metadata.status) || "unknown",
-    domain: normalizeStoredDomains(metadata.domain),
-    remote,
-    repoUrl: remote.safe ? remote.canonicalUrl : null,
+    id: projection.id,
+    metadata: source.metadata,
+    name: projection.name || bodyName || projection.project,
+    project: projection.project,
+    status: projection.status,
+    domain: normalizeStoredDomains(source.metadata.domain),
+    remote: projection.remote,
+    repoUrl: projection.remote.safe ? projection.remote.canonicalUrl : null,
     readmePath,
     slug: directorySlug,
     source
+  };
+}
+
+function projectMetadataProjection(directorySlug, metadata, source) {
+  return {
+    id: readProjectId(metadata, source),
+    project: readOptionalString(metadata.project)
+      || readOptionalString(metadata.slug)
+      || directorySlug,
+    name: readOptionalString(metadata.name),
+    purpose: readOptionalString(metadata.description),
+    status: readOptionalString(metadata.status) || "unknown",
+    remote: classifyProjectRemote(
+      readOptionalString(metadata.repo_url) || readOptionalString(metadata.repo) || null
+    )
   };
 }
 
@@ -1680,7 +1716,12 @@ async function verifyProjectPathMapping(context, value) {
     if (!sameProjectRootIdentity(observed, identity)) {
       return { status: "changed", projectPath: null };
     }
-    return { status: "verified", projectPath, rootIdentity: observed };
+    return {
+      status: "verified",
+      projectPath,
+      canonicalProjectPath: canonicalPath,
+      rootIdentity: observed
+    };
   } catch {
     return { status: "unavailable", projectPath: null };
   }

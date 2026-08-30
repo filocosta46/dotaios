@@ -40,11 +40,10 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
     })
   ];
   const inspections = [];
-
-  const result = await resolveProjectRoute({
-    intent: "Prepare and track this product launch."
-  }, {
-    readProjectRegistrations: async () => projects,
+  const dependencies = {
+    readProjectRegistrations: async ({ projectSelector }) => projectSelector === null
+      ? projects
+      : projects.filter((project) => project.id === projectSelector || project.slug === projectSelector),
     inspectLiveRemote: async (project) => {
       inspections.push(["git", project.slug]);
       return project.repository;
@@ -53,9 +52,17 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
       inspections.push(["conventions", project.slug]);
       return [convention("agents-md", "AGENTS.md", project.slug === "launch-work" ? "201" : "301")];
     }
-  });
+  };
 
-  assert.deepEqual(result, {
+  const result = await resolveProjectRoute({
+    intent: "Prepare and track this product launch.",
+    supportedConventionKinds: ["repository-skill", "agents-md"]
+  }, dependencies);
+
+  assert.match(result.approval_binding, /^[a-f0-9]{64}$/);
+  const { approval_binding: approvalBinding, ...candidateResult } = result;
+  assert.equal(typeof approvalBinding, "string");
+  assert.deepEqual(candidateResult, {
     status: "candidate",
     project: {
       id: "project-launch-001",
@@ -86,6 +93,13 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
     ["conventions", "finance-work"]
   ]);
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects|command|argv|environment|content/);
+  const exact = await resolveProjectRoute({
+    intent: "Prepare and track this product launch.",
+    projectSelector: result.project.id,
+    supportedConventionKinds: ["agents-md", "repository-skill"],
+    approvalBinding: result.approval_binding
+  }, dependencies);
+  assert.equal(exact.status, "ready");
 });
 
 test("EPR-003: ordinary intent can match the registered slug when the remote basename differs", async () => {
@@ -99,7 +113,8 @@ test("EPR-003: ordinary intent can match the registered slug when the remote bas
   });
 
   const result = await resolveProjectRoute({
-    intent: "Please work in acme-tax"
+    intent: "Please work in acme-tax",
+    supportedConventionKinds: ["agents-md"]
   }, {
     readProjectRegistrations: async () => [project],
     inspectLiveRemote: async () => project.repository,
@@ -143,7 +158,7 @@ test("EPR-004: one weak lexical overlap does not become a confident project matc
   });
 });
 
-test("EPR-001, EPR-005, and EPR-015: exact stable ID returns a freshly revalidated advisory route", async () => {
+test("EPR-001, EPR-005, and EPR-015: exact stable ID requires the candidate binding and one fresh observation", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const project = projectRecord({
     id: "project-launch-001",
@@ -157,17 +172,13 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID returns a freshly revalidat
     convention("repository-skill", ".agents/skills/launch/SKILL.md", "202"),
     convention("agents-md", "AGENTS.md", "201")
   ];
-  let catalogReads = 0;
+  const catalogSelectors = [];
   let remoteReads = 0;
   let conventionReads = 0;
 
-  const result = await resolveProjectRoute({
-    intent: "Prepare this launch.",
-    projectSelector: "project-launch-001",
-    supportedConventionKinds: ["agents-md", "repository-skill"]
-  }, {
-    readProjectRegistrations: async () => {
-      catalogReads += 1;
+  const dependencies = {
+    readProjectRegistrations: async ({ projectSelector }) => {
+      catalogSelectors.push(projectSelector);
       return [{ ...project, rootIdentity: { ...project.rootIdentity } }];
     },
     inspectLiveRemote: async () => {
@@ -178,7 +189,20 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID returns a freshly revalidat
       conventionReads += 1;
       return structuredClone(allConventions);
     }
-  });
+  };
+  const proposal = await resolveProjectRoute({
+    intent: "Prepare and track this product launch.",
+    supportedConventionKinds: ["repository-skill", "agents-md"]
+  }, dependencies);
+  assert.equal(proposal.status, "candidate");
+  assert.match(proposal.approval_binding, /^[a-f0-9]{64}$/);
+
+  const result = await resolveProjectRoute({
+    intent: "Prepare and track this product launch.",
+    projectSelector: "project-launch-001",
+    supportedConventionKinds: ["agents-md", "repository-skill"],
+    approvalBinding: proposal.approval_binding
+  }, dependencies);
 
   assert.deepEqual(result, {
     status: "ready",
@@ -220,9 +244,156 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID returns a freshly revalidat
     },
     reason: "exact_project_ready"
   });
-  assert.equal(catalogReads, 2, "exact routing must re-read registered identity");
-  assert.equal(remoteReads, 2, "exact routing must re-read the authoritative live remote");
-  assert.equal(conventionReads, 2, "exact routing must re-observe convention identities");
+  assert.deepEqual(catalogSelectors, [null, "project-launch-001"]);
+  assert.equal(remoteReads, 2, "each router call observes the authoritative live remote once");
+  assert.equal(conventionReads, 2, "each router call observes convention identities once");
+});
+
+test("R3: approval binding normalizes action, host support, remotes, and observation ordering with framed fields", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const base = projectRecord({
+    id: "project-binding-001",
+    slug: "binding-work",
+    name: "Binding work",
+    purpose: "Prepare the unique approval binding launch.",
+    repository: "https://github.com/customer/binding-work"
+  });
+  const firstConventions = [
+    convention("repository-skill", ".agents/skills/launch/SKILL.md", "902"),
+    convention("agents-md", "AGENTS.md", "901")
+  ];
+  const candidateFor = (project, {
+    intent = "Prepare  the unique approval binding launch cafe\u0301.",
+    support = ["repository-skill", "agents-md"],
+    liveRemote = "https://github.com/customer/binding-work.git",
+    conventions = firstConventions
+  } = {}) => resolveProjectRoute({
+    intent,
+    supportedConventionKinds: support
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => liveRemote,
+    inspectConventionInventory: async () => conventions
+  });
+
+  const first = await candidateFor(base);
+  const reordered = await candidateFor(base, {
+    intent: "Prepare the unique approval binding launch café.",
+    support: ["agents-md", "repository-skill"],
+    liveRemote: "https://github.com/customer/binding-work",
+    conventions: [...firstConventions].reverse()
+  });
+  assert.equal(first.status, "candidate");
+  assert.equal(reordered.status, "candidate");
+  assert.equal(first.approval_binding, reordered.approval_binding);
+
+  const reframed = await candidateFor({
+    ...base,
+    name: "Binding wor",
+    purpose: "k Prepare the unique approval binding launch."
+  });
+  assert.equal(reframed.status, "candidate");
+  assert.notEqual(
+    first.approval_binding,
+    reframed.approval_binding,
+    "stable JSON field framing must not permit concatenation-equivalent public fields"
+  );
+});
+
+test("R4: exact resolution refuses every approval-bound continuity drift without a path", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const base = projectRecord({
+    id: "project-continuity-001",
+    slug: "continuity-work",
+    name: "Continuity work",
+    purpose: "Prepare the unique continuity launch.",
+    repository: "https://github.com/customer/continuity-work"
+  });
+  const baseConventions = [
+    convention("agents-md", "AGENTS.md", "911"),
+    convention("repository-skill", ".agents/skills/continuity/SKILL.md", "912")
+  ];
+  const cases = [
+    ["stable project id", { project: { ...base, id: "project-continuity-002" } }],
+    ["mapping to another root", {
+      project: {
+        ...base,
+        projectPath: "/customer/projects/equivalent-looking-root",
+        mappingPath: "/customer/projects/equivalent-looking-root",
+        rootIdentity: { type: "directory", dev: "101", ino: "9991" }
+      }
+    }],
+    ["renamed same physical root and updated mapping", {
+      project: {
+        ...base,
+        projectPath: "/customer/projects/renamed-continuity-work",
+        mappingPath: "/customer/projects/renamed-continuity-work"
+      }
+    }],
+    ["registered root identity", {
+      project: { ...base, rootIdentity: { ...base.rootIdentity, ino: "9992" } }
+    }],
+    ["canonical registered remote and authoritative live remote", {
+      project: { ...base, repository: "https://github.com/customer/moved-continuity-work" },
+      liveRemote: "https://github.com/customer/moved-continuity-work"
+    }],
+    ["observed convention identity", {
+      conventions: [
+        convention("agents-md", "AGENTS.md", "9993"),
+        baseConventions[1]
+      ]
+    }],
+    ["match-bearing public registration name", {
+      project: { ...base, name: "Renamed continuity work" }
+    }],
+    ["match-bearing public registration slug", {
+      project: { ...base, slug: "renamed-continuity-work" }
+    }],
+    ["match-bearing public registration purpose and explanation basis", {
+      project: { ...base, purpose: "Prepare the unique continuity release." },
+      exactIntent: "Prepare the unique continuity release."
+    }],
+    ["public registration placement", {
+      project: { ...base, placement: "managed" }
+    }],
+    ["normalized host support", {
+      exactSupport: ["agents-md", "claude-md"]
+    }],
+    ["normalized action", {
+      exactIntent: "Prepare the unique continuity launch and publish it."
+    }]
+  ];
+
+  for (const [name, mutation] of cases) {
+    await t.test(name, async () => {
+      let exactPhase = false;
+      const dependencies = {
+        readProjectRegistrations: async ({ projectSelector }) => {
+          exactPhase = projectSelector !== null;
+          return [exactPhase ? (mutation.project || base) : base];
+        },
+        inspectLiveRemote: async () => exactPhase
+          ? (mutation.liveRemote || mutation.project?.repository || base.repository)
+          : base.repository,
+        inspectConventionInventory: async () => structuredClone(
+          exactPhase ? (mutation.conventions || baseConventions) : baseConventions
+        )
+      };
+      const proposal = await resolveProjectRoute({
+        intent: "Prepare the unique continuity launch.",
+        supportedConventionKinds: ["repository-skill", "agents-md"]
+      }, dependencies);
+      assert.equal(proposal.status, "candidate", name);
+
+      const exact = await resolveProjectRoute({
+        intent: mutation.exactIntent || "Prepare the unique continuity launch.",
+        projectSelector: base.id,
+        supportedConventionKinds: mutation.exactSupport || ["agents-md", "repository-skill"],
+        approvalBinding: proposal.approval_binding
+      }, dependencies);
+      assertPathFreeApprovalRefusal(exact);
+    });
+  }
 });
 
 test("EPR-015: a host refuses a project whose only convention it does not support", async () => {
@@ -237,7 +408,6 @@ test("EPR-015: a host refuses a project whose only convention it does not suppor
 
   const result = await resolveProjectRoute({
     intent: "Collect research sources.",
-    projectSelector: "research-work",
     supportedConventionKinds: ["agents-md", "repository-skill"]
   }, {
     readProjectRegistrations: async () => [project],
@@ -252,7 +422,7 @@ test("EPR-015: a host refuses a project whose only convention it does not suppor
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects\/research-work/);
 });
 
-test("EPR-004: colliding display-name matches are ambiguous and disclose handles only", async () => {
+test("EPR-004: tied lexical matches are ambiguous and disclose handles only", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const projects = [
     projectRecord({
@@ -272,7 +442,8 @@ test("EPR-004: colliding display-name matches are ambiguous and disclose handles
   ];
 
   const result = await resolveProjectRoute({
-    intent: "Use Customer operations to coordinate this account."
+    intent: "Use Customer operations to coordinate this account.",
+    supportedConventionKinds: ["agents-md"]
   }, {
     readProjectRegistrations: async () => projects,
     inspectLiveRemote: async (project) => project.repository,
@@ -282,7 +453,7 @@ test("EPR-004: colliding display-name matches are ambiguous and disclose handles
   assert.deepEqual(result, {
     status: "ambiguous",
     project: null,
-    match: { kind: "colliding_display_name", confidence: 0.5, fields: ["name"] },
+    match: { kind: "low_separation", confidence: 0.5, fields: ["metadata"] },
     routability: null,
     route: null,
     reason: "multiple_registered_project_matches",
@@ -294,7 +465,7 @@ test("EPR-004: colliding display-name matches are ambiguous and disclose handles
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects/);
 });
 
-test("EPR-004: one eligible project containing cwd wins before lexical matching", async () => {
+test("EPR-004: a vague action inside a registered cwd does not bypass lexical matching", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const projects = [
     projectRecord({
@@ -315,7 +486,8 @@ test("EPR-004: one eligible project containing cwd wins before lexical matching"
 
   const result = await resolveProjectRoute({
     intent: "Do the next approved task.",
-    cwd: "/customer/projects/alpha-ops/nested"
+    cwd: "/customer/projects/alpha-ops/nested",
+    supportedConventionKinds: ["agents-md"]
   }, {
     readProjectRegistrations: async () => projects,
     inspectLiveRemote: async (project) => project.repository,
@@ -323,14 +495,14 @@ test("EPR-004: one eligible project containing cwd wins before lexical matching"
     isPathWithin: async (root, candidate) => candidate.startsWith(`${root}/`)
   });
 
-  assert.equal(result.status, "candidate");
-  assert.equal(result.project.slug, "alpha-ops");
-  assert.deepEqual(result.match, {
-    kind: "current_directory",
-    confidence: 1,
-    fields: ["registered_root"]
+  assert.deepEqual(result, {
+    status: "no_match",
+    project: null,
+    match: null,
+    routability: null,
+    route: null,
+    reason: "no_registered_project_match"
   });
-  assert.equal(result.route, null);
 });
 
 test("EPR-014: implicit discovery refuses the 33rd active project before local mapping inspection", async (t) => {
@@ -398,7 +570,10 @@ test("EPR-014: implicit discovery permits at most eight concurrent live-Git obse
   let activeGit = 0;
   let maximumGit = 0;
 
-  const result = await resolveProjectRoute({ intent: "Prepare the unique launch dossier." }, {
+  const result = await resolveProjectRoute({
+    intent: "Prepare the unique launch dossier.",
+    supportedConventionKinds: ["agents-md"]
+  }, {
     readProjectRegistrations: async () => projects,
     inspectLiveRemote: async (project) => {
       activeGit += 1;
@@ -415,7 +590,7 @@ test("EPR-014: implicit discovery permits at most eight concurrent live-Git obse
   assert.ok(maximumGit <= 8, `expected at most 8 concurrent Git observations, saw ${maximumGit}`);
 });
 
-test("EPR-004: a slug colliding with another stable ID refuses exact routing as ambiguous", async () => {
+test("EPR-004: a changed colliding exact handle refuses approval path-free", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const alpha = projectRecord({
     id: "project-alpha-001",
@@ -436,7 +611,8 @@ test("EPR-004: a slug colliding with another stable ID refuses exact routing as 
   const result = await resolveProjectRoute({
     intent: "Coordinate work.",
     projectSelector: "shared-handle",
-    supportedConventionKinds: ["agents-md"]
+    supportedConventionKinds: ["agents-md"],
+    approvalBinding: "0".repeat(64)
   }, {
     readProjectRegistrations: async () => [alpha, beta],
     inspectLiveRemote: async () => {
@@ -449,13 +625,9 @@ test("EPR-004: a slug colliding with another stable ID refuses exact routing as 
     }
   });
 
-  assert.equal(result.status, "ambiguous");
+  assert.equal(result.status, "refused");
   assert.equal(result.route, null);
-  assert.equal(result.reason, "ambiguous_project_handle");
-  assert.deepEqual(result.candidates, [
-    { id: "shared-handle", slug: "beta", name: "Beta" },
-    { id: "project-alpha-001", slug: "shared-handle", name: "Alpha" }
-  ]);
+  assert.equal(result.reason, "approval_binding_mismatch");
   assert.equal(inspections, 0);
 });
 
@@ -486,11 +658,30 @@ test("EPR-001 through EPR-003: default adapters route a real registered reposito
     path.join(aiosPath, "projects", "customer-project", "README.md"),
     "\nPORTABLE_README_BODY_CANARY\n"
   );
+  let externalBodyReads = 0;
+  const filesystem = new Proxy(fs, {
+    get(target, property) {
+      if (property === "open") {
+        return async (filePath, ...args) => {
+          const relative = path.relative(projectPath, path.resolve(String(filePath)));
+          if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+            externalBodyReads += 1;
+            throw new Error("external project bodies must remain unopened");
+          }
+          return fs.open(filePath, ...args);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
 
   const result = await resolveProjectRoute({
     aiosPath,
     homePath,
-    intent: "Prepare and track this product launch."
+    filesystem,
+    intent: "Prepare and track this product launch.",
+    supportedConventionKinds: ["agents-md"]
   });
 
   assert.equal(result.status, "candidate");
@@ -501,6 +692,17 @@ test("EPR-001 through EPR-003: default adapters route a real registered reposito
     JSON.stringify(result),
     /CONVENTION_BODY_CANARY|PROJECT_DATA_CANARY|PORTABLE_README_BODY_CANARY/
   );
+  const exact = await resolveProjectRoute({
+    aiosPath,
+    homePath,
+    filesystem,
+    intent: "Prepare and track this product launch.",
+    projectSelector: result.project.id,
+    supportedConventionKinds: ["agents-md"],
+    approvalBinding: result.approval_binding
+  });
+  assert.equal(exact.status, "ready");
+  assert.equal(externalBodyReads, 0);
 });
 
 test("EPR-001: origin remains authoritative while multiple non-origin fallbacks refuse implicitly", async (t) => {
@@ -514,7 +716,8 @@ test("EPR-001: origin remains authoritative while multiple non-origin fallbacks 
 
   const withOrigin = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique remote routing launch."
+    intent: "Prepare the unique remote routing launch.",
+    supportedConventionKinds: ["agents-md"]
   });
   assert.equal(withOrigin.status, "candidate");
 
@@ -522,7 +725,8 @@ test("EPR-001: origin remains authoritative while multiple non-origin fallbacks 
   await run("git", ["-C", fixture.projectPath, "remote", "add", "mirror", "https://github.com/customer/mirror.git"]);
   const withoutOrigin = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique remote routing launch."
+    intent: "Prepare the unique remote routing launch.",
+    supportedConventionKinds: ["agents-md"]
   });
   assert.equal(withoutOrigin.status, "no_match");
   assert.equal(withoutOrigin.route, null);
@@ -542,7 +746,8 @@ test("EPR-001: exactly one safe fallback remote is accepted and conflicting orig
 
   const fallback = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique fallback routing audit."
+    intent: "Prepare the unique fallback routing audit.",
+    supportedConventionKinds: ["agents-md"]
   });
   assert.equal(fallback.status, "candidate");
 
@@ -553,7 +758,8 @@ test("EPR-001: exactly one safe fallback remote is accepted and conflicting orig
   ]);
   const conflictingOrigin = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique fallback routing audit."
+    intent: "Prepare the unique fallback routing audit.",
+    supportedConventionKinds: ["agents-md"]
   });
   assert.equal(conflictingOrigin.status, "no_match");
   assert.equal(conflictingOrigin.route, null);
@@ -576,7 +782,8 @@ test("EPR-001: one non-origin fetch remote remains authoritative beside a push-o
 
   const result = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique fetch authority audit."
+    intent: "Prepare the unique fetch authority audit.",
+    supportedConventionKinds: ["agents-md"]
   });
 
   assert.equal(result.status, "candidate");
@@ -605,7 +812,8 @@ test("EPR-001: live remote authority is local-only and requires a local fetch re
   });
   const resolve = () => resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique local authority audit."
+    intent: "Prepare the unique local authority audit.",
+    supportedConventionKinds: ["agents-md"]
   }, { execFileAsync });
 
   const inherited = await resolve();
@@ -648,7 +856,8 @@ test("EPR-001: an invalidly named second local fetch remote refuses fallback aut
 
   const result = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique invalid fetch-name audit."
+    intent: "Prepare the unique invalid fetch-name audit.",
+    supportedConventionKinds: ["agents-md"]
   });
 
   assert.equal(result.status, "no_match");
@@ -667,21 +876,27 @@ test("EPR-015: the generic support declaration accepts CLAUDE.md without changin
   const codexResult = await resolveProjectRoute({
     ...fixture.options,
     intent: "Organize the unique research archive.",
-    projectSelector: "claude-native",
     supportedConventionKinds: ["agents-md", "repository-skill"]
   });
   assert.equal(codexResult.status, "unsupported_by_host");
   assert.equal(codexResult.route, null);
   assert.doesNotMatch(JSON.stringify(codexResult), new RegExp(fixture.projectPath));
 
+  const compatibleProposal = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Organize the unique research archive.",
+    supportedConventionKinds: ["claude-md"]
+  });
+  assert.equal(compatibleProposal.status, "candidate");
   const compatibleResult = await resolveProjectRoute({
     ...fixture.options,
     intent: "Organize the unique research archive.",
     projectSelector: "claude-native",
-    supportedConventionKinds: ["claude-md"]
+    supportedConventionKinds: ["claude-md"],
+    approvalBinding: compatibleProposal.approval_binding
   });
   assert.equal(compatibleResult.status, "ready");
-  assert.equal(compatibleResult.route.location, fixture.projectPath);
+  assert.equal(compatibleResult.route.location, await fs.realpath(fixture.projectPath));
   assert.deepEqual(compatibleResult.route.conventions.map(({ kind, resource }) => ({ kind, resource })), [
     { kind: "claude-md", resource: "CLAUDE.md" }
   ]);
@@ -699,11 +914,18 @@ test("EPR-002 and EPR-014: exactly 66 inert convention observations are accepted
     conventions: ["AGENTS.md", "CLAUDE.md", ...skillResources]
   });
 
+  const proposal = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the uniquely bounded convention audit.",
+    supportedConventionKinds: ["agents-md", "repository-skill"]
+  });
+  assert.equal(proposal.status, "candidate");
   const result = await resolveProjectRoute({
     ...fixture.options,
     intent: "Prepare the uniquely bounded convention audit.",
     projectSelector: "bounded-conventions",
-    supportedConventionKinds: ["agents-md", "repository-skill"]
+    supportedConventionKinds: ["repository-skill", "agents-md"],
+    approvalBinding: proposal.approval_binding
   });
 
   assert.equal(result.status, "ready");
@@ -731,7 +953,8 @@ test("EPR-014: a 65th skill convention refuses implicit discovery path-free", as
 
   const result = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the unique overflow convention audit."
+    intent: "Prepare the unique overflow convention audit.",
+    supportedConventionKinds: ["repository-skill"]
   });
 
   assert.equal(result.status, "refused");
@@ -759,66 +982,6 @@ test("EPR-015: invalid or invented universal convention support refuses before i
   assert.equal(reads, 0);
 });
 
-test("EPR-014: exact final root, remote, or convention replacement refuses without a path", async (t) => {
-  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
-  const base = projectRecord({
-    id: "project-race-001",
-    slug: "race-work",
-    name: "Race work",
-    purpose: "Prepare the race audit.",
-    repository: "https://github.com/customer/race-work"
-  });
-
-  await t.test("root", async () => {
-    let reads = 0;
-    const result = await resolveProjectRoute({
-      intent: "Prepare the race audit.",
-      projectSelector: "race-work",
-      supportedConventionKinds: ["agents-md"]
-    }, {
-      readProjectRegistrations: async () => [{
-        ...base,
-        rootIdentity: { ...base.rootIdentity, ino: reads++ === 0 ? base.id : "replaced" }
-      }],
-      inspectLiveRemote: async () => base.repository,
-      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "501")]
-    });
-    assertPathFreeIdentityRefusal(result);
-  });
-
-  await t.test("remote", async () => {
-    let reads = 0;
-    const result = await resolveProjectRoute({
-      intent: "Prepare the race audit.",
-      projectSelector: "race-work",
-      supportedConventionKinds: ["agents-md"]
-    }, {
-      readProjectRegistrations: async () => [{ ...base, rootIdentity: { ...base.rootIdentity } }],
-      inspectLiveRemote: async () => reads++ === 0
-        ? base.repository
-        : "https://github.com/customer/replaced",
-      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "501")]
-    });
-    assertPathFreeIdentityRefusal(result);
-  });
-
-  await t.test("convention", async () => {
-    let reads = 0;
-    const result = await resolveProjectRoute({
-      intent: "Prepare the race audit.",
-      projectSelector: "race-work",
-      supportedConventionKinds: ["agents-md"]
-    }, {
-      readProjectRegistrations: async () => [{ ...base, rootIdentity: { ...base.rootIdentity } }],
-      inspectLiveRemote: async () => base.repository,
-      inspectConventionInventory: async () => [
-        convention("agents-md", "AGENTS.md", reads++ === 0 ? "501" : "replaced")
-      ]
-    });
-    assertPathFreeIdentityRefusal(result);
-  });
-});
-
 test("EPR-002: an adapter cannot claim a linked, invented, or off-contract convention", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const project = projectRecord({
@@ -834,7 +997,8 @@ test("EPR-002: an adapter cannot claim a linked, invented, or off-contract conve
   const result = await resolveProjectRoute({
     intent: "Inspect the unsafe convention.",
     projectSelector: "unsafe-convention",
-    supportedConventionKinds: ["agents-md"]
+    supportedConventionKinds: ["agents-md"],
+    approvalBinding: "0".repeat(64)
   }, {
     readProjectRegistrations: async () => [project],
     inspectLiveRemote: async () => project.repository,
@@ -842,7 +1006,7 @@ test("EPR-002: an adapter cannot claim a linked, invented, or off-contract conve
   });
 
   assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_not_routable");
+  assert.equal(result.reason, "project_identity_unverified");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects\/unsafe-convention/);
 });
@@ -891,6 +1055,12 @@ test("EPR-004 and EPR-014: exact slug or stable ID ignores unrelated implicit me
     purpose: "Prepare the exact bounded routing audit.",
     conventions: ["AGENTS.md"]
   });
+  const proposal = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the exact bounded routing audit.",
+    supportedConventionKinds: ["agents-md"]
+  });
+  assert.equal(proposal.status, "candidate");
   const projectsPath = path.join(fixture.aiosPath, "projects");
   for (let index = 0; index < 70; index += 1) {
     const slug = `unrelated-inactive-${String(index).padStart(2, "0")}`;
@@ -914,11 +1084,12 @@ test("EPR-004 and EPR-014: exact slug or stable ID ignores unrelated implicit me
       ...fixture.options,
       intent: "Prepare the exact bounded routing audit.",
       projectSelector,
-      supportedConventionKinds: ["agents-md"]
+      supportedConventionKinds: ["agents-md"],
+      approvalBinding: proposal.approval_binding
     });
     assert.equal(result.status, "ready", projectSelector);
     assert.equal(result.project.slug, "exact-bounded", projectSelector);
-    assert.equal(result.route.location, fixture.projectPath, projectSelector);
+    assert.equal(result.route.location, await fs.realpath(fixture.projectPath), projectSelector);
   }
 });
 
@@ -941,11 +1112,10 @@ test("EPR-002: linked convention lookalikes do not make a real project routable"
   const result = await resolveProjectRoute({
     ...fixture.options,
     intent: "Inspect the unique linked convention audit.",
-    projectSelector: "linked-conventions",
     supportedConventionKinds: ["agents-md", "claude-md", "repository-skill"]
   });
-  assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_not_routable");
+  assert.equal(result.status, "no_match");
+  assert.equal(result.reason, "no_registered_project_match");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), /HARDLINK_BODY_CANARY/);
 });
@@ -980,7 +1150,8 @@ test("EPR-001: two forged IDs mapped to one root are ineligible for routing", as
 
   const result = await resolveProjectRoute({
     ...fixture.options,
-    intent: "Prepare the uniquely forged mapping audit."
+    intent: "Prepare the uniquely forged mapping audit.",
+    supportedConventionKinds: ["agents-md"]
   });
   assert.equal(result.status, "no_match");
   assert.equal(result.route, null);
@@ -991,7 +1162,8 @@ test("EPR-001: two forged IDs mapped to one root are ineligible for routing", as
       ...fixture.options,
       intent: "Prepare the uniquely forged mapping audit.",
       projectSelector,
-      supportedConventionKinds: ["agents-md"]
+      supportedConventionKinds: ["agents-md"],
+      approvalBinding: "0".repeat(64)
     });
     assert.equal(exact.status, "refused", projectSelector);
     assert.equal(exact.reason, "project_identity_unverified", projectSelector);
@@ -1026,7 +1198,8 @@ test("EPR-001 and EPR-004: exact slug selection retains global duplicate-ID conf
     ...fixture.options,
     intent: "Prepare the unique duplicate-ID ownership audit.",
     projectSelector: "duplicate-id-owner",
-    supportedConventionKinds: ["agents-md"]
+    supportedConventionKinds: ["agents-md"],
+    approvalBinding: "0".repeat(64)
   });
 
   assert.equal(result.status, "refused");
@@ -1044,6 +1217,7 @@ function projectRecord({ id, slug, name, purpose, repository }) {
     repository,
     status: "active",
     projectPath: `/customer/projects/${slug}`,
+    mappingPath: `/customer/projects/${slug}`,
     mappingStatus: "verified",
     pathAvailable: true,
     placement: "external",
@@ -1120,4 +1294,14 @@ function assertPathFreeIdentityRefusal(result) {
   assert.equal(result.reason, "project_identity_unverified");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects\/race-work/);
+}
+
+function assertPathFreeApprovalRefusal(result) {
+  assert.equal(result.status, "refused");
+  assert.ok(
+    ["approval_binding_mismatch", "project_identity_unverified"].includes(result.reason),
+    `unexpected refusal reason: ${result.reason}`
+  );
+  assert.equal(result.route, null);
+  assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects\//);
 }
