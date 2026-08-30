@@ -46,9 +46,10 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     filesystem,
     intent,
     cwd: options.cwd || process.cwd(),
-    supportedConventionKinds: options.supportedConventionKinds || []
+    supportedConventionKinds: options.supportedConventionKinds || [],
+    approvalBinding: options.approvalBinding ?? null
   };
-  let projectRoute = notEvaluatedProjectRoute();
+  let projectRoute = null;
   if (!toolRequested) {
     projectRoute = await safelyResolveProjectRoute(routeResolver, {
       ...routeRequest,
@@ -63,7 +64,8 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     reason,
     recovery,
     projectRoute: refusedRoute,
-    includeTool: toolRequested
+    includeTool: toolRequested,
+    includeProjectRoute: !toolRequested
   });
   let authority;
   try {
@@ -77,9 +79,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
         })
       : await prepareNativeAuthority({
           aiosPath,
-          projectRoute,
-          routeRequest,
-          routeResolver
+          projectRoute
         });
   } catch (error) {
     return refuse(error?.reason || "local_authority_unreadable", error?.recovery || "Run dotaios doctor, then retry.");
@@ -128,7 +128,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     schema: SCHEMA,
     status,
     project,
-    project_route: projectRoute,
+    ...(!toolRequested ? { project_route: projectRoute } : {}),
     memory: {
       receipt: MEMORY_RECEIPT,
       scope: selected.slug,
@@ -190,19 +190,11 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     return refuse("fixed_envelope_exceeds_budget", "Retry with a larger --budget value.");
   }
 
-  // Re-check the relevant authority immediately before the sole location
-  // disclosure. Native routes revalidate root, remote, and conventions again;
-  // explicit tools retain the existing primary-directory check.
+  // Explicit tools retain main's final primary-directory check. An exact
+  // native route is already the router's one fresh, bound observation; do not
+  // run that router again after it succeeds.
   try {
-    const finalRoute = await authority.revalidate();
-    if (finalRoute) {
-      projectRoute = finalRoute;
-      envelope.project_route = finalRoute;
-      envelope.location = finalRoute.route.location;
-      if (renderWithStableUsed(envelope).length > visibleCharacterBudget) {
-        return refuse("fixed_envelope_exceeds_budget", "Retry with a larger --budget value.", finalRoute);
-      }
-    }
+    if (toolRequested) await authority.revalidate();
   } catch {
     return refuse(
       "project_identity_unverified",
@@ -259,7 +251,7 @@ async function prepareToolAuthority({
   };
 }
 
-async function prepareNativeAuthority({ aiosPath, projectRoute, routeRequest, routeResolver }) {
+async function prepareNativeAuthority({ aiosPath, projectRoute }) {
   let skills;
   try {
     skills = await collectSkills(aiosPath);
@@ -283,14 +275,7 @@ async function prepareNativeAuthority({ aiosPath, projectRoute, routeRequest, ro
       description: projectRoute.project.purpose
     },
     skills,
-    configured: null,
-    revalidate: async () => {
-      const finalRoute = await routeResolver({ ...routeRequest, projectSelector: selected.id });
-      if (!sameReadyProjectRoute(projectRoute, finalRoute)) {
-        throw new Error("project native route changed");
-      }
-      return finalRoute;
-    }
+    configured: null
   };
 }
 
@@ -331,7 +316,8 @@ function resolutionAuthorityError(reason, recovery) {
 export function renderIntentResolution(value) {
   const readable = JSON.stringify(value, null, 2);
   if (
-    value?.status === "refused"
+    Object.hasOwn(value || {}, "project_route")
+    && value?.status === "refused"
     && value.next_action?.summary === "fixed_envelope_exceeds_budget"
     && Number.isInteger(value.budget?.limit)
     && readable.length > value.budget.limit
@@ -375,19 +361,6 @@ function projectLocationSafe(project) {
     && (project.placement === "external" || project.placement === "managed");
 }
 
-function sameReadyProjectRoute(left, right) {
-  return left?.status === "ready"
-    && right?.status === "ready"
-    && left.project?.id === right.project?.id
-    && left.project?.slug === right.project?.slug
-    && left.project?.name === right.project?.name
-    && left.project?.purpose === right.project?.purpose
-    && left.project?.repository === right.project?.repository
-    && left.project?.placement === right.project?.placement
-    && left.route?.location === right.route?.location
-    && JSON.stringify(left.route?.conventions) === JSON.stringify(right.route?.conventions);
-}
-
 function nextAction(skill, tool) {
   if (tool.status === "refused") {
     return {
@@ -414,15 +387,16 @@ function budgetedRefusal({
   limit,
   reason,
   recovery,
-  projectRoute = notEvaluatedProjectRoute(),
-  includeTool = true
+  projectRoute = null,
+  includeTool = true,
+  includeProjectRoute = true
 }) {
   const safeProjectRoute = refusedProjectRoute(projectRoute, reason);
   const envelope = {
     schema: SCHEMA,
     status: "refused",
     project: null,
-    project_route: safeProjectRoute,
+    ...(includeProjectRoute ? { project_route: safeProjectRoute } : {}),
     memory: { receipt: MEMORY_RECEIPT, scope: null, generated_at: null, context: "", truncated: false },
     skill: { status: "not_evaluated", name: null, resource: null, confidence: 0, reason: "project_not_verified" },
     ...(includeTool ? {
@@ -435,7 +409,13 @@ function budgetedRefusal({
     location: null
   };
   if (renderWithStableUsed(envelope).length > limit) {
-    compactRefusalEnvelope(envelope);
+    if (includeProjectRoute) {
+      compactRefusalEnvelope(envelope);
+    } else {
+      envelope.recovery.action = null;
+      envelope.next_action.summary = "fixed_envelope_exceeds_budget";
+      envelope.omissions = ["all_variable_content"];
+    }
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
@@ -512,17 +492,6 @@ function budgetedProjectRoute({ limit, intent, projectRoute }) {
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
-}
-
-function notEvaluatedProjectRoute() {
-  return {
-    status: "not_evaluated",
-    reason: "tool_selector_precedence",
-    project: null,
-    match: null,
-    routability: null,
-    route: null
-  };
 }
 
 function projectRouteRecovery(projectRoute) {

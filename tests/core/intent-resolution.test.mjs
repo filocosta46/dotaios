@@ -89,14 +89,7 @@ test("one local call returns the verified project, context, skill, configured to
   });
 
   assert.equal(result.schema, "dotaios.intent-resolution/v1");
-  assert.deepEqual(result.project_route, {
-    status: "not_evaluated",
-    reason: "tool_selector_precedence",
-    project: null,
-    match: null,
-    routability: null,
-    route: null
-  });
+  assert.equal(Object.hasOwn(result, "project_route"), false);
   assert.equal(result.status, "matched");
   assert.deepEqual(result.project, {
     id: "project-client-001",
@@ -140,33 +133,14 @@ test("EPR-012: implicit project candidate does not evaluate memory, AIOS skills,
   const result = await resolveIntentResolution({
     ...fixture,
     cwd: fixture.root,
-    intent: "Prepare the client's approved launch."
-  }, {
-    resolveProjectRoute: async () => ({
-      status: "candidate",
-      project: {
-        id: "project-client-001",
-        slug: "client-work",
-        name: "client-work",
-        purpose: "Prepare the client's approved launch.",
-        repository: "https://github.com/customer/client-work.git",
-        placement: "external"
-      },
-      match: { kind: "purpose_overlap", confidence: 1, fields: ["purpose"] },
-      routability: {
-        trust: "registered-user-owned",
-        effect: "unknown",
-        approval: "direct_user_required",
-        conventions: [{ kind: "agents-md", resource: "AGENTS.md" }]
-      },
-      route: null,
-      reason: "unique_registered_project_match"
-    })
+    intent: "Prepare the client's approved launch.",
+    supportedConventionKinds: ["agents-md"]
   });
 
   assert.equal(result.status, "partial");
   assert.equal(result.project, null);
   assert.equal(result.project_route.status, "candidate");
+  assert.match(result.project_route.approval_binding, /^[a-f0-9]{64}$/);
   assert.equal(result.memory.scope, null);
   assert.equal(result.memory.context, "");
   assert.equal(result.skill.status, "not_evaluated");
@@ -178,21 +152,70 @@ test("EPR-012: implicit project candidate does not evaluate memory, AIOS skills,
   assert.match(result.next_action.summary, /changing directory.*insufficient/i);
 });
 
+test("EPR-012: an unsupported host receives path-free guidance before memory or skill composition", async (t) => {
+  const { resolveIntentResolution, renderIntentResolution } = await import(
+    "../../packages/core/src/intent-resolution.mjs"
+  );
+  const fixture = await makeFixture(t);
+  await fs.writeFile(
+    path.join(fixture.aiosPath, "skills", "plan-today", "SKILL.md"),
+    "---\nname: [this would fail if read\n---\n"
+  );
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent: "Prepare the client's approved launch.",
+    supportedConventionKinds: ["claude-md"]
+  });
+  const rendered = renderIntentResolution(result);
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.project_route.status, "unsupported_by_host");
+  assert.equal(result.project_route.reason, "no_supported_convention");
+  assert.equal(result.location, null);
+  assert.equal(result.memory.context, "");
+  assert.equal(result.skill.status, "not_evaluated");
+  assert.equal(Object.hasOwn(result, "tool"), false);
+  assert.doesNotMatch(
+    rendered,
+    new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
 test("EPR-012 and EPR-015: exact native route survives an AIOS skill no-match", async (t) => {
   const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const fixture = await makeFixture(t);
+  const intent = "Prepare the client's approved launch.";
+  const support = ["agents-md", "repository-skill"];
+  const candidate = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent,
+    supportedConventionKinds: support
+  });
+  let exactRouteCalls = 0;
 
   const result = await resolveIntentResolution({
     ...fixture,
     project: "client-work",
-    intent: "xyzzy quux",
-    supportedConventionKinds: ["agents-md", "repository-skill"]
-  }, { clock: () => new Date("2026-08-29T08:00:00.000Z") });
+    intent,
+    supportedConventionKinds: support,
+    approvalBinding: candidate.project_route.approval_binding
+  }, {
+    clock: () => new Date("2026-08-29T08:00:00.000Z"),
+    resolveProjectRoute: async (request) => {
+      exactRouteCalls += 1;
+      return resolveProjectRoute(request);
+    }
+  });
 
+  assert.equal(exactRouteCalls, 1, "exact success must not re-run the router");
   assert.equal(result.project_route.status, "ready");
   assert.equal(result.skill.status, "no_match");
   assert.equal(Object.hasOwn(result, "tool"), false);
-  assert.equal(result.location, fixture.projectPath);
+  assert.equal(result.location, await fs.realpath(fixture.projectPath));
   assert.equal(result.status, "partial");
   assert.deepEqual(result.next_action, {
     state: "fresh_context_required",
@@ -282,8 +305,8 @@ test("unknown, detached, neighboring, and ambiguous selection refuse without cho
     cwd: neighbor,
     intent: "plan my day"
   });
-  assert.equal(unknown.status, "partial");
-  assert.equal(unknown.project_route.status, "no_match");
+  assert.equal(unknown.status, "refused");
+  assert.equal(unknown.project_route.reason, "approval_binding_required");
   assert.equal(detached.status, "partial");
   assert.equal(detached.project_route.status, "no_match");
   assert.equal(unknown.location, null);
@@ -304,7 +327,12 @@ test("current-directory inference requires one primary attachment and ignores su
     `${JSON.stringify({ id: "assets", path: supplemental })}\n`
   );
 
-  const primary = await resolveIntentResolution({ ...fixture, cwd: child, intent: "plan my day" });
+  const primary = await resolveIntentResolution({
+    ...fixture,
+    cwd: child,
+    intent: "Prepare the client's approved launch.",
+    supportedConventionKinds: ["agents-md"]
+  });
   const supplementalAttempt = await resolveIntentResolution({ ...fixture, cwd: supplemental, intent: "plan my day" });
   assert.equal(primary.project_route.status, "candidate");
   assert.equal(primary.location, null);
@@ -334,10 +362,11 @@ test("current-directory inference requires one primary attachment and ignores su
   const ambiguousCwd = await resolveIntentResolution({
     ...fixture,
     cwd: path.join(movedNested, "inside"),
-    intent: "plan my day"
+    intent: "plan my day",
+    supportedConventionKinds: ["agents-md"]
   });
   assert.equal(ambiguousCwd.status, "partial");
-  assert.equal(ambiguousCwd.project_route.status, "ambiguous");
+  assert.equal(ambiguousCwd.project_route.status, "no_match");
   assert.equal(ambiguousCwd.location, null);
 });
 
@@ -355,13 +384,19 @@ test("project-scoped context excludes another project's canaries and is determin
     JSON.stringify({ session_id: "one", project: "client-work", captured_at: "2026-08-29T07:00:00.000Z", title: "CLIENT_CONTEXT_CANARY", agent: "codex", turns: 2 }),
     JSON.stringify({ session_id: "two", project: "other-work", captured_at: "2026-08-29T07:30:00.000Z", title: "OTHER_CONTEXT_CANARY", agent: "codex", turns: 3 })
   ].join("\n"));
-  const options = {
+  const discoveryOptions = {
     ...fixture,
-    project: "client-work",
-    intent: "plan my day",
+    cwd: fixture.root,
+    intent: "Prepare the client's approved launch.",
     supportedConventionKinds: ["agents-md", "repository-skill"]
   };
   const dependencies = { clock: () => new Date("2026-08-29T08:00:00.000Z") };
+  const candidate = await resolveIntentResolution(discoveryOptions, dependencies);
+  const options = {
+    ...discoveryOptions,
+    project: "client-work",
+    approvalBinding: candidate.project_route.approval_binding
+  };
 
   const first = await resolveIntentResolution(options, dependencies);
   const second = await resolveIntentResolution(options, dependencies);
@@ -376,12 +411,21 @@ test("the closed envelope accepts only the 1,024 through 32,000 character budget
     renderIntentResolution
   } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);
+  const intent = "Prepare the client's approved launch.";
+  const supportedConventionKinds = ["agents-md", "repository-skill"];
+  const candidate = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent,
+    supportedConventionKinds
+  });
   for (const budget of [1024, 32000]) {
     const result = await resolveIntentResolution({
       ...fixture,
       project: "client-work",
-      intent: "plan my day",
-      supportedConventionKinds: ["agents-md", "repository-skill"],
+      intent,
+      supportedConventionKinds,
+      approvalBinding: candidate.project_route.approval_binding,
       visibleCharacterBudget: budget
     }, { clock: () => new Date("2026-08-29T08:00:00.000Z") });
     const rendered = renderIntentResolution(result);
@@ -400,99 +444,50 @@ test("the closed envelope accepts only the 1,024 through 32,000 character budget
   );
 });
 
-test("EPR-012: final exact revalidation cannot grow the envelope beyond its budget", async (t) => {
+test("EPR-012 and EPR-014: exact requests refuse missing, malformed, stale, and action-mismatched bindings path-free", async (t) => {
   const {
     resolveIntentResolution,
     renderIntentResolution
   } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);
-  const initialRoute = readyProjectRoute(fixture);
-  const expandedRoute = structuredClone(initialRoute);
-  expandedRoute.routability.conventions.push(...Array.from(
-    { length: 64 },
-    (_, index) => ({
-      kind: "repository-skill",
-      resource: `.agents/skills/unhandled-${String(index).padStart(2, "0")}/SKILL.md`
-    })
-  ));
-  const options = {
+  const intent = "Prepare the client's approved launch.";
+  const supportedConventionKinds = ["agents-md"];
+  const candidate = await resolveIntentResolution({
     ...fixture,
-    project: "client-work",
-    intent: "plan my day",
-    supportedConventionKinds: ["agents-md"]
-  };
-  const fixedClock = () => new Date("2026-08-29T08:00:00.000Z");
-  const baseline = await resolveIntentResolution({
-    ...options,
-    visibleCharacterBudget: 32000
-  }, {
-    clock: fixedClock,
-    resolveProjectRoute: async () => structuredClone(initialRoute)
+    cwd: fixture.root,
+    intent,
+    supportedConventionKinds
   });
-  const tightBudget = renderIntentResolution(baseline).length;
-  let routeReads = 0;
-
-  const result = await resolveIntentResolution({
-    ...options,
-    visibleCharacterBudget: tightBudget
-  }, {
-    clock: fixedClock,
-    resolveProjectRoute: async () => structuredClone(
-      routeReads++ === 0 ? initialRoute : expandedRoute
-    )
-  });
-  const rendered = renderIntentResolution(result);
-
-  assert.equal(routeReads, 2);
-  assert.ok(rendered.length <= tightBudget, `${rendered.length} must fit ${tightBudget}`);
-  assert.equal(result.budget.used, rendered.length);
-  assert.equal(result.status, "refused");
-  assert.equal(result.location, null);
-  assert.equal(result.next_action.summary, "fixed_envelope_exceeds_budget");
-});
-
-test("EPR-012 and EPR-014: final exact revalidation compares the complete public project identity", async (t) => {
-  const {
-    resolveIntentResolution,
-    renderIntentResolution
-  } = await import("../../packages/core/src/intent-resolution.mjs");
-  const fixture = await makeFixture(t);
-  const initialRoute = readyProjectRoute(fixture);
-  const mutations = [
-    ["name", "Replaced client workspace"],
-    ["purpose", "A concurrently replaced purpose."],
-    ["placement", "managed"]
+  const cases = [
+    ["missing", undefined, intent, "approval_binding_required"],
+    ["malformed", "not-a-binding", intent, "approval_binding_required"],
+    ["stale", "0".repeat(64), intent, "approval_binding_mismatch"],
+    ["action-mismatched", candidate.project_route.approval_binding, "Prepare a different launch action.", "approval_binding_mismatch"]
   ];
 
-  for (const [field, replacement] of mutations) {
-    await t.test(field, async () => {
-      const finalRoute = structuredClone(initialRoute);
-      finalRoute.project[field] = replacement;
-      let routeReads = 0;
-      const result = await resolveIntentResolution({
-        ...fixture,
-        project: "client-work",
-        intent: "plan my day",
-        supportedConventionKinds: ["agents-md"],
-        visibleCharacterBudget: 8000
-      }, {
-        clock: () => new Date("2026-08-29T08:00:00.000Z"),
-        resolveProjectRoute: async () => structuredClone(
-          routeReads++ === 0 ? initialRoute : finalRoute
-        )
-      });
-      const rendered = renderIntentResolution(result);
+  for (const budget of [1024, 8000]) {
+    for (const [name, approvalBinding, exactIntent, reason] of cases) {
+      await t.test(`${name} at budget ${budget}`, async () => {
+        const result = await resolveIntentResolution({
+          ...fixture,
+          project: "client-work",
+          intent: exactIntent,
+          supportedConventionKinds,
+          approvalBinding,
+          visibleCharacterBudget: budget
+        });
+        const rendered = renderIntentResolution(result);
 
-      assert.equal(routeReads, 2);
-      assert.equal(result.status, "refused");
-      assert.equal(result.location, null);
-      assert.equal(result.project_route.status, "refused");
-      assert.equal(result.project_route.route, null);
-      assert.doesNotMatch(
-        rendered,
-        new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
-      );
-    });
+        assert.equal(result.status, "refused");
+        assert.equal(result.project_route.reason, reason);
+        assert.equal(result.location, null);
+        assert.ok(rendered.length <= budget, `${name} rendered ${rendered.length} > ${budget}`);
+        assert.doesNotMatch(
+          rendered,
+          new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        );
+      });
+    }
   }
 });
 
@@ -515,14 +510,7 @@ test("EPR-012: the compact explicit-tool refusal always fits the 1,024-character
   assert.equal(result.status, "refused");
   assert.equal(result.location, null);
   assert.ok(rendered.length <= 1024, `${rendered.length} must fit 1024`);
-  assert.deepEqual(result.project_route, {
-    status: "not_evaluated",
-    reason: "tool_selector_precedence",
-    project: null,
-    match: null,
-    routability: null,
-    route: null
-  });
+  assert.equal(Object.hasOwn(result, "project_route"), false);
   assert.deepEqual(result.skill, {
     status: "not_evaluated",
     name: null,
@@ -553,14 +541,7 @@ test("EPR-012: a compact missing-project Google refusal preserves tool precedenc
   assert.equal(result.status, "refused");
   assert.equal(result.location, null);
   assert.ok(rendered.length <= 1024, `${rendered.length} must fit 1024`);
-  assert.deepEqual(result.project_route, {
-    status: "not_evaluated",
-    reason: "tool_selector_precedence",
-    project: null,
-    match: null,
-    routability: null,
-    route: null
-  });
+  assert.equal(Object.hasOwn(result, "project_route"), false);
   assert.deepEqual(result.skill, {
     status: "not_evaluated",
     name: null,
@@ -577,14 +558,23 @@ test("EPR-012 and EPR-014: a compact exact-root refusal preserves its authority 
     renderIntentResolution
   } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);
+  const intent = "Prepare the client's approved launch.";
+  const supportedConventionKinds = ["agents-md"];
+  const candidate = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent,
+    supportedConventionKinds
+  });
   await fs.rename(fixture.projectPath, `${fixture.projectPath}-replaced`);
   await fs.mkdir(fixture.projectPath);
 
   const result = await resolveIntentResolution({
     ...fixture,
     project: "client-work",
-    intent: "plan my day",
-    supportedConventionKinds: ["agents-md"],
+    intent,
+    supportedConventionKinds,
+    approvalBinding: candidate.project_route.approval_binding,
     visibleCharacterBudget: 1024
   });
   const rendered = renderIntentResolution(result);
@@ -617,14 +607,23 @@ test("EPR-012 and EPR-014: a compact exact-root refusal preserves its authority 
 test("an unreadable local routing authority returns one path-free fixed refusal", async (t) => {
   const { resolveIntentResolution, renderIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);
+  const intent = "Prepare the client's approved launch.";
+  const supportedConventionKinds = ["agents-md", "repository-skill"];
+  const candidate = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent,
+    supportedConventionKinds
+  });
   const skillPath = path.join(fixture.aiosPath, "skills", "plan-today", "SKILL.md");
   await fs.writeFile(skillPath, "---\nname: [broken\n---\n");
 
   const result = await resolveIntentResolution({
     ...fixture,
     project: "client-work",
-    intent: "plan my day",
-    supportedConventionKinds: ["agents-md", "repository-skill"]
+    intent,
+    supportedConventionKinds,
+    approvalBinding: candidate.project_route.approval_binding
   });
   const rendered = renderIntentResolution(result);
   assert.equal(result.status, "refused");
@@ -638,48 +637,3 @@ test("an unreadable local routing authority returns one path-free fixed refusal"
   );
   assert.doesNotMatch(rendered, new RegExp(fixture.aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
-
-function readyProjectRoute(fixture) {
-  return {
-    status: "ready",
-    project: {
-      id: "project-client-001",
-      slug: "client-work",
-      name: "client-work",
-      purpose: "Prepare the client's approved launch.",
-      repository: "https://github.com/customer/client-work",
-      placement: "external"
-    },
-    match: { kind: "exact_handle", confidence: 1, fields: ["stable_id"] },
-    routability: {
-      trust: "registered-user-owned",
-      effect: "unknown",
-      approval: "direct_user_required",
-      conventions: [{ kind: "agents-md", resource: "AGENTS.md" }]
-    },
-    route: {
-      kind: "project-native",
-      project_id: "project-client-001",
-      project_slug: "client-work",
-      location: fixture.projectPath,
-      advisory: true,
-      revalidate_before_entry: true,
-      fresh_context_required: true,
-      conventions: [{
-        kind: "agents-md",
-        resource: "AGENTS.md",
-        observed_identity: {
-          type: "file",
-          dev: "101",
-          ino: "201",
-          mode: 33188,
-          nlink: 1,
-          size: "128",
-          mtime_ns: "1788000000000000000",
-          ctime_ns: "1788000000000000000"
-        }
-      }]
-    },
-    reason: "exact_project_ready"
-  };
-}
