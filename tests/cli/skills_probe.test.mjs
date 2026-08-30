@@ -77,6 +77,23 @@ test("skills probe exposes the project-native route through the shipped CLI in d
   }
 });
 
+test("skills probe refuses the Codex-only project-native route for every other client", () => {
+  const { root, aiosPath } = setupAios();
+  try {
+    for (const client of ["gemini", "claude-code", "hermes", "cursor", "antigravity"]) {
+      const result = run([
+        "skills", "probe", "--client", client, "--project-native-route",
+        "--dry-run", "--json", "--path", aiosPath
+      ], { allowNonZero: true });
+      assert.equal(result.status, 1, client);
+      assert.match(result.stderr, /--project-native-route is available only with --client codex/i, client);
+      assert.equal(result.stdout, "", client);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("skills probe project-native CLI mode reaches a controlled fake client at the exact route root", () => {
   const { root, aiosPath } = setupAios();
   const fakeBin = path.join(root, "bin");

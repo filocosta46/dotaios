@@ -155,6 +155,9 @@ export async function runSkillInvocationProbe({
   if (!definition) {
     throw new Error(`Unknown probe client: ${client}. Choose: ${Object.keys(PROBE_CLIENTS).join(", ")}`);
   }
+  if (projectNativeRoute && client !== "codex") {
+    throw new Error("--project-native-route is available only with --client codex.");
+  }
 
   const sourcePath = path.resolve(aiosPath || path.join(os.homedir(), "aios"));
   await assertAiosSkillsSource(sourcePath);
