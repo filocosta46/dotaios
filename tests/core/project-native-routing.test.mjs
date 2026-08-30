@@ -194,7 +194,20 @@ test("R2: a project handle without a concrete action never requests approval", a
     inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "191")]
   };
 
-  for (const intent of ["annual-compliance", "Please work in annual-compliance"]) {
+  for (const intent of [
+    "annual-compliance",
+    "Please work in annual-compliance",
+    "Take me to annual-compliance",
+    "Show annual-compliance",
+    "annual-compliance now",
+    "What about annual-compliance?",
+    "Take me to records in annual-compliance",
+    "What about records in annual-compliance?",
+    "Bring me to records in annual-compliance",
+    "Enter records in annual-compliance",
+    "Load records in annual-compliance",
+    "Access records in annual-compliance"
+  ]) {
     const result = await resolveProjectRoute({
       intent,
       supportedConventionKinds: ["agents-md"]
@@ -204,6 +217,57 @@ test("R2: a project handle without a concrete action never requests approval", a
     assert.equal(result.route, null, intent);
     assert.equal(result.approval_binding, undefined, intent);
   }
+});
+
+test("R2: action words inside a project handle do not count as the requested action", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+
+  for (const [handle, purpose] of [
+    ["reporting", "Create reporting workflows."],
+    ["research", "Research public evidence."],
+    ["design-system", "Design reusable system components."]
+  ]) {
+    const project = projectRecord({
+      id: `project-${handle}-001`,
+      slug: handle,
+      name: handle,
+      purpose,
+      repository: `https://github.com/customer/${handle}`
+    });
+    const result = await resolveProjectRoute({
+      intent: handle,
+      supportedConventionKinds: ["agents-md"]
+    }, {
+      readProjectRegistrations: async () => [project],
+      inspectLiveRemote: async () => project.repository,
+      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", handle)]
+    });
+
+    assert.equal(result.status, "no_match", handle);
+    assert.equal(result.approval_binding, undefined, handle);
+  }
+});
+
+test("R2: an action outside an action-named project handle remains actionable", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-reporting-001",
+    slug: "reporting",
+    name: "reporting",
+    purpose: "Create reporting workflows.",
+    repository: "https://github.com/customer/reporting"
+  });
+  const result = await resolveProjectRoute({
+    intent: "Prepare reporting",
+    supportedConventionKinds: ["agents-md"]
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "reporting")]
+  });
+
+  assert.equal(result.status, "candidate");
+  assert.equal(result.project.slug, "reporting");
 });
 
 test("EPR-004: one weak lexical overlap does not become a confident project match", async () => {

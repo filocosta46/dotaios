@@ -30,17 +30,14 @@ export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
   "repository-skill"
 ]);
 const CONVENTION_KINDS = new Set(PROJECT_NATIVE_CONVENTION_KINDS);
-const ROUTE_ONLY_TOKENS = new Set([
-  "a", "an", "the", "my", "me", "i", "to", "for", "of", "and", "or", "on",
-  "in", "is", "this", "that", "with", "it", "do", "how", "what", "should",
-  "want", "wants", "please", "can", "you", "help", "get", "into", "out",
-  "work", "open", "use", "project", "repo", "repository", "folder", "switch", "go"
+const ROUTE_PURPOSE_FILLER_TOKENS = new Set([
+  "a", "an", "the", "my", "me", "please", "for", "of", "and", "or"
 ]);
 const ROUTE_ACTION_TOKENS = new Set([
   "add", "analyze", "archive", "build", "change", "check", "create", "debug", "delete",
   "design", "draft", "edit", "fix", "implement", "investigate", "migrate", "organize",
   "plan", "prepare", "publish", "refactor", "release", "remove", "research", "review",
-  "run", "schedule", "ship", "test", "update", "verify", "write"
+  "report", "reporting", "reports", "run", "schedule", "ship", "test", "update", "verify", "write"
 ]);
 const MATCH_KIND_BY_FIELD = Object.freeze({
   slug: "slug_overlap",
@@ -201,15 +198,34 @@ function noMatch() {
 
 function hasConcreteAction(intent, project) {
   const actionTokens = routeTokens(intent);
-  const identityTokens = new Set(routeTokens([
+  const stableHandleTokens = [
     project.slug,
-    project.name,
     remoteBasename(project.repository)
-  ].filter(Boolean).join(" ")));
-  return actionTokens.some((token) => ROUTE_ACTION_TOKENS.has(token))
-    || actionTokens.some((token) => (
-    !ROUTE_ONLY_TOKENS.has(token) && !identityTokens.has(token)
+  ].filter(Boolean).map(routeTokens);
+  const purposeTokens = new Set(routeTokens(project.purpose));
+  const handleTokenPositions = matchedTokenPositions(actionTokens, stableHandleTokens);
+  const hasExplicitAction = actionTokens.some((token, index) => (
+    ROUTE_ACTION_TOKENS.has(token) && !handleTokenPositions.has(index)
   ));
+  if (handleTokenPositions.size > 0) return hasExplicitAction;
+  if (hasExplicitAction) return true;
+  const meaningfulTokens = actionTokens.filter((token) => !ROUTE_PURPOSE_FILLER_TOKENS.has(token));
+  return meaningfulTokens.length > 0
+    && meaningfulTokens.every((token) => purposeTokens.has(token));
+}
+
+function matchedTokenPositions(tokens, sequences) {
+  const positions = new Set();
+  for (const sequence of sequences) {
+    if (sequence.length === 0 || sequence.length > tokens.length) continue;
+    for (let index = 0; index <= tokens.length - sequence.length; index += 1) {
+      if (!sequence.every((token, offset) => tokens[index + offset] === token)) continue;
+      for (let offset = 0; offset < sequence.length; offset += 1) {
+        positions.add(index + offset);
+      }
+    }
+  }
+  return positions;
 }
 
 function routeTokens(value) {
