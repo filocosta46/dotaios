@@ -174,13 +174,19 @@ test("project-native routing teaches keep-it-there connection and generic fresh-
   assert.match(projects, /match[\s\S]*not an AIOS recommendation/i);
   assert.match(
     projects,
-    /no match[\s\S]*connect[\s\S]{0,80}the existing folder[\s\S]*an? exact registered[\s\S]{0,20}slug or stable ID/i
+    /no match[\s\S]*connect[\s\S]{0,80}the existing folder[\s\S]*make the action concrete[\s\S]*name the connected project/i
   );
   assert.match(
     projects,
     /I found the `<slug>` folder you connected[\s\S]*one action: `<concrete action>`/i
   );
-  assert.match(projects, /supports-conventions agents-md,repository-skill/);
+  assert.doesNotMatch(projects, /--supports-conventions|--approval-binding|\bapproval[_ -]binding\b/i);
+  assert.doesNotMatch(projects, /`(?:agents-md|claude-md|repository-skill)`/);
+  assert.match(
+    projects,
+    /after direct approval[\s\S]*host adapter[\s\S]*native support internally[\s\S]*exact-resolves[\s\S]*fresh context/i
+  );
+  assert.match(projects, /customer does not[\s\S]*convention identifiers[\s\S]*handoff protocol/i);
   assert.match(projects, /changing the[\s\S]{0,20}directory[\s\S]*insufficient/i);
   assert.match(projects, /unsupported_by_host[\s\S]*manual-open recovery[\s\S]*no route/i);
   assert.doesNotMatch(projects, /download (?:the|this|a) (?:career|agent|recommended|particular) repository/i);

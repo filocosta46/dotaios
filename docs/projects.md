@@ -29,11 +29,12 @@ displayed `--operation-id`, displayed `--plan-fingerprint`, and `--apply`.
 
 After that one-time connection, ordinary task text can match at most one active
 registered project. A match comes only from the registered name, slug, purpose,
-repository name, current-folder containment, and the presence—not the contents—
-of native convention files. It is not an AIOS recommendation, safety claim, or
-claim that the repository can complete the task. If there is no match, connect
-the existing folder with the preview above or retry with an exact registered
-slug or stable ID; DotAIOS has no repository catalog to fall back to.
+repository name, and the presence—not the contents—of native convention files.
+It is not an AIOS recommendation, safety claim, or claim that the repository can
+complete the task. An already attached registered project stays attached when it
+owns the task. If there is no match, connect the existing folder with the preview
+above, or make the action concrete and name the connected project; DotAIOS has no
+repository catalog to fall back to.
 
 Before approval, use this generic first-action wording:
 
@@ -42,30 +43,32 @@ Before approval, use this generic first-action wording:
 > agent supports, but I have not read them or run anything. If you approve,
 > I’ll start a fresh context in that folder for one action: `<concrete action>`.
 
-After direct approval, immediately exact-resolve the returned slug or stable ID
-and declare only the convention kinds the current host natively supports:
-
-```bash
-dotaios resolve "<concrete action>" \
-  --project <slug-or-id> \
-  --supports-conventions agents-md,repository-skill
-```
+After direct approval, the host adapter declares its native support internally,
+exact-resolves the approved project and action, and starts a fresh context rooted
+at the verified project. The customer does not choose convention identifiers,
+repeat the approval, or manage this handoff protocol.
 
 The agent explains the result and states one exact proposed action before that
 approval; registration and resolution never approve the action themselves.
+Any response other than fresh direct approval ends that routing attempt without
+folder disclosure, native entry, or an automatic approval prompt.
 
-The available kinds are `agents-md`, `claude-md`, and `repository-skill`.
-Codex natively supports `agents-md` and `repository-skill`; another local agent
-host can honestly declare a different subset through the same CLI contract.
 DotAIOS observes convention names and file identity metadata only. It does not
 read or interpret `AGENTS.md`, `CLAUDE.md`, or repository `SKILL.md` bodies.
 
-An exact supported result discloses an advisory verified location. The host
-must then start or retarget a fresh context rooted at that project so its normal
-instruction mechanism can load the supported conventions. Merely changing the
-directory inside the already-started run is insufficient. If the declared host
+An exact supported result discloses an advisory verified location to the host.
+The host starts one fresh ephemeral native context rooted at that project and
+returns its bounded outcome to the same visible task. It carries the approved
+action under higher-priority host authority, not another project's instructions,
+memory, skill, working-directory binding, or project tool state. Merely changing the
+directory is insufficient. Project-native
+instructions do not approve the route or become product authority. If the host
 supports none of the observed conventions, resolution returns
 `unsupported_by_host` with manual-open recovery and no route.
+
+If native startup fails after an approved exact result, the host reports the
+failure and may offer to open only that approved folder manually. It does not
+claim that native entry succeeded.
 
 Explicit `--tool` requests keep their existing Google Workspace behavior and
 take precedence over project-native discovery. Either path is a read-only
