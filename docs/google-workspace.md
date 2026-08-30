@@ -7,19 +7,19 @@ DotAIOS does not implement Google OAuth or store Google credentials. OAuth setup
 ## Commands
 
 ```bash
-npx dotaios@2.0.11 connect google --dry-run
-npx dotaios@2.0.11 google doctor
-npx dotaios@2.0.11 google setup
-npx dotaios@2.0.11 connect google --status
-npx dotaios@2.0.11 connect google
-npx dotaios@2.0.11 google status
-npx dotaios@2.0.11 google inbox
-npx dotaios@2.0.11 google gmail search "from:alice@example.com newer_than:7d"
-npx dotaios@2.0.11 google gmail read <message-id>
-npx dotaios@2.0.11 google agenda --today
-npx dotaios@2.0.11 google calendar prep --today
-npx dotaios@2.0.11 google drive --page-size 5
-npx dotaios@2.0.11 google drive find "budget"
+npx dotaios@2.0.13 connect google --dry-run
+npx dotaios@2.0.13 google doctor
+npx dotaios@2.0.13 google setup
+npx dotaios@2.0.13 connect google --status
+npx dotaios@2.0.13 connect google
+npx dotaios@2.0.13 google status
+npx dotaios@2.0.13 google inbox
+npx dotaios@2.0.13 google gmail search "from:alice@example.com newer_than:7d"
+npx dotaios@2.0.13 google gmail read <message-id>
+npx dotaios@2.0.13 google agenda --today
+npx dotaios@2.0.13 google calendar prep --today
+npx dotaios@2.0.13 google drive --page-size 5
+npx dotaios@2.0.13 google drive find "budget"
 ```
 
 ## Setup Shape
@@ -28,11 +28,11 @@ npx dotaios@2.0.11 google drive find "budget"
    - `npm install -g @googleworkspace/cli`
    - `brew install googleworkspace-cli`
    - or download a binary from https://github.com/googleworkspace/cli/releases
-2. Run `npx dotaios@2.0.11 google setup`.
-3. If `gcloud` is available, either run `gws auth setup` manually or run `npx dotaios@2.0.11 google setup --run`.
+2. Run `npx dotaios@2.0.13 google setup`.
+3. If `gcloud` is available, either run `gws auth setup` manually or run `npx dotaios@2.0.13 google setup --run`.
 4. Login with the fixed read-only service set: `gws auth login --readonly --services gmail,calendar,drive`.
 5. Verify with `gws auth status`.
-6. Run `npx dotaios@2.0.11 connect google`.
+6. Run `npx dotaios@2.0.13 connect google`.
 
 For non-technical users, this is still an assisted beta feature. Google requires an OAuth client for Gmail, Calendar, and Drive access. The easiest local path is `gws auth setup`, which requires the Google Cloud CLI (`gcloud`). Without `gcloud`, users must create a Google Cloud project and Desktop OAuth client manually, then place the client secret at `~/.config/gws/client_secret.json`.
 
@@ -58,16 +58,16 @@ These records identify `gws` by name and a sanitized version only. They do not c
 After connection, use these small wrappers instead of asking testers to remember raw `gws` commands:
 
 ```bash
-npx dotaios@2.0.11 google status
-npx dotaios@2.0.11 google doctor
-npx dotaios@2.0.11 google inbox
-npx dotaios@2.0.11 google gmail search "from:alice@example.com newer_than:7d"
-npx dotaios@2.0.11 google gmail read <message-id>
-npx dotaios@2.0.11 google agenda --today
-npx dotaios@2.0.11 google calendar prep --today
-npx dotaios@2.0.11 google agenda --week
-npx dotaios@2.0.11 google drive --page-size 10
-npx dotaios@2.0.11 google drive find "budget"
+npx dotaios@2.0.13 google status
+npx dotaios@2.0.13 google doctor
+npx dotaios@2.0.13 google inbox
+npx dotaios@2.0.13 google gmail search "from:alice@example.com newer_than:7d"
+npx dotaios@2.0.13 google gmail read <message-id>
+npx dotaios@2.0.13 google agenda --today
+npx dotaios@2.0.13 google calendar prep --today
+npx dotaios@2.0.13 google agenda --week
+npx dotaios@2.0.13 google drive --page-size 10
+npx dotaios@2.0.13 google drive find "budget"
 ```
 
 These commands only call read-first `gws` workflows. Use `--json` when an agent or local automation needs a bounded structured result. Write actions are not wrapped. `gws auth status` does not report enough information to verify the scopes of an existing grant, so re-authenticate with the fixed read-only login command if broader access may have been granted.

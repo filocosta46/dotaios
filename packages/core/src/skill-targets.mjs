@@ -2,6 +2,8 @@ import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const bundledRegistry = require("./agents.json");
 
+export const SKILL_TARGET_PLAN_FORMAT = "dotaios-skill-target-plan/v1";
+
 function agentsFrom(registry) {
   return Array.isArray(registry)
     ? registry
@@ -34,6 +36,50 @@ export function symlinkTargets(registry = bundledRegistry) {
   for (const a of agentsFrom(registry)) if (a.skills?.mode === "symlink") push(a.skills);
   for (const w of wellKnownFrom(registry)) if (w.mode === "symlink") push(w);
   return out;
+}
+
+export function planSkillTargets({
+  registry = bundledRegistry,
+  detectedAgentNames = new Set(),
+  all = false
+} = {}) {
+  const detected = new Set(
+    [...(detectedAgentNames || [])].map((name) => String(name).toLowerCase())
+  );
+  const grouped = new Map();
+  const add = (target, scope, hosts = []) => {
+    if (target?.mode !== "symlink" || !target.dir) return;
+    const dir = String(target.dir).replaceAll("\\", "/");
+    const current = grouped.get(dir) || {
+      dir,
+      scope,
+      hosts: new Set()
+    };
+    if (scope === "shared") current.scope = "shared";
+    for (const host of hosts) if (host) current.hosts.add(host);
+    grouped.set(dir, current);
+  };
+
+  for (const target of wellKnownFrom(registry)) {
+    add(target, "shared", target.serves || []);
+  }
+  for (const agent of agentsFrom(registry)) {
+    if (!all && !detected.has(String(agent?.name || "").toLowerCase())) continue;
+    add(agent.skills, "client-specific", [agent.name]);
+  }
+
+  const targets = [...grouped.values()]
+    .map(({ dir, scope, hosts }) => Object.freeze({
+      dir,
+      scope,
+      hosts: Object.freeze([...hosts].sort((left, right) => left.localeCompare(right)))
+    }))
+    .sort((left, right) => left.dir.localeCompare(right.dir));
+  return Object.freeze({
+    format: SKILL_TARGET_PLAN_FORMAT,
+    mode: all ? "all" : "detected",
+    targets: Object.freeze(targets)
+  });
 }
 
 export function retiredSymlinkTargets(registry = bundledRegistry) {

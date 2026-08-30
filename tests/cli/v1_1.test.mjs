@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { applyApprovedProjectRegistration } from "../helpers/project-registration.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -12,6 +13,7 @@ const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.j
 test("activate creates global and project agent bridges for installed tools", () => {
   const { aiosPath, homePath, projectPath } = setupAios();
   installAgents(homePath);
+  registerApprovedProject({ aiosPath, homePath, projectPath });
 
   run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath]);
 
@@ -20,7 +22,7 @@ test("activate creates global and project agent bridges for installed tools", ()
   assert.match(read(path.join(projectPath, "AGENTS.md")), /DotAIOS Project Bridge/);
 });
 
-test("activate skips absent client bridges while keeping native skill projections explicit", () => {
+test("activate skips absent client bridges and client-specific skill projections", () => {
   const { aiosPath, homePath } = setupAios();
 
   const result = run(["activate", "--path", aiosPath, "--home", homePath], {
@@ -29,8 +31,9 @@ test("activate skips absent client bridges while keeping native skill projection
 
   assert.equal(fs.existsSync(path.join(homePath, ".claude", "CLAUDE.md")), false);
   assert.equal(fs.existsSync(path.join(homePath, ".codex", "AGENTS.md")), false);
-  assert.equal(fs.existsSync(path.join(homePath, ".claude", "skills")), true);
-  assert.equal(fs.existsSync(path.join(homePath, ".gemini", "config", "skills")), true);
+  assert.equal(fs.existsSync(path.join(homePath, ".claude", "skills")), false);
+  assert.equal(fs.existsSync(path.join(homePath, ".gemini", "config", "skills")), false);
+  assert.equal(fs.existsSync(path.join(homePath, ".grok", "skills")), false);
   assert.equal(fs.existsSync(path.join(homePath, ".agents", "skills")), true);
   assert.match(result.stdout, /No known AI tools were detected/);
 });
@@ -123,16 +126,17 @@ test("context prints files and refreshes generated entrypoints", () => {
   assert.match(read(path.join(aiosPath, "CLAUDE.md")), /@AGENTS\.md/);
 });
 
-// The documented rewrite path must keep the same runnable invocation init wrote.
-// A missing {{cli}}/{{version}} becomes an empty command and a dead doc link.
-test("context --refresh still names a command the machine can run", () => {
+// The documented rewrite path must retain the captured-invocation reference.
+// A missing {{version}} still becomes a dead doc link.
+test("context --refresh retains the one managed CLI authority", () => {
   const { aiosPath } = setupAios();
   run(["context", "--refresh", "--path", aiosPath]);
   const router = read(path.join(aiosPath, "AGENTS.md"));
-  assert.doesNotMatch(router, /` brief /, "refresh must not emit an empty command name");
+  assert.match(router, /candidate_invocation/);
+  assert.doesNotMatch(router, /\bnpx(?:\.cmd)?\s+dotaios/, "refresh must not create a package-runner authority");
   assert.doesNotMatch(router, /blob\/v\//, "refresh must not drop the release from doc links");
   assert.doesNotMatch(router, /\{\{\w+\}\}/, "every router placeholder must still be filled");
-  assert.match(router, /npx dotaios@\d+\.\d+\.\d+ brief --compact --memory shared/);
+  assert.match(router, /\["brief","--compact","--memory","shared"\]/);
 });
 
 test("generated managed instruction surfaces contain no bare or unpinned DotAIOS command", () => {
@@ -311,6 +315,14 @@ function setupAios() {
   run(["init", "--path", aiosPath, "--yes"]);
 
   return { aiosPath, homePath, projectPath, tempRoot };
+}
+
+function registerApprovedProject({ aiosPath, homePath, projectPath }) {
+  applyApprovedProjectRegistration(run, [
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    "--home", homePath
+  ]);
 }
 
 // Simulate the per-tool config folders that DotAIOS uses to detect an

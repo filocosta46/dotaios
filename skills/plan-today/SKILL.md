@@ -20,7 +20,7 @@ Build today's plan from your priorities, active work, and your stated planning p
 
 - It does not write a daily note, that is `/today`. Use `/today` when you want to save the plan and close it out at the end of the day.
 - It does not read your calendar or email unless a plugin has captured signals.
-- It does not second-guess your priorities. If they are wrong, run `npx dotaios@<exact-candidate-version> interview` first.
+- It does not second-guess your priorities. If they are wrong, invoke `["interview"]` first through the current host-managed `candidate_invocation`.
 
 ## How to use it
 
@@ -34,8 +34,8 @@ Try saying:
 
 ### Read
 
-1. `prompt.md` in this skill directory if present, compiled by `npx dotaios@<exact-candidate-version> interview`. Prefer it over reading individual context files.
-2. Run `npx dotaios@<exact-candidate-version> brief --compact` to receive the bounded identity, priorities, work, and recent-memory projection. If the work is project-scoped, add `--project <slug-or-id>`.
+1. `prompt.md` in this skill directory if present, compiled by `["interview"]` through the current host-managed `candidate_invocation`. Launch its `executable` with its `argv_prefix` plus the shown arguments, without a shell; stop if the object is absent. Prefer the prompt over reading individual context files.
+2. Invoke `["brief","--compact"]` to receive the bounded identity, priorities, work, and recent-memory projection. If the work is project-scoped, append `"--project","<slug-or-id>"`.
 3. If `prompt.md` is missing, use the identity, priorities, and active-work sections from that projection as the fallback context.
 
 ### Process

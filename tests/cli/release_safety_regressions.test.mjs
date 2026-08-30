@@ -14,6 +14,7 @@ import {
 } from "../../scripts/verify-release-source.mjs";
 import { verifyEvidenceCommit } from "../../scripts/verify-release-evidence-commit.mjs";
 import { evaluateReleaseAdmission } from "../../scripts/release-checklist.mjs";
+import { applyApprovedProjectRegistration } from "../helpers/project-registration.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -28,6 +29,22 @@ function makeSandbox(t, label) {
     homePath: path.join(root, "home"),
     processHomePath: path.join(root, "process-home")
   };
+}
+
+function registerApprovedProject(sandbox, projectPath) {
+  const env = { ...process.env, HOME: sandbox.processHomePath, PATH: isolatedPath };
+  applyApprovedProjectRegistration(
+    (args) => spawnSync(process.execPath, [cli, ...args], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env
+    }),
+    [
+      "project", "add", projectPath,
+      "--path", sandbox.aiosPath,
+      "--home", sandbox.homePath
+    ]
+  );
 }
 
 function runDoctor(t, label, bridgeContent, {
@@ -304,10 +321,11 @@ test("activate and attach report a preserved foreign project bridge as blocking"
     env: { ...process.env, HOME: sandbox.processHomePath, PATH: isolatedPath }
   });
   assert.equal(initialized.status, 0, initialized.stderr);
+  registerApprovedProject(sandbox, projectPath);
 
   for (const args of [
     ["activate", "--path", sandbox.aiosPath, "--home", sandbox.homePath, "--project", projectPath],
-    ["attach", projectPath, "--path", sandbox.aiosPath]
+    ["attach", projectPath, "--path", sandbox.aiosPath, "--home", sandbox.homePath]
   ]) {
     const result = spawnSync(process.execPath, [cli, ...args], {
       cwd: repoRoot,
@@ -418,14 +436,20 @@ test("release admission CI checks out and packs the exact clean reviewed source"
   assert.ok(admissionJob, "release admission job must exist");
   assert.match(admissionJob, /uses: actions\/checkout@v4\n\s+with:\n\s+ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/);
   assert.match(admissionJob, /test "\$\(git rev-parse HEAD\)" = "\$REVIEWED_SOURCE_COMMIT"/);
-  assert.match(admissionJob, /test -z "\$\(git status --porcelain --untracked-files=no\)"/);
+  assert.match(admissionJob, /test -z "\$\(git status --porcelain\)"/);
+  assert.doesNotMatch(admissionJob, /--untracked-files=no/);
   assert.ok(
     admissionJob.indexOf("git rev-parse HEAD") < admissionJob.indexOf("npm run pack:admission"),
     "reviewed HEAD must be proved before package creation",
   );
   assert.ok(
-    admissionJob.indexOf("git status --porcelain --untracked-files=no") < admissionJob.indexOf("npm run pack:admission"),
-    "clean tracked source must be proved before package creation",
+    admissionJob.indexOf("git status --porcelain") < admissionJob.indexOf("npm run pack:admission"),
+    "a fully clean source checkout must be proved before package creation",
+  );
+  assert.match(
+    admissionJob,
+    /npm run pack:admission -- --silent --source-commit "\$REVIEWED_SOURCE_COMMIT" --pack-destination \.artifacts/,
+    "artifact construction must bind the already-verified source commit",
   );
   assert.match(
     admissionJob,
@@ -478,6 +502,7 @@ test("final admission reports package, native-agent, and public-release states s
       name: "dotaios",
       version: "2.0.12",
       sha256: "4".repeat(64),
+      payload_sha256: "3".repeat(64),
       dependency_graph_sha256: "5".repeat(64),
     },
     assertions: {
@@ -606,6 +631,7 @@ function completeReleaseAdmissionFixture() {
       name: "dotaios",
       version: "2.0.12",
       sha256: artifactSha256,
+      payload_sha256: "3".repeat(64),
       dependency_graph_sha256: dependencyGraphSha256,
     },
     assertions: {

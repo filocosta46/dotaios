@@ -44,8 +44,22 @@ async function writeProject(aiosPath, slug, repoUrl) {
 }
 
 async function writeState(statePath, paths) {
+  const verifiedPaths = Object.fromEntries(await Promise.all(
+    Object.entries(paths).map(async ([id, projectPath]) => {
+      const canonicalPath = await fs.realpath(projectPath);
+      const stats = await fs.lstat(canonicalPath, { bigint: true });
+      return [id, {
+        path: projectPath,
+        root_identity: {
+          type: "directory",
+          dev: stats.dev.toString(),
+          ino: stats.ino.toString()
+        }
+      }];
+    })
+  ));
   await fs.mkdir(path.dirname(statePath), { recursive: true });
-  await fs.writeFile(statePath, `${JSON.stringify({ version: 1, paths }, null, 2)}\n`);
+  await fs.writeFile(statePath, `${JSON.stringify({ version: 1, paths: verifiedPaths }, null, 2)}\n`);
 }
 
 function captureOutput() {

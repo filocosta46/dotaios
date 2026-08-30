@@ -32,26 +32,44 @@ function makeSandbox() {
   return { root, homePath, aiosPath, projectPath };
 }
 
+function runApprovedProjectAdd({ homePath, aiosPath, projectPath, name }) {
+  const env = { ...process.env, HOME: homePath };
+  const baseArgs = [cli, "project", "add", projectPath, "--path", aiosPath, "--name", name];
+  const preview = spawnSync(process.execPath, [...baseArgs, "--json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env
+  });
+  assert.equal(preview.status, 0, `preview failed:\n${preview.stdout}\n${preview.stderr}`);
+  const proof = JSON.parse(preview.stdout).plan;
+  return spawnSync(process.execPath, [
+    ...baseArgs,
+    "--operation-id", proof.operation_id,
+    "--plan-fingerprint", proof.plan_fingerprint,
+    "--yes"
+  ], { cwd: repoRoot, encoding: "utf8", env });
+}
+
 test("a spawned command with HOME pinned never writes outside that home", () => {
   const { homePath, aiosPath, projectPath } = makeSandbox();
 
   // Deliberately omit --home. HOME alone must be enough to contain the write.
-  const result = spawnSync(
-    process.execPath,
-    [cli, "project", "add", projectPath, "--path", aiosPath, "--name", "isolation-probe", "--yes"],
-    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, HOME: homePath } }
-  );
+  const result = runApprovedProjectAdd({ homePath, aiosPath, projectPath, name: "isolation-probe" });
 
   assert.equal(result.status, 0, `attach failed:\n${result.stdout}\n${result.stderr}`);
 
   const sandboxState = path.join(homePath, ".dotaios", "projects.json");
   assert.ok(fs.existsSync(sandboxState), "the registry must land inside the pinned HOME");
 
-  // The machine-local registry maps project id -> checkout path only; the
-  // portable name lives in AIOS under projects/<slug>/README.md. Assert on the
-  // path mapping, which is what this file is actually contracted to hold.
+  // The machine-local registry keeps both the checkout path and the directory
+  // identity used to revalidate it before disclosure. Portable project truth
+  // remains in AIOS under projects/<slug>/README.md.
   const state = JSON.parse(fs.readFileSync(sandboxState, "utf8"));
-  assert.deepEqual(Object.values(state.paths || {}), [projectPath]);
+  const mappings = Object.values(state.paths || {});
+  assert.equal(mappings.length, 1);
+  assert.equal(mappings[0].path, projectPath);
+  assert.deepEqual(Object.keys(mappings[0].root_identity).sort(), ["dev", "ino", "type"]);
+  assert.equal(mappings[0].root_identity.type, "directory");
 });
 
 test("the real user registry is untouched by a HOME-pinned run", () => {
@@ -59,11 +77,7 @@ test("the real user registry is untouched by a HOME-pinned run", () => {
   const realState = path.join(os.homedir(), ".dotaios", "projects.json");
   const before = fs.existsSync(realState) ? fs.readFileSync(realState, "utf8") : null;
 
-  spawnSync(
-    process.execPath,
-    [cli, "project", "add", projectPath, "--path", aiosPath, "--name", "must-not-leak", "--yes"],
-    { cwd: repoRoot, encoding: "utf8", env: { ...process.env, HOME: homePath } }
-  );
+  runApprovedProjectAdd({ homePath, aiosPath, projectPath, name: "must-not-leak" });
 
   const after = fs.existsSync(realState) ? fs.readFileSync(realState, "utf8") : null;
   assert.equal(after, before, "the developer's own ~/.dotaios/projects.json must not change");

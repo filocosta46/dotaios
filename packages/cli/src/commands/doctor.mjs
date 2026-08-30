@@ -13,12 +13,14 @@ import {
   bridgePath,
   bridgePointer,
   findManagedBlock,
+  inspectCandidateInvocationRecord,
   inspectDotaiosOnPath,
   isClaudeCodeAgent,
   isAgentInstalled,
   loadAgentRegistry,
   resolveClaudeConfigRoot,
-  resolveCliInvocation
+  resolveCliInvocation,
+  resolveLocalCliInvocation
 } from "../../../core/src/bridges.mjs";
 import { USER_MAINTAINED_CONTEXT_FILES } from "../../../core/src/memory-audit.mjs";
 import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
@@ -723,6 +725,15 @@ function hasNonCandidateManagedInvocation(text, candidateInvocation) {
   return false;
 }
 
+function hasCurrentCandidateInvocationRecord(text, expected) {
+  const inspected = inspectCandidateInvocationRecord(text);
+  if (inspected.status !== "valid") return false;
+  if (!expected) return true;
+  return inspected.candidateInvocation.executable === expected.executable
+    && inspected.candidateInvocation.argv_prefix.length === 1
+    && inspected.candidateInvocation.argv_prefix[0] === expected.entrypoint;
+}
+
 export async function checkCliInstallations({
   candidateVersion = INSTALLED_VERSION,
   inspectPersistent = inspectDotaiosOnPath,
@@ -792,7 +803,8 @@ export async function checkCliInstallations({
 export async function checkCliReachable(target, homePath, {
   env = process.env,
   loadRegistry = loadAgentRegistry,
-  resolveInvocation = resolveCliInvocation
+  resolveInvocation = resolveCliInvocation,
+  resolveLocalInvocation = resolveLocalCliInvocation
 } = {}) {
   const name = "DotAIOS command agents are told to run";
 
@@ -801,6 +813,12 @@ export async function checkCliReachable(target, homePath, {
     invocation = await resolveInvocation();
   } catch {
     invocation = null;
+  }
+  let localInvocation;
+  try {
+    localInvocation = resolveLocalInvocation();
+  } catch {
+    localInvocation = null;
   }
 
   let registry;
@@ -833,7 +851,10 @@ export async function checkCliReachable(target, homePath, {
     }
     const managed = findManagedBlock(content);
     if (!managed) continue;
-    if (hasNonCandidateManagedInvocation(managed.text, invocation)) staleBridges.push(filePath);
+    if (
+      !hasCurrentCandidateInvocationRecord(managed.text, localInvocation)
+      || hasNonCandidateManagedInvocation(managed.text, invocation)
+    ) staleBridges.push(filePath);
   }
 
   // The bridge points every agent at this file, and it carries the same
@@ -853,15 +874,15 @@ export async function checkCliReachable(target, homePath, {
 
   if (!staleBridges.length && !staleEntrypoint && !brokenEntrypoint) {
     const detail = skippedDefaultBridges.length > 0
-      ? `Every file this check read names a DotAIOS command that runs here; the ${skippedDefaultBridges.join(", ")} default-root bridge was not read because CLAUDE_CONFIG_DIR selects another root.`
-      : "Every file that names a DotAIOS command names one that runs here.";
+      ? `Every file this check read names a DotAIOS command that runs here; ${skippedDefaultBridges.join(", ")} uses another configured location that this check did not read.`
+      : "Every connected AI app uses the approved DotAIOS command, and every other instruction this check read agrees with it.";
     return { name, status: "ok", detail };
   }
 
   const parts = [];
   const fixes = [];
   if (staleBridges.length) {
-    parts.push(`${staleBridges.length} agent bridge${staleBridges.length === 1 ? "" : "s"} (${staleBridges.join(", ")})`);
+    parts.push(`${staleBridges.length} connected AI app instruction${staleBridges.length === 1 ? "" : "s"} (${staleBridges.join(", ")})`);
     if (invocation) fixes.push(`\`${invocation} activate\` rewrites the bridges`);
   }
   if (staleEntrypoint || brokenEntrypoint) {
@@ -872,11 +893,14 @@ export async function checkCliReachable(target, homePath, {
   const verb = parts.length === 1 && staleBridges.length <= 1 ? "tells" : "tell";
   const what = brokenEntrypoint && !staleBridges.length && !staleEntrypoint
     ? `${parts.join(" and ")} ${verb} assistants to run an empty command name — so every brief, search, and save from those assistants fails.`
-    : `${parts.join(" and ")} ${verb} assistants to run a non-candidate DotAIOS command, so those managed instructions can run a different release.`;
+    : `${parts.join(" and ")} ${verb} assistants to run a DotAIOS command that was not approved for this setup, so it could run a different release.`;
 
   return {
     name,
-    status: "fail",
+    // A stale connected-app instruction is an upgrade warning, matching the
+    // bridge-specific doctor verdict. A stale router is blocking because every
+    // connected app delegates its commands to that one shared file.
+    status: staleEntrypoint || brokenEntrypoint ? "fail" : "warn",
     detail: what,
     ...(fixes.length > 0 ? { fix: `${fixes.join("; ")}.` } : {})
   };

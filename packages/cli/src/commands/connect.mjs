@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { appendEvent } from "../../../core/src/memory.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
+import { resolveLocalCliInvocation } from "../../../core/src/bridges.mjs";
 import {
   assertSafeGeminiAiosPath,
   mergeGeminiSettings,
@@ -307,13 +308,15 @@ async function connectGemini(aiosPath, options) {
   const geminiMdPath = path.join(geminiDir, "GEMINI.md");
   const hookScriptPath = path.join(geminiDir, "dotaios-context-hook.sh");
   const settingsPath = path.join(geminiDir, "settings.json");
+  const localCli = resolveLocalCliInvocation();
 
   // All three artifacts share this parent. Refuse an unsafe home/.gemini path
   // before touching settings, the bridge, or the hook so a symlinked client
   // directory cannot redirect a partial install outside the user's home.
   await writeGeminiBridge(geminiMdPath, aiosPath, {
     boundaryRoot: os.homedir(),
-    preflightOnly: true
+    preflightOnly: true,
+    localCli
   });
   await writeGeminiHookScript(hookScriptPath, aiosPath, {
     boundaryRoot: os.homedir(),
@@ -329,7 +332,7 @@ async function connectGemini(aiosPath, options) {
   await writeGeminiHookScript(hookScriptPath, aiosPath, { boundaryRoot: os.homedir() });
   console.log("[ok] ~/.gemini/dotaios-context-hook.sh");
 
-  await writeGeminiBridge(geminiMdPath, aiosPath);
+  await writeGeminiBridge(geminiMdPath, aiosPath, { localCli });
   console.log("[ok] ~/.gemini/GEMINI.md");
 
   await mergeGeminiSettings(settingsPath, hookScriptPath, aiosPath, { boundaryRoot: os.homedir() });

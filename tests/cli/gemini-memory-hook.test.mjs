@@ -68,9 +68,23 @@ function modeFixture() {
   ].join("\n"));
   fs.writeFileSync(path.join(homePath, ".dotaios", "projects.json"), JSON.stringify({
     version: 1,
-    paths: { "project-alpha-001": projectPath }
+    paths: {
+      "project-alpha-001": {
+        path: projectPath,
+        root_identity: projectRootIdentity(projectPath)
+      }
+    }
   }));
   return { root, homePath, aiosPath, projectPath, elsewhere };
+}
+
+function projectRootIdentity(projectPath) {
+  const stats = fs.lstatSync(fs.realpathSync(projectPath), { bigint: true });
+  return {
+    type: "directory",
+    dev: stats.dev.toString(),
+    ino: stats.ino.toString()
+  };
 }
 
 test("Gemini first-message reader derives the session lock from the host transcript", async () => {

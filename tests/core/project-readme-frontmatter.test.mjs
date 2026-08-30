@@ -7,6 +7,17 @@ import { parseDocument } from "yaml";
 
 import { registerProject } from "../../packages/core/src/projects.mjs";
 
+async function registerApprovedProject(options) {
+  const preview = await registerProject({ ...options, apply: false, yes: false });
+  return registerProject({
+    ...options,
+    operationId: preview.operationId,
+    planFingerprint: preview.planFingerprint,
+    apply: true,
+    yes: false
+  });
+}
+
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-project-frontmatter-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -21,11 +32,12 @@ async function fixture(t) {
 async function registerWidget(aiosPath, statePath) {
   const projectPath = path.join(aiosPath, "workspaces", "widget");
   await fs.mkdir(projectPath, { recursive: true });
-  await registerProject({
+  await registerApprovedProject({
     aiosPath,
     statePath,
     projectPath,
     slug: "widget",
+    purpose: "Coordinate the widget launch",
     yes: true,
     createId: () => "widget-id",
     readRepoUrl: async () => "https://github.com/acme/widget.git"
@@ -49,6 +61,7 @@ test("a generated project README uses block frontmatter, one key per line", asyn
   );
   assert.match(frontmatter, /^id: widget-id$/m);
   assert.match(frontmatter, /^project: widget$/m);
+  assert.match(frontmatter, /^description: Coordinate the widget launch$/m);
 });
 
 test("a generated project README survives a caller that injects its own key", async (t) => {

@@ -40,7 +40,7 @@ becomes routable through `skills/RESOLVER.md`.
    triggers: <phrase>, <phrase>, <phrase>
    ---
    ```
-6. **Reindex** so every agent can find it: run `npx dotaios@<exact-candidate-version> activate`. This
+6. **Reindex** so every agent can find it: use only the current host-managed `candidate_invocation`, launching its `executable` with its `argv_prefix` plus `["activate"]`, without a shell. Stop if the object is absent. This
    regenerates `skills/INDEX.md` and `skills/RESOLVER.md`. Confirm the new skill
    appears in RESOLVER.md.
 7. **Tell the user** it is saved and which phrases now trigger it.

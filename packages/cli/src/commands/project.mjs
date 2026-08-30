@@ -6,6 +6,7 @@ import {
   matchProjectRecord,
   registerProject,
   resolveProject,
+  resolveProjectContext,
   restoreProjects
 } from "../../../core/src/projects.mjs";
 import { buildSessionDigest } from "../../../core/src/digest.mjs";
@@ -18,6 +19,7 @@ const HELP_TEXT = `Usage:
   dotaios project add <repo-path> [options]
   dotaios project list [options]
   dotaios project restore [slug-or-id] [options]
+  dotaios project identify [options]
   dotaios project resolve <slug-or-id> [options]
   dotaios project doctor [options]
   dotaios project context <slug-or-id> [options]
@@ -31,17 +33,23 @@ const HELP_TEXT = `Usage:
 
 Keep portable project metadata under projects/<slug>/README.md. Existing
 external repositories stay where they are; restored repositories use the
-ignored workspaces/ shelf, with a local path mapping only on this machine.
-Project add is a read-only preview unless you explicitly pass --apply or --yes.
+ignored workspaces/ shelf, with a local path mapping and verified directory
+identity only on this machine.
+Project add is a read-only preview. Applying requires --apply or --yes plus the
+operation id and fingerprint displayed by that exact preview.
 
 Add options:
   --slug <slug>       Override the slug derived from the repository folder
   --name <name>       Set the human-readable project name
+  --purpose <text>    Explain what this primary project is for (1-500 characters)
   --status <status>   Set the project status (default: active)
   --domain <domain>   Set build, make, or sell; repeat for multiple domains
   --repo-url <url>    Override the Git origin URL discovered from the repository
-  --apply             Apply the exact plan computed and checked by this command
-  --yes               Explicit script-friendly alias for --apply
+  --operation-id <id> Use the operation id displayed by the approved preview
+  --plan-fingerprint <sha256>
+                      Use the fingerprint displayed by the approved preview
+  --apply             Apply only the exact displayed operation id and fingerprint
+  --yes               Script-friendly alias for the same proof-bound apply
 
 Context options:
   --budget <n>        Visible character limit (positive int). Payload field
@@ -85,14 +93,24 @@ export async function projectCommand(args = [], dependencies = {}) {
   }
   if (subcommand === "add") {
     assertPositionals(positionals, 1, "dotaios project add <repo-path>");
+    if (
+      (addOptions.operationId || addOptions.planFingerprint)
+      && addOptions.apply !== true
+      && addOptions.yes !== true
+    ) {
+      throw new Error("Project registration proof options can only be used with --apply or --yes.");
+    }
     const project = await registerProject({
       ...coreOptions,
       projectPath: resolveUserPath(positionals[0], coreOptions.homePath),
       slug: addOptions.slug,
       name: addOptions.name,
+      purpose: addOptions.purpose,
       status: addOptions.status,
       domain: addOptions.domains.length > 0 ? addOptions.domains : undefined,
       repoUrl: addOptions.repoUrl,
+      operationId: addOptions.operationId,
+      planFingerprint: addOptions.planFingerprint,
       apply: addOptions.apply,
       yes: addOptions.yes
     });
@@ -137,6 +155,27 @@ export async function projectCommand(args = [], dependencies = {}) {
     const projects = await listProjects(coreOptions);
     printProjects(output, projects);
     return projects;
+  }
+
+  if (subcommand === "identify") {
+    assertPositionals(positionals, 0, "dotaios project identify");
+    const project = await resolveProjectContext({
+      ...coreOptions,
+      cwd: dependencies.cwd || process.cwd()
+    });
+    const result = {
+      receipt: project ? "Memory: This project" : "Memory: Off",
+      registered_project: project ? { id: project.id, slug: project.slug } : null
+    };
+    if (options.json) {
+      output.log(JSON.stringify(result, null, 2));
+    } else {
+      output.log(result.receipt);
+      output.log(project
+        ? `Registered project: ${project.slug} (${project.id})`
+        : "This working directory is not a registered project.");
+    }
+    return result;
   }
 
   if (subcommand === "resolve") {
@@ -255,9 +294,12 @@ function parseOptions(args) {
   const addOptions = {
     slug: null,
     name: null,
+    purpose: undefined,
     status: null,
     domains: [],
     repoUrl: null,
+    operationId: null,
+    planFingerprint: null,
     apply: false,
     yes: false
   };
@@ -281,6 +323,9 @@ function parseOptions(args) {
     } else if (arg === "--name") {
       addOptions.name = readOptionValue(args, index, "--name");
       index += 1;
+    } else if (arg === "--purpose") {
+      addOptions.purpose = readOptionValue(args, index, "--purpose");
+      index += 1;
     } else if (arg === "--status") {
       addOptions.status = readOptionValue(args, index, "--status");
       index += 1;
@@ -290,6 +335,12 @@ function parseOptions(args) {
       index += 1;
     } else if (arg === "--repo-url") {
       addOptions.repoUrl = readOptionValue(args, index, "--repo-url");
+      index += 1;
+    } else if (arg === "--operation-id") {
+      addOptions.operationId = readOptionValue(args, index, "--operation-id");
+      index += 1;
+    } else if (arg === "--plan-fingerprint") {
+      addOptions.planFingerprint = readOptionValue(args, index, "--plan-fingerprint");
       index += 1;
     } else if (arg === "--apply") {
       addOptions.apply = true;
@@ -334,9 +385,12 @@ function assertNoAddOptions(options, subcommand) {
   if (
     options.slug ||
     options.name ||
+    options.purpose !== undefined ||
     options.status ||
     options.domains.length > 0 ||
     options.repoUrl ||
+    options.operationId ||
+    options.planFingerprint ||
     options.apply ||
     options.yes
   ) {
@@ -358,8 +412,11 @@ function printProjectRegistration(output, project) {
     output.log("");
     output.log(project.preview);
     output.log("");
-    output.log("Preview only. Re-run with --apply to save the durable record and this machine's path.");
-    output.log("For scripts, --yes is an explicit alias for --apply.");
+    output.log(`  operation id:   ${project.operationId}`);
+    output.log(`  fingerprint:    ${project.planFingerprint}`);
+    output.log("");
+    output.log("Preview only. Re-run the same command with both displayed proof values and --apply.");
+    output.log("For scripts, --yes is an explicit alias for the same proof-bound apply.");
     return;
   }
 
@@ -436,10 +493,13 @@ function projectRegistrationJson(project) {
     plan: {
       version: project.version,
       operation: project.operation,
+      operation_id: project.operationId,
+      plan_fingerprint: project.planFingerprint,
       project: {
         id: project.id,
         slug: project.slug,
         name: project.name,
+        ...(project.description ? { description: project.description } : {}),
         status: project.status,
         domain: [...project.domain],
         repo_url: project.repoUrl
@@ -453,6 +513,8 @@ function projectRegistrationJson(project) {
       operation: project.receipt.operation,
       project_id: project.receipt.project_id,
       project: project.receipt.project,
+      operation_id: project.receipt.operation_id,
+      plan_fingerprint: project.receipt.plan_fingerprint,
       durable,
       applied: project.receipt.applied
     },
@@ -473,7 +535,11 @@ function printProjects(output, projects) {
     const domains = project.domain.join(", ") || "none";
     output.log(`[${state}] ${project.slug}: ${project.name}`);
     output.log(`       status: ${project.status} | domain: ${domains}`);
-    output.log(`       path: ${project.projectPath || "not registered on this machine"}`);
+    const location = project.projectPath
+      || (project.mappingStatus && project.mappingStatus !== "unmapped"
+        ? "re-registration required on this machine"
+        : "not registered on this machine");
+    output.log(`       path: ${location}`);
     if (project.repoUrl) output.log(`       repo: ${project.repoUrl}`);
   }
 }

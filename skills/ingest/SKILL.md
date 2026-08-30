@@ -43,13 +43,15 @@ Try saying:
 - "ingest this PDF: <path>"
 - "capture this article into my vault"
 
-Or run it directly:
+For every DotAIOS operation below, use only the current host-managed
+`candidate_invocation`: launch its `executable` with its `argv_prefix` followed
+by the displayed argument array, without a shell. Stop if the object is absent.
 
-```bash
-npx dotaios@<exact-candidate-version> ingest <url-or-path>
-npx dotaios@<exact-candidate-version> ingest <input> --to wiki --name <ref>   # route by purpose
-npx dotaios@<exact-candidate-version> ingest <input> --dry-run                # preview the plan
-npx dotaios@<exact-candidate-version> ingest <input> --overwrite              # replace existing
+```json
+["ingest","<url-or-path>"]
+["ingest","<input>","--to","wiki","--name","<ref>"]
+["ingest","<input>","--dry-run"]
+["ingest","<input>","--overwrite"]
 ```
 
 ## Advanced details
@@ -78,16 +80,16 @@ the interactive Terminal question counts as approval and writes immediately.
 
 Examples:
 
-```bash
-npx dotaios@<exact-candidate-version> ingest report.pdf --to raw
-npx dotaios@<exact-candidate-version> ingest https://example.com/post --to wiki --name ai-sales-research
-npx dotaios@<exact-candidate-version> ingest company-brief.pdf --to company --name acme --apply
-npx dotaios@<exact-candidate-version> ingest call-note.md --to signal
+```json
+["ingest","report.pdf","--to","raw"]
+["ingest","https://example.com/post","--to","wiki","--name","ai-sales-research"]
+["ingest","company-brief.pdf","--to","company","--name","acme","--apply"]
+["ingest","call-note.md","--to","signal"]
 ```
 
 ## Routing internals (what goes where)
 
-The CLI command `npx dotaios@<exact-candidate-version> ingest <input>` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins, flag the conflict and update this file.
+The `ingest` command reached through `candidate_invocation` is the routing authority. This skill mirrors that command. If anything conflicts with the CLI, the CLI wins; flag the conflict and update this file.
 
 | Input | Path | Parser | Output |
 |---|---|---|---|
@@ -140,11 +142,9 @@ Dynamic or paywalled pages, including some Substack pages, may ingest partial co
 
 There is no `--batch` flag. For multiple files or URLs, loop the single-file command:
 
-```bash
-for f in ~/Downloads/*.pdf; do
-  npx dotaios@<exact-candidate-version> ingest "$f"
-done
-```
+Enumerate the selected PDFs without a shell loop, then invoke
+`["ingest","<absolute-pdf-path>"]` separately for each file through the same
+`candidate_invocation`.
 
 Each invocation appends one entry to `memory/events.jsonl`. Failures stop only that item; the next invocation continues.
 
@@ -162,7 +162,7 @@ If the user accepts, install with:
 pip install marker-pdf
 ```
 
-Then verify with `npx dotaios@<exact-candidate-version> status`, the **Ingest engines** section should show `Marker (local) : installed (<path>)`.
+Then verify with `["status"]` through `candidate_invocation`; the **Ingest engines** section should show `Marker (local) : installed (<path>)`.
 
 If declined or installation fails, PDFs continue to use the bundled `unpdf` text fallback. `.docx` / `.pptx` / `.epub` will still reject with `MARKER_REQUIRED` until marker is available.
 
@@ -174,7 +174,7 @@ When the user asks to ingest:
   pass `--to` and `--name` directly instead of dumping everything in `vault/raw`.
 - For a durable shelf (`wiki`/`company`/`person`), the command will preview and not
   write. Show the user the previewed destination, confirm, then re-run with `--apply`.
-- If intent is unclear, run plain `npx dotaios@<exact-candidate-version> ingest <input>` (saves to `vault/raw`) and
+- If intent is unclear, invoke `["ingest","<input>"]` (saves to `vault/raw`) and
   ask the user where it should ultimately live.
 - If the result is `Already ingested:`, ask whether the user wants `--overwrite` rather than re-running unprompted.
 - If the result is a `MARKER_REQUIRED` error, offer the install prompt above before suggesting alternatives.

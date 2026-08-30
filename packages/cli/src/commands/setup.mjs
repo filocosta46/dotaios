@@ -13,14 +13,16 @@ import { schemaVersion } from "../../../core/src/schema.mjs";
 import { processBirthToken, processRecordIsAlive } from "../../../core/src/process-identity.mjs";
 import { collectSkills } from "../../../core/src/skills.mjs";
 import {
+  FIRST_TASK_PROMPT,
   MANAGED_END,
   MANAGED_START,
   bridgePath,
   findManagedBlock,
   isAgentInstalled,
-  loadAgentRegistry
+  loadAgentRegistry,
+  resolveSkillTargetPath
 } from "../../../core/src/bridges.mjs";
-import { symlinkTargets } from "../../../core/src/skill-targets.mjs";
+import { planSkillTargets } from "../../../core/src/skill-targets.mjs";
 import {
   LIGHTPANDA_VERSION,
   downloadLightpanda,
@@ -315,7 +317,8 @@ export async function setupCommand(args, { lifecycle = {} } = {}) {
   console.log("  1. Start the agent from your usual folder or a project checkout already attached with `dotaios activate` — not from inside AIOS.");
   console.log(`  2. Your one AIOS folder: ${displayHomePath(aiosPath, os.homedir())}`);
   console.log("     Opening the AIOS folder itself may let the app read its router before your first prompt.");
-  console.log('  3. Ask: "Use my memory. Read my context and tell me what I am working on."');
+  console.log(`  3. Paste: "${FIRST_TASK_PROMPT}"`);
+  console.log("     The agent must explain and propose; nothing changes until a fresh reply approves that exact action.");
   console.log('  4. Choose "Only this project" only inside that registered checkout; "Private chat" works anywhere.');
   // `dotaios interview` throws without a TTY (interview.mjs), so on a piped run
   // this line named the one command the caller who just succeeded cannot run.
@@ -514,16 +517,20 @@ async function previewSetupTarget(aiosPath) {
 }
 
 async function printClientPreview(aiosPath, homePath, { verbose = false } = {}) {
-  const registry = await loadAgentRegistry(null);
-  // The writer projects skills into every symlink target regardless of what is
-  // detected. The preview must read the same set, or it promises less than the
-  // run delivers.
-  const skillDirs = symlinkTargets(registry).map((target) => target.dir);
+  const registry = await loadAgentRegistry(aiosPath);
+  const detections = await Promise.all(registry.map(async (agent) => ({
+    agent,
+    installed: await isAgentInstalled(homePath, agent)
+  })));
+  const detectedAgentNames = new Set(
+    detections.filter(({ installed }) => installed).map(({ agent }) => agent.name)
+  );
+  const skillDirs = planSkillTargets({ registry, detectedAgentNames })
+    .targets.map((target) => target.dir);
   let detectedClientCount = 0;
 
-  for (const agent of registry) {
+  for (const { agent, installed } of detections) {
     const destination = bridgePath(homePath, agent) || path.join(homePath, agent.detect);
-    const installed = await isAgentInstalled(homePath, agent);
     if (!installed) {
       if (verbose) console.log(`[would skip] ${destination} (${agent.name} not detected${skillLinkCaveat(agent, homePath, skillDirs)})`);
       continue;
@@ -549,7 +556,7 @@ async function printClientPreview(aiosPath, homePath, { verbose = false } = {}) 
 
   if (!verbose) return detectedClientCount;
   for (const relativeDir of skillDirs) {
-    const targetDir = path.join(homePath, relativeDir);
+    const targetDir = resolveSkillTargetPath(homePath, relativeDir);
     const stats = await lstatIfPresent(targetDir);
     if (!stats) {
       console.log(`[would create managed skill links] ${targetDir}`);

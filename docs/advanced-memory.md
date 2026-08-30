@@ -23,9 +23,9 @@ Run a local audit any time:
 
 
 ```bash
-npx dotaios@2.0.11 memory audit
-npx dotaios@2.0.11 memory audit --write-queue
-npx dotaios@2.0.11 memory audit --apply-skills
+npx dotaios@2.0.13 memory audit
+npx dotaios@2.0.13 memory audit --write-queue
+npx dotaios@2.0.13 memory audit --apply-skills
 ```
 
 The audit never deletes memory. By default it follows DotAIOS memory routing:
@@ -71,7 +71,7 @@ Mirror your folder to a private GitHub repository that only you can see, so
 you can read your memory from your phone and drop notes into it from anywhere.
 
 ```bash
-npx dotaios@2.0.11 sync setup
+npx dotaios@2.0.13 sync setup
 ```
 
 Notes you save from another device land in `memory/inbox/`, and the
@@ -87,8 +87,8 @@ Save useful AI sessions as local Markdown so other tools on your machine can
 find the decisions and open threads later.
 
 ```bash
-npx dotaios@2.0.11 capture enable claude-code   # save sessions automatically
-npx dotaios@2.0.11 capture import paste         # or paste one in from any tool
+npx dotaios@2.0.13 capture enable claude-code   # save sessions automatically
+npx dotaios@2.0.13 capture import paste         # or paste one in from any tool
 ```
 
 Everything lands in `memory/sessions/` as readable files you can open, edit,
@@ -100,7 +100,7 @@ Your folder ships with a pre-wired daily brief. It uses your computer's own
 scheduler, not a service of ours.
 
 ```bash
-npx dotaios@2.0.11 schedule install --dry-run   # shows what it would do, changes nothing
+npx dotaios@2.0.13 schedule install --dry-run   # shows what it would do, changes nothing
 ```
 
 ## Rung 5: Recipes for a deeper brain (entirely optional)

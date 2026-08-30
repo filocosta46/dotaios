@@ -494,11 +494,13 @@ describe("doctorCommand", () => {
     );
     const lines = [];
     const origLog = console.log.bind(console);
+    const previousExitCode = process.exitCode;
     console.log = (...args) => lines.push(args.join(" "));
     try {
       await doctorCommand(["--verbose", "--path", aiosPath, "--home", tmpHome]);
     } finally {
       console.log = origLog;
+      process.exitCode = previousExitCode;
       await fs.rm(tmpHome, { recursive: true, force: true });
     }
     assert.match(lines.join("\n"), /predates v1\.23.*read_session_digest/i);
@@ -668,8 +670,48 @@ describe("doctor command reachability", () => {
         loadRegistry: async () => [{ name: "Codex", bridge: ".codex/AGENTS.md" }],
         resolveInvocation: async () => "npx dotaios@2.0.11"
       });
-      assert.equal(result.status, "fail");
-      assert.match(result.detail, /1 agent bridge .* tells assistants/);
+      assert.equal(result.status, "warn");
+      assert.match(result.detail, /1 connected AI app instruction .* tells assistants/);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects missing, malformed, and mismatched candidate invocation records", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-doctor-candidate-record-"));
+    const aiosPath = await makeMinimalAios(root);
+    const homePath = path.join(root, "home");
+    const bridgeFile = path.join(homePath, ".codex", "AGENTS.md");
+    await fs.mkdir(path.dirname(bridgeFile), { recursive: true });
+    const expected = {
+      executable: "/opt/admitted/bin/node",
+      entrypoint: "/opt/admitted/package/packages/cli/src/index.mjs"
+    };
+    const cases = [
+      "No candidate record.",
+      '    {"candidate_invocation":{"executable":"relative-node","argv_prefix":["relative-cli"]}}',
+      '    {"candidate_invocation":{"executable":"/opt/other/bin/node","argv_prefix":["/opt/other/package/packages/cli/src/index.mjs"]}}'
+    ];
+    const { checkCliReachable } = await import(
+      path.join(repoRoot, "packages/cli/src/commands/doctor.mjs")
+    );
+
+    try {
+      for (const candidateLine of cases) {
+        await fs.writeFile(bridgeFile, [
+          "<!-- dotaios-managed:start -->",
+          candidateLine,
+          "<!-- dotaios-managed:end -->",
+          ""
+        ].join("\n"));
+        const result = await checkCliReachable(aiosPath, homePath, {
+          loadRegistry: async () => [{ name: "Codex", bridge: ".codex/AGENTS.md" }],
+          resolveInvocation: async () => "npx dotaios@2.0.11",
+          resolveLocalInvocation: () => expected
+        });
+        assert.equal(result.status, "warn", candidateLine);
+        assert.match(result.detail, /connected AI app instruction[\s\S]*not approved/i);
+      }
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -743,9 +785,9 @@ describe("doctor command reachability", () => {
         resolveInvocation: async () => "npx dotaios@2.0.11"
       });
       assert.equal(result.status, "fail");
-      assert.match(result.detail, /agent bridge/i);
+      assert.match(result.detail, /connected AI app instruction/i);
       assert.match(result.detail, /AIOS router/i);
-      assert.match(result.detail, /non-candidate|exact candidate/i);
+      assert.match(result.detail, /not approved|different release/i);
       assert.match(result.fix, /npx dotaios@2\.0\.11 activate/);
       assert.match(result.fix, /npx dotaios@2\.0\.11 context --refresh/);
     } finally {

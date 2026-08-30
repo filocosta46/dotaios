@@ -101,6 +101,7 @@ test("every upgrade route directly skips portable mirror sync", async () => {
 test("search and skill lookup surfaces are classified read-only while skill writers are not", async () => {
   const readOnlyCommands = [
     ["search", ["continuity"]],
+    ["resolve", ["plan my day", "--project", "client"]],
     ["skills", []],
     ["skills", ["audit"]],
     ["skills", ["resolve", "plan my day"]],

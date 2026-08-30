@@ -4,6 +4,39 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- The post-publication source is now versioned as 2.0.14 (unreleased) so it
+  cannot be mistaken for the immutable 2.0.13 package published from
+  `77350441b706c816c5c5e5e63c175962632e415f`. Customer setup docs remain pinned
+  to the available 2.0.13 package until 2.0.14 is published.
+
+## [2.0.13] - 2026-08-29
+
+### Fixed
+- Prebuilt npm tarballs now carry the exact reviewed source commit in their
+  publication manifest, and local package admission refuses a mismatched
+  manifest before release. Product behavior is unchanged from 2.0.12.
+
+## [2.0.12] - 2026-08-29
+
+### Added
+- First-session induction now carries a browser-chat user through a local agent,
+  explicit project registration, one connected existing folder, and one useful
+  action that runs only after approval.
+- Release admission binds the candidate invocation, source commit, dependency
+  graph, compressed package hash, canonical payload hash, and packed black-box
+  induction evidence to one exact artifact.
+
+### Fixed
+- Global skill activation always maintains the shared Agent Skills projection,
+  but creates client-specific Claude Code, Antigravity, and Grok projections
+  only for detected clients unless `--all` is explicit. Setup and activation
+  now share that target plan across preview and apply, including custom
+  registries and `CLAUDE_CONFIG_DIR`, without deleting previously managed
+  targets merely because a client is no longer detected.
+- Activation and attachment dry runs now identify themselves as previews instead
+  of reporting that DotAIOS was activated or attached when no writes occurred.
+
 ## [2.0.11] - 2026-08-26
 
 ### Added

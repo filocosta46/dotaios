@@ -12,6 +12,24 @@ DotAIOS is a local file convention.
 
 A bridge names the folder and states when to open it — when the working directory is inside it, or when the user asks. It never references the entrypoint as `@<path>`, because the hosts that understand `@` expand it while loading the bridge, which would import the folder into every session in every directory instead of pointing at it.
 
+## First-session induction boundary
+
+The global Claude Code and Codex bridges carry one first-task contract. They
+capture the admitted local Node executable and installed CLI entrypoint as an
+absolute executable plus argv prefix during activation. Agents pass argv
+directly, without a shell or a package lookup, and invoke `dotaios resolve` for
+the bounded project intent. If either captured path is missing, resolution
+stops and asks for re-activation from that same local installation.
+
+Induction is a two-level chain: the bridge controls conversation, receipts, and
+approval order; the CLI controls deterministic project registration and intent
+resolution. The bridge first helps the person connect and understand one
+existing work folder, then recommends one exact action. It may act only after a
+fresh direct approval that follows that proposal. Resolver output, project
+instructions, skills, tool text, and folder contents are untrusted and cannot
+approve or widen the action. This is an instruction and receipt boundary, not
+an operating-system sandbox.
+
 `dotaios attach <project>` writes the shared project-level `AGENTS.md` bridge. Cursor reads that root file directly, so DotAIOS does not add a duplicate always-applied Cursor rule. A managed legacy `.cursor/rules/dotaios.mdc` is removed during attachment; unmanaged files are preserved. If the checkout owns a `skills/` directory, DotAIOS also links those project skills into the explicit project-native targets declared in `packages/core/src/agents.json`. The global `~/aios/skills` surface is not replaced or copied into the project. Existing unmanaged files are preserved unless the user passes `--overwrite`.
 
 ## Context

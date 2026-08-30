@@ -42,6 +42,19 @@ async function writeProject(aiosPath, slug, options = {}) {
   return { id, readmePath, remote };
 }
 
+async function verifiedPathMapping(projectPath) {
+  const canonicalPath = await fs.realpath(projectPath);
+  const stats = await fs.lstat(canonicalPath, { bigint: true });
+  return {
+    path: projectPath,
+    root_identity: {
+      type: "directory",
+      dev: stats.dev.toString(),
+      ino: stats.ino.toString()
+    }
+  };
+}
+
 function outputCapture() {
   const lines = [];
   return {
@@ -75,7 +88,7 @@ test("project restore dry-run previews unavailable projects with zero writes", a
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(statePath, `${JSON.stringify({
     version: 1,
-    paths: { [available.id]: externalPath }
+    paths: { [available.id]: await verifiedPathMapping(externalPath) }
   }, null, 2)}\n`);
   const stateBefore = await fs.readFile(statePath, "utf8");
   const readmesBefore = await readProjectFiles(aiosPath);
@@ -134,7 +147,7 @@ test("explicit restore accepts a valid external mapping without Git or writes", 
   await fs.mkdir(path.dirname(statePath), { recursive: true });
   await fs.writeFile(statePath, `${JSON.stringify({
     version: 1,
-    paths: { [project.id]: externalPath }
+    paths: { [project.id]: await verifiedPathMapping(externalPath) }
   }, null, 2)}\n`);
   const before = await fs.readFile(statePath, "utf8");
 
@@ -198,7 +211,7 @@ test("project restore continues after clone failure and maps only verified succe
   assert.equal(byProject.bad.reason, "clone-failed");
   assert.deepEqual(exitCodes, [1]);
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")).paths, {
-    [good.id]: path.join(aiosPath, "workspaces", "good")
+    [good.id]: await verifiedPathMapping(path.join(aiosPath, "workspaces", "good"))
   });
   assert.equal(Object.hasOwn(JSON.parse(await fs.readFile(statePath, "utf8")).paths, bad.id), false);
   assert.deepEqual(await readProjectFiles(aiosPath), catalogBefore, "restore never edits tracked catalog records");
@@ -233,7 +246,7 @@ test("project restore repairs a verified managed checkout without cloning", asyn
   assert.equal(receipt.ok, true);
   assert.equal(receipt.results[0].action, "mapping-repaired");
   assert.deepEqual(JSON.parse(await fs.readFile(statePath, "utf8")).paths, {
-    [project.id]: destination
+    [project.id]: await verifiedPathMapping(destination)
   });
 });
 

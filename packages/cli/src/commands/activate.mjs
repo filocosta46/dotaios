@@ -15,7 +15,8 @@ import {
   isAgentInstalled,
   loadAgentRegistry,
   resolveClaudeConfigRoot,
-  resolveCliInvocation
+  resolveSkillTargetPath,
+  resolveLocalCliInvocation
 } from "../../../core/src/bridges.mjs";
 import {
   collectSkills,
@@ -23,9 +24,12 @@ import {
   renderSkillsIndex
 } from "../../../core/src/skills.mjs";
 import { readAiosConfig, updateAiosConfig } from "../../../core/src/config.mjs";
-import { registerProject, resolveProjectContext } from "../../../core/src/projects.mjs";
 import {
-  symlinkTargets,
+  planProjectRegistration,
+  resolveProjectContext
+} from "../../../core/src/projects.mjs";
+import {
+  planSkillTargets,
   retiredSymlinkTargets,
   projectSymlinkTargets
 } from "../../../core/src/skill-targets.mjs";
@@ -123,6 +127,11 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
     throw new Error("Refusing to connect a temporary AIOS path to the real home; use a permanent AIOS folder.");
   }
   await ensureAiosFolder(aiosPath);
+  if (options.project && !options.dryRun) {
+    const projectPath = resolvePath(options.project);
+    const project = await resolveProjectContext({ aiosPath, homePath, cwd: projectPath });
+    if (!project) throw unregisteredProjectAttachmentError(aiosPath, projectPath);
+  }
   if (!options.dryRun) {
     await fs.mkdir(homePath, { recursive: true });
   }
@@ -141,8 +150,17 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
   // Detection must be observed before reconciliation creates native projection
   // directories. A projected path is evidence of projection only; it must never
   // bootstrap itself into a claim that the corresponding client is installed.
-  const detectedAgentNames = await detectInstalledAgentNames(aiosPath, homePath, options, env);
-  if (!options.dryRun) {
+  const registry = await loadAgentRegistry(aiosPath);
+  const detectedAgentNames = await detectInstalledAgentNames(homePath, options, env, registry);
+  const skillTargetPlan = planSkillTargets({
+    registry,
+    detectedAgentNames,
+    all: options.all
+  });
+  if (
+    !options.dryRun
+    && skillTargetPlan.targets.some(({ dir }) => dir === ".claude/skills")
+  ) {
     await fs.mkdir(resolveClaudeConfigRoot(homePath, { env }), { recursive: true });
   }
 
@@ -158,7 +176,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
   try {
     ({ skillsIndex, skillsCatalog } = options.dryRun
       ? await previewSkillsIndex(aiosPath)
-      : await reconcileGlobalSkillStore(aiosPath, homePath, { env }));
+      : await reconcileGlobalSkillStore(aiosPath, homePath, { env, skillTargetPlan }));
   } catch (error) {
     skillStoreFailure = error;
     ({ skillsIndex, skillsCatalog } = await previewSkillsIndex(aiosPath));
@@ -186,7 +204,9 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
     skillsCatalog,
     lifecycle,
     detectedAgentNames,
-    env
+    env,
+    registry,
+    skillTargetPlan
   );
   const results = [...global.results];
   const projectBlockedBridges = [];
@@ -204,7 +224,7 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
     }
   }
 
-  if (!quiet) printResults("DotAIOS activated", results);
+  if (!quiet) printResults(options.dryRun ? "Activation preview" : "DotAIOS activated", results);
   const refreshAction = options.dryRun ? "would refresh" : "refreshed";
   if (!quiet) console.log(`[${refreshAction}] ${skillsIndex.path} and ${skillsIndex.resolverPath} (${skillsIndex.count} workflow(s) indexed)`);
   if (!quiet && skillsIndex.unresolvedProjections?.length > 0) {
@@ -274,8 +294,17 @@ export async function activateCommand(args, { lifecycle = {}, quiet = false, env
   };
 }
 
-async function reconcileGlobalSkillStore(aiosPath, homePath, { env = process.env } = {}) {
-  const store = createManagedSkillStore({ aiosPath, homePath, env });
+async function reconcileGlobalSkillStore(
+  aiosPath,
+  homePath,
+  { env = process.env, skillTargetPlan = null } = {}
+) {
+  const store = createManagedSkillStore({
+    aiosPath,
+    homePath,
+    env,
+    projectionTargetPlan: skillTargetPlan
+  });
   const proof = await store.reconcile();
   const applied = await store.reconcile({
     apply: true,
@@ -314,7 +343,7 @@ export async function attachCommand(args) {
   await ensureAiosFolder(aiosPath);
 
   const results = await createProjectBridges(aiosPath, projectPath, options);
-  printResults("DotAIOS attached", results);
+  printResults(options.dryRun ? "Attachment preview" : "DotAIOS attached", results);
   if (!isConfiguredBridgeAction(results[0]?.action)) {
     process.exitCode = 1;
     console.error("Attach needs attention: the project bridge was preserved because it could not be safely configured.");
@@ -418,13 +447,15 @@ async function createGlobalBridges(
   skillsCatalog,
   lifecycle = {},
   detectedAgentNames = new Set(),
-  env = process.env
+  env = process.env,
+  registry = [],
+  skillTargetPlan = null
 ) {
-  const registry = await loadAgentRegistry(aiosPath);
-  // Resolve once per run rather than once per bridge: every bridge must name
-  // the same invocation, and the answer cannot change mid-loop.
-  const cli = await resolveCliInvocation();
-  const managedBlock = await bridgeManagedBlock(aiosPath, { skillsFirst, skillsCatalog, cli });
+  // Capture once per activation rather than resolving a package command in
+  // every future session. Every bridge receives the same executable + argv
+  // prefix and can invoke the admitted installation without a shell lookup.
+  const localCli = resolveLocalCliInvocation();
+  const managedBlock = await bridgeManagedBlock(aiosPath, { skillsFirst, skillsCatalog, localCli });
   const results = [];
   let installedCount = 0;
   let configuredContextCount = 0;
@@ -489,7 +520,8 @@ async function createGlobalBridges(
     options,
     registry,
     lifecycle,
-    env
+    env,
+    skillTargetPlan
   );
   return {
     results: [...results, ...skills],
@@ -501,8 +533,7 @@ async function createGlobalBridges(
   };
 }
 
-async function detectInstalledAgentNames(aiosPath, homePath, options, env = process.env) {
-  const registry = await loadAgentRegistry(aiosPath);
+async function detectInstalledAgentNames(homePath, options, env = process.env, registry = []) {
   const detected = new Set();
   for (const agent of registry) {
     if (options.all || await isAgentInstalled(homePath, agent, { env })) {
@@ -551,7 +582,8 @@ async function installAllSkills(
   options,
   registry,
   lifecycle = {},
-  env = process.env
+  env = process.env,
+  skillTargetPlan = null
 ) {
   const aiosSkillsDir = path.join(aiosPath, "skills");
   if (!await pathExists(aiosSkillsDir)) return [];
@@ -568,13 +600,8 @@ async function installAllSkills(
       }));
     }
   }
-  // Every symlink target, not just the detected ones: the real activation
-  // reconciles all of them through ManagedSkillStore, so narrowing the preview
-  // here made --dry-run promise less than the run writes.
-  for (const target of symlinkTargets(registry)) {
-    const targetDir = target.dir.replaceAll("\\", "/") === ".claude/skills"
-      ? path.join(resolveClaudeConfigRoot(homePath, { env }), "skills")
-      : path.join(homePath, target.dir);
+  for (const target of skillTargetPlan.targets) {
+    const targetDir = resolveSkillTargetPath(homePath, target.dir, { env });
     // A real activation has already reconciled canonical projections through
     // ManagedSkillStore. Keep the legacy installer only for zero-write preview;
     // the remaining passes own alias/stale cleanup rather than publication.
@@ -613,30 +640,30 @@ async function installAllSkills(
 }
 
 async function createProjectBridges(aiosPath, projectPath, options, lifecycle = {}) {
+  const homePath = resolvePath(options.home || os.homedir());
   let project = await resolveProjectContext({
     aiosPath,
-    homePath: resolvePath(options.home || os.homedir()),
+    homePath,
     cwd: projectPath
   });
   if (!project) {
-    const registration = await registerProject({
+    if (!options.dryRun) throw unregisteredProjectAttachmentError(aiosPath, projectPath);
+    const registrationPlan = await planProjectRegistration({
       aiosPath,
-      homePath: resolvePath(options.home || os.homedir()),
-      projectPath,
-      apply: !options.dryRun
+      homePath,
+      projectPath
     });
     project = {
-      id: registration.id,
-      slug: registration.slug,
-      project: registration.slug,
+      id: registrationPlan.id,
+      slug: registrationPlan.slug,
+      project: registrationPlan.slug,
       projectPath,
-      registered: registration.applied
+      registered: false
     };
   }
   const registry = await loadAgentRegistry(aiosPath);
-  const cli = await resolveCliInvocation();
   const bridges = [
-    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, resolvePath(options.home || os.homedir()), cli), {
+    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, homePath), {
       ...options,
       projectRoot: projectPath,
       beforeReplace: lifecycle.beforeBridgeReplace,
@@ -650,6 +677,14 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
   ];
   const skills = await propagateProjectSkills(projectPath, options, registry);
   return [...bridges, skills];
+}
+
+function unregisteredProjectAttachmentError(aiosPath, projectPath) {
+  return new Error([
+    "This project folder is not registered, so project attachment cannot write a bridge yet.",
+    `Preview it first with \`dotaios project add ${projectPath} --path ${aiosPath}\`,`,
+    "apply that exact preview with its displayed operation id and plan fingerprint, then run attach again."
+  ].join(" "));
 }
 
 async function propagateProjectSkills(projectPath, options, registry) {
@@ -849,14 +884,22 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
   };
 }
 
-function projectAgentsBridge(aiosPath, project, homePath, cli) {
+function projectAgentsBridge(aiosPath, project, homePath) {
+  const registeredProject = project.registered
+    ? JSON.stringify({ registered_project: { id: project.id, slug: project.slug } })
+    : null;
   return bridgeFile("DotAIOS Project Bridge", [
     `This checkout is project \`${project.slug}\` (id \`${project.id}\`).`,
-    "This attached checkout defaults to `Memory: This project`.",
-    `At session start run \`${cli} brief --compact --memory project --project ${project.id}\`.`,
+    ...(registeredProject ? [
+      "This is the host-written project identity selector:",
+      registeredProject,
+      "At session start use the host-managed `candidate_invocation` from the global bridge and append [\"project\",\"identify\",\"--json\"] from this same attached checkout. Only after its receipt is `Memory: This project` and its `registered_project` exactly matches the record above may you emit that receipt or read project memory.",
+      `Then append [\"brief\",\"--compact\",\"--memory\",\"project\",\"--project\",\"${project.id}\"] to the same \`argv_prefix\` and launch its \`executable\` without a shell.`
+    ] : [
+      "This checkout is not registered. Use `Memory: Off`, keep AIOS closed, and request proof-bound registration."
+    ]),
     `Keep later searches and explicit saves in the same mode with \`--memory project --project ${project.id}\`.`,
     "This mode may use only this project's files and explicitly attributed sessions, signals, and events; exclude personal, unscoped, and other-project memory.",
-    ...(project.registered ? [] : [`This checkout is not in the project catalog yet; run \`${cli} project add <repo-path>\` to enable automatic writer attribution.`]),
     "",
     `The DotAIOS entrypoint is ${portableAiosPointer(aiosPath, homePath)}. Do not open personal context from it while this session is in project mode.`,
     "",

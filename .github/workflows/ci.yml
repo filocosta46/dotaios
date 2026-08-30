@@ -119,9 +119,9 @@ jobs:
           REVIEWED_SOURCE_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           test "$(git rev-parse HEAD)" = "$REVIEWED_SOURCE_COMMIT"
-          test -z "$(git status --porcelain --untracked-files=no)"
+          test -z "$(git status --porcelain)"
           mkdir -p .artifacts
-          npm run pack:admission -- --silent --pack-destination .artifacts
+          npm run pack:admission -- --silent --source-commit "$REVIEWED_SOURCE_COMMIT" --pack-destination .artifacts
 
       - name: Admit the exact package bytes
         env:

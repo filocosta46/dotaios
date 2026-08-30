@@ -98,6 +98,7 @@ export function createManagedSkillStore({
   homePath,
   officialPackageRoot = null,
   officialCandidateVersion,
+  projectionTargetPlan = null,
   env = process.env,
   limits = {},
   hooks = {}
@@ -109,12 +110,16 @@ export function createManagedSkillStore({
       throw new TypeError(`ManagedSkillStore limit ${name} must be a positive safe integer`);
     }
   }
+  const projectionTargetDirs = projectionTargetPlan === null
+    ? null
+    : normalizeProjectionTargetPlan(projectionTargetPlan, configuredLimits);
   const settings = Object.freeze({
     aiosPath: path.resolve(aiosPath),
     homePath: path.resolve(homePath),
     claudeConfigRoot: resolveClaudeConfigRoot(homePath, { env }),
     officialPackageRoot: officialPackageRoot ? path.resolve(officialPackageRoot) : null,
     officialCandidateVersion,
+    projectionTargetDirs,
     limits: Object.freeze(configuredLimits),
     hooks
   });
@@ -2021,7 +2026,7 @@ async function reconcileManagedSkills(settings, input = {}) {
 
 async function buildReconcilePlan(settings) {
   await assertStoreRoots(settings);
-  const targets = await projectionTargetsForSettings(settings);
+  const targets = await reconciliationProjectionTargetsForSettings(settings);
   const registry = await readPortableRegistry(settings);
   const currentCatalogs = await inspectCatalogs(settings);
   const skills = await collectSkills(settings.aiosPath);
@@ -2069,6 +2074,7 @@ async function buildReconcilePlan(settings) {
   const payload = {
     format: "dotaios-managed-skill-reconcile-proof/v1",
     inventory_digest: sha256(canonicalJson(skills.map(({ dir }) => dir))),
+    projection_targets: targets.map(({ relativePath }) => relativePath),
     catalogs: currentCatalogs,
     desired_catalogs: desired,
     repairs,
@@ -2870,6 +2876,33 @@ async function projectionTargetsForSettings(settings) {
     agents,
     wellKnownSkillDirs: agentRegistry.wellKnownSkillDirs || []
   }, settings.limits);
+}
+
+async function reconciliationProjectionTargetsForSettings(settings) {
+  const targets = await projectionTargetsForSettings(settings);
+  if (settings.projectionTargetDirs === null) return targets;
+  const selected = new Set(settings.projectionTargetDirs);
+  return targets.filter(({ relativePath }) => selected.has(relativePath));
+}
+
+function normalizeProjectionTargetPlan(plan, limits) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan) || !Array.isArray(plan.targets)) {
+    throw new TypeError("ManagedSkillStore projection target plan must contain targets");
+  }
+  if (plan.targets.length > limits.maxProjectionTargets) {
+    throw managedError("bundle_bound_exceeded", "projection_target_bound_exceeded");
+  }
+  const dirs = [];
+  const seen = new Set();
+  for (const target of plan.targets) {
+    const dir = String(target?.dir || "").replaceAll("\\", "/");
+    validateRelativePath(dir, limits);
+    if (!seen.has(dir)) {
+      seen.add(dir);
+      dirs.push(dir);
+    }
+  }
+  return Object.freeze(dirs.sort(compareUtf8));
 }
 
 async function readAgentRegistryForStore(settings) {

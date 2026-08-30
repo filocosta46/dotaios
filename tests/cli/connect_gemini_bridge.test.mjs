@@ -9,6 +9,7 @@ import {
   writeGeminiBridge,
   writeGeminiHookScript
 } from "../../packages/cli/src/adapters/gemini.mjs";
+import { resolveLocalCliInvocation } from "../../packages/core/src/bridges.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -85,7 +86,7 @@ test("connect gemini creates the bridge when none exists", () => {
     // and carries the rule for when to open it. Asserting connect's own older
     // wording here is what let the two bodies drift apart in the first place.
     assert.match(after, new RegExp(`personal context in a folder at ${aios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
-    assert.match(after, /Choose memory access for this session before any AIOS read/i);
+    assert.match(after, /Choose memory access before any AIOS memory read/i);
     assert.match(after, /Private chat.*Memory: Off.*keep AIOS closed/i);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
@@ -187,6 +188,7 @@ test("Gemini bridge leaves a concurrent user edit untouched", async () => {
   try {
     await assert.rejects(
       writeGeminiBridge(bridge, aios, {
+        localCli: resolveLocalCliInvocation(),
         beforeCommit: async () => {
           reachedCommit = true;
           fs.writeFileSync(bridge, concurrent);
@@ -340,8 +342,45 @@ test("activate and connect gemini agree on the managed block", () => {
 
     assert.equal(afterConnect, afterActivate, "connect must not rewrite the block activate owns");
     // The rule this release exists to add has to survive the second command.
-    assert.match(afterConnect, /Choose memory access for this session before any AIOS read/i);
+    assert.match(afterConnect, /Choose memory access before any AIOS memory read/i);
     assert.match(afterConnect, /Private chat.*Memory: Off.*keep AIOS closed/i);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("connect gemini preserves an activation-admitted candidate across later runtimes", async () => {
+  const { base, aios, bridge } = sandbox();
+  const admitted = {
+    executable: "/opt/dotaios-admitted/bin/node",
+    entrypoint: "/opt/dotaios-admitted/package/packages/cli/src/index.mjs"
+  };
+  const later = {
+    executable: "/opt/dotaios-later/bin/node",
+    entrypoint: "/opt/dotaios-later/package/packages/cli/src/index.mjs"
+  };
+  try {
+    await writeGeminiBridge(bridge, aios, { localCli: admitted });
+    const before = fs.readFileSync(bridge, "utf8");
+
+    const result = await writeGeminiBridge(bridge, aios, { localCli: later });
+    assert.equal(result.action, "unchanged");
+    assert.equal(fs.readFileSync(bridge, "utf8"), before);
+    assert.match(before, /dotaios-admitted/);
+    assert.doesNotMatch(before, /dotaios-later/);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("Gemini bridge preflight refuses creation without an admitted candidate", async () => {
+  const { base, aios, bridge } = sandbox();
+  try {
+    await assert.rejects(
+      writeGeminiBridge(bridge, aios, { preflightOnly: true }),
+      /requires the admitted local DotAIOS invocation/i
+    );
+    assert.equal(fs.existsSync(bridge), false);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

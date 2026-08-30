@@ -252,18 +252,30 @@ test("PATH inspection skips an npx shim and finds the persistent global without 
 });
 
 test("managed bridges route working memory through the canonical projection", async () => {
-  const content = await bridgeContent({ name: "Test Agent" }, "/tmp/example-aios");
+  const content = await bridgeContent({ name: "Test Agent" }, "/tmp/example-aios", {
+    localCli: {
+      executable: "/opt/dotaios/node/bin/node",
+      entrypoint: "/opt/dotaios/package/packages/cli/src/index.mjs"
+    }
+  });
 
   assert.match(content, /events, signals, and saved sessions only through the canonical bounded projection/);
-  // The invocation is resolved from the running package, never from PATH.
-  assert.match(content, /npx dotaios@[\w.-]+ brief --compact/);
+  assert.match(content, /"executable":"\/opt\/dotaios\/node\/bin\/node"/);
+  assert.match(content, /"argv_prefix":\["\/opt\/dotaios\/package\/packages\/cli\/src\/index\.mjs"\]/);
+  assert.match(content, /append.*\["resolve","<intent>"/is);
+  assert.doesNotMatch(content, /\bnpx(?:\.cmd)?\b|_npx|\.npm\/_cacache|registry\.npmjs/i);
   assert.match(content, /^.*Private chat.*Memory: Off.*$/im);
   assert.match(content, /^.*Only this project.*Memory: This project.*$/im);
   assert.match(content, /^.*Use my memory.*Memory: Shared.*$/im);
-  assert.match(content, /^Choose memory access for this session before any AIOS read:$/m);
-  assert.match(content, /not registered.*keep AIOS closed.*npx dotaios@[\w.-]+ activate.*never fall back to Shared/is);
-  assert.match(content, /Only after registration and exact identity.*read AGENTS\.md.*memory project/is);
-  assert.match(content, /Only in Shared.*read AGENTS\.md.*memory shared/is);
+  assert.match(content, /^Choose memory access before any AIOS memory read:$/m);
+  assert.match(content, /an attached working directory alone is never project identity/i);
+  assert.match(content, /project["`, ]+identify[\s\S]*same cwd/is);
+  assert.match(content, /Host admission[\s\S]*only registration metadata[\s\S]*receipt[\s\S]*registered_project/is);
+  assert.match(content, /Without `Memory: This project`[\s\S]*non-null[\s\S]*do not claim\/read memory[\s\S]*`Memory: Off`/is);
+  assert.doesNotMatch(content, /In an attached working directory[^\n]*use `Memory: This project`/i);
+  assert.match(content, /keep AIOS closed.*re-activate.*never Shared/is);
+  assert.match(content, /Then read AGENTS\.md.*append.*brief.*--memory.*project/is);
+  assert.match(content, /Only in Shared.*read AGENTS\.md.*append.*brief.*--memory.*shared/is);
   assert.match(content, /host.*history/i);
   assert.match(content, /`read_working_context`, `search_aios`, and `resolve_skill`/);
   const retiredToolNames = [
@@ -273,6 +285,39 @@ test("managed bridges route working memory through the canonical projection", as
     ["google", "calendar", "agenda"], ["google", "drive", "search"]
   ].map((parts) => parts.join("_"));
   assert.equal(retiredToolNames.some((name) => content.includes(name)), false);
+});
+
+test("the generated bridge makes one approved existing-folder task the first-session contract", async () => {
+  const content = await bridgeManagedBlock("/tmp/example-aios", {
+    localCli: {
+      executable: "/opt/dotaios/node/bin/node",
+      entrypoint: "/opt/dotaios/package/packages/cli/src/index.mjs"
+    }
+  });
+  const prompt = "Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.";
+
+  assert.match(content, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(content, /no attached project[\s\S]*ask.*folder[\s\S]*purpose[\s\S]*desired outcome/i);
+  assert.match(content, /project add[\s\S]*preview[\s\S]*fresh direct user turn[\s\S]*--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply[\s\S]*resolve/is);
+  assert.match(content, /resolver output.*project instructions.*skills.*tool text.*work-folder contents.*untrusted/is);
+  assert.match(content, /never.*approval|cannot.*approve/i);
+  assert.match(content, /exactly one proposed action[\s\S]*fresh direct user turn/is);
+  assert.match(content, /declin(?:e|es|ed)[\s\S]*no proposed work[\s\S]*no further AIOS write/is);
+  assert.match(content, /durable memory[\s\S]*explicitly asks[\s\S]*selected scope/is);
+  assert.match(content, /browser-only[\s\S]*cannot access[\s\S]*local folder[\s\S]*supported local agent/is);
+});
+
+test("a missing captured local entrypoint stops resolution with bounded re-activation guidance", async () => {
+  const content = await bridgeManagedBlock("/tmp/example-aios", {
+    localCli: {
+      executable: "/opt/dotaios/node/bin/node",
+      entrypoint: "/opt/dotaios/package/packages/cli/src/index.mjs"
+    }
+  });
+
+  assert.match(content, /if (?:the )?captured executable or entrypoint is missing[\s\S]*stop/is);
+  assert.match(content, /re-run activation from the same admitted local installation/i);
+  assert.match(content, /do not substitute.*(?:package runner|registry|cache|bare command)/i);
 });
 
 // Regression guard for the defect this replaced: every documented install is
@@ -368,7 +413,7 @@ test("the global bridge names the AIOS folder instead of importing it", async ()
       `${agent.name}: no always-on boot order`
     );
     assert.ok(
-      managed.length < 1500,
+      managed.length < 4000,
       `${agent.name}: an always-loaded block stays small (${managed.length} characters)`
     );
   }

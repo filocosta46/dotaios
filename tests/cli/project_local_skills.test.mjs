@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { applyApprovedProjectRegistration } from "../helpers/project-registration.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -63,7 +64,22 @@ function setupProject({ withSkills = true } = {}) {
     );
   }
 
+  registerApprovedProject({ aiosPath, projectPath });
+
   return { tempRoot, aiosPath, homePath, projectPath };
+}
+
+function registerApprovedProject({ aiosPath, projectPath, homePath = null }) {
+  const home = homePath || sandboxHome;
+  const baseArgs = [
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    ...(homePath ? ["--home", homePath] : [])
+  ];
+  applyApprovedProjectRegistration(
+    (args) => ({ status: 0, stdout: run(args, { home }), stderr: "" }),
+    baseArgs
+  );
 }
 
 function addForeignEntries(projectPath) {
@@ -137,6 +153,7 @@ function assertForeignEntriesPreserved(projectPath) {
 
 test("activate --project and attach expose project skills natively and preserve foreign entries", () => {
   const { tempRoot, aiosPath, homePath, projectPath } = setupProject();
+  registerApprovedProject({ aiosPath, projectPath, homePath });
   addForeignEntries(projectPath);
   const hermesPath = path.join(projectPath, ".hermes", "config.yaml");
   const projectSkillsPath = path.join(projectPath, "skills");
@@ -306,6 +323,8 @@ test("attach dry-run previews legacy Cursor cleanup without changing the file", 
   try {
     const output = run(["attach", projectPath, "--path", aiosPath, "--dry-run"]);
 
+    assert.match(output, /^Attachment preview$/m);
+    assert.doesNotMatch(output, /^DotAIOS attached$/m);
     assert.match(output, /would remove/i);
     assert.equal(fs.readFileSync(rulePath, "utf8"), original);
   } finally {

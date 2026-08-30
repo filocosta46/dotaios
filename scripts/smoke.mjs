@@ -20,6 +20,23 @@ run(["context", "--path", aiosPath]);
 run(["context", "identity", "--path", aiosPath]);
 run(["context", "--refresh", "--path", aiosPath]);
 fs.mkdirSync(projectPath, { recursive: true });
+const projectPreview = runJson([
+  "project", "add", projectPath,
+  "--purpose", "Verify the complete smoke-test journey",
+  "--path", aiosPath,
+  "--home", homePath,
+  "--json"
+]);
+run([
+  "project", "add", projectPath,
+  "--purpose", "Verify the complete smoke-test journey",
+  "--operation-id", projectPreview.plan.operation_id,
+  "--plan-fingerprint", projectPreview.plan.plan_fingerprint,
+  "--apply",
+  "--path", aiosPath,
+  "--home", homePath,
+  "--json"
+]);
 run(["activate", "--path", aiosPath, "--home", homePath, "--project", projectPath, "--all"]);
 fs.writeFileSync(importPath, JSON.stringify({
   context: { work: "Imported smoke context." },

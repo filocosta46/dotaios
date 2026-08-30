@@ -9,7 +9,8 @@ import {
   bridgeManagedBlock,
   bridgePath,
   loadAgentRegistry,
-  previewManagedBridgeFile
+  previewManagedBridgeFile,
+  resolveLocalCliInvocation
 } from "../../packages/core/src/bridges.mjs";
 import {
   applyUpgrade,
@@ -32,6 +33,7 @@ const candidateVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
 ).version;
 const candidateInvocation = `npx dotaios@${candidateVersion}`;
+const localCli = resolveLocalCliInvocation();
 const sessionReloadNotice = "Start a new agent session so your AI hosts reload the updated instructions.";
 test("upgrade remains a shallow sequencer with no migration writer, PATH runner, or new lock", () => {
   const source = fs.readFileSync(
@@ -83,9 +85,10 @@ test("upgrade preview is read-only and exact aggregate proof gates every write",
   assert.match(fs.readFileSync(fixture.schedulesPath, "utf8"), new RegExp(
     `command: "${escapeRegExp(candidateInvocation)} brief"`
   ));
-  assert.match(fs.readFileSync(fixture.bridgePath, "utf8"), new RegExp(
-    `${escapeRegExp(candidateInvocation)} brief --compact --memory shared`
-  ));
+  const appliedBridge = fs.readFileSync(fixture.bridgePath, "utf8");
+  assert.match(appliedBridge, /"executable":"[^"]+","argv_prefix":\["[^"]+"\]/);
+  assert.match(appliedBridge, /\["resolve","<intent>","--project","<slug-or-id>"\]/);
+  assert.doesNotMatch(appliedBridge, /npx(?:\.cmd)? dotaios@.*brief --compact/);
   assert.doesNotMatch(fs.readFileSync(fixture.bridgePath, "utf8"), /# Installed Skills|# Skill Resolver/);
   assert.equal(fs.readFileSync(unmanaged, "utf8"), "# Personal Claude instructions\n");
 
@@ -256,7 +259,7 @@ test("public verified upgrade omits the reload notice when only skills and sched
     fixture.bridgePath,
     await bridgeContent(codex, fixture.aiosPath, {
       skillsFirst: false,
-      cli: candidateInvocation
+      localCli
     })
   );
   const beforeBridge = fs.readFileSync(fixture.bridgePath);
@@ -349,9 +352,7 @@ test("skills-first upgrade does not verify catalog drift after bridge publicatio
     beforeBridge,
     JSON.stringify(result.results, null, 2)
   );
-  assert.match(fs.readFileSync(fixture.bridgePath, "utf8"), new RegExp(
-    `${escapeRegExp(candidateInvocation)} brief --compact --memory shared`
-  ));
+  assert.match(fs.readFileSync(fixture.bridgePath, "utf8"), /"executable":"[^"]+","argv_prefix":\["[^"]+"\]/);
   assert.equal(fs.readFileSync(resolverPath, "utf8"), "# post-publication catalog edit\n");
 });
 
@@ -474,7 +475,7 @@ test("skills-first upgrade binds the desired post-batch catalog bridge and appli
   const desiredBlock = await bridgeManagedBlock(fixture.aiosPath, {
     skillsFirst: true,
     skillsCatalog: composition.skillsCatalog,
-    cli: candidateInvocation
+    localCli
   });
   const desiredBridge = await bridgeContent(codex, fixture.aiosPath, {
     managedBlock: desiredBlock

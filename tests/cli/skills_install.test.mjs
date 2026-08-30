@@ -219,6 +219,9 @@ test("activation covers detected native clients and every Hermes profile without
   for (const dir of [".claude", ".codex", ".gemini", ".cursor", ".gemini/antigravity", ".grok"]) {
     fs.mkdirSync(path.join(homePath, dir), { recursive: true });
   }
+  fs.writeFileSync(path.join(homePath, ".claude", "settings.json"), "{}\n");
+  fs.writeFileSync(path.join(homePath, ".gemini", "settings.json"), "{}\n");
+  fs.writeFileSync(path.join(homePath, ".grok", "config.toml"), "\n");
   fs.mkdirSync(path.join(homePath, ".hermes", "profiles", "bill"), { recursive: true });
   fs.writeFileSync(
     path.join(homePath, ".hermes", "config.yaml"),
