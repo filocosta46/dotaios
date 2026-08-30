@@ -88,6 +88,33 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects|command|argv|environment|content/);
 });
 
+test("EPR-003: ordinary intent can match the registered slug when the remote basename differs", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-acme-tax-001",
+    slug: "acme-tax",
+    name: "Quarterly filing workspace",
+    purpose: "Prepare annual compliance records.",
+    repository: "https://github.com/customer/ledger-worktree"
+  });
+
+  const result = await resolveProjectRoute({
+    intent: "Please work in acme-tax"
+  }, {
+    loadRegisteredProjects: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "191")]
+  });
+
+  assert.equal(result.status, "candidate");
+  assert.equal(result.project.slug, "acme-tax");
+  assert.deepEqual(result.match, {
+    kind: "slug_overlap",
+    confidence: 1,
+    fields: ["slug"]
+  });
+});
+
 test("EPR-001, EPR-005, and EPR-015: exact stable ID returns a freshly revalidated advisory route", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const project = projectRecord({
@@ -485,6 +512,74 @@ test("EPR-001: exactly one safe fallback remote is accepted and conflicting orig
   assert.equal(conflictingOrigin.route, null);
 });
 
+test("EPR-001: one non-origin fetch remote remains authoritative beside a push-only remote", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "fetch-authority",
+    purpose: "Prepare the unique fetch authority audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const registeredRemote = "https://github.com/customer/fetch-authority.git";
+  await run("git", ["-C", fixture.projectPath, "remote", "remove", "origin"]);
+  await run("git", ["-C", fixture.projectPath, "remote", "add", "upstream", registeredRemote]);
+  await run("git", [
+    "-C", fixture.projectPath, "config", "remote.publisher.pushurl",
+    "https://github.com/customer/publish-only.git"
+  ]);
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the unique fetch authority audit."
+  });
+
+  assert.equal(result.status, "candidate");
+  assert.equal(result.project.slug, "fetch-authority");
+  assert.equal(result.route, null);
+});
+
+test("EPR-001: live remote authority is local-only and requires a local fetch refspec", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "local-authority",
+    purpose: "Prepare the unique local authority audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const registeredRemote = "https://github.com/customer/local-authority.git";
+  const globalConfigPath = path.join(fixture.root, "global.gitconfig");
+  await run("git", ["config", "--file", globalConfigPath, "remote.origin.url", registeredRemote]);
+  await run("git", ["-C", fixture.projectPath, "remote", "remove", "origin"]);
+  const execFileAsync = (file, args, options) => run(file, args, {
+    ...options,
+    env: {
+      ...options.env,
+      GIT_CONFIG_GLOBAL: globalConfigPath,
+      GIT_CONFIG_NOSYSTEM: "1"
+    }
+  });
+  const resolve = () => resolveProjectRoute({
+    ...fixture.options,
+    intent: "Prepare the unique local authority audit."
+  }, { execFileAsync });
+
+  const inherited = await resolve();
+  assert.equal(inherited.status, "no_match");
+
+  await run("git", [
+    "-C", fixture.projectPath, "config", "--local",
+    "remote.origin.url", registeredRemote
+  ]);
+  const missingFetch = await resolve();
+  assert.equal(missingFetch.status, "no_match");
+
+  await run("git", [
+    "-C", fixture.projectPath, "config", "--local",
+    "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"
+  ]);
+  const localFetchAuthority = await resolve();
+  assert.equal(localFetchAuthority.status, "candidate");
+  assert.equal(localFetchAuthority.project.slug, "local-authority");
+});
+
 test("EPR-015: the generic support declaration accepts CLAUDE.md without changing core", async (t) => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const fixture = await createRegisteredFixture(t, {
@@ -711,6 +806,44 @@ test("EPR-014: aggregate registration frontmatter over 64 KiB refuses before Git
   assert.equal(result.reason, "discovery_bound_exceeded");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(root));
+});
+
+test("EPR-004 and EPR-014: exact slug or stable ID ignores unrelated implicit metadata bounds", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "exact-bounded",
+    purpose: "Prepare the exact bounded routing audit.",
+    conventions: ["AGENTS.md"]
+  });
+  const projectsPath = path.join(fixture.aiosPath, "projects");
+  for (let index = 0; index < 70; index += 1) {
+    const slug = `unrelated-inactive-${String(index).padStart(2, "0")}`;
+    const projectDirectory = path.join(projectsPath, slug);
+    await fs.mkdir(projectDirectory);
+    await fs.writeFile(path.join(projectDirectory, "README.md"), [
+      "---",
+      `id: project-${slug}-001`,
+      `project: ${slug}`,
+      `name: Unrelated inactive ${index}`,
+      `description: ${"unrelated ".repeat(110)}`,
+      "status: inactive",
+      `repo_url: https://github.com/customer/${slug}.git`,
+      "---",
+      "UNRELATED_README_BODY_CANARY"
+    ].join("\n"));
+  }
+
+  for (const projectSelector of ["exact-bounded", "project-exact-bounded-001"]) {
+    const result = await resolveProjectRoute({
+      ...fixture.options,
+      intent: "Prepare the exact bounded routing audit.",
+      projectSelector,
+      supportedConventionKinds: ["agents-md"]
+    });
+    assert.equal(result.status, "ready", projectSelector);
+    assert.equal(result.project.slug, "exact-bounded", projectSelector);
+    assert.equal(result.route.location, fixture.projectPath, projectSelector);
+  }
 });
 
 test("EPR-002: linked convention lookalikes do not make a real project routable", async (t) => {

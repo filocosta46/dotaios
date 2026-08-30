@@ -395,6 +395,80 @@ test("the closed envelope accepts only the 1,024 through 32,000 character budget
   );
 });
 
+test("EPR-012: final exact revalidation cannot grow the envelope beyond its budget", async (t) => {
+  const {
+    resolveIntentResolution,
+    renderIntentResolution
+  } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  const initialRoute = readyProjectRoute(fixture);
+  const expandedRoute = structuredClone(initialRoute);
+  expandedRoute.routability.conventions.push(...Array.from(
+    { length: 64 },
+    (_, index) => ({
+      kind: "repository-skill",
+      resource: `.agents/skills/unhandled-${String(index).padStart(2, "0")}/SKILL.md`
+    })
+  ));
+  const options = {
+    ...fixture,
+    project: "client-work",
+    intent: "plan my day",
+    supportedConventionKinds: ["agents-md"]
+  };
+  const fixedClock = () => new Date("2026-08-29T08:00:00.000Z");
+  const baseline = await resolveIntentResolution({
+    ...options,
+    visibleCharacterBudget: 32000
+  }, {
+    clock: fixedClock,
+    resolveProjectRoute: async () => structuredClone(initialRoute)
+  });
+  const tightBudget = renderIntentResolution(baseline).length;
+  let routeReads = 0;
+
+  const result = await resolveIntentResolution({
+    ...options,
+    visibleCharacterBudget: tightBudget
+  }, {
+    clock: fixedClock,
+    resolveProjectRoute: async () => structuredClone(
+      routeReads++ === 0 ? initialRoute : expandedRoute
+    )
+  });
+  const rendered = renderIntentResolution(result);
+
+  assert.equal(routeReads, 2);
+  assert.ok(rendered.length <= tightBudget, `${rendered.length} must fit ${tightBudget}`);
+  assert.equal(result.budget.used, rendered.length);
+  assert.equal(result.status, "refused");
+  assert.equal(result.location, null);
+  assert.equal(result.next_action.summary, "fixed_envelope_exceeds_budget");
+});
+
+test("EPR-012: the compact explicit-tool refusal always fits the 1,024-character minimum", async (t) => {
+  const {
+    resolveIntentResolution,
+    renderIntentResolution
+  } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.projectPath,
+    intent: "plan my day",
+    tool: { capability: "google.gmail.inbox" },
+    visibleCharacterBudget: 1024
+  });
+  const rendered = renderIntentResolution(result);
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.location, null);
+  assert.ok(rendered.length <= 1024, `${rendered.length} must fit 1024`);
+  assert.equal(result.budget.limit, 1024);
+  assert.equal(result.budget.used, rendered.length);
+});
+
 test("an unreadable local routing authority returns one path-free fixed refusal", async (t) => {
   const { resolveIntentResolution, renderIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);
@@ -410,6 +484,57 @@ test("an unreadable local routing authority returns one path-free fixed refusal"
   const rendered = renderIntentResolution(result);
   assert.equal(result.status, "refused");
   assert.equal(result.location, null);
+  assert.equal(result.project_route.status, "refused");
+  assert.equal(result.project_route.route, null);
   assert.equal(result.memory.receipt, "Memory: This project");
+  assert.doesNotMatch(
+    rendered,
+    new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
   assert.doesNotMatch(rendered, new RegExp(fixture.aiosPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 });
+
+function readyProjectRoute(fixture) {
+  return {
+    status: "ready",
+    project: {
+      id: "project-client-001",
+      slug: "client-work",
+      name: "client-work",
+      purpose: "Prepare the client's approved launch.",
+      repository: "https://github.com/customer/client-work",
+      placement: "external"
+    },
+    match: { kind: "exact_handle", confidence: 1, fields: ["stable_id"] },
+    routability: {
+      trust: "registered-user-owned",
+      effect: "unknown",
+      approval: "direct_user_required",
+      conventions: [{ kind: "agents-md", resource: "AGENTS.md" }]
+    },
+    route: {
+      kind: "project-native",
+      project_id: "project-client-001",
+      project_slug: "client-work",
+      location: fixture.projectPath,
+      advisory: true,
+      revalidate_before_entry: true,
+      fresh_context_required: true,
+      conventions: [{
+        kind: "agents-md",
+        resource: "AGENTS.md",
+        observed_identity: {
+          type: "file",
+          dev: "101",
+          ino: "201",
+          mode: 33188,
+          nlink: 1,
+          size: "128",
+          mtime_ns: "1788000000000000000",
+          ctime_ns: "1788000000000000000"
+        }
+      }]
+    },
+    reason: "exact_project_ready"
+  };
+}

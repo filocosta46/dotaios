@@ -120,8 +120,20 @@ test("EPR-005, EPR-013, and EPR-014: two black-box fixtures use one offline read
     /CONVENTION_BODY_CANARY|PROJECT_DATA_CANARY/
   );
   const gitLog = await fs.readFile(gitLogPath, "utf8");
-  assert.match(gitLog, /config|remote/);
-  assert.doesNotMatch(gitLog, /fetch|pull|clone|ls-remote|https?:\/\//);
+  const gitCalls = gitLog
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("["))
+    .map((line) => JSON.parse(line));
+  assert.ok(gitCalls.length > 0, "routing must revalidate the local Git authority");
+  assert.ok(
+    gitCalls.every((args) => ["config", "remote"].includes(args[2])),
+    JSON.stringify(gitCalls)
+  );
+  assert.equal(
+    gitCalls.some((args) => ["fetch", "pull", "clone", "ls-remote"].includes(args[2])),
+    false
+  );
+  assert.doesNotMatch(JSON.stringify(gitCalls), /https?:\/\//);
 });
 
 test("EPR-013: shipped router and CLI source contain no fixture identity or capability selector", async () => {

@@ -299,6 +299,15 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
       projectRoute = finalRoute;
       envelope.project_route = finalRoute;
       envelope.location = finalRoute.route.location;
+      if (renderWithStableUsed(envelope).length > visibleCharacterBudget) {
+        return budgetedRefusal({
+          limit: visibleCharacterBudget,
+          reason: "fixed_envelope_exceeds_budget",
+          recovery: "Retry with a larger --budget value.",
+          projectRoute: finalRoute,
+          includeTool: false
+        });
+      }
     }
   } catch {
     return budgetedRefusal({
@@ -396,11 +405,12 @@ function budgetedRefusal({
   projectRoute = notEvaluatedProjectRoute(),
   includeTool = true
 }) {
+  const safeProjectRoute = refusedProjectRoute(projectRoute, reason);
   const envelope = {
     schema: SCHEMA,
     status: "refused",
     project: null,
-    project_route: projectRoute,
+    project_route: safeProjectRoute,
     memory: { receipt: MEMORY_RECEIPT, scope: null, generated_at: null, context: "", truncated: false },
     skill: { status: "not_evaluated", name: null, resource: null, confidence: 0, reason: "project_not_verified" },
     ...(includeTool ? {
@@ -416,6 +426,7 @@ function budgetedRefusal({
     envelope.recovery.action = null;
     envelope.next_action.summary = "fixed_envelope_exceeds_budget";
     envelope.omissions = ["all_variable_content"];
+    delete envelope.skill.reason;
     envelope.project_route = {
       status: "refused",
       reason: "fixed_envelope_exceeds_budget",
@@ -427,6 +438,18 @@ function budgetedRefusal({
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
+}
+
+function refusedProjectRoute(projectRoute, reason) {
+  if (projectRoute?.status !== "ready" && !projectRoute?.route?.location) {
+    return projectRoute;
+  }
+  return {
+    ...projectRoute,
+    status: "refused",
+    route: null,
+    reason
+  };
 }
 
 function budgetedProjectRoute({ limit, intent, projectRoute }) {

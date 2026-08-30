@@ -132,7 +132,12 @@ export async function resolveProjectRoute({
     name: project.slug,
     dir: project.slug,
     description: "",
-    triggers: [project.name, project.purpose, remoteBasename(project.repository)].filter(Boolean)
+    triggers: [
+      project.slug,
+      project.name,
+      project.purpose,
+      remoteBasename(project.repository)
+    ].filter(Boolean)
   })));
   const winner = ranked[0];
   if (winner && winner.confidence === undefined) {
@@ -278,13 +283,21 @@ function remoteBasename(repository) {
 
 function matchReason(project, winner) {
   const reason = winner.reason || "";
-  const field = reason.includes(`\"${project.purpose}\"`)
-    ? "purpose"
-    : reason.includes(`\"${project.name}\"`)
-      ? "name"
-      : "repository";
+  const field = reason === "exact name match" || reason.includes(`\"${project.slug}\"`)
+    ? "slug"
+    : reason.includes(`\"${project.purpose}\"`)
+      ? "purpose"
+      : reason.includes(`\"${project.name}\"`)
+        ? "name"
+        : "repository";
   return {
-    kind: field === "purpose" ? "purpose_overlap" : field === "name" ? "name_overlap" : "remote_name_overlap",
+    kind: field === "slug"
+      ? "slug_overlap"
+      : field === "purpose"
+        ? "purpose_overlap"
+        : field === "name"
+          ? "name_overlap"
+          : "remote_name_overlap",
     confidence: winner.confidence,
     fields: [field]
   };
@@ -461,7 +474,12 @@ function defaultDependencies(options, overrides) {
   };
 }
 
-async function loadRegisteredProjects({ aiosPath, statePath, filesystem }) {
+async function loadRegisteredProjects({
+  aiosPath,
+  statePath,
+  filesystem,
+  projectSelector = null
+}) {
   const projectsPath = path.join(aiosPath, "projects");
   const [entries, state] = await Promise.all([
     readContainedDirectory(aiosPath, projectsPath, {
@@ -494,12 +512,21 @@ async function loadRegisteredProjects({ aiosPath, statePath, filesystem }) {
       continue;
     }
     if (frontmatter === null) continue;
-    metadataBytes += Buffer.byteLength(frontmatter);
-    if (metadataBytes > MAX_PROJECT_METADATA_BYTES) {
-      throw routeBoundError();
+    if (projectSelector === null) {
+      metadataBytes += Buffer.byteLength(frontmatter);
+      if (metadataBytes > MAX_PROJECT_METADATA_BYTES) {
+        throw routeBoundError();
+      }
     }
     const metadata = parseProjectMetadata(frontmatter, entry.name);
     if (!metadata) continue;
+    if (
+      projectSelector !== null
+      && metadata.id !== projectSelector
+      && metadata.slug !== projectSelector
+    ) {
+      continue;
+    }
     const mapping = await verifyProjectMapping(state.paths?.[metadata.id], filesystem);
     const placement = await classifyProjectPlacement({
       aiosPath,
@@ -729,25 +756,70 @@ async function verifyProjectMapping(value, filesystem) {
 
 async function inspectLiveRemote(project, { filesystem, runGit }) {
   const before = await observeProjectRoot(project, filesystem);
-  const origin = await gitConfig(project.projectPath, ["config", "--get", "remote.origin.url"], runGit);
-  let remote = origin;
-  if (!remote) {
-    const rawRemotes = await gitConfig(project.projectPath, ["remote"], runGit);
-    const remotes = String(rawRemotes || "").split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
-    if (remotes.length !== 1 || !SAFE_REMOTE_NAME_RE.test(remotes[0])) {
-      throw new Error("A unique authoritative local Git remote is required.");
-    }
-    remote = await gitConfig(
+  const origin = await readLocalFetchRemote(project.projectPath, "origin", runGit);
+  let remote = origin.url;
+  if (!origin.present) {
+    const rawFetchKeys = await gitConfig(
       project.projectPath,
-      ["config", "--get", `remote.${remotes[0]}.url`],
+      ["config", "--local", "--no-includes", "--name-only", "--get-regexp", "^remote\\..*\\.fetch$"],
       runGit
     );
+    const remotes = [...new Set(String(rawFetchKeys || "")
+      .split(/\r?\n/)
+      .map((value) => /^remote\.(.+)\.fetch$/.exec(value.trim())?.[1] || null)
+      .filter((value) => value && value !== "origin" && SAFE_REMOTE_NAME_RE.test(value)))];
+    if (remotes.length !== 1) {
+      throw new Error("A unique authoritative local Git remote is required.");
+    }
+    const fallback = await readLocalFetchRemote(project.projectPath, remotes[0], runGit);
+    if (!fallback.present || !fallback.url) {
+      throw new Error("A unique authoritative local Git remote is required.");
+    }
+    remote = fallback.url;
   }
+  if (!remote) throw new Error("The authoritative local Git remote is incomplete.");
   const classified = classifyProjectRemote(remote);
   if (!classified.safe) throw new Error("The live local Git remote is unsafe.");
   const after = await observeProjectRoot(project, filesystem);
   if (!sameRootIdentity(before, after)) throw new Error("The registered project root changed.");
   return classified.canonicalUrl;
+}
+
+async function readLocalFetchRemote(projectPath, remoteName, runGit) {
+  if (!SAFE_REMOTE_NAME_RE.test(remoteName)) return { present: false, url: null };
+  const [rawUrls, rawFetches] = await Promise.all([
+    gitConfig(
+      projectPath,
+      ["config", "--local", "--no-includes", "--get-all", `remote.${remoteName}.url`],
+      runGit
+    ),
+    gitConfig(
+      projectPath,
+      ["config", "--local", "--no-includes", "--get-all", `remote.${remoteName}.fetch`],
+      runGit
+    )
+  ]);
+  const urls = configValues(rawUrls);
+  const fetches = configValues(rawFetches);
+  const present = urls.length > 0 || fetches.length > 0;
+  if (!present) return { present: false, url: null };
+  if (urls.length !== 1 || !fetches.some(safeFetchRefspec)) {
+    throw new Error("The authoritative local Git remote is incomplete.");
+  }
+  return { present: true, url: urls[0] };
+}
+
+function configValues(value) {
+  return String(value || "")
+    .split(/\r?\n/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function safeFetchRefspec(value) {
+  return value.length <= 2048
+    && !/[\p{Cc}\uD800-\uDFFF]/u.test(value)
+    && /^\+?refs\/[^:\s]+(?::refs\/[^\s]+)?$/.test(value);
 }
 
 async function gitConfig(projectPath, args, runGit) {
