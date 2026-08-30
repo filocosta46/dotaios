@@ -107,6 +107,14 @@ test("renderBootContext emits a Skills first block with the resolver rule and ea
   assert.match(md, /hand-roll/i);
 });
 
+test("renderBootContext keeps a backslash before a pipe inside one markdown table cell", () => {
+  const md = renderBootContext([
+    skill("audit", "audit", "Weekly health check.", ["review \\| audit"])
+  ], { skillsDir: "/aios/skills" });
+
+  assert.ok(md.includes(`review ${"\\".repeat(3)}| audit`));
+});
+
 test("renderBootContext handles an empty skill set", () => {
   const md = renderBootContext([], { skillsDir: "/aios/skills" });
   assert.match(md, /No skills installed/);

@@ -7,15 +7,45 @@ export function isHtmlComment(val) {
 }
 
 export function renderTemplate(template, data) {
-  return template.replaceAll(/{{#if (\w+)}}([\s\S]*?){{else}}([\s\S]*?){{\/if}}/g, (_match, key, yes, no) => {
-    const val = data[key];
-    return (val && !isHtmlComment(val)) ? yes : no;
-  }).replaceAll(/{{#each ai_tools}}([\s\S]*?){{\/each}}/g, () => (
+  return renderConditionals(template, data).replaceAll(/{{#each ai_tools}}([\s\S]*?){{\/each}}/g, () => (
     (data.ai_tools || []).map((tool) => `"${tool}"`).join(", ")
   )).replaceAll(/{{(\w+)}}/g, (_match, key) => {
     const val = data[key];
     return (val != null && !isHtmlComment(val)) ? val : "";
   });
+}
+
+function renderConditionals(template, data) {
+  const open = "{{#if ";
+  const separator = "{{else}}";
+  const close = "{{/if}}";
+  const chunks = [];
+  let cursor = 0;
+
+  while (cursor < template.length) {
+    const start = template.indexOf(open, cursor);
+    if (start === -1) break;
+    const keyEnd = template.indexOf("}}", start + open.length);
+    if (keyEnd === -1) break;
+    const key = template.slice(start + open.length, keyEnd);
+    if (!/^\w+$/.test(key)) break;
+    const yesStart = keyEnd + 2;
+    const separatorStart = template.indexOf(separator, yesStart);
+    if (separatorStart === -1) break;
+    const noStart = separatorStart + separator.length;
+    const closeStart = template.indexOf(close, noStart);
+    if (closeStart === -1) break;
+
+    chunks.push(template.slice(cursor, start));
+    const value = data[key];
+    chunks.push(value && !isHtmlComment(value)
+      ? template.slice(yesStart, separatorStart)
+      : template.slice(noStart, closeStart));
+    cursor = closeStart + close.length;
+  }
+
+  chunks.push(template.slice(cursor));
+  return chunks.join("");
 }
 
 export function templateOutputPath(relativePath) {

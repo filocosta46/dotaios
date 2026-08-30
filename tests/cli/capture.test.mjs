@@ -594,7 +594,7 @@ test("the hook is pinned to a version, never to whatever is newest on npm", () =
   const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
 
   assert.doesNotMatch(command, /@latest/, "a hook that auto-upgrades runs unreviewed code on every session end");
-  assert.match(command, new RegExp(`dotaios@${pkg.version.replace(/\./g, "\\.")}`), command);
+  assert.match(command, new RegExp(`dotaios@${pkg.version.replaceAll(".", "\\.")}`), command);
 });
 
 test("enabling over a hook written by an older release repairs it", () => {

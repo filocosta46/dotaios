@@ -163,7 +163,10 @@ export function renderSkillsIndex(skills) {
 
 // Escape a markdown table cell: pipes break columns, newlines break rows.
 function escapeCell(value) {
-  return String(value || "").replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ");
+  return String(value || "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll("|", "\\|")
+    .replace(/\s*\n\s*/g, " ");
 }
 
 // Render the agent-facing routing table. The agent matches the user's intent to

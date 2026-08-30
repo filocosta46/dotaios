@@ -175,5 +175,8 @@ export function renderBootContext(skills, { skillsDir } = {}) {
 }
 
 function escapeCell(value) {
-  return String(value || "").replace(/\|/g, "\\|").replace(/\s*\n\s*/g, " ");
+  return String(value || "")
+    .replaceAll("\\", "\\\\")
+    .replaceAll("|", "\\|")
+    .replace(/\s*\n\s*/g, " ");
 }
