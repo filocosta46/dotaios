@@ -64,6 +64,16 @@ test("renderTemplate handles malformed repeated condition openers in linear time
   assert.ok(performance.now() - startedAt < 250, "malformed local templates must not cause backtracking stalls");
 });
 
+test("renderTemplate handles malformed repeated loop openers in linear time", () => {
+  const template = "{{#each ai_tools}}" + "{{#each ai_tools}}a".repeat(20_000);
+  const startedAt = performance.now();
+
+  const rendered = renderTemplate(template, { ai_tools: ["codex"] });
+
+  assert.equal(rendered, template);
+  assert.ok(performance.now() - startedAt < 250, "malformed local templates must not stall loop rendering");
+});
+
 test("isHtmlComment identifies HTML comment strings", () => {
   assert.equal(isHtmlComment("<!-- Your Name -->"), true);
   assert.equal(isHtmlComment("<!-- -->"), true);
