@@ -1,5 +1,6 @@
 import path from "node:path";
 import { bundledCliInvocation } from "./bridges.mjs";
+import { escapeMarkdownTableCell } from "./markdown.mjs";
 
 // Deterministic, local intent -> skill ranking. No embeddings, no network, no
 // model calls. Shared by the CLI (`dotaios skills resolve`) and the MCP server
@@ -175,8 +176,5 @@ export function renderBootContext(skills, { skillsDir } = {}) {
 }
 
 function escapeCell(value) {
-  return String(value || "")
-    .replaceAll("\\", "\\\\")
-    .replaceAll("|", "\\|")
-    .replace(/\s*\n\s*/g, " ");
+  return escapeMarkdownTableCell(value);
 }

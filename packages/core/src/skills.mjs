@@ -3,6 +3,7 @@ import path from "node:path";
 import { parseDocument } from "yaml";
 import { createEvidenceReader } from "./evidence-reader.mjs";
 import { writeFileSafe } from "./files.mjs";
+import { escapeMarkdownTableCell } from "./markdown.mjs";
 
 const MAX_ROUTING_METADATA_BYTES = 64 * 1024;
 const MAX_SKILL_SOURCE_BYTES = 8 * 1024 * 1024;
@@ -163,10 +164,7 @@ export function renderSkillsIndex(skills) {
 
 // Escape a markdown table cell: pipes break columns, newlines break rows.
 function escapeCell(value) {
-  return String(value || "")
-    .replaceAll("\\", "\\\\")
-    .replaceAll("|", "\\|")
-    .replace(/\s*\n\s*/g, " ");
+  return escapeMarkdownTableCell(value);
 }
 
 // Render the agent-facing routing table. The agent matches the user's intent to

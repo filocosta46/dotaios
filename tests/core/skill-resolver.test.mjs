@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -113,6 +114,18 @@ test("renderBootContext keeps a backslash before a pipe inside one markdown tabl
   ], { skillsDir: "/aios/skills" });
 
   assert.ok(md.includes(`review ${"\\".repeat(3)}| audit`));
+});
+
+test("renderBootContext handles a bounded whitespace-only trigger in linear time", () => {
+  const whitespace = " ".repeat(32 * 1024);
+  const startedAt = performance.now();
+
+  const md = renderBootContext([
+    skill("audit", "audit", "Weekly health check.", [whitespace])
+  ], { skillsDir: "/aios/skills" });
+
+  assert.ok(md.includes(whitespace));
+  assert.ok(performance.now() - startedAt < 150, "table-cell normalization must stay linear");
 });
 
 test("renderBootContext handles an empty skill set", () => {

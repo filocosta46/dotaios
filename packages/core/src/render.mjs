@@ -7,9 +7,7 @@ export function isHtmlComment(val) {
 }
 
 export function renderTemplate(template, data) {
-  return renderConditionals(template, data).replaceAll(/{{#each ai_tools}}([\s\S]*?){{\/each}}/g, () => (
-    (data.ai_tools || []).map((tool) => `"${tool}"`).join(", ")
-  )).replaceAll(/{{(\w+)}}/g, (_match, key) => {
+  return renderEachAiTools(renderConditionals(template, data), data).replaceAll(/{{(\w+)}}/g, (_match, key) => {
     const val = data[key];
     return (val != null && !isHtmlComment(val)) ? val : "";
   });
@@ -41,6 +39,26 @@ function renderConditionals(template, data) {
     chunks.push(value && !isHtmlComment(value)
       ? template.slice(yesStart, separatorStart)
       : template.slice(noStart, closeStart));
+    cursor = closeStart + close.length;
+  }
+
+  chunks.push(template.slice(cursor));
+  return chunks.join("");
+}
+
+function renderEachAiTools(template, data) {
+  const open = "{{#each ai_tools}}";
+  const close = "{{/each}}";
+  const tools = (data.ai_tools || []).map((tool) => `"${tool}"`).join(", ");
+  const chunks = [];
+  let cursor = 0;
+
+  while (cursor < template.length) {
+    const start = template.indexOf(open, cursor);
+    if (start === -1) break;
+    const closeStart = template.indexOf(close, start + open.length);
+    if (closeStart === -1) break;
+    chunks.push(template.slice(cursor, start), tools);
     cursor = closeStart + close.length;
   }
 

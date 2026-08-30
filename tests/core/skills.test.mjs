@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -172,6 +173,18 @@ test("renderResolver keeps a backslash before a pipe inside one markdown table c
   ]);
 
   assert.ok(md.includes(`review ${"\\".repeat(3)}| audit`));
+});
+
+test("renderResolver handles a bounded whitespace-only trigger in linear time", () => {
+  const whitespace = " ".repeat(32 * 1024);
+  const startedAt = performance.now();
+
+  const md = renderResolver([
+    { dir: "audit", name: "audit", description: "Weekly health check.", triggers: [whitespace] }
+  ]);
+
+  assert.ok(md.includes(whitespace));
+  assert.ok(performance.now() - startedAt < 150, "table-cell normalization must stay linear");
 });
 
 test("renderResolver handles an empty skill set", () => {
