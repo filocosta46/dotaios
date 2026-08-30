@@ -745,6 +745,7 @@ async function runControlledNativeChild({
       : null;
   assert.ok(permissionFlag, "the controlled native child requires Node's permission sandbox");
   const childArgs = [
+    "--no-warnings",
     permissionFlag,
     "--allow-fs-read=" + location,
     "--input-type=module",
