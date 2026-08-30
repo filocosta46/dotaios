@@ -30,6 +30,18 @@ export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
   "repository-skill"
 ]);
 const CONVENTION_KINDS = new Set(PROJECT_NATIVE_CONVENTION_KINDS);
+const ROUTE_ONLY_TOKENS = new Set([
+  "a", "an", "the", "my", "me", "i", "to", "for", "of", "and", "or", "on",
+  "in", "is", "this", "that", "with", "it", "do", "how", "what", "should",
+  "want", "wants", "please", "can", "you", "help", "get", "into", "out",
+  "work", "open", "use", "project", "repo", "repository", "folder", "switch", "go"
+]);
+const ROUTE_ACTION_TOKENS = new Set([
+  "add", "analyze", "archive", "build", "change", "check", "create", "debug", "delete",
+  "design", "draft", "edit", "fix", "implement", "investigate", "migrate", "organize",
+  "plan", "prepare", "publish", "refactor", "release", "remove", "research", "review",
+  "run", "schedule", "ship", "test", "update", "verify", "write"
+]);
 const MATCH_KIND_BY_FIELD = Object.freeze({
   slug: "slug_overlap",
   purpose: "purpose_overlap",
@@ -155,6 +167,7 @@ function resolveImplicitProject({
   }
   if (winner && winner.confidence >= minimumConfidence) {
     const selected = routable.find(({ project }) => project.slug === winner.dir);
+    if (!hasConcreteAction(intent, selected.project)) return noMatch();
     const match = matchReason(selected.project, winner);
     const supported = supportedConventions(selected.conventions, supportedConventionKinds);
     if (supported.length === 0) {
@@ -172,6 +185,10 @@ function resolveImplicitProject({
       fields: ["metadata"]
     });
   }
+  return noMatch();
+}
+
+function noMatch() {
   return {
     status: "no_match",
     project: null,
@@ -180,6 +197,26 @@ function resolveImplicitProject({
     route: null,
     reason: "no_registered_project_match"
   };
+}
+
+function hasConcreteAction(intent, project) {
+  const actionTokens = routeTokens(intent);
+  const identityTokens = new Set(routeTokens([
+    project.slug,
+    project.name,
+    remoteBasename(project.repository)
+  ].filter(Boolean).join(" ")));
+  return actionTokens.some((token) => ROUTE_ACTION_TOKENS.has(token))
+    || actionTokens.some((token) => (
+    !ROUTE_ONLY_TOKENS.has(token) && !identityTokens.has(token)
+  ));
+}
+
+function routeTokens(value) {
+  return String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
 }
 
 async function resolveExactProject({
