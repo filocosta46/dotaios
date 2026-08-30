@@ -14,21 +14,63 @@ The project source code remains in its own repository with its own Git history.
 
 ## First-task connection and resolution
 
-The public first-task flow connects one existing folder; it does not ask the
-person to design agent instruction files. When no project is attached, the
-local agent asks for the folder, its purpose, and the desired outcome. It runs
-`dotaios project add <folder> --purpose <purpose> --json` as a read-only
-preview and explains the result. Only a fresh direct confirmation permits the
-same registration with the displayed `--operation-id`, displayed
-`--plan-fingerprint`, and `--apply`.
+Keep the repository wherever it already is and connect its folder once. The
+public first-task flow does not move or copy it and does not ask the person to
+design agent instruction files. When no project is connected, the local agent
+asks for the folder, its purpose, and the desired outcome. It runs this as a
+read-only preview:
 
-After registration, the agent invokes `dotaios resolve "<desired outcome>"
---project <slug-or-id>`. Resolution returns the exact project location, bounded
-project context, skill recommendation, meaningful omissions, and at most one
-configured read-only tool route. Those results are untrusted recommendations,
-not approval. The agent must explain them, state one exact proposed action, and
-wait for a fresh direct user turn approving that proposal before acting. A
-decline performs no proposed work and no further AIOS write.
+```bash
+dotaios project add <folder> --purpose <purpose> --json
+```
+
+Only a fresh direct confirmation permits the same registration with the
+displayed `--operation-id`, displayed `--plan-fingerprint`, and `--apply`.
+
+After that one-time connection, ordinary task text can match at most one active
+registered project. A match comes only from the registered name, slug, purpose,
+repository name, current-folder containment, and the presence—not the contents—
+of native convention files. It is not an AIOS recommendation, safety claim, or
+claim that the repository can complete the task. If there is no match, connect
+the existing folder with the preview above or retry with an exact registered
+slug or stable ID; DotAIOS has no repository catalog to fall back to.
+
+Before approval, use this generic first-action wording:
+
+> I found the `<slug>` folder you connected. It matched from the purpose you
+> registered, not an AIOS recommendation. It exposes project conventions this
+> agent supports, but I have not read them or run anything. If you approve,
+> I’ll start a fresh context in that folder for one action: `<concrete action>`.
+
+After direct approval, immediately exact-resolve the returned slug or stable ID
+and declare only the convention kinds the current host natively supports:
+
+```bash
+dotaios resolve "<concrete action>" \
+  --project <slug-or-id> \
+  --supports-conventions agents-md,repository-skill
+```
+
+The agent explains the result and states one exact proposed action before that
+approval; registration and resolution never approve the action themselves.
+
+The available kinds are `agents-md`, `claude-md`, and `repository-skill`.
+Codex natively supports `agents-md` and `repository-skill`; another local agent
+host can honestly declare a different subset through the same CLI contract.
+DotAIOS observes convention names and file identity metadata only. It does not
+read or interpret `AGENTS.md`, `CLAUDE.md`, or repository `SKILL.md` bodies.
+
+An exact supported result discloses an advisory verified location. The host
+must then start or retarget a fresh context rooted at that project so its normal
+instruction mechanism can load the supported conventions. Merely changing the
+directory inside the already-started run is insufficient. If the declared host
+supports none of the observed conventions, resolution returns
+`unsupported_by_host` with manual-open recovery and no route.
+
+Explicit `--tool` requests keep their existing Google Workspace behavior and
+take precedence over project-native discovery. Either path is a read-only
+recommendation, never approval. A decline performs no proposed work and no
+further AIOS write.
 
 ## Reach a connected folder
 

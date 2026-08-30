@@ -164,6 +164,28 @@ test("public induction is one approved existing-folder task, not an instruction-
   assert.doesNotMatch(documents["README.md"], /design|edit|write[\s-]+(?:an? )?(?:AGENTS|CLAUDE)\.md/i);
 });
 
+test("project-native routing teaches keep-it-there connection and generic fresh-context entry", async () => {
+  const projects = await fs.readFile(path.join(repoRoot, "docs/projects.md"), "utf8");
+  assert.match(projects, /keep the repository wherever it already is and connect its folder once/i);
+  assert.match(
+    projects,
+    /project add <folder> --purpose <purpose> --json[\s\S]*operation-id[\s\S]*plan-fingerprint[\s\S]*--apply/i
+  );
+  assert.match(projects, /match[\s\S]*not an AIOS recommendation/i);
+  assert.match(
+    projects,
+    /no match[\s\S]*connect[\s\S]{0,80}the existing folder[\s\S]*an? exact registered[\s\S]{0,20}slug or stable ID/i
+  );
+  assert.match(
+    projects,
+    /I found the `<slug>` folder you connected[\s\S]*one action: `<concrete action>`/i
+  );
+  assert.match(projects, /supports-conventions agents-md,repository-skill/);
+  assert.match(projects, /changing the[\s\S]{0,20}directory[\s\S]*insufficient/i);
+  assert.match(projects, /unsupported_by_host[\s\S]*manual-open recovery[\s\S]*no route/i);
+  assert.doesNotMatch(projects, /download (?:the|this|a) (?:career|agent|recommended|particular) repository/i);
+});
+
 test("Hermes claims a global adapter without inventing a project-local selector", async () => {
   const relativeFiles = [
     "docs/adapters.md",

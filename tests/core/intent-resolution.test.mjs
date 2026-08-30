@@ -1,10 +1,14 @@
+import { execFile } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import test from "node:test";
 import assert from "node:assert/strict";
 
 import { registerProject } from "../../packages/core/src/projects.mjs";
+
+const run = promisify(execFile);
 
 async function registerApprovedProject(options) {
   const preview = await registerProject({ ...options, apply: false, yes: false });
@@ -27,6 +31,9 @@ async function makeFixture(t) {
   await fs.mkdir(aiosPath, { recursive: true });
   await fs.mkdir(projectPath, { recursive: true });
   await fs.writeFile(path.join(aiosPath, "aios.json"), "{\"schema_version\":\"1.2.0\"}\n");
+  await fs.writeFile(path.join(projectPath, "AGENTS.md"), "EXTERNAL_INSTRUCTION_CANARY\n");
+  await run("git", ["-C", projectPath, "init", "-q"]);
+  await run("git", ["-C", projectPath, "remote", "add", "origin", "https://github.com/customer/client-work.git"]);
   await registerApprovedProject({
     aiosPath,
     homePath,
@@ -34,7 +41,6 @@ async function makeFixture(t) {
     slug: "client-work",
     purpose: "Prepare the client's approved launch.",
     createId: () => "project-client-001",
-    readRepoUrl: async () => null,
     apply: true
   });
   await fs.mkdir(path.join(aiosPath, "skills", "plan-today"), { recursive: true });
@@ -50,6 +56,9 @@ async function makeFixture(t) {
 async function addProject(fixture, { slug, id, purpose }) {
   const projectPath = path.join(fixture.root, slug);
   await fs.mkdir(projectPath, { recursive: true });
+  await fs.writeFile(path.join(projectPath, "AGENTS.md"), "OTHER_EXTERNAL_INSTRUCTION_CANARY\n");
+  await run("git", ["-C", projectPath, "init", "-q"]);
+  await run("git", ["-C", projectPath, "remote", "add", "origin", `https://github.com/customer/${slug}.git`]);
   await registerApprovedProject({
     aiosPath: fixture.aiosPath,
     homePath: fixture.homePath,
@@ -57,7 +66,6 @@ async function addProject(fixture, { slug, id, purpose }) {
     slug,
     purpose,
     createId: () => id,
-    readRepoUrl: async () => null,
     apply: true
   });
   return projectPath;
@@ -74,10 +82,21 @@ test("one local call returns the verified project, context, skill, configured to
     tool: { capability: "google.gmail.inbox" },
     visibleCharacterBudget: 8000
   }, {
-    clock: () => new Date("2026-08-29T08:00:00.000Z")
+    clock: () => new Date("2026-08-29T08:00:00.000Z"),
+    resolveProjectRoute: async () => {
+      throw new Error("explicit Google tool precedence must skip project-native routing");
+    }
   });
 
   assert.equal(result.schema, "dotaios.intent-resolution/v1");
+  assert.deepEqual(result.project_route, {
+    status: "not_evaluated",
+    reason: "tool_selector_precedence",
+    project: null,
+    match: null,
+    routability: null,
+    route: null
+  });
   assert.equal(result.status, "matched");
   assert.deepEqual(result.project, {
     id: "project-client-001",
@@ -99,10 +118,82 @@ test("one local call returns the verified project, context, skill, configured to
     authenticated: "unknown",
     argv_suffix: ["google", "inbox", "--json"]
   });
-  assert.equal(result.next_action.state, "approval_required");
-  assert.equal(result.next_action.approval, "direct_user_required");
+  assert.deepEqual(result.omissions, ["supplemental_project_sources_not_requested"]);
+  assert.deepEqual(result.recovery, { required: false, action: null });
+  assert.deepEqual(result.next_action, {
+    state: "approval_required",
+    approval: "direct_user_required",
+    summary: "Review this recommendation and ask the user to approve before acting."
+  });
   assert.equal(result.location, fixture.projectPath);
   assert.equal(Object.keys(result).at(-1), "location", "verified location is disclosed last");
+});
+
+test("EPR-012: implicit project candidate does not evaluate memory, AIOS skills, or tools", async (t) => {
+  const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  await fs.writeFile(
+    path.join(fixture.aiosPath, "skills", "plan-today", "SKILL.md"),
+    "---\nname: [this would fail if read\n---\n"
+  );
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent: "Prepare the client's approved launch."
+  }, {
+    resolveProjectRoute: async () => ({
+      status: "candidate",
+      project: {
+        id: "project-client-001",
+        slug: "client-work",
+        name: "client-work",
+        purpose: "Prepare the client's approved launch.",
+        repository: "https://github.com/customer/client-work.git",
+        placement: "external"
+      },
+      match: { kind: "purpose_overlap", confidence: 1, fields: ["purpose"] },
+      routability: {
+        trust: "registered-user-owned",
+        effect: "unknown",
+        approval: "direct_user_required",
+        conventions: [{ kind: "agents-md", resource: "AGENTS.md" }]
+      },
+      route: null,
+      reason: "unique_registered_project_match"
+    })
+  });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.project, null);
+  assert.equal(result.project_route.status, "candidate");
+  assert.equal(result.memory.scope, null);
+  assert.equal(result.memory.context, "");
+  assert.equal(result.skill.status, "not_evaluated");
+  assert.equal(Object.hasOwn(result, "tool"), false);
+  assert.equal(result.location, null);
+  assert.match(result.next_action.summary, /direct approval/i);
+  assert.match(result.next_action.summary, /immediately.*exact resolution/i);
+  assert.match(result.next_action.summary, /fresh context/i);
+  assert.match(result.next_action.summary, /changing directory.*insufficient/i);
+});
+
+test("EPR-012 and EPR-015: exact native route survives an AIOS skill no-match", async (t) => {
+  const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    project: "client-work",
+    intent: "xyzzy quux",
+    supportedConventionKinds: ["agents-md", "repository-skill"]
+  }, { clock: () => new Date("2026-08-29T08:00:00.000Z") });
+
+  assert.equal(result.project_route.status, "ready");
+  assert.equal(result.skill.status, "no_match");
+  assert.equal(Object.hasOwn(result, "tool"), false);
+  assert.equal(result.location, fixture.projectPath);
+  assert.equal(result.status, "partial");
 });
 
 test("skill and tool no-match remain explicit without suppressing the verified primary location", async (t) => {
@@ -186,32 +277,13 @@ test("unknown, detached, neighboring, and ambiguous selection refuse without cho
     cwd: neighbor,
     intent: "plan my day"
   });
-  assert.equal(unknown.status, "refused");
-  assert.equal(detached.status, "refused");
+  assert.equal(unknown.status, "partial");
+  assert.equal(unknown.project_route.status, "no_match");
+  assert.equal(detached.status, "partial");
+  assert.equal(detached.project_route.status, "no_match");
   assert.equal(unknown.location, null);
   assert.equal(detached.location, null);
 
-  const secondPath = await addProject(fixture, {
-    slug: "second-work",
-    id: "project-client-002",
-    purpose: "Second project."
-  });
-  await fs.writeFile(
-    path.join(fixture.aiosPath, "projects", "client-work", "README.md"),
-    "---\nid: project-client-001\nproject: shared-name\nname: First\ndescription: First project.\nstatus: active\ndomain: [build]\nrepo_url: null\n---\n# First\n"
-  );
-  await fs.writeFile(
-    path.join(fixture.aiosPath, "projects", "second-work", "README.md"),
-    "---\nid: project-client-002\nproject: shared-name\nname: Second\ndescription: Second project.\nstatus: active\ndomain: [build]\nrepo_url: null\n---\n# Second\n"
-  );
-  const ambiguous = await resolveIntentResolution({
-    ...fixture,
-    project: "shared-name",
-    intent: "plan my day"
-  });
-  assert.equal(ambiguous.status, "refused");
-  assert.equal(ambiguous.location, null);
-  assert.ok(secondPath.endsWith("second-work"));
 });
 
 test("current-directory inference requires one primary attachment and ignores supplemental or neighbor folders", async (t) => {
@@ -229,8 +301,9 @@ test("current-directory inference requires one primary attachment and ignores su
 
   const primary = await resolveIntentResolution({ ...fixture, cwd: child, intent: "plan my day" });
   const supplementalAttempt = await resolveIntentResolution({ ...fixture, cwd: supplemental, intent: "plan my day" });
-  assert.equal(primary.location, fixture.projectPath);
-  assert.equal(supplementalAttempt.status, "refused");
+  assert.equal(primary.project_route.status, "candidate");
+  assert.equal(primary.location, null);
+  assert.equal(supplementalAttempt.status, "partial");
   assert.equal(supplementalAttempt.location, null);
 
   const nestedPrimary = await addProject(fixture, {
@@ -251,7 +324,6 @@ test("current-directory inference requires one primary attachment and ignores su
     projectPath: movedNested,
     slug: "nested-primary",
     purpose: "A separately registered nested root.",
-    readRepoUrl: async () => null,
     apply: true
   });
   const ambiguousCwd = await resolveIntentResolution({
@@ -259,7 +331,8 @@ test("current-directory inference requires one primary attachment and ignores su
     cwd: path.join(movedNested, "inside"),
     intent: "plan my day"
   });
-  assert.equal(ambiguousCwd.status, "refused");
+  assert.equal(ambiguousCwd.status, "partial");
+  assert.equal(ambiguousCwd.project_route.status, "ambiguous");
   assert.equal(ambiguousCwd.location, null);
 });
 
@@ -277,7 +350,12 @@ test("project-scoped context excludes another project's canaries and is determin
     JSON.stringify({ session_id: "one", project: "client-work", captured_at: "2026-08-29T07:00:00.000Z", title: "CLIENT_CONTEXT_CANARY", agent: "codex", turns: 2 }),
     JSON.stringify({ session_id: "two", project: "other-work", captured_at: "2026-08-29T07:30:00.000Z", title: "OTHER_CONTEXT_CANARY", agent: "codex", turns: 3 })
   ].join("\n"));
-  const options = { ...fixture, project: "client-work", intent: "plan my day" };
+  const options = {
+    ...fixture,
+    project: "client-work",
+    intent: "plan my day",
+    supportedConventionKinds: ["agents-md", "repository-skill"]
+  };
   const dependencies = { clock: () => new Date("2026-08-29T08:00:00.000Z") };
 
   const first = await resolveIntentResolution(options, dependencies);
@@ -298,6 +376,7 @@ test("the closed envelope accepts only the 1,024 through 32,000 character budget
       ...fixture,
       project: "client-work",
       intent: "plan my day",
+      supportedConventionKinds: ["agents-md", "repository-skill"],
       visibleCharacterBudget: budget
     }, { clock: () => new Date("2026-08-29T08:00:00.000Z") });
     const rendered = renderIntentResolution(result);
@@ -325,7 +404,8 @@ test("an unreadable local routing authority returns one path-free fixed refusal"
   const result = await resolveIntentResolution({
     ...fixture,
     project: "client-work",
-    intent: "plan my day"
+    intent: "plan my day",
+    supportedConventionKinds: ["agents-md", "repository-skill"]
   });
   const rendered = renderIntentResolution(result);
   assert.equal(result.status, "refused");

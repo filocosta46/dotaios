@@ -17,6 +17,9 @@ command recommends only; it never runs the tool or approves an action.
 
 Options:
   --project <slug-or-id>  Select one exact registered project (otherwise cwd)
+  --supports-conventions <kinds>
+                           Comma-separated native kinds: agents-md, claude-md,
+                           repository-skill
   --tool <capability>     Request one closed, product-owned tool capability
   --query <text>          Bounded Gmail/Drive query for a matching capability
   --message-id <id>       Validated Gmail message id
@@ -53,6 +56,7 @@ export async function resolveCommand(args = [], dependencies = {}) {
     project: options.project,
     intent: options.positionals[0],
     tool,
+    supportedConventionKinds: options.supportedConventionKinds,
     visibleCharacterBudget: options.budget
   }, {
     filesystem: dependencies.fs,
@@ -78,6 +82,8 @@ function parseOptions(args) {
     project: null,
     query: undefined,
     statePath: null,
+    supportedConventions: null,
+    supportedConventionKinds: [],
     tool: null
   };
   const valueOptions = new Map([
@@ -90,6 +96,7 @@ function parseOptions(args) {
     ["--project", "project"],
     ["--query", "query"],
     ["--state-path", "statePath"],
+    ["--supports-conventions", "supportedConventions"],
     ["--tool", "tool"]
   ]);
   const seen = new Set();
@@ -119,7 +126,22 @@ function parseOptions(args) {
   }
   options.budget = options.budget === undefined ? undefined : Number(options.budget);
   options.pageSize = options.pageSize === undefined ? undefined : Number(options.pageSize);
+  options.supportedConventionKinds = parseSupportedConventionKinds(options.supportedConventions);
   return options;
+}
+
+function parseSupportedConventionKinds(value) {
+  if (value === null) return [];
+  const allowed = new Set(["agents-md", "claude-md", "repository-skill"]);
+  const kinds = value.split(",");
+  if (
+    kinds.length === 0
+    || kinds.some((kind) => !allowed.has(kind))
+    || new Set(kinds).size !== kinds.length
+  ) {
+    throw new Error("--supports-conventions requires unique supported convention kinds: agents-md, claude-md, repository-skill");
+  }
+  return kinds;
 }
 
 function buildToolRequest(options) {
