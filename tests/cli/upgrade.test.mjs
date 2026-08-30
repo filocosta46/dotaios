@@ -87,7 +87,10 @@ test("upgrade preview is read-only and exact aggregate proof gates every write",
   ));
   const appliedBridge = fs.readFileSync(fixture.bridgePath, "utf8");
   assert.match(appliedBridge, /"executable":"[^"]+","argv_prefix":\["[^"]+"\]/);
-  assert.match(appliedBridge, /\["resolve","<intent>","--project","<slug-or-id>"\]/);
+  assert.match(
+    appliedBridge,
+    /\["resolve","<same exact action>","--project","<candidate stable ID>","--supports-conventions","<same host-native-support>","--approval-binding","<retained opaque binding>"\]/
+  );
   assert.doesNotMatch(appliedBridge, /npx(?:\.cmd)? dotaios@.*brief --compact/);
   assert.doesNotMatch(fs.readFileSync(fixture.bridgePath, "utf8"), /# Installed Skills|# Skill Resolver/);
   assert.equal(fs.readFileSync(unmanaged, "utf8"), "# Personal Claude instructions\n");
