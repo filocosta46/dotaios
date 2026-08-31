@@ -15,6 +15,7 @@ const MAX_UNPACKED_BYTES = 128 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 4_096;
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
+const THIRD_PARTY_NOTICES_SHA256 = "ba60f8003b71d8126a97c3337f74f868f5541e63d546466b070d1c500c151081";
 export const ADMISSION_NPM_VERSION = "11.6.4";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -255,6 +256,7 @@ export function admitPackageArtifact({ artifact, sourceCommit }) {
   }
   const dependencyGraph = admitDependencyGraph({ packageJson, shrinkwrap });
   admitBundledGraph({ entries, packageJson, dependencyGraph });
+  admitThirdPartyNotices({ entries });
 
   const runRoot = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-package-admission-"));
   fs.chmodSync(runRoot, 0o700);
@@ -317,6 +319,7 @@ export function admitPackageArtifact({ artifact, sourceCommit }) {
       candidate_loaded_without_ambient_modules: true,
       lifecycle_scripts_absent: true,
       shrinkwrap_admitted: true,
+      third_party_notices_admitted: true,
     },
   };
 }
@@ -408,6 +411,24 @@ export function admitBundledGraph({ entries, packageJson, dependencyGraph }) {
   }
   if (packagedPaths.length !== admittedPaths.size) {
     throw new Error("Bundled dependency graph is incomplete.");
+  }
+}
+
+export function admitThirdPartyNotices({ entries }) {
+  const notices = entries.get("package/THIRD-PARTY-NOTICES.md");
+  if (!Buffer.isBuffer(notices)) {
+    throw new Error("Package is missing the reviewed third-party notices.");
+  }
+  if (notices.length === 0 || notices.length > 64 * 1024) {
+    throw new Error("Package third-party notices are outside the admission boundary.");
+  }
+  try {
+    UTF8.decode(notices);
+  } catch {
+    throw new Error("Package third-party notices are not valid UTF-8.");
+  }
+  if (sha256(notices) !== THIRD_PARTY_NOTICES_SHA256) {
+    throw new Error("Package third-party notices do not match the reviewed license inventory.");
   }
 }
 

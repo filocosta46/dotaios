@@ -113,6 +113,19 @@ test("public claims stay inside the verified product boundary", async () => {
   assert.doesNotMatch(corpus, /every AI reads|no cloud memory|native in every tool/i);
 });
 
+test("optional Lightpanda download discloses its separate AGPL license before consent", async () => {
+  const files = [
+    "docs/getting-started.md",
+    "docs/security.md",
+    "packages/cli/src/commands/setup.mjs"
+  ];
+  for (const relative of files) {
+    const content = await fs.readFile(path.join(repoRoot, relative), "utf8");
+    assert.match(content, /Lightpanda[\s\S]{0,500}AGPL-3\.0/i, relative);
+    assert.match(content, /github\.com\/lightpanda-io\/browser/i, relative);
+  }
+});
+
 test("README leads with the nondeveloper continuity outcome before technical reference", async () => {
   const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
   const opening = readme.slice(0, 1200);

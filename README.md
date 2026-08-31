@@ -157,4 +157,6 @@ Feature-specific workflows are in the linked guides below.
 
 ## License
 
-MIT
+DotAIOS is MIT-licensed. The self-contained npm artifact includes a frozen
+dependency graph; its component licenses and required attributions are listed
+in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

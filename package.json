@@ -46,7 +46,8 @@
     "docs/sessions.md",
     "INSTALL.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD-PARTY-NOTICES.md"
   ],
   "scripts": {
     "cli": "node packages/cli/src/index.mjs",

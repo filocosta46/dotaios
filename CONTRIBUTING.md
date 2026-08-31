@@ -26,3 +26,10 @@ git config core.hooksPath scripts/hooks
 - Prefer markdown, JSON, and JSONL for user-owned data.
 - Keep agent entrypoints short; route detail into context files and skills.
 - Treat plugin code as optional. The core product is the folder convention and CLI.
+
+## Inbound licensing
+
+By contributing, you confirm that you have the right to submit the work and
+agree that it is licensed under this project's MIT License. Do not submit
+copied, confidential, or third-party material unless its license and required
+attribution are documented.
