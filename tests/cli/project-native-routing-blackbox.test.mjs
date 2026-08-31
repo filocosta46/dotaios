@@ -945,6 +945,14 @@ function readGuardPreload() {
     "  if (!Array.isArray(args) || args[2] !== 'config' || args[3] !== '--local' || args[4] !== '--no-includes') return false;",
     "  const safeKey = (value) => /^remote\\.[A-Za-z0-9][A-Za-z0-9._-]{0,100}\\.(?:url|fetch)$/.test(value);",
     "  if (args.length === 7 && ['--get', '--get-all'].includes(args[5])) return safeKey(args[6]);",
+    "  if (args.length === 8 && args[5] === '--null' && args[6] === '--get-regexp') {",
+    "    const prefix = '^remote\\\\.';",
+    "    const suffix = '\\\\.(url|fetch)$';",
+    "    if (!args[7].startsWith(prefix) || !args[7].endsWith(suffix)) return false;",
+    "    const escapedName = args[7].slice(prefix.length, -suffix.length);",
+    "    const remoteName = escapedName.replaceAll('\\\\.', '.');",
+    "    return /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/.test(remoteName) && escapedName === remoteName.replaceAll('.', '\\\\.');",
+    "  }",
     "  return args.length === 8 && args[5] === '--name-only' && args[6] === '--get-regexp' && args[7] === '^remote\\\\..*\\\\.fetch$';",
     "}",
     "function guardGit(file, args) {",
@@ -1015,6 +1023,15 @@ function exactReadOnlyGitConfigCall(args, guardedRoots) {
   ) return false;
   const safeKey = (value) => /^remote\.[A-Za-z0-9][A-Za-z0-9._-]{0,100}\.(?:url|fetch)$/u.test(value);
   if (args.length === 7 && ["--get", "--get-all"].includes(args[5])) return safeKey(args[6]);
+  if (args.length === 8 && args[5] === "--null" && args[6] === "--get-regexp") {
+    const prefix = "^remote\\.";
+    const suffix = "\\.(url|fetch)$";
+    if (!args[7].startsWith(prefix) || !args[7].endsWith(suffix)) return false;
+    const escapedName = args[7].slice(prefix.length, -suffix.length);
+    const remoteName = escapedName.replaceAll("\\.", ".");
+    return /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/u.test(remoteName)
+      && escapedName === remoteName.replaceAll(".", "\\.");
+  }
   return args.length === 8
     && args[5] === "--name-only"
     && args[6] === "--get-regexp"

@@ -28,3 +28,12 @@ export function repeatedJsonObjectKey(raw, { topLevelOnly = false } = {}) {
 
   return null;
 }
+
+/** Serialize JSON-like values with deterministic object-key ordering. */
+export function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value).toSorted().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}

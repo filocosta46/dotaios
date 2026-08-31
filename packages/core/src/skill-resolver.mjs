@@ -169,12 +169,8 @@ export function renderBootContext(skills, { skillsDir } = {}) {
     const skillPath = skillsDir
       ? path.join(skillsDir, skill.dir, "SKILL.md")
       : `skills/${skill.dir}/SKILL.md`;
-    lines.push(`| ${skill.name} | ${escapeCell(triggers)} | \`${skillPath}\` |`);
+    lines.push(`| ${skill.name} | ${escapeMarkdownTableCell(triggers)} | \`${skillPath}\` |`);
   }
   lines.push("");
   return lines.join("\n");
-}
-
-function escapeCell(value) {
-  return escapeMarkdownTableCell(value);
 }

@@ -10,6 +10,7 @@ import {
   readContainedFile
 } from "./contained-read.mjs";
 import { isPathWithin } from "./paths.mjs";
+import { stableJson } from "./json.mjs";
 import { schemaVersion } from "./schema.mjs";
 import { processBirthToken, processRecordIsAlive } from "./process-identity.mjs";
 import {
@@ -2034,14 +2035,6 @@ function projectRegistrationFingerprint(plan) {
       state_after: plan.stateAfter
     }
   }));
-}
-
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map((entry) => stableJson(entry)).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).toSorted().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 function validateProjectOperationId(value) {
