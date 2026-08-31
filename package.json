@@ -1,6 +1,6 @@
 {
   "name": "dotaios",
-  "version": "2.0.14",
+  "version": "2.0.15",
   "description": "Stop re-explaining yourself to every AI. Keep who you are and what you're working on in one folder on your computer.",
   "type": "module",
   "packageManager": "pnpm@10.33.4",

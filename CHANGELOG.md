@@ -4,12 +4,22 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.15] - 2026-08-31
+
+### Changed
+
+- Registered-project discovery now bounds concurrent metadata inspection,
+  performs one bounded Git query per project, and reuses deterministic shared
+  serialization helpers across the core.
+
 ### Fixed
 
 - Project routing now requires a recognized leading action verb outside every
   distinct selected-project handle, so bare noun matches and vague reference
   questions fail closed without suppressing explicit commands such as
   `review review` or `Code Review: review this`.
+- Untrusted local Markdown and text fields now use bounded escaping helpers,
+  while adversarial token parsing remains linear.
 - Exact project routes now report that location identity was revalidated during
   exact resolution instead of implying a second pre-entry validation step.
 
