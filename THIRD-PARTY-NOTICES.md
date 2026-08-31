@@ -5,6 +5,8 @@ artifact intentionally bundles one frozen dependency graph so installation
 does not re-resolve production dependencies. This document supplements the
 license files shipped inside those bundled packages.
 
+<!-- bundled-dependency-graph-sha256: 965a9dd9616eeea020637151c01030f1cee8a1bc0276e7b8a73a693b8c9a2033 -->
+
 ## Bundled dependency inventory
 
 | Package | Version | License |
@@ -232,7 +234,7 @@ licensed under the Apache License, Version 2.0. Source:
 artifact did not include a standalone license file, so its notice is
 reproduced here. Source: <https://github.com/fb55/boolbase>.
 
-Copyright (c) 2014-2015, Felix Boehm <me@feedic.com>
+Copyright (c) 2014-2015, Felix Boehm
 
 Permission to use, copy, modify, and/or distribute this software for any
 purpose with or without fee is hereby granted, provided that the above

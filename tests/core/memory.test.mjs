@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -11,6 +12,7 @@ import {
   filterEvents,
   appendEvent,
   appendSignal,
+  appendUpdateRecord,
   compactEvents,
   trimSignals,
   searchMemory,
@@ -132,6 +134,40 @@ test("appendSignal writes to date-named file", async () => {
   const entries = await readJsonl(filePath);
   assert.equal(entries.length, 1);
   assert.equal(entries[0].type, "email");
+});
+
+test("appendUpdateRecord rolls back its canonical event when the paired signal fails", async (t) => {
+  const dir = tmpDir();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const eventsPath = path.join(dir, "memory", "events.jsonl");
+  const signalsDir = path.join(dir, "memory", "signals");
+  fs.mkdirSync(path.dirname(eventsPath), { recursive: true });
+  const original = '{"type":"existing"}\n';
+  fs.writeFileSync(eventsPath, original);
+  const filesystem = {
+    ...fsp,
+    async appendFile(filePath, content, options) {
+      if (path.dirname(filePath) === signalsDir) {
+        const error = new Error("simulated signal failure");
+        error.code = "EIO";
+        throw error;
+      }
+      return fsp.appendFile(filePath, content, options);
+    }
+  };
+
+  await assert.rejects(
+    () => appendUpdateRecord({
+      signalsDir,
+      eventsPath,
+      record: { type: "update", summary: "must roll back", record_id: "rollback-test" }
+    }, { filesystem }),
+    /simulated signal failure/
+  );
+
+  assert.equal(fs.readFileSync(eventsPath, "utf8"), original);
+  assert.equal(fs.existsSync(signalsDir), true);
+  assert.deepEqual(fs.readdirSync(signalsDir), []);
 });
 
 test("compactEvents archives old entries and keeps recent", async () => {

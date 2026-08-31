@@ -8,6 +8,7 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import {
+  admitDependencyGraph,
   admitThirdPartyNotices,
   inspectPackageArchive,
 } from "../../scripts/onboarding-release-acceptance.mjs";
@@ -70,15 +71,35 @@ test("package identity survives runtime-dependent gzip encoding", () => {
 });
 
 test("package admission requires the reviewed third-party notices", () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json")));
+  const shrinkwrap = JSON.parse(fs.readFileSync(path.join(repoRoot, "npm-shrinkwrap.json")));
+  const dependencyGraph = admitDependencyGraph({ packageJson, shrinkwrap });
   assert.throws(
-    () => admitThirdPartyNotices({ entries: new Map() }),
+    () => admitThirdPartyNotices({ entries: new Map(), dependencyGraph }),
     /third-party notices/i
   );
 
   const notices = fs.readFileSync(path.join(repoRoot, "THIRD-PARTY-NOTICES.md"));
   assert.doesNotThrow(() => admitThirdPartyNotices({
-    entries: new Map([["package/THIRD-PARTY-NOTICES.md", notices]])
+    entries: new Map([["package/THIRD-PARTY-NOTICES.md", notices]]),
+    dependencyGraph
   }));
+  const tampered = Buffer.from(notices);
+  tampered[tampered.length - 1] ^= 1;
+  assert.throws(
+    () => admitThirdPartyNotices({
+      entries: new Map([["package/THIRD-PARTY-NOTICES.md", tampered]]),
+      dependencyGraph
+    }),
+    /reviewed license inventory/i
+  );
+  assert.throws(
+    () => admitThirdPartyNotices({
+      entries: new Map([["package/THIRD-PARTY-NOTICES.md", notices]]),
+      dependencyGraph: { ...dependencyGraph, sha256: "0".repeat(64) }
+    }),
+    /admitted dependency graph/i
+  );
 });
 
 test("package admission extracts with owned OS tools and returns a bounded package verdict", { timeout: 120_000 }, (t) => {
