@@ -617,6 +617,7 @@ async function readBoundedProjectRouteRecords(context, { enforceImplicitBounds }
 }
 
 function toBoundedProjectRouteRecord(directorySlug, readmePath, metadata) {
+  if (!validDeclaredProjectRemoteMetadata(metadata)) return null;
   const boundedMetadata = {
     id: boundedProjectMetadataString(metadata.id, 200),
     project_id: boundedProjectMetadataString(metadata.project_id, 200),
@@ -641,19 +642,32 @@ function toBoundedProjectRouteRecord(directorySlug, readmePath, metadata) {
   }
   if (
     projection.project !== directorySlug
-    || !projection.name
-    || !projection.purpose
-    || !projection.remote.safe
+    || (!projection.remote.safe && projection.remote.reason !== "missing")
   ) return null;
   return {
     id: projection.id,
     slug: directorySlug,
-    name: projection.name,
+    name: projection.name || projection.project,
     purpose: projection.purpose,
-    repository: projection.remote.canonicalUrl,
+    repository: projection.remote.safe ? projection.remote.canonicalUrl : null,
     status: projection.status,
     readmePath
   };
+}
+
+function validDeclaredProjectRemoteMetadata(metadata) {
+  const declared = [];
+  for (const key of ["repo_url", "repo"]) {
+    if (!Object.hasOwn(metadata, key)) continue;
+    const value = metadata[key];
+    if (value === null) continue;
+    const bounded = boundedProjectMetadataString(value, 2048);
+    if (bounded === null) return false;
+    const remote = classifyProjectRemote(bounded);
+    if (!remote.safe) return false;
+    declared.push(remote.canonicalUrl);
+  }
+  return new Set(declared).size <= 1;
 }
 
 function toPublicProjectRouteRegistration(project) {

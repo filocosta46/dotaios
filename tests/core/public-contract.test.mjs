@@ -167,13 +167,15 @@ test("public induction is one approved existing-folder task, not an instruction-
     relativePath,
     await fs.readFile(path.join(repoRoot, relativePath), "utf8")
   ])));
-  const prompt = "Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.";
+  const prompt = "Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, ask only for its location; do not require a description. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.";
 
   assert.match(documents["README.md"], new RegExp(`> ${prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   assert.match(documents["docs/getting-started.md"], new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(documents["docs/projects.md"], /preview[\s\S]*fresh direct confirmation[\s\S]*resolve[\s\S]*one exact proposed action/is);
   assert.match(documents["docs/architecture.md"], /understand[\s\S]*recommend[\s\S]*fresh direct approval[\s\S]*act/is);
   assert.match(documents["README.md"], /browser-only chat cannot access a local work folder[\s\S]*supported local agent/i);
+  assert.match(documents["README.md"], /ask only for its location[\s\S]*do not require a description/i);
+  assert.doesNotMatch(documents["README.md"], /asks? for (?:the folder|its location),? (?:its )?purpose/i);
   assert.doesNotMatch(documents["README.md"], /design|edit|write[\s-]+(?:an? )?(?:AGENTS|CLAUDE)\.md/i);
 });
 
@@ -182,13 +184,15 @@ test("project-native routing teaches keep-it-there connection and generic fresh-
   assert.match(projects, /keep the repository wherever it already is and connect its folder once/i);
   assert.match(
     projects,
-    /project add <folder> --purpose <purpose> --json[\s\S]*operation-id[\s\S]*plan-fingerprint[\s\S]*--apply/i
+    /project add <folder> --json[\s\S]*operation-id[\s\S]*plan-fingerprint[\s\S]*--apply/i
   );
+  assert.match(projects, /description[\s\S]{0,80}optional/i);
   assert.match(projects, /match[\s\S]*not an AIOS recommendation/i);
   assert.match(
     projects,
-    /no match[\s\S]*connect[\s\S]{0,80}the existing folder[\s\S]*make the action concrete[\s\S]*name the connected project/i
+    /no match[\s\S]*connect the existing folder[\s\S]*apply receipt selects that exact new registration[\s\S]*unchanged[\s\S]*task/i
   );
+  assert.match(projects, /do not need to repeat the folder name[\s\S]*invent a description/i);
   assert.match(
     projects,
     /I found the `<slug>` folder you connected[\s\S]*one action: `<concrete action>`/i

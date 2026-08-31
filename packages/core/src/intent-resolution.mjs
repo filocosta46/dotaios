@@ -550,6 +550,38 @@ function compactRefusalEnvelope(envelope) {
   envelope.location = null;
 }
 
+function compactCandidateEnvelope(envelope) {
+  const projectRoute = envelope.project_route;
+  envelope.project_route = {
+    status: "candidate",
+    project: {
+      id: projectRoute.project.id,
+      slug: projectRoute.project.slug
+    },
+    match: null,
+    routability: null,
+    route: null,
+    reason: projectRoute.reason,
+    approval_binding: projectRoute.approval_binding
+  };
+  envelope.skill = {
+    status: "not_evaluated",
+    reason: "project_route_not_ready"
+  };
+  envelope.memory = {
+    receipt: envelope.memory.receipt,
+    scope: null
+  };
+  envelope.omissions = ["project_context", "governing_skill"];
+  envelope.recovery = { required: false, action: null };
+  envelope.next_action = {
+    state: "approval_required",
+    approval: "direct_user_required",
+    summary: "Ask for fresh approval; exact-resolve with the retained binding."
+  };
+  envelope.location = null;
+}
+
 function budgetedProjectRoute({ limit, intent, projectRoute, memoryPolicy }) {
   const failed = projectRoute.status === "refused" || projectRoute.status === "unsupported_by_host";
   const envelope = {
@@ -572,7 +604,8 @@ function budgetedProjectRoute({ limit, intent, projectRoute, memoryPolicy }) {
     location: null
   };
   if (renderWithStableUsed(envelope).length > limit) {
-    compactRefusalEnvelope(envelope);
+    if (projectRoute.status === "candidate") compactCandidateEnvelope(envelope);
+    if (renderWithStableUsed(envelope).length > limit) compactRefusalEnvelope(envelope);
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
@@ -589,7 +622,7 @@ function projectRouteRecovery(projectRoute) {
   if (projectRoute.status === "no_match") {
     return {
       required: true,
-      action: "Keep the repository where it is and connect it once: preview dotaios project add <folder> --purpose <purpose>, then apply the displayed operation id and plan fingerprint. After connection, rerun implicit discovery with the same concrete action."
+      action: "Keep the folder where it is and connect it once: preview dotaios project add <folder> --json, then repeat it with the displayed --operation-id and --plan-fingerprint plus --apply --json. A description is optional. After connection, use the returned registered_project stable ID to request a path-free candidate for the same concrete action without an approval binding."
     };
   }
   if (projectRoute.status === "refused") {
@@ -636,7 +669,7 @@ function projectRouteNextAction(intent, projectRoute) {
     return {
       state: "clarification_required",
       approval: "not_applicable",
-      summary: "Connect the existing folder once with its purpose, or make the action more concrete, then rerun implicit discovery."
+      summary: "Connect the existing folder once; a description is optional. Then select the returned stable project ID for the unchanged action, or make the action more concrete and rerun discovery."
     };
   }
   if (

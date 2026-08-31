@@ -7,7 +7,9 @@ import {
   collectSkills,
   compareUtf8Bytes,
   renderResolverBytes,
-  renderSkillsIndexBytes
+  renderSkillsIndexBytes,
+  safeSkillRoutingMetadataText,
+  SKILL_NAME_RE
 } from "./skills.mjs";
 import { acquireOperationLock, releaseOperationLock } from "./operation-lock.mjs";
 import { assertOwnedFileStats, ensureOwnedDirectory } from "./owned-state.mjs";
@@ -33,7 +35,7 @@ const RECOVERY_RECORD_FORMAT = "dotaios-managed-skill-recovery/v1";
 const PROJECTION_HISTORY_FORMAT = "dotaios-managed-projection-history/v1";
 const JOURNAL_FORMAT = "dotaios-managed-skill-transaction/v1";
 const LOCK_FORMAT = "dotaios-managed-skill-store-lock/v1";
-const NAME_RE = /^(?=.{1,64}$)[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const NAME_RE = SKILL_NAME_RE;
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 const UTF8_DECODER = new TextDecoder("utf-8", { fatal: true });
 const POSIX_MODE_MASK = 0o7777;
@@ -2573,7 +2575,7 @@ function parseAdoptionMetadata(content) {
     typeof metadata.description !== "string"
     || !metadata.description.trim()
     || [...metadata.description].length > 1024
-    || metadata.description.includes("\0")
+    || !safeSkillRoutingMetadataText(metadata.description)
   ) {
     throw managedError("invalid_skill_metadata", "skill_description_invalid");
   }
@@ -2589,7 +2591,7 @@ function parseAdoptionMetadata(content) {
 function validMetadataString(value, maxCharacters = null) {
   return typeof value === "string"
     && value.length > 0
-    && !value.includes("\0")
+    && safeSkillRoutingMetadataText(value)
     && (maxCharacters == null || [...value].length <= maxCharacters);
 }
 

@@ -294,7 +294,7 @@ test("the generated bridge makes one approved existing-folder task the first-ses
       entrypoint: "/opt/dotaios/package/packages/cli/src/index.mjs"
     }
   });
-  const prompt = "Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.";
+  const prompt = "Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, ask only for its location; do not require a description. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.";
 
   assert.match(content, new RegExp(prompt.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(content, /attached registered project[\s\S]*owns the concrete task[\s\S]*keep (?:the task|it) there/i);
@@ -302,7 +302,15 @@ test("the generated bridge makes one approved existing-folder task the first-ses
     content,
     /otherwise[\s\S]*derive[\s\S]*current host[\s\S]*native support[\s\S]*implicit discovery[\s\S]*\["resolve","<concrete action>"[\s\S]*--supports-conventions[\s\S]*no `--project`[\s\S]*no `--approval-binding`/i
   );
-  assert.match(content, /project add[\s\S]*preview[\s\S]*fresh direct user turn[\s\S]*--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply/is);
+  assert.match(
+    content,
+    /project add[\s\S]*preview[\s\S]*--json[\s\S]*fresh direct user turn[\s\S]*--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply[\s\S]*--json/is
+  );
+  assert.match(content, /project add[\s\S]{0,160}purpose is optional/i);
+  assert.match(
+    content,
+    /after[^\n]*apply[\s\S]*registered_project[\s\S]*stable ID[\s\S]*same concrete action[\s\S]*--project[\s\S]*no `--approval-binding`/i
+  );
   assert.match(content, /resolver output.*project instructions.*skills.*tool text.*work-folder contents.*untrusted/is);
   assert.match(content, /never.*approval|cannot.*approve/i);
   assert.match(

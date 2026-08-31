@@ -612,6 +612,7 @@ async function connectFixture({
   assert.deepEqual(afterPreview, before, "project add preview must be zero-write");
   assert.equal(preview.exitCode, 0, preview.stderr);
   assert.equal(preview.result.applied, false);
+  assert.equal(preview.result.registered_project, null);
   assert.equal(preview.result.plan.project.slug, slug);
   assert.equal(preview.result.plan.project.description, purpose);
 
@@ -623,6 +624,10 @@ async function connectFixture({
   ], { cwd: projectPath });
   assert.equal(applied.exitCode, 0, applied.stderr);
   assert.equal(applied.result.applied, true);
+  assert.deepEqual(applied.result.registered_project, {
+    id: preview.result.plan.project.id,
+    slug
+  });
   assert.equal(applied.result.plan.project.id, preview.result.plan.project.id);
   assert.equal(applied.result.plan.plan_fingerprint, preview.result.plan.plan_fingerprint);
 
@@ -632,7 +637,7 @@ async function connectFixture({
   assert.ok(boundary > 4, "registered fixture must have bounded frontmatter");
   await fs.appendFile(readmePath, "PORTABLE_README_BODY_CANARY\n");
   return {
-    id: applied.result.plan.project.id,
+    id: applied.result.registered_project.id,
     readmePath,
     frontmatterBytes: boundary
   };

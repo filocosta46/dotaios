@@ -21,7 +21,7 @@ skill, optional configured read-only tool, omissions, and approval state. This
 command recommends only; it never runs the tool or approves an action.
 
 Options:
-  --project <slug-or-id>  Continue one approved exact project route
+  --project <slug-or-id>  Select a project or continue an approved exact project route
   --memory <mode>         Use project, shared, or off memory (default: project)
   --tool <capability>     Request one closed, product-owned tool capability
   --query <text>          Bounded Gmail/Drive query for a matching capability

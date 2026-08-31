@@ -6,6 +6,7 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { PACKAGE_ADMISSION_ASSERTION_KEYS } from "./onboarding-release-acceptance.mjs";
 
 const HASH_256 = /^[a-f0-9]{64}$/;
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/;
@@ -178,10 +179,7 @@ export function evaluateReleaseAdmission(input) {
     && HASH_256.test(packageReceipt.artifact.sha256 || "")
     && HASH_256.test(packageReceipt.artifact.payload_sha256 || "")
     && HASH_256.test(packageReceipt.artifact.dependency_graph_sha256 || "")
-    && hasExactKeys(packageAssertions, [
-      "archive_regular_files_only", "artifact_identity_stable", "bundled_graph_complete",
-      "candidate_loaded_without_ambient_modules", "lifecycle_scripts_absent", "shrinkwrap_admitted",
-    ])
+    && hasExactKeys(packageAssertions, PACKAGE_ADMISSION_ASSERTION_KEYS)
     && Object.values(packageAssertions).every((value) => value === true)
   );
   const nativeAdmissions = Array.isArray(input.native_admissions) ? input.native_admissions : [];

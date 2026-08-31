@@ -490,7 +490,7 @@ test("non-interactive setup does not download the optional web browsing engine b
   assert.match(result.stdout, /Choose "Only this project" only inside that registered checkout/i);
   assert.match(
     result.stdout,
-    /Help me with one useful task in an existing work folder\. Ask what I want to accomplish\. If the folder is not connected, also ask for its location and what it is for\. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting\./,
+    /Help me with one useful task in an existing work folder\. Ask what I want to accomplish\. If the folder is not connected, ask only for its location; do not require a description\. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting\./,
     "setup must end with the same pasteable first-task prompt as FIRST_SESSION.md"
   );
   assert.match(result.stdout, /agent must explain and propose; nothing changes until a fresh reply approves that exact action/i);

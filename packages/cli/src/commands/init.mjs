@@ -833,11 +833,11 @@ folder, from your usual work folder. Paste this exact prompt:
 
 > ${FIRST_TASK_PROMPT}
 
-The agent asks for any missing folder, purpose, and desired outcome. If the
-folder is new to DotAIOS, it previews the connection and waits for you to
-confirm it. Then it understands the bounded project context, proposes one exact
-action, and waits again. Nothing is changed until a fresh reply approves the
-proposal you can see. Declining stops the work.
+The agent asks for any missing folder and desired outcome. A description is
+optional. If the folder is new to DotAIOS, it previews the connection and waits
+for you to confirm it. Then it understands the bounded project context, proposes
+one exact action, and waits again. Nothing is changed until a fresh reply
+approves the proposal you can see. Declining stops the work.
 
 A browser-only chat cannot access your local folder or run this flow. Use a
 supported local agent on this computer; do not paste folder paths into a browser

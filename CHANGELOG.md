@@ -11,9 +11,23 @@ All notable changes to DotAIOS will be documented in this file.
 - Registered-project discovery now bounds concurrent metadata inspection,
   performs one bounded Git query per project, and reuses deterministic shared
   serialization helpers across the core.
+- Existing installations must apply the reviewed managed-scaffold upgrade (or
+  rerun `dotaios activate`) and start a new agent session before using
+  approval-bound project routing; this refreshes the managed bridge
+  instructions from earlier releases.
 
 ### Fixed
 
+- Connecting a project no longer requires a description: the apply receipt's
+  stable ID carries the unchanged task into an approval-gated proposal, while
+  plain local folders remain routable without a Git remote or agent instruction
+  file. Malformed declared remote metadata cannot downgrade a remote-backed
+  project into that local-only path.
+- Skill catalogs now reject structurally unsafe on-disk names and render every
+  untrusted description, trigger, name, and path as inert Markdown data instead
+  of allowing it to create headings or table rows in agent context.
+- Package production and final release admission now share one exact assertion
+  schema, so the required third-party-notices proof can reach a release `GO`.
 - Project routing now requires a recognized leading action verb outside every
   distinct selected-project handle, so bare noun matches and vague reference
   questions fail closed without suppressing explicit commands such as

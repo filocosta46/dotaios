@@ -326,6 +326,7 @@ test("project add CLI applies only the exact proof from its zero-write preview",
   const otherAiosPath = path.join(root, "other-aios");
   await fs.mkdir(path.join(otherAiosPath, "projects"), { recursive: true });
   assert.equal(preview.applied, false);
+  assert.equal(preview.registered_project, null);
   assert.match(preview.plan.operation_id, /^[a-f0-9-]{1,64}$/);
   assert.match(preview.plan.plan_fingerprint, /^[a-f0-9]{64}$/);
   await assert.rejects(fs.access(path.join(aiosPath, "projects", "proved-cli", "README.md")), { code: "ENOENT" });
@@ -384,6 +385,10 @@ test("project add CLI applies only the exact proof from its zero-write preview",
     "--apply"
   ]).stdout);
   assert.equal(applied.applied, true);
+  assert.deepEqual(applied.registered_project, {
+    id: preview.plan.project.id,
+    slug: preview.plan.project.slug
+  });
   assert.equal(applied.plan.project.id, preview.plan.project.id);
   assert.equal(applied.plan.durable.after_hash, preview.plan.durable.after_hash);
   assert.equal(applied.plan.preview, preview.plan.preview);
@@ -521,7 +526,7 @@ test("project help explains preview, explicit apply, JSON, and local path separa
   assert.match(result.stdout, /read-only preview\. Applying requires --apply or --yes plus the\s+operation id and fingerprint/);
   assert.match(result.stdout, /--apply\s+Apply only the exact displayed/);
   assert.match(result.stdout, /--yes\s+Script-friendly alias for the same proof-bound apply/);
-  assert.match(result.stdout, /--purpose <text>\s+Explain what this primary project is for/);
+  assert.match(result.stdout, /--purpose <text>\s+Optional routing hint; the folder connects without one/);
   assert.match(result.stdout, /--json\s+Print the portable plan and receipt/);
   assert.match(result.stdout, /local path mapping and verified directory\s+identity only on this machine/);
 });

@@ -512,6 +512,7 @@ test("final admission reports package, native-agent, and public-release states s
       candidate_loaded_without_ambient_modules: true,
       lifecycle_scripts_absent: true,
       shrinkwrap_admitted: true,
+      third_party_notices_admitted: true,
     },
   };
   const admission = evaluateReleaseAdmission({ source, package_receipt: packageReceipt });
@@ -641,6 +642,7 @@ function completeReleaseAdmissionFixture() {
       candidate_loaded_without_ambient_modules: true,
       lifecycle_scripts_absent: true,
       shrinkwrap_admitted: true,
+      third_party_notices_admitted: true,
     },
   };
   const native = (client, digit) => ({

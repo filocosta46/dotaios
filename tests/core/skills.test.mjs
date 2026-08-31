@@ -253,7 +253,7 @@ test("120 real skills render deterministic owned-only catalogs without body inje
     assert.doesNotMatch(text, /FULL_SKILL_BODY_CANARY|LINKED_METADATA_CANARY|linked-candidate/);
   }
   assert.equal((indexBytes.toString("utf8").match(/^## skill-/gm) || []).length, 120);
-  assert.equal((resolverBytes.toString("utf8").match(/\| `skills\/skill-/g) || []).length, 120);
+  assert.equal((resolverBytes.toString("utf8").match(/\| skills\/skill-/g) || []).length, 120);
   assert.deepEqual(renderSkillsIndexBytes([...skills].reverse()), indexBytes);
   assert.deepEqual(renderResolverBytes([...skills].reverse()), resolverBytes);
 });

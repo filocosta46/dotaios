@@ -214,7 +214,7 @@ test("EPR-012: an unsupported host receives path-free guidance before memory or 
   );
 });
 
-test("R4 and R6: unresolved project routes restart path-free discovery instead of an unbound exact call", async () => {
+test("R4 and R6: unresolved project routes restart safely without inventing an exact project", async () => {
   const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
   const routes = [
     {
@@ -256,8 +256,14 @@ test("R4 and R6: unresolved project routes restart path-free discovery instead o
     const guidance = `${result.recovery.action || ""} ${result.next_action.summary || ""}`;
 
     assert.equal(result.location, null, projectRoute.status);
-    assert.match(guidance, /implicit discovery|discover again|rerun discovery/i, projectRoute.status);
-    assert.doesNotMatch(guidance, /--project|retry exact resolution|choose one displayed slug/i, projectRoute.status);
+    assert.match(guidance, /implicit discovery|discover again|rerun discovery|connect/i, projectRoute.status);
+    if (projectRoute.status !== "no_match") {
+      assert.doesNotMatch(guidance, /--project|retry exact resolution|choose one displayed slug/i, projectRoute.status);
+    } else {
+      assert.match(guidance, /project add <folder> --json/i);
+      assert.match(guidance, /--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply --json/i);
+      assert.match(guidance, /registered_project stable ID/i);
+    }
     if (projectRoute.reason === "approval_binding_mismatch") {
       assert.doesNotMatch(guidance, /doctor|repair|reconnect/i);
       assert.match(guidance, /fresh approval/i);
@@ -388,7 +394,7 @@ test("unknown, detached, neighboring, and ambiguous selection refuse without cho
     intent: "plan my day"
   });
   assert.equal(unknown.status, "refused");
-  assert.equal(unknown.project_route.reason, "approval_binding_required");
+  assert.equal(unknown.project_route.reason, "project_identity_unverified");
   assert.equal(detached.status, "partial");
   assert.equal(detached.project_route.status, "no_match");
   assert.equal(unknown.location, null);
@@ -526,7 +532,7 @@ test("the closed envelope accepts only the 1,024 through 32,000 character budget
   );
 });
 
-test("EPR-012 and EPR-014: exact requests refuse missing, malformed, stale, and action-mismatched bindings path-free", async (t) => {
+test("EPR-012 and EPR-014: selected projects propose without a binding and refuse invalid bindings path-free", async (t) => {
   const {
     resolveIntentResolution,
     renderIntentResolution
@@ -540,8 +546,23 @@ test("EPR-012 and EPR-014: exact requests refuse missing, malformed, stale, and 
     intent,
     supportedConventionKinds
   });
+  for (const visibleCharacterBudget of [1024, 8000]) {
+    const proposal = await resolveIntentResolution({
+      ...fixture,
+      project: "client-work",
+      intent,
+      supportedConventionKinds,
+      visibleCharacterBudget
+    });
+    assert.equal(proposal.status, "partial");
+    assert.equal(proposal.project_route.status, "candidate");
+    assert.equal(proposal.project_route.reason, "explicit_registered_project_candidate");
+    assert.match(proposal.project_route.approval_binding, /^[a-f0-9]{64}$/);
+    assert.equal(proposal.location, null);
+    assert.ok(renderIntentResolution(proposal).length <= visibleCharacterBudget);
+  }
+
   const cases = [
-    ["missing", undefined, intent, "approval_binding_required"],
     ["malformed", "not-a-binding", intent, "approval_binding_required"],
     ["stale", "0".repeat(64), intent, "approval_binding_mismatch"],
     ["action-mismatched", candidate.project_route.approval_binding, "Prepare a different launch action.", "approval_binding_mismatch"]
