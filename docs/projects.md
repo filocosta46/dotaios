@@ -45,8 +45,9 @@ Before approval, use this generic first-action wording:
 
 After direct approval, the host adapter declares its native support internally,
 exact-resolves the approved project and action, and starts a fresh context rooted
-at the verified project. The customer does not choose convention identifiers,
-repeat the approval, or manage this handoff protocol.
+at the project location revalidated by that exact resolution. The
+customer does not choose convention identifiers, repeat the approval, or manage
+this handoff protocol.
 
 The agent explains the result and states one exact proposed action before that
 approval; registration and resolution never approve the action themselves.

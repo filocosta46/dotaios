@@ -531,7 +531,7 @@ function projectRouteNextAction(intent, projectRoute) {
     return {
       state: "approval_required",
       approval: "direct_user_required",
-      summary: `Explain that ${projectRoute.project.slug} matched only from the customer's registration metadata, not an AIOS endorsement. Ask for direct approval of one action: “${intent}” After approval, immediately request exact resolution for ${projectRoute.project.id} and start a fresh context rooted at the verified project; changing directory in this run is insufficient.`
+      summary: `Explain that ${projectRoute.project.slug} matched only from the customer's registration metadata, not an AIOS endorsement. Ask for direct approval of one action: “${intent}” After approval, immediately request exact resolution for ${projectRoute.project.id} and start a fresh context rooted at the project location revalidated by that exact resolution; changing directory in this run is insufficient.`
     };
   }
   if (projectRoute.status === "ambiguous") {
@@ -576,7 +576,7 @@ function nativeRouteNextAction() {
   return {
     state: "fresh_context_required",
     approval: "not_applicable",
-    summary: "Start a fresh context rooted at the verified project for the approved action; changing directory in this run is insufficient."
+    summary: "Start a fresh context rooted at the project location revalidated by exact resolution for the approved action; changing directory in this run is insufficient."
   };
 }
 

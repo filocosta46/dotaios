@@ -197,7 +197,7 @@ test("the packed product carries one non-founder induction through exact approve
   assert.deepEqual(resolution.next_action, {
     state: "fresh_context_required",
     approval: "not_applicable",
-    summary: "Start a fresh context rooted at the verified project for the approved action; changing directory in this run is insufficient."
+    summary: "Start a fresh context rooted at the project location revalidated by exact resolution for the approved action; changing directory in this run is insufficient."
   });
   const child = JSON.parse(run(process.execPath, [
     "--input-type=module",

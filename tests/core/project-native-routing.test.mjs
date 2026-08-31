@@ -657,7 +657,7 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID requires the candidate bind
       project_slug: "launch-work",
       location: "/customer/projects/launch-work",
       advisory: true,
-      revalidate_before_entry: true,
+      revalidated_at_exact_resolution: true,
       fresh_context_required: true,
       conventions: [
         convention("agents-md", "AGENTS.md", "201"),

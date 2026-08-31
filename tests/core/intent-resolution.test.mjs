@@ -271,7 +271,7 @@ test("EPR-012 and EPR-015: exact native route survives an AIOS skill no-match", 
   assert.deepEqual(result.next_action, {
     state: "fresh_context_required",
     approval: "not_applicable",
-    summary: "Start a fresh context rooted at the verified project for the approved action; changing directory in this run is insufficient."
+    summary: "Start a fresh context rooted at the project location revalidated by exact resolution for the approved action; changing directory in this run is insufficient."
   });
 });
 
