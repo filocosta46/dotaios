@@ -488,7 +488,7 @@ function ready(project, conventions, supported, handleField) {
       project_slug: project.slug,
       location: project.mappingPath || project.projectPath,
       advisory: true,
-      revalidate_before_entry: true,
+      revalidated_at_exact_resolution: true,
       fresh_context_required: true,
       conventions: supported
     },

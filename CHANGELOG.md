@@ -10,6 +10,8 @@ All notable changes to DotAIOS will be documented in this file.
   distinct selected-project handle, so bare noun matches and vague reference
   questions fail closed without suppressing explicit commands such as
   `review review` or `Code Review: review this`.
+- Exact project routes now report that location identity was revalidated during
+  exact resolution instead of implying a second pre-entry validation step.
 
 ## [2.0.14] - 2026-08-30
 
