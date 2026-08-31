@@ -219,6 +219,16 @@ test("an exact name match still reports full confidence", () => {
   assert.equal(hit.confidence, 1);
 });
 
+test("duplicate exact skill names remain ambiguous", () => {
+  const hit = resolveIntent("duplicate", [
+    skill("alpha", "duplicate", "First duplicate.", []),
+    skill("beta", "duplicate", "Second duplicate.", [])
+  ]);
+
+  assert.equal(hit.confidence, 0.5);
+  assert.equal(hit.ambiguous, true);
+});
+
 test("resolveIntent exposes the raw score alongside confidence", () => {
   const hit = resolveIntent("start my day", DAY_SKILLS);
   assert.equal(typeof hit.score, "number");

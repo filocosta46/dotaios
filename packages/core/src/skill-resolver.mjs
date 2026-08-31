@@ -132,7 +132,9 @@ export function rankSkillMatches(intent, skills, options = {}) {
       ? ranked[1]?.score ?? 0
       : ranked[0]?.score ?? 0;
     const total = entry.score + strongestAlternative;
-    const confidence = index === 0 && entry.score >= EXACT_NAME_BONUS
+    const confidence = index === 0
+      && entry.score >= EXACT_NAME_BONUS
+      && strongestAlternative < EXACT_NAME_BONUS
       ? 1
       : total > 0 ? entry.score / total : 1;
     return {

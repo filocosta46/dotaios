@@ -10,7 +10,7 @@ import {
   validateProjectSelector
 } from "./projects.mjs";
 import { collectSkills } from "./skills.mjs";
-import { rankSkills, resolveIntent } from "./skill-resolver.mjs";
+import { rankSkillMatches } from "./skill-resolver.mjs";
 import { renderWorkingContext, selectWorkingContext } from "./working-context.mjs";
 import {
   inspectConfiguredConnections,
@@ -99,7 +99,8 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
   }
 
   const { selected, portable, skills, configured } = authority;
-  const matchedSkill = resolveIntent(intent, skills, { skillsDir: "skills" });
+  const rankedSkills = rankSkillMatches(intent, skills, { skillsDir: "skills" });
+  const matchedSkill = rankedSkills[0] || null;
   const skill = matchedSkill?.ambiguous
     ? {
         status: "ambiguous",
@@ -107,8 +108,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
         resource: null,
         confidence: matchedSkill.confidence,
         reason: "low_separation",
-        candidates: rankSkills(intent, skills, { skillsDir: "skills" })
-          .slice(0, 2)
+        candidates: rankedSkills.slice(0, 2)
           .map((candidate) => ({
             name: candidate.name,
             resource: path.posix.join("skills", candidate.dir, "SKILL.md"),
