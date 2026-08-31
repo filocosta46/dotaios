@@ -122,6 +122,37 @@ test("one local call returns the verified project, context, skill, configured to
   assert.equal(Object.keys(result).at(-1), "location", "verified location is disclosed last");
 });
 
+test("an unresolved skill tie asks for clarification without naming a governing skill", async (t) => {
+  const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  await fs.mkdir(path.join(fixture.aiosPath, "skills", "alpha-plan"), { recursive: true });
+  await fs.writeFile(
+    path.join(fixture.aiosPath, "skills", "alpha-plan", "SKILL.md"),
+    "---\nname: alpha-plan\ndescription: Plan the day.\ntriggers: [plan my day]\n---\n# Alpha plan\n"
+  );
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.projectPath,
+    intent: "plan my day",
+    tool: { capability: "google.gmail.inbox" }
+  });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.skill.status, "ambiguous");
+  assert.equal(result.skill.name, null);
+  assert.equal(result.skill.resource, null);
+  assert.equal(result.skill.confidence, 0.5);
+  assert.equal(result.skill.reason, "low_separation");
+  assert.deepEqual(
+    result.skill.candidates.map(({ name }) => name),
+    ["alpha-plan", "plan-today"]
+  );
+  assert.ok(result.omissions.includes("governing_skill_ambiguous"));
+  assert.equal(result.next_action.state, "clarification_required");
+  assert.equal(result.next_action.approval, "not_applicable");
+});
+
 test("EPR-012: implicit project candidate does not evaluate memory, AIOS skills, or tools", async (t) => {
   const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
   const fixture = await makeFixture(t);

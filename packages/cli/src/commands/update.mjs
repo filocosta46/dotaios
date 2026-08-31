@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import path from "node:path";
 import { hasHelpFlag } from "../lib/args.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
-import { appendEvent, appendSignal } from "../../../core/src/memory.mjs";
+import { appendUpdateRecord } from "../../../core/src/memory.mjs";
 import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
 import { readOptionValue } from "../lib/args.mjs";
@@ -77,8 +77,7 @@ export async function updateCommand(args) {
     record_id: recordId,
     ...attribution
   };
-  await appendSignal(signalsDir, record);
-  await appendEvent(eventsPath, record);
+  await appendUpdateRecord({ signalsDir, eventsPath, record });
 
   console.log("Saved.");
 }

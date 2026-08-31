@@ -6,6 +6,7 @@ import {
   resolveIntentResolution
 } from "../../../core/src/intent-resolution.mjs";
 import { expandHome } from "../../../core/src/paths.mjs";
+import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
 import { PROJECT_NATIVE_CONVENTION_KINDS } from "../../../core/src/project-native-routing.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
@@ -21,6 +22,7 @@ command recommends only; it never runs the tool or approves an action.
 
 Options:
   --project <slug-or-id>  Continue one approved exact project route
+  --memory <mode>         Use project, shared, or off memory (default: project)
   --tool <capability>     Request one closed, product-owned tool capability
   --query <text>          Bounded Gmail/Drive query for a matching capability
   --message-id <id>       Validated Gmail message id
@@ -46,6 +48,13 @@ export async function resolveCommand(args = [], dependencies = {}) {
   const homePath = path.resolve(expandHome(options.home || dependencies.homePath || os.homedir()));
   const aiosPath = path.resolve(expandHome(options.path || path.join(homePath, "aios")));
   const tool = buildToolRequest(options);
+  const memoryPolicy = options.memory === null
+    ? null
+    : resolveMemoryPolicy({
+        mode: options.memory,
+        project: options.project,
+        allowDeferredProject: true
+      });
   const result = await resolveIntentResolution({
     aiosPath,
     homePath,
@@ -56,6 +65,7 @@ export async function resolveCommand(args = [], dependencies = {}) {
     cwd: dependencies.cwd || process.cwd(),
     project: options.project,
     intent: options.positionals[0],
+    memoryPolicy,
     tool,
     supportedConventionKinds: options.supportedConventionKinds,
     approvalBinding: options.approvalBinding,
@@ -79,6 +89,7 @@ function parseOptions(args) {
     dateWindow: undefined,
     home: null,
     messageId: undefined,
+    memory: null,
     pageSize: undefined,
     path: null,
     positionals: [],
@@ -95,6 +106,7 @@ function parseOptions(args) {
     ["--date-window", "dateWindow"],
     ["--home", "home"],
     ["--message-id", "messageId"],
+    ["--memory", "memory"],
     ["--page-size", "pageSize"],
     ["--path", "path"],
     ["--project", "project"],

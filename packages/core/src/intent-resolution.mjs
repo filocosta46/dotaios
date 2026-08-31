@@ -10,24 +10,36 @@ import {
   validateProjectSelector
 } from "./projects.mjs";
 import { collectSkills } from "./skills.mjs";
-import { resolveIntent } from "./skill-resolver.mjs";
+import { rankSkills, resolveIntent } from "./skill-resolver.mjs";
 import { renderWorkingContext, selectWorkingContext } from "./working-context.mjs";
 import {
   inspectConfiguredConnections,
   resolveConnectionTool
 } from "./connection-tool-resolver.mjs";
 import { resolveProjectRoute } from "./project-native-routing.mjs";
+import { resolveMemoryPolicy } from "./memory-policy.mjs";
 
 export const DEFAULT_INTENT_RESOLUTION_BUDGET = 8000;
 export const MIN_INTENT_RESOLUTION_BUDGET = 1024;
 export const MAX_INTENT_RESOLUTION_BUDGET = 32000;
 const SCHEMA = "dotaios.intent-resolution/v1";
-const MEMORY_RECEIPT = "Memory: This project";
 
 /** Compose existing project, context, skill, and connection authorities locally. */
 export async function resolveIntentResolution(options = {}, dependencies = {}) {
   const visibleCharacterBudget = normalizeBudget(options.visibleCharacterBudget ?? options.budget);
   const intent = normalizeIntent(options.intent);
+  const memoryPolicy = options.memoryPolicy || resolveMemoryPolicy({
+    mode: options.memory || "project",
+    project: options.projectSelector ?? options.project,
+    allowDeferredProject: true
+  });
+  if (memoryPolicy.mode === "off") {
+    return budgetedMemoryOff({
+      limit: visibleCharacterBudget,
+      memoryPolicy,
+      includeTool: options.tool !== undefined && options.tool !== null
+    });
+  }
   const filesystem = options.fs || dependencies.filesystem || dependencies.fs || fs;
   const homePath = path.resolve(options.homePath || os.homedir());
   const aiosPath = path.resolve(options.aiosPath || path.join(homePath, "aios"));
@@ -57,7 +69,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     });
   }
   if (!toolRequested && projectRoute.status !== "ready") {
-    return budgetedProjectRoute({ limit: visibleCharacterBudget, intent, projectRoute });
+    return budgetedProjectRoute({ limit: visibleCharacterBudget, intent, projectRoute, memoryPolicy });
   }
   const refuse = (reason, recovery, refusedRoute = projectRoute) => budgetedRefusal({
     limit: visibleCharacterBudget,
@@ -65,7 +77,8 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     recovery,
     projectRoute: refusedRoute,
     includeTool: toolRequested,
-    includeProjectRoute: !toolRequested
+    includeProjectRoute: !toolRequested,
+    memoryPolicy
   });
   let authority;
   try {
@@ -87,8 +100,23 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
 
   const { selected, portable, skills, configured } = authority;
   const matchedSkill = resolveIntent(intent, skills, { skillsDir: "skills" });
-  const skill = matchedSkill
+  const skill = matchedSkill?.ambiguous
     ? {
+        status: "ambiguous",
+        name: null,
+        resource: null,
+        confidence: matchedSkill.confidence,
+        reason: "low_separation",
+        candidates: rankSkills(intent, skills, { skillsDir: "skills" })
+          .slice(0, 2)
+          .map((candidate) => ({
+            name: candidate.name,
+            resource: path.posix.join("skills", candidate.dir, "SKILL.md"),
+            score: candidate.score
+          }))
+      }
+    : matchedSkill
+      ? {
         status: "matched",
         name: matchedSkill.name,
         resource: path.posix.join("skills", matchedSkill.dir, "SKILL.md"),
@@ -119,6 +147,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     : "partial";
   const omissions = [];
   if (skill.status === "no_match") omissions.push("governing_skill_no_match");
+  if (skill.status === "ambiguous") omissions.push("governing_skill_ambiguous");
   if (tool?.status === "no_match" && tool.reason !== "not_requested") omissions.push("configured_tool_no_match");
   if (tool?.status === "refused") omissions.push("configured_tool_refused");
   omissions.push("supplemental_project_sources_not_requested");
@@ -130,8 +159,8 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     project,
     ...(!toolRequested ? { project_route: projectRoute } : {}),
     memory: {
-      receipt: MEMORY_RECEIPT,
-      scope: selected.slug,
+      receipt: memoryPolicy.receipt,
+      scope: memoryPolicy.mode === "project" ? selected.slug : null,
       generated_at: null,
       context: "",
       truncated: false
@@ -140,9 +169,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     ...(toolRequested ? { tool } : {}),
     omissions,
     recovery: { required: false, action: null },
-    next_action: toolRequested
-      ? nextAction(skill, tool)
-      : nativeRouteNextAction(),
+    next_action: nextAction(skill, tool),
     budget: { limit: visibleCharacterBudget, used: 0, truncated: false },
     location: selected.projectPath
   };
@@ -156,8 +183,8 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     let context;
     try {
       context = await selectWorkingContext(aiosPath, {
-        memory: "project",
-        project: selected.slug,
+        memory: memoryPolicy.mode,
+        ...(memoryPolicy.mode === "project" ? { project: selected.slug } : {}),
         visibleCharacterBudget: contextBudget
       }, {
         filesystem,
@@ -362,6 +389,16 @@ function projectLocationSafe(project) {
 }
 
 function nextAction(skill, tool) {
+  if (skill.status === "ambiguous") {
+    return {
+      state: "clarification_required",
+      approval: "not_applicable",
+      summary: "More than one governing skill matched; narrow the intent before choosing an action."
+    };
+  }
+  if (!tool) {
+    return nativeRouteNextAction();
+  }
   if (tool.status === "refused") {
     return {
       state: "clarification_required",
@@ -383,13 +420,60 @@ function nextAction(skill, tool) {
   };
 }
 
+function budgetedMemoryOff({ limit, memoryPolicy, includeTool }) {
+  const envelope = {
+    schema: SCHEMA,
+    status: "partial",
+    project: null,
+    memory: {
+      receipt: memoryPolicy.receipt,
+      notice: memoryPolicy.notice,
+      scope: null,
+      generated_at: null,
+      context: "",
+      truncated: false
+    },
+    skill: {
+      status: "not_evaluated",
+      name: null,
+      resource: null,
+      confidence: 0,
+      reason: "memory_off"
+    },
+    ...(includeTool ? {
+      tool: {
+        status: "not_evaluated",
+        capability: null,
+        connection: null,
+        configured: false,
+        authenticated: "unknown"
+      }
+    } : {}),
+    omissions: ["project_route", "project_context", "governing_skill", "configured_tool", "primary_location"],
+    recovery: { required: false, action: null },
+    next_action: {
+      state: "memory_off",
+      approval: "not_applicable",
+      summary: "DotAIOS memory is off; no route or context was evaluated."
+    },
+    budget: { limit, used: 0, truncated: false },
+    location: null
+  };
+  stabilizeBudgetUsed(envelope);
+  if (renderIntentResolution(envelope).length > limit) {
+    throw new TypeError("budget is too small for the Memory Off resolution envelope");
+  }
+  return envelope;
+}
+
 function budgetedRefusal({
   limit,
   reason,
   recovery,
   projectRoute = null,
   includeTool = true,
-  includeProjectRoute = true
+  includeProjectRoute = true,
+  memoryPolicy
 }) {
   const safeProjectRoute = refusedProjectRoute(projectRoute, reason);
   const envelope = {
@@ -397,7 +481,7 @@ function budgetedRefusal({
     status: "refused",
     project: null,
     ...(includeProjectRoute ? { project_route: safeProjectRoute } : {}),
-    memory: { receipt: MEMORY_RECEIPT, scope: null, generated_at: null, context: "", truncated: false },
+    memory: { receipt: memoryPolicy.receipt, scope: null, generated_at: null, context: "", truncated: false },
     skill: { status: "not_evaluated", name: null, resource: null, confidence: 0, reason: "project_not_verified" },
     ...(includeTool ? {
       tool: { status: "not_evaluated", capability: null, connection: null, configured: false, authenticated: "unknown" }
@@ -466,14 +550,14 @@ function compactRefusalEnvelope(envelope) {
   envelope.location = null;
 }
 
-function budgetedProjectRoute({ limit, intent, projectRoute }) {
+function budgetedProjectRoute({ limit, intent, projectRoute, memoryPolicy }) {
   const failed = projectRoute.status === "refused" || projectRoute.status === "unsupported_by_host";
   const envelope = {
     schema: SCHEMA,
     status: failed ? "refused" : "partial",
     project: null,
     project_route: projectRoute,
-    memory: { receipt: MEMORY_RECEIPT, scope: null, generated_at: null, context: "", truncated: false },
+    memory: { receipt: memoryPolicy.receipt, scope: null, generated_at: null, context: "", truncated: false },
     skill: {
       status: "not_evaluated",
       name: null,

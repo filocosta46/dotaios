@@ -181,6 +181,32 @@ test("dotaios resolve rejects ambiguous free arguments and unattached tool param
   await assert.rejects(resolveCommand(["plan my day", "--tool", "google.drive.list", "--page-size", "many"]), /must be an integer/);
 });
 
+test("dotaios resolve Memory Off evaluates no project, context, skill, or path", async (t) => {
+  const { resolveCommand } = await import("../../packages/cli/src/commands/resolve.mjs");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-resolve-off-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const absentAios = path.join(root, "must-stay-absent");
+  const captured = captureOutput();
+
+  const result = await resolveCommand([
+    "plan my day",
+    "--memory", "off",
+    "--project", "not-a-real-project",
+    "--path", absentAios
+  ], { output: captured.output });
+
+  assert.equal(result.status, "partial");
+  assert.equal(result.project, null);
+  assert.equal(result.memory.receipt, "Memory: Off");
+  assert.match(result.memory.notice, /did not read, search, save, or capture this turn/i);
+  assert.equal(result.memory.context, "");
+  assert.equal(result.skill.status, "not_evaluated");
+  assert.equal(result.skill.reason, "memory_off");
+  assert.equal(result.location, null);
+  assert.equal(await fs.stat(absentAios).then(() => true, () => false), false);
+  assert.deepEqual(JSON.parse(captured.lines[0]), result);
+});
+
 test("dotaios resolve help is readable and promises recommendation without execution", async () => {
   const { resolveCommand } = await import("../../packages/cli/src/commands/resolve.mjs");
   const captured = captureOutput();

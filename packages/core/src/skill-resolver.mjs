@@ -8,6 +8,7 @@ import { escapeMarkdownTableCell } from "./markdown.mjs";
 // skills/skillify/SKILL.md.
 
 export const MIN_SCORE = 0.05;
+export const MIN_SKILL_MATCH_CONFIDENCE = 0.6;
 
 // Tiny stopword list so "what should I work on" does not rank on "what" or "I".
 const STOPWORDS = new Set([
@@ -123,6 +124,25 @@ export function rankSkills(intent, skills, { skillsDir } = {}) {
   return scored;
 }
 
+/** Rank skills and attach the same winner-separation confidence everywhere. */
+export function rankSkillMatches(intent, skills, options = {}) {
+  const ranked = rankSkills(intent, skills, options);
+  return ranked.map((entry, index) => {
+    const strongestAlternative = index === 0
+      ? ranked[1]?.score ?? 0
+      : ranked[0]?.score ?? 0;
+    const total = entry.score + strongestAlternative;
+    const confidence = index === 0 && entry.score >= EXACT_NAME_BONUS
+      ? 1
+      : total > 0 ? entry.score / total : 1;
+    return {
+      ...entry,
+      confidence,
+      ambiguous: index === 0 && confidence < MIN_SKILL_MATCH_CONFIDENCE
+    };
+  });
+}
+
 // Return the single best match, or null when nothing clears the bar.
 //
 // `confidence` is SEPARATION, not magnitude: how far the winner stands clear of
@@ -131,14 +151,9 @@ export function rankSkills(intent, skills, { skillsDir } = {}) {
 // caller could gate on it. Now a lone match reports 1, a two-way tie reports
 // ~0.5, and the raw `score` is still available for callers that want magnitude.
 export function resolveIntent(intent, skills, options = {}) {
-  const ranked = rankSkills(intent, skills, options);
+  const ranked = rankSkillMatches(intent, skills, options);
   if (ranked.length === 0) return null;
-  const best = ranked[0];
-  if (best.score >= EXACT_NAME_BONUS) return { ...best, confidence: 1 };
-
-  const runnerUp = ranked[1]?.score ?? 0;
-  const total = best.score + runnerUp;
-  return { ...best, confidence: total > 0 ? best.score / total : 1 };
+  return ranked[0];
 }
 
 // Render Markdown prompt context for fleet scripts and other non-IDE consumers.

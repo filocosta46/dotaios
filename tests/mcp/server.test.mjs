@@ -1114,6 +1114,8 @@ test("resolve_skill skips linked top-level skills and keeps real siblings routab
 
   assert.deepEqual(linked.matches, []);
   assert.equal(real.matches[0].name, "plan-today");
+  assert.equal(typeof real.matches[0].confidence, "number");
+  assert.equal(real.matches[0].ambiguous, false);
   assert.doesNotMatch(JSON.stringify(linked.matches), /ZZZXQ_9471|linked-skill/);
   assert.doesNotMatch(JSON.stringify(responses), /linked-skill/);
   assert.doesNotMatch(JSON.stringify(responses), new RegExp(tempRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));

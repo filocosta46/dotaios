@@ -1462,6 +1462,14 @@ function renderProjectReadme(source, metadata) {
 }
 
 async function readProjectState(context, { maxBytes = null, tooLargeCode = null } = {}) {
+  try {
+    await context.fs.lstat(context.statePath);
+  } catch (error) {
+    if (error.code === "ENOENT" || error.code === "ENOTDIR") {
+      return { version: PROJECT_STATE_VERSION, paths: {} };
+    }
+    throw error;
+  }
   let content;
   try {
     content = maxBytes === null

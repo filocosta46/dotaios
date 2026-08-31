@@ -198,6 +198,7 @@ test("adding more triggers cannot raise a skill's score on an unrelated intent",
 test("confidence separates a clear winner from a near tie", () => {
   const clear = resolveIntent("start my day", DAY_SKILLS);
   assert.equal(clear.dir, "today");
+  assert.equal(clear.ambiguous, false);
 
   const tie = resolveIntent("day", [
     { dir: "alpha", name: "alpha", description: "Day handling.", triggers: ["day"] },
@@ -209,6 +210,7 @@ test("confidence separates a clear winner from a near tie", () => {
     `a tie must report lower confidence than a clear win: tie ${tie.confidence} vs clear ${clear.confidence}`
   );
   assert.ok(tie.confidence <= 0.6, `a two-way tie should sit near 0.5, got ${tie.confidence}`);
+  assert.equal(tie.ambiguous, true, "an exact tie must not be presented as a governing match");
 });
 
 test("an exact name match still reports full confidence", () => {

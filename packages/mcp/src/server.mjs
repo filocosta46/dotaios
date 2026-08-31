@@ -19,7 +19,7 @@ import {
   resolvePortableProjectIdentity,
   validateProjectSelector
 } from "../../core/src/projects.mjs";
-import { rankSkills } from "../../core/src/skill-resolver.mjs";
+import { rankSkillMatches } from "../../core/src/skill-resolver.mjs";
 import { collectSkills } from "../../core/src/skills.mjs";
 import { MEMORY_MODES, resolveMemoryPolicy } from "../../core/src/memory-policy.mjs";
 
@@ -218,13 +218,15 @@ class DotaiosMcpServer {
     }
     const skillsDir = path.join(this.aiosPath, "skills");
     const skills = await collectSkills(this.aiosPath, { reader, root: this.aiosPath });
-    const matches = rankSkills(intent, skills, { skillsDir })
+    const matches = rankSkillMatches(intent, skills, { skillsDir })
       .slice(0, limit)
       .map((entry) => ({
         name: entry.name,
         description: entry.description,
         triggers: entry.triggers,
         score: Math.round(entry.score * 1000) / 1000,
+        confidence: Math.round(entry.confidence * 1000) / 1000,
+        ambiguous: entry.ambiguous,
         reason: entry.reason,
         resource: `skills/${entry.dir}/SKILL.md`,
       }));

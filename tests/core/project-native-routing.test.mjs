@@ -24,6 +24,27 @@ test("EPR-003: project routing exposes one generic resolver interface", async ()
   assert.equal(typeof routing?.resolveProjectRoute, "function");
 });
 
+test("a fresh install with no machine-local project registry reports no match", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-fresh-project-route-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const homePath = path.join(root, "home");
+  const aiosPath = path.join(homePath, "aios");
+  await fs.mkdir(aiosPath, { recursive: true });
+  await fs.writeFile(path.join(aiosPath, "aios.json"), "{}\n");
+
+  const result = await resolveProjectRoute({
+    homePath,
+    aiosPath,
+    intent: "Ship the product.",
+    supportedConventionKinds: ["agents-md"]
+  });
+
+  assert.equal(result.status, "no_match");
+  assert.equal(result.reason, "no_registered_project_match");
+  assert.equal(result.route, null);
+});
+
 test("EPR-003: ordinary intent returns one metadata-only registered project candidate", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const projects = [
