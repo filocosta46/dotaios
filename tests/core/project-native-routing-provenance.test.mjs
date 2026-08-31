@@ -47,7 +47,7 @@ test("overlapping registration values report the scorer's first matching field",
   });
   const dependencies = projectDependencies(project);
   const request = {
-    intent: "Coordinate release archive follow-up.",
+    intent: "Review Coordinate release archive follow-up.",
     supportedConventionKinds: ["agents-md"]
   };
 

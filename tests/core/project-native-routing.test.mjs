@@ -130,7 +130,7 @@ test("R4: exact resolution preserves an approved separated match below the raw-s
       convention("agents-md", "AGENTS.md", project.id === "project-invoice-001" ? "211" : "212")
     ]
   };
-  const intent = "Billing reports";
+  const intent = "Create billing reports";
   const candidate = await resolveProjectRoute({
     intent,
     supportedConventionKinds: ["agents-md"]
@@ -138,7 +138,7 @@ test("R4: exact resolution preserves an approved separated match below the raw-s
 
   assert.equal(candidate.status, "candidate");
   assert.equal(candidate.project.id, "project-invoice-001");
-  assert.equal(candidate.match.confidence, 0.75);
+  assert.equal(candidate.match.confidence, 13 / 18);
 
   const exact = await resolveProjectRoute({
     intent,
@@ -199,6 +199,7 @@ test("R2: a project handle without a concrete action never requests approval", a
     "Please work in annual-compliance",
     "Take me to annual-compliance",
     "Show annual-compliance",
+    "Open annual-compliance",
     "annual-compliance now",
     "What about annual-compliance?",
     "Take me to records in annual-compliance",
@@ -245,6 +246,287 @@ test("R2: action words inside a project handle do not count as the requested act
 
     assert.equal(result.status, "no_match", handle);
     assert.equal(result.approval_binding, undefined, handle);
+  }
+});
+
+test("R2: nouns copied from project purpose do not become approval-bound actions", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-compliance-001",
+    slug: "annual-records",
+    name: "Annual records",
+    purpose: "Billing compliance reporting reports.",
+    repository: "https://github.com/customer/ledger-worktree"
+  });
+
+  for (const intent of ["billing", "compliance", "reporting", "reports"]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, {
+      readProjectRegistrations: async () => [project],
+      inspectLiveRemote: async () => project.repository,
+      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", intent)]
+    });
+
+    assert.equal(result.status, "no_match", intent);
+    assert.equal(result.approval_binding, undefined, intent);
+  }
+});
+
+test("R2: an action-like word inside the project display name is not a requested action", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-release-dashboard-001",
+    slug: "dashboard",
+    name: "Release Dashboard",
+    purpose: "Maintain the product dashboard.",
+    repository: "https://github.com/customer/dashboard"
+  });
+
+  const result = await resolveProjectRoute({
+    intent: "Show Release Dashboard",
+    supportedConventionKinds: ["agents-md"]
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "release-dashboard")]
+  });
+
+  assert.equal(result.status, "no_match");
+  assert.equal(result.approval_binding, undefined);
+});
+
+test("R2: a repeated action-named handle preserves the command occurrence", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-review-001",
+    slug: "review",
+    name: "Review",
+    purpose: "Review product changes.",
+    repository: "https://github.com/customer/review"
+  });
+
+  const result = await resolveProjectRoute({
+    intent: "Please review review",
+    supportedConventionKinds: ["agents-md"]
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "review")]
+  });
+
+  assert.equal(result.status, "candidate");
+  assert.equal(result.project.slug, "review");
+});
+
+test("R2: common project commands remain actionable", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+
+  for (const action of ["Assess", "Bill", "Collect", "Configure", "Deploy", "Evaluate", "Inspect", "Merge", "Read"]) {
+    const project = projectRecord({
+      id: "project-dashboard-001",
+      slug: "dashboard",
+      name: "Dashboard",
+      purpose: `${action} the product dashboard.`,
+      repository: "https://github.com/customer/dashboard"
+    });
+    const result = await resolveProjectRoute({
+      intent: `${action} dashboard`,
+      supportedConventionKinds: ["agents-md"]
+    }, {
+      readProjectRegistrations: async () => [project],
+      inspectLiveRemote: async () => project.repository,
+      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", action)]
+    });
+
+    assert.equal(result.status, "candidate", action);
+    assert.equal(result.project.slug, "dashboard", action);
+  }
+});
+
+test("R2: every distinct project handle in the intent is excluded from the action", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-research-001",
+    slug: "research",
+    name: "Knowledge Lab",
+    purpose: "Collect public evidence.",
+    repository: "https://github.com/customer/research"
+  });
+
+  const result = await resolveProjectRoute({
+    intent: "Show research Knowledge Lab",
+    supportedConventionKinds: ["agents-md"]
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "research")]
+  });
+
+  assert.equal(result.status, "no_match");
+  assert.equal(result.approval_binding, undefined);
+});
+
+test("R2: action homonyms in vague reference questions are not commands", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-dashboard-001",
+    slug: "dashboard",
+    name: "Dashboard",
+    purpose: "Maintain dashboard release notes.",
+    repository: "https://github.com/customer/dashboard"
+  });
+
+  for (const intent of [
+    "Dashboard release notes",
+    "What about dashboard release notes?",
+    "Please, what about dashboard release notes?",
+    "How about dashboard release notes?",
+    "Tell me about dashboard release notes?",
+    "How is dashboard release going?",
+    "Where is dashboard release?",
+    "Show dashboard release notes"
+  ]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, {
+      readProjectRegistrations: async () => [project],
+      inspectLiveRemote: async () => project.repository,
+      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "release-notes")]
+    });
+
+    assert.equal(result.status, "no_match", intent);
+    assert.equal(result.approval_binding, undefined, intent);
+  }
+});
+
+test("R2: an explicit handle-prefixed command preserves overlapping action aliases", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-review-001",
+    slug: "review",
+    name: "Code Review",
+    purpose: "Review product changes.",
+    repository: "https://github.com/customer/code-review"
+  });
+
+  for (const intent of [
+    "Code Review: review this",
+    "Code Review: please review this",
+    "Code Review: can you review this"
+  ]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, {
+      readProjectRegistrations: async () => [project],
+      inspectLiveRemote: async () => project.repository,
+      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", intent)]
+    });
+
+    assert.equal(result.status, "candidate", intent);
+    assert.equal(result.project.slug, "review", intent);
+  }
+});
+
+test("R2: an action-named handle can prefix a different explicit action", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-review-001",
+    slug: "review",
+    name: "Review",
+    purpose: "Review product changes.",
+    repository: "https://github.com/customer/review"
+  });
+
+  const result = await resolveProjectRoute({
+    intent: "Review: deploy this",
+    supportedConventionKinds: ["agents-md"]
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "review")]
+  });
+
+  assert.equal(result.status, "candidate");
+  assert.equal(result.project.slug, "review");
+});
+
+test("R2: a colon command reserves an action that is also another project alias", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-deploy-001",
+    slug: "deploy",
+    name: "Launch Console",
+    purpose: "Deploy product releases.",
+    repository: "https://github.com/customer/deploy"
+  });
+
+  for (const intent of [
+    "Launch Console: deploy this",
+    "Launch Console: please deploy this"
+  ]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, {
+      readProjectRegistrations: async () => [project],
+      inspectLiveRemote: async () => project.repository,
+      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", intent)]
+    });
+
+    assert.equal(result.status, "candidate", intent);
+    assert.equal(result.project.slug, "deploy", intent);
+  }
+});
+
+test("R2: opening a concrete project artifact is actionable", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-dashboard-001",
+    slug: "dashboard",
+    name: "Dashboard",
+    purpose: "Maintain dashboard pull requests.",
+    repository: "https://github.com/customer/dashboard"
+  });
+
+  const result = await resolveProjectRoute({
+    intent: "Open a pull request for dashboard",
+    supportedConventionKinds: ["agents-md"]
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "dashboard-pr")]
+  });
+
+  assert.equal(result.status, "candidate");
+  assert.equal(result.project.slug, "dashboard");
+});
+
+test("R2: question-shaped explicit commands remain actionable", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-dashboard-001",
+    slug: "dashboard",
+    name: "Dashboard",
+    purpose: "Release and review the product dashboard.",
+    repository: "https://github.com/customer/dashboard"
+  });
+
+  for (const intent of ["How do I release dashboard?", "Can you review dashboard?"]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, {
+      readProjectRegistrations: async () => [project],
+      inspectLiveRemote: async () => project.repository,
+      inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", intent)]
+    });
+
+    assert.equal(result.status, "candidate", intent);
+    assert.equal(result.project.slug, "dashboard", intent);
   }
 });
 
