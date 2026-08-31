@@ -126,6 +126,273 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
   assert.equal(exact.status, "ready");
 });
 
+test("a newly connected project can be proposed by exact registered identity without repeating metadata", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const selected = projectRecord({
+    id: "project-customer-app-001",
+    slug: "customer-app",
+    name: "customer-app",
+    purpose: null,
+    repository: "https://github.com/customer/customer-app"
+  });
+  const dependencies = {
+    readProjectRegistrations: async ({ projectSelector }) => (
+      projectSelector === selected.id || projectSelector === selected.slug ? [selected] : []
+    ),
+    inspectLiveRemote: async () => selected.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "219")]
+  };
+  const request = {
+    intent: "Fix the failing tests",
+    projectSelector: selected.slug,
+    supportedConventionKinds: ["agents-md"]
+  };
+
+  const proposal = await resolveProjectRoute(request, dependencies);
+
+  assert.equal(proposal.status, "candidate");
+  assert.equal(proposal.project.id, selected.id);
+  assert.deepEqual(proposal.match, {
+    kind: "exact_handle",
+    confidence: 1,
+    fields: ["stable_id"]
+  });
+  assert.equal(proposal.reason, "explicit_registered_project_candidate");
+  assert.match(proposal.approval_binding, /^[a-f0-9]{64}$/);
+  assert.doesNotMatch(JSON.stringify(proposal), /\/customer\/projects/);
+
+  const exact = await resolveProjectRoute({
+    ...request,
+    projectSelector: selected.id,
+    approvalBinding: proposal.approval_binding
+  }, dependencies);
+  assert.equal(exact.status, "ready");
+  assert.equal(exact.project.id, selected.id);
+});
+
+test("a registered local folder with no remote or native convention remains approval-gated and routable", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "downloaded-report",
+    purpose: null,
+    remote: null,
+    conventions: []
+  });
+  const request = {
+    ...fixture.options,
+    intent: "Summarize what is in this folder",
+    projectSelector: "project-downloaded-report-001",
+    supportedConventionKinds: []
+  };
+
+  const proposal = await resolveProjectRoute(request);
+
+  assert.equal(proposal.status, "candidate");
+  assert.deepEqual(proposal.routability.conventions, []);
+  const exact = await resolveProjectRoute({
+    ...request,
+    approvalBinding: proposal.approval_binding
+  });
+  assert.equal(exact.status, "ready");
+  assert.deepEqual(exact.route.conventions, []);
+});
+
+test("a registered plain folder that is not a Git repository remains routable", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "plain-downloaded-report",
+    purpose: null,
+    remote: null,
+    conventions: [],
+    initializeGit: false
+  });
+  await fs.writeFile(path.join(fixture.projectPath, "report.txt"), "quarterly report\n");
+  const request = {
+    ...fixture.options,
+    intent: "Summarize this folder",
+    projectSelector: "project-plain-downloaded-report-001",
+    supportedConventionKinds: []
+  };
+
+  const proposal = await resolveProjectRoute(request);
+
+  assert.equal(proposal.status, "candidate");
+  assert.deepEqual(proposal.routability.conventions, []);
+  const exact = await resolveProjectRoute({
+    ...request,
+    approvalBinding: proposal.approval_binding
+  });
+  assert.equal(exact.status, "ready");
+  assert.deepEqual(exact.route.conventions, []);
+});
+
+test("invalid declared remote metadata cannot downgrade a remote-backed project to local-only", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "remote-authority",
+    purpose: null,
+    remote: "https://github.com/customer/remote-authority.git",
+    conventions: ["AGENTS.md"]
+  });
+  const readmePath = path.join(fixture.aiosPath, "projects", "remote-authority", "README.md");
+  const readme = await fs.readFile(readmePath, "utf8");
+  const forged = readme.replace(
+    /^repo_url:.*$/mu,
+    "repo_url:\n  forged: metadata"
+  );
+  assert.notEqual(forged, readme);
+  await fs.writeFile(readmePath, forged);
+  await run("git", [
+    "-C", fixture.projectPath, "remote", "set-url", "origin",
+    "https://github.com/attacker/replaced.git"
+  ]);
+
+  const registrations = await readBoundedProjectRegistrations({
+    ...fixture.options,
+    projectSelector: "project-remote-authority-001"
+  });
+  const proposal = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Fix the failing tests",
+    projectSelector: "project-remote-authority-001",
+    supportedConventionKinds: ["agents-md"]
+  });
+
+  assert.deepEqual(registrations, []);
+  assert.equal(proposal.status, "refused");
+  assert.equal(proposal.reason, "project_identity_unverified");
+  assert.doesNotMatch(JSON.stringify(proposal), /attacker|replaced|remote-authority\//);
+});
+
+test("null remote metadata cannot downgrade a live remote-backed project to local-only", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "remote-downgrade",
+    purpose: null,
+    remote: "https://github.com/customer/remote-downgrade.git",
+    conventions: []
+  });
+  const readmePath = path.join(fixture.aiosPath, "projects", "remote-downgrade", "README.md");
+  const readme = await fs.readFile(readmePath, "utf8");
+  const downgraded = readme.replace(/^repo_url:.*$/mu, "repo_url: null");
+  assert.notEqual(downgraded, readme);
+  await fs.writeFile(readmePath, downgraded);
+  await run("git", [
+    "-C", fixture.projectPath, "remote", "set-url", "origin",
+    "https://github.com/attacker/replaced.git"
+  ]);
+
+  const proposal = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Fix the failing tests",
+    projectSelector: "project-remote-downgrade-001",
+    supportedConventionKinds: []
+  });
+
+  assert.equal(proposal.status, "refused");
+  assert.equal(proposal.reason, "project_identity_unverified");
+  assert.doesNotMatch(JSON.stringify(proposal), /attacker|replaced|remote-downgrade\//);
+});
+
+test("a local-only registration refuses a live credential-bearing remote without disclosing it", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "unsafe-live-remote",
+    purpose: null,
+    remote: "https://secret-token@example.invalid/customer/private.git",
+    conventions: []
+  });
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Review the files in this folder",
+    projectSelector: "project-unsafe-live-remote-001",
+    supportedConventionKinds: []
+  });
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.reason, "project_identity_unverified");
+  assert.doesNotMatch(JSON.stringify(result), /secret-token|example\.invalid|private\.git/);
+});
+
+test("a malformed local Git config cannot be mistaken for a proven remote absence", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "malformed-live-remote",
+    purpose: null,
+    remote: null,
+    conventions: []
+  });
+  await fs.writeFile(
+    path.join(fixture.projectPath, ".git", "config"),
+    "[remote \"origin\"\n\turl = https://secret-token@example.invalid/customer/private.git\n"
+  );
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Review the files in this folder",
+    projectSelector: "project-malformed-live-remote-001",
+    supportedConventionKinds: []
+  });
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.reason, "project_identity_unverified");
+  assert.doesNotMatch(JSON.stringify(result), /secret-token|example\.invalid|private\.git/);
+});
+
+test("a Git inspection failure cannot be mistaken for a proven remote absence", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "failed-remote-inspection",
+    purpose: null,
+    remote: null,
+    conventions: []
+  });
+  const unavailableGit = async () => {
+    const error = new Error("injected Git inspection failure");
+    error.code = "EACCES";
+    throw error;
+  };
+
+  const result = await resolveProjectRoute({
+    ...fixture.options,
+    intent: "Review the files in this folder",
+    projectSelector: "project-failed-remote-inspection-001",
+    supportedConventionKinds: []
+  }, { execFileAsync: unavailableGit });
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.reason, "project_identity_unverified");
+  assert.doesNotMatch(JSON.stringify(result), /injected Git inspection failure/);
+});
+
+test("an impossible successful Git inspection cannot prove remote absence", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "impossible-remote-inspection",
+    purpose: null,
+    remote: null,
+    conventions: []
+  });
+  const cases = [
+    ["empty output", { stdout: "", stderr: "" }],
+    ["success stderr", { stdout: "remote.origin.fetch\n", stderr: "secret diagnostic" }]
+  ];
+
+  for (const [name, inspection] of cases) {
+    const result = await resolveProjectRoute({
+      ...fixture.options,
+      intent: "Review the files in this folder",
+      projectSelector: "project-impossible-remote-inspection-001",
+      supportedConventionKinds: []
+    }, { execFileAsync: async () => inspection });
+
+    assert.equal(result.status, "refused", name);
+    assert.equal(result.reason, "project_identity_unverified", name);
+    assert.doesNotMatch(JSON.stringify(result), /secret diagnostic/, name);
+  }
+});
+
 test("R4: exact resolution preserves an approved separated match below the raw-score threshold", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const projects = [
@@ -1265,6 +1532,78 @@ test("EPR-001 through EPR-003: default adapters route a real registered reposito
   assert.equal(externalBodyReads, 0);
 });
 
+test("EPR-003: a registered project without a purpose remains routeable by slug and exact resolve", async (t) => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await createRegisteredFixture(t, {
+    slug: "optional-purpose",
+    conventions: ["AGENTS.md"]
+  });
+  const intent = "Inspect optional-purpose";
+
+  const candidate = await resolveProjectRoute({
+    ...fixture.options,
+    intent,
+    supportedConventionKinds: ["agents-md"]
+  });
+
+  assert.equal(candidate.status, "candidate");
+  assert.equal(candidate.project.slug, "optional-purpose");
+  assert.equal(candidate.project.name, "optional-purpose");
+  assert.equal(candidate.project.purpose, null);
+
+  const exact = await resolveProjectRoute({
+    ...fixture.options,
+    intent,
+    projectSelector: candidate.project.id,
+    supportedConventionKinds: ["agents-md"],
+    approvalBinding: candidate.approval_binding
+  });
+
+  assert.equal(exact.status, "ready");
+  assert.equal(exact.project.slug, "optional-purpose");
+});
+
+test("EPR-001: bounded registration derives a missing name from project frontmatter without reading the README body", async (t) => {
+  const fixture = await createRegisteredFixture(t, {
+    slug: "frontmatter-name-fallback",
+    purpose: "Inspect the frontmatter name fallback.",
+    conventions: ["AGENTS.md"]
+  });
+  const readmePath = path.join(fixture.aiosPath, "projects", "frontmatter-name-fallback", "README.md");
+  const frontmatter = [
+    "---",
+    "id: project-frontmatter-name-fallback-001",
+    "project: frontmatter-name-fallback",
+    "description: Inspect the frontmatter name fallback.",
+    "status: active",
+    "repo_url: https://github.com/customer/frontmatter-name-fallback.git",
+    "---",
+    ""
+  ].join("\n");
+  await fs.writeFile(readmePath, `${frontmatter}README_BODY_MUST_NOT_BE_READ\n`);
+  const filesystem = frontmatterOnlyFilesystem(readmePath, Buffer.byteLength(frontmatter));
+
+  const registrations = await readBoundedProjectRegistrations({
+    aiosPath: fixture.aiosPath,
+    homePath: fixture.homePath,
+    fs: filesystem
+  });
+
+  assert.deepEqual(
+    registrations.map(({ id, slug, name, purpose, repository, status }) => ({
+      id, slug, name, purpose, repository, status
+    })),
+    [{
+      id: "project-frontmatter-name-fallback-001",
+      slug: "frontmatter-name-fallback",
+      name: "frontmatter-name-fallback",
+      purpose: "Inspect the frontmatter name fallback.",
+      repository: "https://github.com/customer/frontmatter-name-fallback.git",
+      status: "active"
+    }]
+  );
+});
+
 test("EPR-001: origin remains authoritative while multiple non-origin fallbacks refuse implicitly", async (t) => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const fixture = await createRegisteredFixture(t, {
@@ -1956,7 +2295,8 @@ async function createRegisteredFixture(t, {
   slug,
   purpose,
   conventions = [],
-  remote = `https://github.com/customer/${slug}.git`
+  remote = `https://github.com/customer/${slug}.git`,
+  initializeGit = true
 }) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-native-fixture-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -1972,17 +2312,46 @@ async function createRegisteredFixture(t, {
     await fs.mkdir(path.dirname(conventionPath), { recursive: true });
     await fs.writeFile(conventionPath, `BODY_CANARY_${resource}\n`);
   }
-  await run("git", ["-C", projectPath, "init", "-q"]);
-  await run("git", ["-C", projectPath, "remote", "add", "origin", remote]);
+  if (initializeGit) await run("git", ["-C", projectPath, "init", "-q"]);
+  else if (remote) throw new Error("A remote requires an initialized Git repository fixture.");
+  if (remote) await run("git", ["-C", projectPath, "remote", "add", "origin", remote]);
   await registerApprovedProject({
     aiosPath,
     homePath,
     projectPath,
     slug,
-    purpose,
+    ...(purpose == null ? {} : { purpose }),
     createId: () => `project-${slug}-001`
   });
   return { root, homePath, aiosPath, projectPath, options: { aiosPath, homePath } };
+}
+
+function frontmatterOnlyFilesystem(readmePath, maximumBytes) {
+  const expectedPath = path.resolve(readmePath);
+  return new Proxy(fs, {
+    get(target, property) {
+      if (property === "open") {
+        return async (filePath, ...args) => {
+          const handle = await fs.open(filePath, ...args);
+          if (path.resolve(String(filePath)) !== expectedPath) return handle;
+          const read = handle.read.bind(handle);
+          let offset = 0;
+          handle.read = async (buffer, bufferOffset, length, position) => {
+            const start = Number.isInteger(position) ? position : offset;
+            if (start >= maximumBytes || start + length > maximumBytes) {
+              throw new Error("README body read is forbidden");
+            }
+            const result = await read(buffer, bufferOffset, length, position);
+            if (!Number.isInteger(position)) offset += result.bytesRead;
+            return result;
+          };
+          return handle;
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
 }
 
 function assertPathFreeIdentityRefusal(result) {

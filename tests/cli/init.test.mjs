@@ -53,7 +53,8 @@ test("a new folder teaches the stable approved first-task contract", () => {
     assert.match(guide, /Use my memory/);
     assert.match(guide, /Only this project/);
     assert.match(guide, /Private chat/);
-    assert.match(guide, /Help me with one useful task in an existing work folder\. Ask what I want to accomplish\. If the folder is not connected, also ask for its location and what it is for\. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting\./);
+    assert.match(guide, /Help me with one useful task in an existing work folder\. Ask what I want to accomplish\. If the folder is not connected, ask only for its location; do not require a description\. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting\./);
+    assert.match(guide, /description is\s+optional/i);
     assert.match(guide, /preview[\s\S]*confirm[\s\S]*understand[\s\S]*propose[\s\S]*approve/is);
     assert.match(guide, /nothing is changed[\s\S]*fresh reply/i);
     assert.match(guide, /save[\s\S]*only if[\s\S]*ask[\s\S]*scope/i);

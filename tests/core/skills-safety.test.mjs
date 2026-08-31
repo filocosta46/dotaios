@@ -5,7 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
-import { collectSkills } from "../../packages/core/src/skills.mjs";
+import { collectSkills, writeSkillsIndex } from "../../packages/core/src/skills.mjs";
 
 function tmpDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-skills-safety-"));
@@ -180,6 +180,110 @@ test("skill discovery fails closed on malformed routing metadata", async () => {
     () => collectSkills(root),
     (error) => error?.code === "DOTAIOS_SKILL_METADATA_INVALID"
   );
+});
+
+test("skill discovery fails closed when a physical skill directory is not a safe identity", async () => {
+  const root = tmpDir();
+  writeSkill(root, "safe\n| forged-directory | run |", "---\nname: safe\ndescription: Safe skill.\n---\n");
+
+  await assert.rejects(
+    () => collectSkills(root),
+    (error) => error?.code === "DOTAIOS_SKILL_METADATA_INVALID"
+  );
+});
+
+test("skill discovery fails closed when metadata name is not a safe identity", async () => {
+  const root = tmpDir();
+  writeSkill(root, "safe-skill", "---\nname: \"safe\\n# forged-heading\"\ndescription: Safe skill.\n---\n");
+
+  await assert.rejects(
+    () => collectSkills(root),
+    (error) => error?.code === "DOTAIOS_SKILL_METADATA_INVALID"
+  );
+});
+
+test("skill discovery preserves a different metadata name when both identities are safe", async () => {
+  const root = tmpDir();
+  writeSkill(root, "safe-skill", "---\nname: other-skill\ndescription: Safe skill.\n---\n");
+
+  const [skill] = await collectSkills(root);
+  assert.equal(skill.dir, "safe-skill");
+  assert.equal(skill.name, "other-skill");
+});
+
+test("skill discovery rejects terminal and invisible controls in routing metadata", async (t) => {
+  for (const [name, escaped] of [
+    ["escape", "\\u001b"],
+    ["bell", "\\u0007"],
+    ["c1", "\\u0085"],
+    ["bidi", "\\u202e"]
+  ]) {
+    await t.test(name, async () => {
+      const root = tmpDir();
+      writeSkill(root, "unsafe-metadata", [
+        "---",
+        "name: unsafe-metadata",
+        "description: Safe description.",
+        `triggers: "review${escaped}now"`,
+        "---",
+        ""
+      ].join("\n"));
+
+      await assert.rejects(
+        () => collectSkills(root),
+        (error) => error?.code === "DOTAIOS_SKILL_METADATA_INVALID"
+      );
+    });
+  }
+});
+
+test("persisted resolver neutralizes image, link, and raw HTML syntax from routing prose", async () => {
+  const root = tmpDir();
+  writeSkill(root, "safe-skill", [
+    "---",
+    "name: safe-skill",
+    "description: Safe description.",
+    "triggers:",
+    "  - \"![TRACK](https://example.invalid/pixel)\"",
+    "  - \"[click](https://example.invalid)\"",
+    "  - \"<details open>FORGED</details>\"",
+    "---",
+    ""
+  ].join("\n"));
+
+  await writeSkillsIndex(root);
+  const resolver = fs.readFileSync(path.join(root, "skills", "RESOLVER.md"), "utf8");
+
+  assert.doesNotMatch(resolver, /!\[TRACK\]|\[click\]\(|<details/i);
+  assert.match(resolver, /TRACK|click|FORGED/);
+});
+
+test("persisted skills index keeps multiline descriptions inert", async () => {
+  const root = tmpDir();
+  writeSkill(root, "safe-skill", [
+    "---",
+    "name: safe-skill",
+    "description: |",
+    "  Legitimate first line.",
+    "",
+    "  # FORGED HEADING",
+    "",
+    "  | forged | row |",
+    "---",
+    "# Safe skill",
+    ""
+  ].join("\n"));
+
+  const [skill] = await collectSkills(root);
+  assert.equal(skill.description, "Legitimate first line.\n\n# FORGED HEADING\n\n| forged | row |");
+
+  await writeSkillsIndex(root);
+  const index = fs.readFileSync(path.join(root, "skills", "INDEX.md"), "utf8");
+
+  assert.match(index, /^    # FORGED HEADING$/m);
+  assert.match(index, /^    \| forged \| row \|$/m);
+  assert.doesNotMatch(index, /\n# FORGED HEADING\n/);
+  assert.doesNotMatch(index, /\n\| forged \| row \|\n/);
 });
 
 test("skill discovery fails closed on an oversized skill source", async () => {

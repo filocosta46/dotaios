@@ -21,7 +21,11 @@ async function registerApprovedProject(options) {
   });
 }
 
-async function makeFixture(t) {
+async function makeFixture(t, {
+  purpose = "Ship one approved customer action.",
+  remote = "https://github.com/customer/primary.git",
+  withConvention = true
+} = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-resolve-cli-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const homePath = path.join(root, "home");
@@ -31,15 +35,17 @@ async function makeFixture(t) {
   await fs.mkdir(aiosPath, { recursive: true });
   await fs.mkdir(projectPath, { recursive: true });
   await fs.writeFile(path.join(aiosPath, "aios.json"), "{\"schema_version\":\"1.2.0\"}\n");
-  await fs.writeFile(path.join(projectPath, "AGENTS.md"), "CLI_CONVENTION_BODY_CANARY\n");
+  if (withConvention) {
+    await fs.writeFile(path.join(projectPath, "AGENTS.md"), "CLI_CONVENTION_BODY_CANARY\n");
+  }
   await run("git", ["-C", projectPath, "init", "-q"]);
-  await run("git", ["-C", projectPath, "remote", "add", "origin", "https://github.com/customer/primary.git"]);
+  if (remote) await run("git", ["-C", projectPath, "remote", "add", "origin", remote]);
   await registerApprovedProject({
     aiosPath,
     homePath,
     projectPath,
     slug: "primary",
-    purpose: "Ship one approved customer action.",
+    ...(purpose == null ? {} : { purpose }),
     createId: () => "project-primary-001",
     apply: true
   });
@@ -166,6 +172,48 @@ test("dotaios resolve forwards hidden host support and approval binding for one 
   assert.equal(result.next_action.state, "fresh_context_required");
   assert.doesNotMatch(discoveryOutput.lines[0], /CLI_CONVENTION_BODY_CANARY/);
   assert.doesNotMatch(exactOutput.lines[0], /CLI_CONVENTION_BODY_CANARY/);
+});
+
+test("dotaios resolve carries a generic task through a newly connected purpose-free local folder", async (t) => {
+  const { resolveCommand } = await import("../../packages/cli/src/commands/resolve.mjs");
+  const fixture = await makeFixture(t, {
+    purpose: null,
+    remote: null,
+    withConvention: false
+  });
+  const action = "Summarize what is in this folder";
+  const proposalOutput = captureOutput();
+
+  const proposal = await resolveCommand([
+    action,
+    "--project", "project-primary-001",
+    "--path", fixture.aiosPath,
+    "--home", fixture.homePath
+  ], {
+    output: proposalOutput.output,
+    cwd: fixture.projectPath
+  });
+
+  assert.equal(proposal.project_route.status, "candidate");
+  assert.equal(proposal.project_route.reason, "explicit_registered_project_candidate");
+  assert.deepEqual(proposal.project_route.routability.conventions, []);
+  assert.equal(proposal.location, null);
+  assert.doesNotMatch(proposalOutput.lines[0], new RegExp(fixture.projectPath));
+
+  const exact = await resolveCommand([
+    action,
+    "--project", "project-primary-001",
+    "--approval-binding", proposal.project_route.approval_binding,
+    "--path", fixture.aiosPath,
+    "--home", fixture.homePath
+  ], {
+    output: captureOutput().output,
+    cwd: fixture.projectPath
+  });
+
+  assert.equal(exact.project_route.status, "ready");
+  assert.deepEqual(exact.project_route.route.conventions, []);
+  assert.equal(exact.location, await fs.realpath(fixture.projectPath));
 });
 
 test("dotaios resolve rejects ambiguous free arguments and unattached tool parameters", async () => {

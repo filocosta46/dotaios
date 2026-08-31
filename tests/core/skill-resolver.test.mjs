@@ -10,6 +10,7 @@ import {
   renderBootContext,
   MIN_SCORE
 } from "../../packages/core/src/skill-resolver.mjs";
+import { renderResolver } from "../../packages/core/src/skills.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const packageVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
@@ -114,6 +115,24 @@ test("renderBootContext keeps a backslash before a pipe inside one markdown tabl
   ], { skillsDir: "/aios/skills" });
 
   assert.ok(md.includes(`review ${"\\".repeat(3)}| audit`));
+});
+
+test("boot context and resolver keep adversarial dynamic values inside one table row", () => {
+  const skills = [{
+    name: "safe\n| forged-name | extra |",
+    dir: "safe\r| forged-directory | extra |",
+    description: "safe\n| forged-description | extra |",
+    triggers: ["safe\r# forged-heading", "safe\n| forged-trigger | extra |"]
+  }];
+
+  const bootContext = renderBootContext(skills, { skillsDir: "/aios/skills" });
+  const resolver = renderResolver(skills);
+
+  for (const output of [bootContext, resolver]) {
+    assert.equal(output.split("\n").filter((line) => line.startsWith("|")).length, 3);
+    assert.doesNotMatch(output, /[\r\n]\| forged-/);
+    assert.doesNotMatch(output, /\r/);
+  }
 });
 
 test("renderBootContext handles a bounded whitespace-only trigger in linear time", () => {

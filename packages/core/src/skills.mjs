@@ -7,6 +7,8 @@ import { escapeMarkdownTableCell } from "./markdown.mjs";
 
 const MAX_ROUTING_METADATA_BYTES = 64 * 1024;
 const MAX_SKILL_SOURCE_BYTES = 8 * 1024 * 1024;
+export const SKILL_NAME_RE = /^(?=.{1,64}$)[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const UNSAFE_ROUTING_METADATA_RE = /[\u0000-\u0009\u000B\u000C\u000E-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069\uD800-\uDFFF]/u;
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 
@@ -61,6 +63,7 @@ export async function collectSkills(aiosPath, { reader = null, root = aiosPath }
     });
     if (content === null) throw skillMetadataError();
     const metadata = parseSkillMetadata(content);
+    validateSkillCatalogIdentity(dir, metadata.name);
 
     skills.push({
       dir,
@@ -95,17 +98,28 @@ export function parseSkillMetadata(content) {
 
 function optionalMetadataString(value) {
   if (value === undefined || value === null) return "";
-  if (typeof value !== "string") throw skillMetadataError();
+  if (!safeSkillRoutingMetadataText(value)) throw skillMetadataError();
   return value.trim();
+}
+
+export function safeSkillRoutingMetadataText(value) {
+  return typeof value === "string" && !UNSAFE_ROUTING_METADATA_RE.test(value);
+}
+
+function validateSkillCatalogIdentity(dir, name) {
+  if (
+    !SKILL_NAME_RE.test(dir)
+    || (name && !SKILL_NAME_RE.test(name))
+  ) throw skillMetadataError();
 }
 
 function metadataList(value, separator) {
   if (value === undefined || value === null || value === "") return [];
   if (Array.isArray(value)) {
-    if (!value.every((entry) => typeof entry === "string")) throw skillMetadataError();
+    if (!value.every(safeSkillRoutingMetadataText)) throw skillMetadataError();
     return value.map((entry) => entry.trim()).filter(Boolean);
   }
-  if (typeof value !== "string") throw skillMetadataError();
+  if (!safeSkillRoutingMetadataText(value)) throw skillMetadataError();
   return value.split(separator).map((entry) => entry.trim()).filter(Boolean);
 }
 
@@ -154,12 +168,18 @@ export function renderSkillsIndex(skills) {
   } else {
     for (const skill of orderedSkills(skills)) {
       lines.push(`## ${skill.name}`, "");
-      if (skill.description) lines.push(skill.description, "");
+      if (skill.description) lines.push(...renderMarkdownLiteralBlock(skill.description), "");
       lines.push(`Run it: read \`skills/${skill.dir}/SKILL.md\` and follow the steps.`, "");
     }
   }
 
   return lines.join("\n");
+}
+
+function renderMarkdownLiteralBlock(value) {
+  return String(value)
+    .split(/\r\n|[\r\n]/g)
+    .map((line) => line ? `    ${line}` : "");
 }
 
 // Render the agent-facing routing table. The agent matches the user's intent to
@@ -189,7 +209,8 @@ export function renderResolver(skills) {
     const hints = skill.triggers && skill.triggers.length
       ? skill.triggers.join(" · ")
       : (skill.description || skill.name);
-    lines.push(`| ${escapeMarkdownTableCell(hints)} | \`skills/${skill.dir}/SKILL.md\` |`);
+    const skillPath = `skills/${skill.dir}/SKILL.md`;
+    lines.push(`| ${escapeMarkdownTableCell(hints)} | ${escapeMarkdownTableCell(skillPath)} |`);
   }
   lines.push("");
   return lines.join("\n");

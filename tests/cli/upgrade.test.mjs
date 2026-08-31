@@ -8,6 +8,7 @@ import {
   bridgeContent,
   bridgeManagedBlock,
   bridgePath,
+  findManagedBlock,
   loadAgentRegistry,
   previewManagedBridgeFile,
   resolveLocalCliInvocation
@@ -35,6 +36,7 @@ const candidateVersion = JSON.parse(
 const candidateInvocation = `npx dotaios@${candidateVersion}`;
 const localCli = resolveLocalCliInvocation();
 const sessionReloadNotice = "Start a new agent session so your AI hosts reload the updated instructions.";
+const v2_0_13BridgeFixture = path.join(repoRoot, "tests", "fixtures", "v2.0.13-codex-bridge.md");
 test("upgrade remains a shallow sequencer with no migration writer, PATH runner, or new lock", () => {
   const source = fs.readFileSync(
     path.join(repoRoot, "packages", "cli", "src", "commands", "upgrade.mjs"),
@@ -113,6 +115,48 @@ test("upgrade preview is read-only and exact aggregate proof gates every write",
   });
   assert.equal(current.status, "verified");
   assert.deepEqual(snapshotTree(fixture.root), afterApplied);
+});
+
+test("verified upgrade replaces v2.0.13 direct exact routing instructions", async (t) => {
+  const fixture = await createUpgradeFixture(t);
+  const legacyBridge = fs.readFileSync(v2_0_13BridgeFixture, "utf8");
+  assert.match(
+    legacyBridge,
+    /U2 uses \["resolve","<intent>","--project","<slug-or-id>"\]/
+  );
+  assert.doesNotMatch(legacyBridge, /--approval-binding/);
+  fs.writeFileSync(fixture.bridgePath, legacyBridge);
+
+  const preview = await previewUpgrade(fixture);
+  const bridgeTarget = preview.targets.find(({ domain, path: target }) => (
+    domain === "managed-bridges" && target === fixture.bridgePath
+  ));
+  assert.deepEqual(
+    { status: bridgeTarget?.status, action: bridgeTarget?.action },
+    { status: "ready", action: "update-managed-block" }
+  );
+
+  const applied = await applyUpgrade({
+    ...fixture,
+    id: preview.id,
+    fingerprint: preview.fingerprint
+  });
+  assert.equal(applied.status, "verified");
+  assert.ok(applied.results.some(({ domain, action }) => (
+    domain === "managed-bridges" && action === "updated"
+  )));
+
+  const managed = findManagedBlock(fs.readFileSync(fixture.bridgePath, "utf8"));
+  assert.ok(managed);
+  assert.match(managed.text, /derive the current host's native support[\s\S]*implicit discovery/i);
+  assert.match(
+    managed.text,
+    /after approval[\s\S]*--project[\s\S]*--approval-binding[\s\S]*retained opaque binding/i
+  );
+  assert.doesNotMatch(
+    managed.text,
+    /U2 uses \["resolve","<intent>","--project","<slug-or-id>"\]/
+  );
 });
 
 test("upgrade gates outdated schema and open migration recovery with zero writes", async (t) => {

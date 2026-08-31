@@ -41,7 +41,7 @@ operation id and fingerprint displayed by that exact preview.
 Add options:
   --slug <slug>       Override the slug derived from the repository folder
   --name <name>       Set the human-readable project name
-  --purpose <text>    Explain what this primary project is for (1-500 characters)
+  --purpose <text>    Optional routing hint; the folder connects without one
   --status <status>   Set the project status (default: active)
   --domain <domain>   Set build, make, or sell; repeat for multiple domains
   --repo-url <url>    Override the Git origin URL discovered from the repository
@@ -490,6 +490,9 @@ function projectRegistrationJson(project) {
   const durable = { ...project.receipt.durable };
   return {
     applied: project.applied,
+    registered_project: project.applied
+      ? { id: project.id, slug: project.slug }
+      : null,
     plan: {
       version: project.version,
       operation: project.operation,

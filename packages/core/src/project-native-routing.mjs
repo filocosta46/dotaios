@@ -85,7 +85,11 @@ export async function resolveProjectRoute({
   if (!validSupportedConventionKinds(supportedConventionKinds)) {
     return refused("invalid_host_support");
   }
-  if (projectSelector !== null && !validApprovalBinding(approvalBinding)) {
+  if (
+    projectSelector !== null
+    && approvalBinding !== null
+    && !validApprovalBinding(approvalBinding)
+  ) {
     return refused("approval_binding_required");
   }
   const runtime = {
@@ -124,9 +128,14 @@ async function observeRoutableProjects(projects, dependencies) {
   const liveRemoteResults = await mapWithConcurrency(
     projects,
     MAX_LIVE_GIT_CONCURRENCY,
-    (project) => settleInspection(async () => canonicalLiveRemote(
-      await dependencies.inspectLiveRemote(project)
-    ))
+    (project) => settleInspection(async () => {
+      const observed = await dependencies.inspectLiveRemote(project);
+      if (project.repository === null) {
+        if (observed !== null) throw new Error("An undeclared live Git remote is present.");
+        return null;
+      }
+      return canonicalLiveRemote(observed);
+    })
   );
   if (liveRemoteResults.some(({ error }) => isDiscoveryBoundError(error))) {
     return { error: "discovery_bound_exceeded", routable: [] };
@@ -135,7 +144,11 @@ async function observeRoutableProjects(projects, dependencies) {
     .map((project, index) => ({ project, liveRemote: liveRemoteResults[index].value }))
     .filter(({ project, liveRemote }, index) => (
       liveRemoteResults[index].ok
-      && projectRemotesMatch(project.repository, liveRemote)
+      && (
+        project.repository === null
+          ? liveRemote === null
+          : projectRemotesMatch(project.repository, liveRemote)
+      )
     ));
   const inventoryResults = await mapWithConcurrency(
     remoteVerified,
@@ -153,7 +166,7 @@ async function observeRoutableProjects(projects, dependencies) {
       liveRemote,
       conventions: inventoryResults[index].ok ? inventoryResults[index].value : null
     }))
-    .filter(({ conventions }) => Array.isArray(conventions) && conventions.length > 0);
+    .filter(({ conventions }) => Array.isArray(conventions));
   return { error: null, routable };
 }
 
@@ -186,7 +199,7 @@ function resolveImplicitProject({
     if (!hasConcreteAction(intent, selected.project)) return noMatch();
     const match = matchReason(selected.project, winner);
     const supported = supportedConventions(selected.conventions, supportedConventionKinds);
-    if (supported.length === 0) {
+    if (selected.conventions.length > 0 && supported.length === 0) {
       return unsupported(selected.project, selected.conventions, match);
     }
     return candidate(selected, match, { intent, supportedConventionKinds });
@@ -324,7 +337,11 @@ async function resolveExactProject({
   const matches = projects.filter((project) => (
     project.id === projectSelector || project.slug === projectSelector
   ));
-  if (matches.length !== 1) return refused("approval_binding_mismatch");
+  if (matches.length !== 1) {
+    return refused(approvalBinding === null
+      ? "project_identity_unverified"
+      : "approval_binding_mismatch");
+  }
   const selected = matches[0];
   if (!projectEligibleForInspection(selected)) {
     return refused("project_identity_unverified");
@@ -333,16 +350,25 @@ async function resolveExactProject({
   if (observation.error) return refused(observation.error);
   if (observation.routable.length !== 1) return refused("project_identity_unverified");
   const observed = observation.routable[0];
-  const proposal = resolveImplicitProject({
+  const explicitProposal = proposeExplicitProject({
+    intent,
+    supportedConventionKinds,
+    observed
+  });
+  if (approvalBinding === null) return explicitProposal;
+  const implicitProposal = resolveImplicitProject({
     intent,
     supportedConventionKinds,
     routable: [observed],
     minimumConfidence: 0
   });
+  const proposal = [explicitProposal, implicitProposal].find((entry) => (
+    entry.status === "candidate"
+    && entry.project.id === selected.id
+    && entry.approval_binding === approvalBinding
+  ));
   if (
-    proposal.status !== "candidate"
-    || proposal.project.id !== selected.id
-    || proposal.approval_binding !== approvalBinding
+    !proposal
   ) {
     return refused("approval_binding_mismatch");
   }
@@ -358,12 +384,34 @@ async function resolveExactProject({
   );
 }
 
+function proposeExplicitProject({
+  intent,
+  supportedConventionKinds,
+  observed
+}) {
+  if (!hasConcreteAction(intent, observed.project)) return noMatch();
+  const match = {
+    kind: "exact_handle",
+    confidence: 1,
+    fields: ["stable_id"]
+  };
+  const supported = supportedConventions(observed.conventions, supportedConventionKinds);
+  if (observed.conventions.length > 0 && supported.length === 0) {
+    return unsupported(observed.project, observed.conventions, match);
+  }
+  return candidate(observed, match, {
+    intent,
+    supportedConventionKinds,
+    reason: "explicit_registered_project_candidate"
+  });
+}
+
 function projectEligibleForInspection(project) {
   return project?.status === "active"
     && project.mappingStatus === "verified"
     && project.pathAvailable === true
     && (project.placement === "external" || project.placement === "managed")
-    && typeof project.repository === "string";
+    && (project.repository === null || typeof project.repository === "string");
 }
 
 function remoteBasename(repository) {
@@ -390,9 +438,9 @@ function matchReason(project, winner) {
 
 function candidate({ project, liveRemote, conventions }, match, {
   intent,
-  supportedConventionKinds
+  supportedConventionKinds,
+  reason = "unique_registered_project_match"
 }) {
-  const reason = "unique_registered_project_match";
   return {
     status: "candidate",
     project: publicProject(project),
@@ -671,7 +719,15 @@ function routeConventionError(code) {
 
 async function inspectLiveRemote(project, { filesystem, runGit }) {
   const before = await observeProjectRoot(project, filesystem);
-  const origin = await readLocalFetchRemote(project.projectPath, "origin", runGit);
+  let origin;
+  try {
+    origin = await readLocalFetchRemote(project.projectPath, "origin", runGit);
+  } catch (error) {
+    if (!await proveNonGitDirectory(project.projectPath, runGit)) throw error;
+    const after = await observeProjectRoot(project, filesystem);
+    if (!sameRootIdentity(before, after)) throw new Error("The registered project root changed.");
+    return null;
+  }
   let remote = origin.url;
   if (!origin.present) {
     const rawFetchKeys = await gitConfig(
@@ -683,6 +739,11 @@ async function inspectLiveRemote(project, { filesystem, runGit }) {
       .split(/\r?\n/)
       .map((value) => /^remote\.(.+)\.fetch$/.exec(value.trim())?.[1] || null)
       .filter((value) => value && value !== "origin"))];
+    if (remotes.length === 0) {
+      const after = await observeProjectRoot(project, filesystem);
+      if (!sameRootIdentity(before, after)) throw new Error("The registered project root changed.");
+      return null;
+    }
     if (remotes.length !== 1 || !SAFE_LOCAL_NAME_RE.test(remotes[0])) {
       throw new Error("A unique authoritative local Git remote is required.");
     }
@@ -743,7 +804,7 @@ function safeFetchRefspec(value) {
 
 async function gitConfig(projectPath, args, runGit) {
   try {
-    const { stdout } = await runGit(
+    const { stdout, stderr } = await runGit(
       "git",
       ["-C", projectPath, ...args],
       {
@@ -754,16 +815,66 @@ async function gitConfig(projectPath, args, runGit) {
       }
     );
     const value = String(stdout || "").trim();
-    return value || null;
-  } catch {
-    return null;
+    if (!value || String(stderr || "").trim() !== "") {
+      throw new Error("Local Git inspection returned an invalid success result.");
+    }
+    return value;
+  } catch (error) {
+    if (
+      error?.code === 1
+      && error?.killed !== true
+      && error?.signal == null
+      && String(error?.stdout || "").trim() === ""
+      && String(error?.stderr || "").trim() === ""
+    ) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function proveNonGitDirectory(projectPath, runGit) {
+  try {
+    const { stdout, stderr } = await runGit(
+      "git",
+      ["-C", projectPath, "rev-parse", "--is-inside-work-tree"],
+      {
+        encoding: "utf8",
+        env: sanitizedGitEnvironment(),
+        timeout: GIT_INSPECTION_TIMEOUT_MS,
+        killSignal: "SIGTERM"
+      }
+    );
+    const state = String(stdout || "").trim();
+    if ((state === "true" || state === "false") && String(stderr || "").trim() === "") {
+      return false;
+    }
+    throw new Error("Local Git repository probe returned an invalid success result.");
+  } catch (error) {
+    if (
+      error?.code === 128
+      && error?.killed !== true
+      && error?.signal == null
+      && String(error?.stdout || "").trim() === ""
+      && /^fatal: not a git repository \(or any of the parent directories\): \.git$/u.test(
+        String(error?.stderr || "").trim()
+      )
+    ) {
+      return true;
+    }
+    throw error;
   }
 }
 
 function sanitizedGitEnvironment(environment = process.env) {
-  return Object.fromEntries(
+  return {
+    ...Object.fromEntries(
     Object.entries(environment).filter(([key]) => !key.toUpperCase().startsWith("GIT_"))
-  );
+    ),
+    LANG: "C",
+    LANGUAGE: "C",
+    LC_ALL: "C"
+  };
 }
 
 async function inspectConventionInventory(project, { filesystem }) {

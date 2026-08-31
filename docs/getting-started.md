@@ -29,12 +29,15 @@ Gemini installations. Private sync remains off unless you explicitly opt in.
 Open a supported local agent in your usual work folder and paste this exact
 prompt:
 
-> Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.
+> Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, ask only for its location; do not require a description. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.
 
-If the folder is not registered, the agent asks for its location, purpose, and
-your desired outcome. It previews the project connection and waits for a fresh
-direct confirmation before applying it. Next it runs the local `dotaios
-resolve` contract to select that project, bounded context, relevant skill, and
+If the folder is not registered, the agent asks only for its location. Your
+task already supplies the desired outcome, and a description is optional. It
+previews the project connection and waits for a fresh direct confirmation before
+applying it. Next it runs the local `dotaios
+resolve` contract with the returned stable project ID to select that exact
+folder for the unchanged task—no description or repeated project name is
+needed—then resolves bounded context, relevant skill, and
 at most one configured read-only tool route. Resolution recommends; it never
 executes or approves the action.
 

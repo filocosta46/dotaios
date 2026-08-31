@@ -17,24 +17,31 @@ The project source code remains in its own repository with its own Git history.
 Keep the repository wherever it already is and connect its folder once. The
 public first-task flow does not move or copy it and does not ask the person to
 design agent instruction files. When no project is connected, the local agent
-asks for the folder, its purpose, and the desired outcome. It runs this as a
-read-only preview:
+asks only for the folder; the task already carries the desired outcome. A
+description is optional and improves natural-language matching, but it never
+blocks connection. The agent runs this as a read-only preview:
 
 ```bash
-dotaios project add <folder> --purpose <purpose> --json
+dotaios project add <folder> --json
 ```
 
 Only a fresh direct confirmation permits the same registration with the
 displayed `--operation-id`, displayed `--plan-fingerprint`, and `--apply`.
 
+The apply receipt returns the connected project's stable ID. The local agent
+uses that ID immediately to prepare the path-free proposal for the same task;
+you do not need to repeat the folder name, invent a description, or rewrite the
+task so it matches metadata. This selection still does not reveal the folder or
+approve work.
+
 After that one-time connection, ordinary task text can match at most one active
-registered project. A match comes only from the registered name, slug, purpose,
-repository name, and the presence—not the contents—of native convention files.
+registered project. A match comes only from the registered name, slug, optional
+purpose, repository name, and the presence—not the contents—of native convention files.
 It is not an AIOS recommendation, safety claim, or claim that the repository can
 complete the task. An already attached registered project stays attached when it
 owns the task. If there is no match, connect the existing folder with the preview
-above, or make the action concrete and name the connected project; DotAIOS has no
-repository catalog to fall back to.
+above; the apply receipt selects that exact new registration for the unchanged
+task. DotAIOS has no remote repository catalog to fall back to.
 
 Before approval, use this generic first-action wording:
 

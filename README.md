@@ -75,14 +75,17 @@ npx dotaios@2.0.15 doctor
 
 In a supported local agent, paste:
 
-> Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, also ask for its location and what it is for. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.
+> Help me with one useful task in an existing work folder. Ask what I want to accomplish. If the folder is not connected, ask only for its location; do not require a description. Explain what you understand, propose exactly one action, and wait for my explicit approval before acting.
 
-If the folder is not connected yet, the agent asks for its location, purpose,
-and your desired outcome. DotAIOS previews the connection first and waits for a
-fresh confirmation before recording it. It then resolves only that project's
-bounded context and relevant workflow. The agent explains what it understood,
-proposes one exact action, and waits for another fresh direct approval. A
-decline performs no proposed work and no further DotAIOS write.
+If the folder is not connected yet, the agent asks only for its location; your
+task already supplies the desired outcome, and a description is optional.
+DotAIOS previews the connection first and waits for a fresh confirmation before
+recording it. It then resolves only that project's bounded context and relevant
+workflow by using the stable project ID returned by the connection; you do not
+need to repeat the folder name or invent matching metadata. The agent explains
+what it understood, proposes one exact action, and
+waits for another fresh direct approval. A decline performs no proposed work
+and no further DotAIOS write.
 
 A browser-only chat cannot access a local work folder or run the local DotAIOS
 commands. Continue in Claude Code, Codex, or another supported local agent on

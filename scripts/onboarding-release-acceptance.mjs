@@ -17,6 +17,15 @@ const MAX_ARCHIVE_ENTRIES = 4_096;
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
 const THIRD_PARTY_NOTICES_SHA256 = "04ee3214c012182756d36e55863cb62ea8923e1032baea955c4c10d8f648f14a";
 export const ADMISSION_NPM_VERSION = "11.6.4";
+export const PACKAGE_ADMISSION_ASSERTION_KEYS = Object.freeze([
+  "archive_regular_files_only",
+  "artifact_identity_stable",
+  "bundled_graph_complete",
+  "candidate_loaded_without_ambient_modules",
+  "lifecycle_scripts_absent",
+  "shrinkwrap_admitted",
+  "third_party_notices_admitted",
+]);
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 if (isMain()) {
@@ -312,15 +321,9 @@ export function admitPackageArtifact({ artifact, sourceCommit }) {
       payload_sha256: payloadSha256,
       dependency_graph_sha256: dependencyGraph.sha256,
     },
-    assertions: {
-      archive_regular_files_only: true,
-      artifact_identity_stable: true,
-      bundled_graph_complete: true,
-      candidate_loaded_without_ambient_modules: true,
-      lifecycle_scripts_absent: true,
-      shrinkwrap_admitted: true,
-      third_party_notices_admitted: true,
-    },
+    assertions: Object.fromEntries(
+      PACKAGE_ADMISSION_ASSERTION_KEYS.map((key) => [key, true])
+    ),
   };
 }
 
