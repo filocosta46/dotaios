@@ -32,14 +32,31 @@ export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
   "repository-skill"
 ]);
 const CONVENTION_KINDS = new Set(PROJECT_NATIVE_CONVENTION_KINDS);
-const ROUTE_PURPOSE_FILLER_TOKENS = new Set([
-  "a", "an", "the", "my", "me", "please", "for", "of", "and", "or"
+const ROUTE_ACTION_VERBS = new Set([
+  "add", "analyze", "approve", "archive", "assess", "audit", "bill", "build", "change",
+  "check", "clean",
+  "collect", "commit", "compare", "configure", "connect", "convert", "coordinate", "copy",
+  "create", "debug", "delete", "deploy", "design", "document", "draft", "edit", "evaluate", "export",
+  "fix", "generate", "import", "implement", "inspect", "install", "integrate", "investigate",
+  "launch", "maintain", "measure", "merge", "migrate", "monitor", "move", "open", "optimize",
+  "organize", "package", "patch", "plan", "prepare", "publish", "pull", "push", "reconcile",
+  "read", "refactor", "release", "remove", "rename", "report", "research",
+  "resolve", "restore", "review", "run", "scan", "schedule", "search", "secure", "ship",
+  "simplify", "summarize", "sync", "test", "track", "troubleshoot", "update", "upgrade",
+  "validate", "verify", "write"
 ]);
-const ROUTE_ACTION_TOKENS = new Set([
-  "add", "analyze", "archive", "build", "change", "check", "create", "debug", "delete",
-  "design", "draft", "edit", "fix", "implement", "investigate", "migrate", "organize",
-  "plan", "prepare", "publish", "refactor", "release", "remove", "research", "review",
-  "report", "reporting", "reports", "run", "schedule", "ship", "test", "update", "verify", "write"
+const OPEN_ACTION_OBJECT_TOKENS = new Set([
+  "branch", "document", "file", "issue", "pr", "pull", "readme", "request", "ticket"
+]);
+const REQUEST_FILLER_TOKENS = new Set(["hey", "kindly", "please"]);
+const ACTION_REQUEST_PREFIXES = Object.freeze([
+  ["can", "you"],
+  ["could", "you"],
+  ["how", "do", "i"],
+  ["i", "need", "you", "to"],
+  ["i", "want", "you", "to"],
+  ["will", "you"],
+  ["would", "you"]
 ]);
 const MATCH_KIND_BY_FIELD = Object.freeze({
   slug: "slug_overlap",
@@ -202,32 +219,91 @@ function hasConcreteAction(intent, project) {
   const actionTokens = routeTokens(intent);
   const stableHandleTokens = [
     project.slug,
+    project.name,
     remoteBasename(project.repository)
   ].filter(Boolean).map(routeTokens);
-  const purposeTokens = new Set(routeTokens(project.purpose));
-  const handleTokenPositions = matchedTokenPositions(actionTokens, stableHandleTokens);
-  const hasExplicitAction = actionTokens.some((token, index) => (
-    ROUTE_ACTION_TOKENS.has(token) && !handleTokenPositions.has(index)
-  ));
-  if (handleTokenPositions.size > 0) return hasExplicitAction;
-  if (hasExplicitAction) return true;
-  const meaningfulTokens = actionTokens.filter((token) => !ROUTE_PURPOSE_FILLER_TOKENS.has(token));
-  return meaningfulTokens.length > 0
-    && meaningfulTokens.every((token) => purposeTokens.has(token));
+  const handleTokenPositions = matchedHandleTokenPositions(actionTokens, stableHandleTokens);
+  const action = concreteAction(intent, actionTokens, stableHandleTokens);
+  if (action === null || (!action.explicitHandlePrefix && handleTokenPositions.has(action.index))) {
+    return false;
+  }
+  return actionTokens[action.index] !== "open"
+    || actionTokens.some((token, index) => (
+      index > action.index
+      && !handleTokenPositions.has(index)
+      && OPEN_ACTION_OBJECT_TOKENS.has(token)
+    ));
 }
 
-function matchedTokenPositions(tokens, sequences) {
-  const positions = new Set();
-  for (const sequence of sequences) {
-    if (sequence.length === 0 || sequence.length > tokens.length) continue;
-    for (let index = 0; index <= tokens.length - sequence.length; index += 1) {
-      if (!sequence.every((token, offset) => tokens[index + offset] === token)) continue;
-      for (let offset = 0; offset < sequence.length; offset += 1) {
-        positions.add(index + offset);
+function concreteAction(intent, tokens, handleSequences) {
+  const separatorIndex = String(intent || "").indexOf(":");
+  if (separatorIndex !== -1) {
+    const prefixTokens = routeTokens(String(intent).slice(0, separatorIndex));
+    const isHandlePrefix = handleSequences.some((sequence) => (
+      sequence.length === prefixTokens.length
+      && sequence.every((token, index) => prefixTokens[index] === token)
+    ));
+    if (isHandlePrefix) {
+      const suffixStart = actionRequestStart(tokens.slice(prefixTokens.length));
+      const actionIndex = prefixTokens.length + suffixStart;
+      if (ROUTE_ACTION_VERBS.has(tokens[actionIndex])) {
+        return { index: actionIndex, explicitHandlePrefix: true };
       }
     }
   }
+
+  const requestStart = actionRequestStart(tokens);
+  return ROUTE_ACTION_VERBS.has(tokens[requestStart])
+    ? { index: requestStart, explicitHandlePrefix: false }
+    : null;
+}
+
+function actionRequestStart(tokens) {
+  let index = 0;
+  let advanced = true;
+  while (advanced) {
+    advanced = false;
+    while (REQUEST_FILLER_TOKENS.has(tokens[index])) {
+      index += 1;
+      advanced = true;
+    }
+    const prefix = ACTION_REQUEST_PREFIXES
+      .filter((candidate) => tokensStartWith(tokens.slice(index), candidate))
+      .sort((left, right) => right.length - left.length)[0];
+    if (prefix) {
+      index += prefix.length;
+      advanced = true;
+    }
+  }
+  return index;
+}
+
+function matchedHandleTokenPositions(tokens, sequences) {
+  const positions = new Set();
+  const uniqueSequences = [...new Map(
+    sequences.map((sequence) => [sequence.join("\u0000"), sequence])
+  ).values()].sort((left, right) => right.length - left.length);
+  for (const sequence of uniqueSequences) {
+    if (sequence.length === 0 || sequence.length > tokens.length) continue;
+    const matchingIndexes = [];
+    for (let index = 0; index <= tokens.length - sequence.length; index += 1) {
+      if (!sequence.every((token, offset) => tokens[index + offset] === token)) continue;
+      matchingIndexes.push(index);
+    }
+    if (matchingIndexes.length === 0) continue;
+    const overlappingIndex = matchingIndexes.find((index) => (
+      sequence.every((_, offset) => positions.has(index + offset))
+    ));
+    const selectedIndex = overlappingIndex ?? matchingIndexes.at(-1);
+    for (let offset = 0; offset < sequence.length; offset += 1) {
+      positions.add(selectedIndex + offset);
+    }
+  }
   return positions;
+}
+
+function tokensStartWith(tokens, prefix) {
+  return prefix.every((token, index) => tokens[index] === token);
 }
 
 function routeTokens(value) {

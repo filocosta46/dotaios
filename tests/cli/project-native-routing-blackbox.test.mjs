@@ -289,7 +289,7 @@ test("AE1-AE6: one approval-bound journey connects, routes, refuses drift, and s
 
   const readmeBefore = await fs.readFile(planning.readmePath, "utf8");
   const explanationDrift = readmeBefore
-    .replace(/^name:.*$/mu, "name: \"" + approvedAction + "\"")
+    .replace(/^name:.*$/mu, "name: \"Weekly launch priorities\"")
     .replace(/^description:.*$/mu, "description: \"Archive unrelated material.\"");
   assert.notEqual(explanationDrift, readmeBefore, "fixture metadata drift must change the registration");
   const originalReadLimits = guardedEnvironment.DOTAIOS_GUARDED_READ_LIMITS;

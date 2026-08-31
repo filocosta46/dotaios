@@ -4,15 +4,23 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Project routing now requires a recognized leading action verb outside every
+  distinct selected-project handle, so bare noun matches and vague reference
+  questions fail closed without suppressing explicit commands such as
+  `review review` or `Code Review: review this`.
+
 ## [2.0.14] - 2026-08-30
 
 ### Added
 
-- Task-first capability routing now resolves curated external project tools
-  without exposing provider-specific setup to the person asking for help.
+- Task-first resolution now returns one structured local result for verified
+  project context and any matching governing skill, or for an explicitly
+  configured read-only tool.
 - Approval-bound project routing discovers an explicitly registered project,
-  binds the exact approved action and project conventions, and hands execution
-  to one fresh context rooted at that project.
+  binds the exact approved action and project conventions, and returns advisory
+  instructions for one fresh host context rooted at that project.
 
 ### Fixed
 
