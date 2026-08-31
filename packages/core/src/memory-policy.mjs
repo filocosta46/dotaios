@@ -15,7 +15,8 @@ const FIRST_MESSAGE_MODES = Object.freeze([
 export function resolveMemoryPolicy({
   mode,
   project,
-  firstUserMessage
+  firstUserMessage,
+  allowDeferredProject = false
 } = {}) {
   const projectSelector = normalizeProjectSelector(project);
   const firstMessageMode = detectMemoryModeFromFirstMessage(firstUserMessage);
@@ -31,7 +32,7 @@ export function resolveMemoryPolicy({
   ) {
     throw memoryPolicyError("Cannot combine shared memory with a project selector.");
   }
-  if (selectedMode === "project" && !projectSelector) {
+  if (selectedMode === "project" && !projectSelector && !allowDeferredProject) {
     throw memoryPolicyError("A project selector is required for This project memory.");
   }
 

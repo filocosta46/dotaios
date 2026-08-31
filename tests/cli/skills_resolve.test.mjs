@@ -31,6 +31,7 @@ test("skills resolve matches a trigger phrase and returns the right skill", () =
   const result = run(["skills", "resolve", "plan my day", "--path", aiosPath]);
   assert.match(result.stdout, /plan-today/);
   assert.match(result.stdout, /skills\/plan-today\/SKILL\.md/);
+  assert.match(result.stdout, /confidence: 0\.72/);
 });
 
 test("skills resolve skips a linked top-level skill and routes real siblings", () => {
@@ -80,6 +81,8 @@ test("skills resolve --json returns the documented shape", () => {
   const top = payload.matches[0];
   assert.equal(top.name, "plan-today");
   assert.equal(typeof top.score, "number");
+  assert.equal(typeof top.confidence, "number");
+  assert.equal(top.ambiguous, false);
   assert.equal(typeof top.skillPath, "string");
   assert.ok(Array.isArray(top.triggers));
 });

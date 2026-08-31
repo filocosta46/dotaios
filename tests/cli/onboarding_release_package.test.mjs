@@ -8,6 +8,8 @@ import { gunzipSync, gzipSync } from "node:zlib";
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import {
+  admitDependencyGraph,
+  admitThirdPartyNotices,
   inspectPackageArchive,
 } from "../../scripts/onboarding-release-acceptance.mjs";
 
@@ -68,6 +70,38 @@ test("package identity survives runtime-dependent gzip encoding", () => {
   assert.equal(first.payloadSha256, second.payloadSha256);
 });
 
+test("package admission requires the reviewed third-party notices", () => {
+  const packageJson = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json")));
+  const shrinkwrap = JSON.parse(fs.readFileSync(path.join(repoRoot, "npm-shrinkwrap.json")));
+  const dependencyGraph = admitDependencyGraph({ packageJson, shrinkwrap });
+  assert.throws(
+    () => admitThirdPartyNotices({ entries: new Map(), dependencyGraph }),
+    /third-party notices/i
+  );
+
+  const notices = fs.readFileSync(path.join(repoRoot, "THIRD-PARTY-NOTICES.md"));
+  assert.doesNotThrow(() => admitThirdPartyNotices({
+    entries: new Map([["package/THIRD-PARTY-NOTICES.md", notices]]),
+    dependencyGraph
+  }));
+  const tampered = Buffer.from(notices);
+  tampered[tampered.length - 1] ^= 1;
+  assert.throws(
+    () => admitThirdPartyNotices({
+      entries: new Map([["package/THIRD-PARTY-NOTICES.md", tampered]]),
+      dependencyGraph
+    }),
+    /reviewed license inventory/i
+  );
+  assert.throws(
+    () => admitThirdPartyNotices({
+      entries: new Map([["package/THIRD-PARTY-NOTICES.md", notices]]),
+      dependencyGraph: { ...dependencyGraph, sha256: "0".repeat(64) }
+    }),
+    /admitted dependency graph/i
+  );
+});
+
 test("package admission extracts with owned OS tools and returns a bounded package verdict", { timeout: 120_000 }, (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-package-admission-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -107,6 +141,7 @@ test("package admission extracts with owned OS tools and returns a bounded packa
     candidate_loaded_without_ambient_modules: true,
     lifecycle_scripts_absent: true,
     shrinkwrap_admitted: true,
+    third_party_notices_admitted: true,
   });
   assert.ok(JSON.stringify(receipt).length < 2_000);
   assert.equal(JSON.stringify(receipt).includes(root), false, "private paths must not enter receipts");

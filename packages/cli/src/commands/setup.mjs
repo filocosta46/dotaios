@@ -452,7 +452,7 @@ async function printSetupPreview(aiosPath, args, { verbose = false } = {}) {
   console.log(verbose
     ? "- Conversation saving: may add a managed client hook; 30-day backfill reads local history into ~/aios."
     : "- Conversation saving: can connect supported apps; 30-day backfill reads local history into ~/aios.");
-  console.log(`- Lightpanda ${LIGHTPANDA_VERSION}: downloads an optional SHA-256-verified local browser binary.`);
+  console.log(`- Lightpanda ${LIGHTPANDA_VERSION}: downloads an optional SHA-256-verified local browser binary; Lightpanda is a separate AGPL-3.0 program from https://github.com/lightpanda-io/browser.`);
   console.log("");
   console.log("After setup, verify with: dotaios doctor");
   if (verbose) {
@@ -1256,7 +1256,7 @@ async function setupLightpanda({ nonInteractive, installRequested }) {
     try {
       console.log("");
       const answer = await rl.question(
-        `Install optional Lightpanda ${LIGHTPANDA_VERSION} for JavaScript-rendered pages? The download is SHA-256 verified. (y/N): `
+        `Install optional Lightpanda ${LIGHTPANDA_VERSION} for JavaScript-rendered pages? Lightpanda is a separate AGPL-3.0 program from https://github.com/lightpanda-io/browser; the download is SHA-256 verified. (y/N): `
       );
       approved = explicitOptIn(answer);
     } finally {

@@ -167,3 +167,33 @@ test("Shared updates stay unscoped and separate identical saves remain distinct"
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a busy event writer cannot leave a signal for a failed update", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-update-busy-pair-"));
+  const aiosPath = path.join(root, "aios");
+  try {
+    const initialized = run(["init", "--path", aiosPath, "--yes"]);
+    assert.equal(initialized.status, 0, initialized.stderr);
+    const eventsPath = path.join(aiosPath, "memory", "events.jsonl");
+    fs.mkdirSync(path.dirname(eventsPath), { recursive: true });
+    fs.writeFileSync(`${eventsPath}.lock`, JSON.stringify({
+      pid: process.pid,
+      ts: Date.now(),
+      token: "held-by-test"
+    }));
+
+    const result = run(["update", "BUSY_UPDATE_PAIR_CANARY", "--path", aiosPath]);
+
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /memory writer lock/i);
+    const signalText = fs.existsSync(path.join(aiosPath, "memory", "signals"))
+      ? fs.readdirSync(path.join(aiosPath, "memory", "signals"))
+          .filter((name) => name.endsWith(".jsonl"))
+          .map((name) => fs.readFileSync(path.join(aiosPath, "memory", "signals", name), "utf8"))
+          .join("\n")
+      : "";
+    assert.doesNotMatch(signalText, /BUSY_UPDATE_PAIR_CANARY/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

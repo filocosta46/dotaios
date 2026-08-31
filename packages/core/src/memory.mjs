@@ -214,6 +214,69 @@ export async function appendSignal(signalsDir, { type, project, domain, summary,
   return entry;
 }
 
+/**
+ * Save one `dotaios update` record to both routed representations while the
+ * canonical event writer lock is held. The event is written first so a busy
+ * writer cannot leave a signal for a command that reports failure. If the
+ * signal append fails, the still-locked event append is rolled back.
+ */
+export async function appendUpdateRecord({ signalsDir, eventsPath, record }, options = {}) {
+  const fileSystem = options.filesystem || fs;
+  const now = typeof options.now === "function" ? options.now() : new Date();
+  const entry = {
+    ts: now.toISOString(),
+    type: record.type || "update",
+    ...(record.project && { project: record.project }),
+    ...(record.domain && { domain: record.domain }),
+    ...(record.summary && { summary: record.summary }),
+    ...(record.source && { source: record.source }),
+    ...Object.fromEntries(Object.entries(record).filter(([key]) => (
+      !["type", "project", "domain", "summary", "source"].includes(key)
+    )))
+  };
+  const signalPath = path.join(signalsDir, `${isoDate(now)}.jsonl`);
+  const line = formatJsonlEntry(entry);
+
+  await withEventStoreLock(eventsPath, async () => {
+    await recoverPendingArchive(eventsPath, fileSystem);
+    let originalEventSize = 0;
+    try {
+      originalEventSize = (await fileSystem.stat(eventsPath)).size;
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    await fileSystem.appendFile(eventsPath, line);
+    try {
+      await fileSystem.mkdir(signalsDir, { recursive: true });
+      await fileSystem.appendFile(signalPath, line);
+    } catch (error) {
+      try {
+        await fileSystem.truncate(eventsPath, originalEventSize);
+      } catch (rollbackError) {
+        throw new AggregateError(
+          [error, rollbackError],
+          "Update signal failed and the paired event could not be rolled back."
+        );
+      }
+      throw error;
+    }
+  }, {
+    ...options,
+    lockRetryDelaysMs: options.lockRetryDelaysMs || [25, 50, 100, 200, 400, 800, 1600]
+  });
+
+  const aiosPath = aiosPathFromEvents(eventsPath);
+  await maybeMaintain(aiosPath);
+  if (aiosPath && entry.project) {
+    try {
+      await writeProjectLog(aiosPath, entry.project);
+    } catch {
+      // Live log projection is best-effort — never break a committed update.
+    }
+  }
+  return entry;
+}
+
 // --- Filter operations ---
 
 /**

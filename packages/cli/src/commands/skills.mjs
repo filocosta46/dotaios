@@ -4,7 +4,7 @@ import path from "node:path";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { defaultAiosPath, expandHome } from "../../../core/src/paths.mjs";
 import { collectSkills, planTriggerVisibility } from "../../../core/src/skills.mjs";
-import { rankSkills, resolveIntent, renderBootContext } from "../../../core/src/skill-resolver.mjs";
+import { rankSkillMatches, renderBootContext } from "../../../core/src/skill-resolver.mjs";
 import { inspectSkillHealth } from "../../../core/src/skill-health.mjs";
 import { activateCommand } from "./activate.mjs";
 import { formatProbeResult, runSkillInvocationProbe } from "../lib/skill-invocation-probe.mjs";
@@ -400,7 +400,7 @@ async function resolveSkillCommand(args) {
     return;
   }
 
-  const ranked = rankSkills(options.intent, skills, { skillsDir });
+  const ranked = rankSkillMatches(options.intent, skills, { skillsDir });
 
   if (ranked.length === 0) {
     if (options.json) {
@@ -425,6 +425,8 @@ async function resolveSkillCommand(args) {
         description: entry.description,
         triggers: entry.triggers,
         score: round(entry.score),
+        confidence: round(entry.confidence),
+        ambiguous: entry.ambiguous,
         reason: entry.reason,
         skillPath: entry.skillPath
       }))
@@ -456,10 +458,9 @@ async function resolveSkillCommand(args) {
 }
 
 function printMatchHeader(entry) {
-  const confidence = entry.score >= 100 ? 1 : Math.min(1, entry.score);
   console.log(`${entry.name} — ${entry.description || "(no description)"}`);
   console.log(`  dir:       ${entry.dir}`);
-  console.log(`  confidence: ${confidence.toFixed(2)} (${entry.reason})`);
+  console.log(`  confidence: ${entry.confidence.toFixed(2)} (${entry.reason})`);
   if (entry.triggers.length) {
     console.log(`  triggers:  ${entry.triggers.join(" · ")}`);
   }
