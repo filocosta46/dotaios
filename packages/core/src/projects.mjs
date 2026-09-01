@@ -142,17 +142,26 @@ export async function planProjectRegistration(options = {}) {
   const domain = normalizeDomains(options.domain ?? existing?.metadata.domain ?? ["build"]);
   const explicitRepoUrlSupplied = options.repoUrl !== undefined && options.repoUrl !== null;
   const explicitRepoUrl = readOptionalString(options.repoUrl);
+  let explicitRemote = null;
   if (explicitRepoUrlSupplied) {
-    const explicitRemote = classifyProjectRemote(explicitRepoUrl);
+    explicitRemote = classifyProjectRemote(explicitRepoUrl);
     if (!explicitRemote.safe) {
       throw unsafeExplicitProjectRemoteError(explicitRemote.reason);
     }
   }
   const discoveredRepoUrl = await context.readRepoUrl(requestedProjectPath);
+  const discoveredRemote = classifyProjectRemote(discoveredRepoUrl);
+  if (
+    explicitRemote
+    && (
+      !discoveredRemote.safe
+      || !projectRemotesMatch(explicitRemote.canonicalUrl, discoveredRemote.canonicalUrl)
+    )
+  ) {
+    throw new Error("The explicit project remote does not match the authoritative local Git remote.");
+  }
   const remoteCandidate = explicitRepoUrl
     ?? readOptionalString(discoveredRepoUrl)
-    ?? readOptionalString(existing?.metadata.repo_url)
-    ?? readOptionalString(existing?.metadata.repo)
     ?? null;
   const remote = classifyProjectRemote(remoteCandidate);
   const repoUrl = remote.safe ? remote.canonicalUrl : null;
@@ -1270,7 +1279,9 @@ function createContext(options) {
     options.statePath || defaultStatePath,
     homePath
   );
-  const readRepoUrl = options.readRepoUrl || readGitRemoteUrl;
+  const inspectRepoUrl = options.inspectRepoUrl
+    || ((projectPath) => inspectAuthoritativeProjectRemote(projectPath));
+  const readRepoUrl = options.readRepoUrl || inspectRepoUrl;
   return {
     aiosPath,
     createId: options.createId || randomUUID,
@@ -1279,9 +1290,7 @@ function createContext(options) {
     homePath,
     ownsStateDirectory: statePath === defaultStatePath,
     readRepoHead: options.readRepoHead || readGitHead,
-    inspectRepoUrl: options.inspectRepoUrl
-      || options.readRepoUrl
-      || ((projectPath) => inspectAuthoritativeProjectRemote(projectPath)),
+    inspectRepoUrl,
     readRepoUrl,
     statePath
   };
@@ -2203,16 +2212,6 @@ async function isDirectory(fileSystem, target) {
   } catch {
     return false;
   }
-}
-
-async function readGitRemoteUrl(projectPath) {
-  const originUrl = await gitOutput(projectPath, ["config", "--get", "remote.origin.url"]);
-  if (originUrl) return originUrl;
-
-  const remotes = await gitOutput(projectPath, ["remote"]);
-  const firstRemote = remotes?.split(/\r?\n/).map((remote) => remote.trim()).find(Boolean);
-  if (!firstRemote) return null;
-  return gitOutput(projectPath, ["config", "--get", `remote.${firstRemote}.url`]);
 }
 
 async function readGitHead(projectPath) {

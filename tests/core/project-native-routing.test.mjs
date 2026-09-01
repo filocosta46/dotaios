@@ -373,25 +373,20 @@ test("null remote metadata cannot downgrade a live remote-backed project to loca
   assert.doesNotMatch(JSON.stringify(proposal), /attacker|replaced|remote-downgrade\//);
 });
 
-test("a local-only registration refuses a live credential-bearing remote without disclosing it", async (t) => {
-  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
-  const fixture = await createRegisteredFixture(t, {
-    slug: "unsafe-live-remote",
-    purpose: null,
-    remote: "https://secret-token@example.invalid/customer/private.git",
-    conventions: []
-  });
-
-  const result = await resolveProjectRoute({
-    ...fixture.options,
-    intent: "Review the files in this folder",
-    projectSelector: "project-unsafe-live-remote-001",
-    supportedConventionKinds: []
-  });
-
-  assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_remote_unverified");
-  assert.doesNotMatch(JSON.stringify(result), /secret-token|example\.invalid|private\.git/);
+test("project add refuses a live credential-bearing remote without disclosing it", async (t) => {
+  await assert.rejects(
+    createRegisteredFixture(t, {
+      slug: "unsafe-live-remote",
+      purpose: null,
+      remote: "https://secret-token@example.invalid/customer/private.git",
+      conventions: []
+    }),
+    (error) => {
+      assert.match(error.message, /live local Git remote is unsafe/i);
+      assert.doesNotMatch(error.message, /secret-token|example\.invalid|private\.git/);
+      return true;
+    }
+  );
 });
 
 test("a malformed local Git config cannot be mistaken for a proven remote absence", async (t) => {

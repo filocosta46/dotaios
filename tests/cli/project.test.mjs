@@ -925,7 +925,7 @@ test("doctorProjects reports missing paths and remote mismatches without writing
   const report = await doctorProjects({
     aiosPath,
     statePath,
-    readRepoUrl: async (projectPath) => {
+    inspectRepoUrl: async (projectPath) => {
       if (projectPath === goodPath) return "git@github.com:acme/good.git";
       if (projectPath === mismatchPath) return "https://github.com/acme/actual.git";
       return null;

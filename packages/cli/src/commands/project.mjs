@@ -228,13 +228,6 @@ export async function projectCommand(args = [], dependencies = {}) {
       env: dependencies.env,
       filesystem: dependencies.fs
     });
-    const readRepoUrl = coreOptions.readRepoUrl || (async (repositoryPath) => {
-      try {
-        return await projectGit.readRepositoryRemote(repositoryPath);
-      } catch {
-        return null;
-      }
-    });
     const readRepoHead = coreOptions.readRepoHead || (async (repositoryPath) => {
       try {
         return await projectGit.readRepositoryHead(repositoryPath);
@@ -244,7 +237,6 @@ export async function projectCommand(args = [], dependencies = {}) {
     });
     const report = await doctorProjects({
       ...coreOptions,
-      readRepoUrl,
       readRepoHead,
       inspectWorkspaceBoundary: async () => {
         const outerGit = await mirrorGit.isRepositoryRoot();
