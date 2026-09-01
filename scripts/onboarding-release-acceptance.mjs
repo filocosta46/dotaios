@@ -60,6 +60,7 @@ export function buildPackageArtifact({ destination, dryRun = false, sourceCommit
     runNpm11([
       "ci", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund",
     ], stageRoot, "Install of the admitted dependency graph failed");
+    pruneBundledDependencyJunk(stageRoot);
     const packArgs = ["pack", "--ignore-scripts", "--silent"];
     if (dryRun) packArgs.push("--dry-run");
     packArgs.push("--pack-destination", path.resolve(destination));
@@ -609,6 +610,24 @@ function stagePackageSource(stageRoot, sourceCommit) {
     path.join(stageRoot, "package.json"),
     `${JSON.stringify({ ...manifest, gitHead: sourceCommit }, null, 2)}\n`,
   );
+}
+
+function pruneBundledDependencyJunk(stageRoot) {
+  const nodeModulesRoot = path.join(stageRoot, "node_modules");
+  const pending = [nodeModulesRoot];
+  const prunedDirectories = new Set(["test", "tests", ".yarn"]);
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const candidate = path.join(current, entry.name);
+      const stats = fs.lstatSync(candidate);
+      if (prunedDirectories.has(entry.name) || entry.name.endsWith(".map")) {
+        fs.rmSync(candidate, { recursive: stats.isDirectory(), force: false });
+      } else if (stats.isDirectory()) {
+        pending.push(candidate);
+      }
+    }
+  }
 }
 
 function listTrackedPackageFiles(sourceCommit, sourceEntries) {

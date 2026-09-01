@@ -34,6 +34,17 @@ test("the publishable package freezes one deterministic dependency graph", { tim
     inventory.includes("package/npm-shrinkwrap.json"),
     "the public package must carry the admitted npm dependency graph",
   );
+  const bundledJunk = inventory.filter((entry) => (
+    /^package\/node_modules\/.+\/(?:test|tests|\.yarn)\//.test(entry)
+    || /^package\/node_modules\/.+\.map$/.test(entry)
+  ));
+  assert.deepEqual(bundledJunk, [], "bundled dependency tests, Yarn state, and source maps must be pruned");
+  assert.equal(inventory.some((entry) => entry.endsWith("/jquery-1.9.1.js")), false);
+  assert.equal(inventory.some((entry) => entry.endsWith("/html5lib-tests.json")), false);
+  assert.equal(
+    inventory.some((entry) => entry.includes("package/node_modules/@mixmark-io/domino/.yarn/plugins/")),
+    false
+  );
 
   const manifest = JSON.parse(run("tar", ["-xOzf", first, "package/package.json"]).stdout);
   assert.equal(
