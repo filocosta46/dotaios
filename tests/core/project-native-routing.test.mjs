@@ -41,7 +41,7 @@ test("a fresh install with no machine-local project registry reports no match", 
   });
 
   assert.equal(result.status, "no_match");
-  assert.equal(result.reason, "no_registered_project_match");
+  assert.equal(result.reason, "no_registered_projects");
   assert.equal(result.route, null);
 });
 
@@ -75,7 +75,8 @@ test("EPR-003: ordinary intent returns one metadata-only registered project cand
     inspectConventionInventory: async (project) => {
       inspections.push(["conventions", project.slug]);
       return [convention("agents-md", "AGENTS.md", project.slug === "launch-work" ? "201" : "301")];
-    }
+    },
+    revalidateProjectRoot: async (project) => structuredClone(project.rootIdentity)
   };
 
   const result = await resolveProjectRoute({
@@ -140,7 +141,8 @@ test("a newly connected project can be proposed by exact registered identity wit
       projectSelector === selected.id || projectSelector === selected.slug ? [selected] : []
     ),
     inspectLiveRemote: async () => selected.repository,
-    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "219")]
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "219")],
+    revalidateProjectRoot: async (project) => structuredClone(project.rootIdentity)
   };
   const request = {
     intent: "Fix the failing tests",
@@ -168,6 +170,83 @@ test("a newly connected project can be proposed by exact registered identity wit
   }, dependencies);
   assert.equal(exact.status, "ready");
   assert.equal(exact.project.id, selected.id);
+});
+
+test("a purpose-free post-add selector preserves declarative actions that omit the new handle", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const selected = projectRecord({
+    id: "project-post-add-001",
+    slug: "post-add",
+    name: "post-add",
+    purpose: null,
+    repository: null
+  });
+  const dependencies = {
+    readProjectRegistrations: async ({ projectSelector }) => (
+      projectSelector === selected.id || projectSelector === null ? [selected] : []
+    ),
+    inspectLiveRemote: async () => null,
+    inspectConventionInventory: async () => [],
+    revalidateProjectRoot: async () => structuredClone(selected.rootIdentity)
+  };
+
+  for (const intent of [
+    "The login flow needs fixing",
+    "We need the login flow fixed",
+    "I'd like to fix the login flow"
+  ]) {
+    const request = {
+      intent,
+      projectSelector: selected.id,
+      supportedConventionKinds: []
+    };
+    const proposal = await resolveProjectRoute(request, dependencies);
+    const exact = await resolveProjectRoute({
+      ...request,
+      approvalBinding: proposal.approval_binding
+    }, dependencies);
+
+    assert.equal(proposal.status, "candidate", intent);
+    assert.equal(proposal.reason, "explicit_registered_project_candidate", intent);
+    assert.equal(exact.status, "ready", intent);
+  }
+
+  const referenceOnly = await resolveProjectRoute({
+    intent: "The login flow release notes",
+    projectSelector: selected.id,
+    supportedConventionKinds: []
+  }, dependencies);
+  assert.equal(referenceOnly.status, "no_match");
+  assert.equal(referenceOnly.reason, "no_registered_project_match");
+
+  const relationReferenceOnly = await resolveProjectRoute({
+    intent: "I need the login flow release notes",
+    projectSelector: selected.id,
+    supportedConventionKinds: []
+  }, dependencies);
+  assert.equal(relationReferenceOnly.status, "no_match");
+  assert.equal(relationReferenceOnly.reason, "no_registered_project_match");
+
+  for (const intent of [
+    "The login flow needs no fixing",
+    "The login flow should never be deployed",
+    "We need to not deploy the login flow"
+  ]) {
+    const negated = await resolveProjectRoute({
+      intent,
+      projectSelector: selected.id,
+      supportedConventionKinds: []
+    }, dependencies);
+    assert.equal(negated.status, "no_match", intent);
+    assert.equal(negated.reason, "no_registered_project_match", intent);
+  }
+
+  const implicitWithoutHandle = await resolveProjectRoute({
+    intent: "The login flow needs fixing",
+    supportedConventionKinds: []
+  }, dependencies);
+  assert.equal(implicitWithoutHandle.status, "no_match");
+  assert.equal(implicitWithoutHandle.reason, "no_registered_project_match");
 });
 
 test("a registered local folder with no remote or native convention remains approval-gated and routable", async (t) => {
@@ -290,7 +369,7 @@ test("null remote metadata cannot downgrade a live remote-backed project to loca
   });
 
   assert.equal(proposal.status, "refused");
-  assert.equal(proposal.reason, "project_identity_unverified");
+  assert.equal(proposal.reason, "project_remote_mismatch");
   assert.doesNotMatch(JSON.stringify(proposal), /attacker|replaced|remote-downgrade\//);
 });
 
@@ -311,7 +390,7 @@ test("a local-only registration refuses a live credential-bearing remote without
   });
 
   assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_identity_unverified");
+  assert.equal(result.reason, "project_remote_unverified");
   assert.doesNotMatch(JSON.stringify(result), /secret-token|example\.invalid|private\.git/);
 });
 
@@ -336,7 +415,7 @@ test("a malformed local Git config cannot be mistaken for a proven remote absenc
   });
 
   assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_identity_unverified");
+  assert.equal(result.reason, "project_remote_unverified");
   assert.doesNotMatch(JSON.stringify(result), /secret-token|example\.invalid|private\.git/);
 });
 
@@ -362,7 +441,7 @@ test("a Git inspection failure cannot be mistaken for a proven remote absence", 
   }, { execFileAsync: unavailableGit });
 
   assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_identity_unverified");
+  assert.equal(result.reason, "project_remote_unverified");
   assert.doesNotMatch(JSON.stringify(result), /injected Git inspection failure/);
 });
 
@@ -388,7 +467,7 @@ test("an impossible successful Git inspection cannot prove remote absence", asyn
     }, { execFileAsync: async () => inspection });
 
     assert.equal(result.status, "refused", name);
-    assert.equal(result.reason, "project_identity_unverified", name);
+    assert.equal(result.reason, "project_remote_unverified", name);
     assert.doesNotMatch(JSON.stringify(result), /secret diagnostic/, name);
   }
 });
@@ -416,7 +495,8 @@ test("R4: exact resolution preserves an approved separated match below the raw-s
     inspectLiveRemote: async (project) => project.repository,
     inspectConventionInventory: async (project) => [
       convention("agents-md", "AGENTS.md", project.id === "project-invoice-001" ? "211" : "212")
-    ]
+    ],
+    revalidateProjectRoot: async (project) => structuredClone(project.rootIdentity)
   };
   const intent = "Create billing reports";
   const candidate = await resolveProjectRoute({
@@ -818,6 +898,233 @@ test("R2: question-shaped explicit commands remain actionable", async () => {
   }
 });
 
+test("R5: natural task clauses can select one exact project handle without an imperative first word", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-dashboard-001",
+    slug: "dashboard",
+    name: "Dashboard",
+    purpose: "Maintain the product dashboard.",
+    repository: "https://github.com/customer/dashboard"
+  });
+  const dependencies = {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "dashboard")]
+  };
+
+  for (const intent of [
+    "I'd like to fix the login bug in dashboard",
+    "Let's deploy dashboard",
+    "We need to release dashboard",
+    "Help me deploy dashboard",
+    "The dashboard schedule needs updating before launch",
+    "Correggi il bug di accesso in dashboard",
+    "In dashboard correggi il bug di accesso",
+    "Aggiorna dashboard",
+    "Explain dashboard",
+    "Translate dashboard",
+    "Summarise dashboard",
+    "What broke in dashboard?",
+    "Why is dashboard failing?",
+    "We need dashboard fixed",
+    "I need dashboard updated",
+    "Dashboard must be deployed",
+    "Could dashboard be fixed?"
+  ]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, dependencies);
+
+    assert.equal(result.status, "candidate", intent);
+    assert.equal(result.project.slug, "dashboard", intent);
+  }
+});
+
+test("R5: natural routing keeps bare, navigational, generic, and multi-project text conservative", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const projects = [
+    projectRecord({
+      id: "project-dashboard-001",
+      slug: "dashboard",
+      name: "Dashboard",
+      purpose: "Maintain the product dashboard.",
+      repository: "https://github.com/customer/dashboard"
+    }),
+    projectRecord({
+      id: "project-billing-001",
+      slug: "billing",
+      name: "Billing",
+      purpose: "Maintain customer billing.",
+      repository: "https://github.com/customer/billing"
+    })
+  ];
+  const dependencies = {
+    readProjectRegistrations: async () => projects,
+    inspectLiveRemote: async (project) => project.repository,
+    inspectConventionInventory: async (project) => [convention("agents-md", "AGENTS.md", project.id)]
+  };
+
+  for (const intent of [
+    "dashboard",
+    "Go to dashboard",
+    "Switch to dashboard",
+    "Show me dashboard",
+    "Could you please show me dashboard",
+    "What is in dashboard?",
+    "The dashboard release notes",
+    "The dashboard release notes for next week's launch",
+    "Tell me everything you know about dashboard",
+    "What can you tell me about dashboard",
+    "There is a problem with dashboard",
+    "I have a question about dashboard",
+    "I need more information about dashboard",
+    "Something seems wrong in dashboard",
+    "I have absolutely no task for dashboard",
+    "This sentence has no task for dashboard",
+    "I am just casually mentioning dashboard",
+    "I need information about dashboard",
+    "Dashboard needs information",
+    "Dashboard needs release notes",
+    "Do not fix dashboard",
+    "I don't want to fix dashboard",
+    "No need to update dashboard",
+    "Never deploy dashboard",
+    "We do not need dashboard fixed",
+    "Dashboard does not need updating",
+    "Dashboard never needs updating",
+    "Non correggi il bug di accesso in dashboard",
+    "Fix it",
+    "Update stuff"
+  ]) {
+    const result = await resolveProjectRoute({
+      intent,
+      supportedConventionKinds: ["agents-md"]
+    }, dependencies);
+    assert.equal(result.status, "no_match", intent);
+    assert.equal(result.approval_binding, undefined, intent);
+    if (intent.toLowerCase().includes("dashboard")) {
+      assert.equal(result.reason, "concrete_action_required", intent);
+    }
+  }
+
+  const ambiguous = await resolveProjectRoute({
+    intent: "Compare dashboard and billing before launch",
+    supportedConventionKinds: ["agents-md"]
+  }, dependencies);
+  assert.equal(ambiguous.status, "ambiguous");
+  assert.equal(ambiguous.route, null);
+});
+
+test("R5: a Unicode-normalized handle keeps the same approval binding through exact routing", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-unicode-dashboard-001",
+    slug: "unicode-work",
+    name: "Ｄａｓｈｂｏａｒｄ",
+    purpose: null,
+    repository: "https://github.com/customer/unicode-work"
+  });
+  const dependencies = {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "unicode")],
+    revalidateProjectRoot: async () => structuredClone(project.rootIdentity)
+  };
+  const request = {
+    intent: "Fix dashboard",
+    supportedConventionKinds: ["agents-md"]
+  };
+
+  const candidate = await resolveProjectRoute(request, dependencies);
+  const exact = await resolveProjectRoute({
+    ...request,
+    projectSelector: project.id,
+    approvalBinding: candidate.approval_binding
+  }, dependencies);
+
+  assert.equal(candidate.status, "candidate");
+  assert.deepEqual(candidate.match, {
+    kind: "name_overlap",
+    confidence: 1,
+    fields: ["name"]
+  });
+  assert.equal(exact.status, "ready");
+  assert.equal(exact.project.id, project.id);
+});
+
+test("R6: an exact unhealthy project handle reports its failing health boundary", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = {
+    ...projectRecord({
+      id: "project-dashboard-001",
+      slug: "dashboard",
+      name: "Dashboard",
+      purpose: "Maintain the product dashboard.",
+      repository: "https://github.com/customer/dashboard"
+    }),
+    pathAvailable: false,
+    projectPath: null,
+    mappingPath: null
+  };
+
+  const result = await resolveProjectRoute({
+    intent: "Fix dashboard",
+    supportedConventionKinds: ["agents-md"]
+  }, {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => assert.fail("an unavailable project must not reach Git inspection"),
+    inspectConventionInventory: async () => assert.fail("an unavailable project must not reach convention inspection")
+  });
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.reason, "project_path_unavailable");
+  assert.equal(result.route, null);
+});
+
+test("R6: exact approval preserves a health failure introduced after the candidate", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const healthy = projectRecord({
+    id: "project-health-drift-001",
+    slug: "health-drift",
+    name: "Health drift",
+    purpose: "Repair health drift failures.",
+    repository: "https://github.com/customer/health-drift"
+  });
+  let reads = 0;
+  const dependencies = {
+    readProjectRegistrations: async () => {
+      reads += 1;
+      return [reads === 1 ? healthy : {
+        ...healthy,
+        mappingStatus: "unmapped",
+        pathAvailable: false,
+        projectPath: null,
+        mappingPath: null
+      }];
+    },
+    inspectLiveRemote: async () => healthy.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "health")]
+  };
+  const request = {
+    intent: "Fix health-drift",
+    supportedConventionKinds: ["agents-md"]
+  };
+  const candidate = await resolveProjectRoute(request, dependencies);
+  const exact = await resolveProjectRoute({
+    ...request,
+    projectSelector: healthy.id,
+    approvalBinding: candidate.approval_binding
+  }, dependencies);
+
+  assert.equal(candidate.status, "candidate");
+  assert.equal(exact.status, "refused");
+  assert.equal(exact.reason, "project_path_unavailable");
+  assert.equal(exact.route, null);
+  assert.doesNotMatch(JSON.stringify(exact), /\/customer\/projects/);
+});
+
 test("R2: an action outside an action-named project handle remains actionable", async () => {
   const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
   const project = projectRecord({
@@ -885,6 +1192,7 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID requires the candidate bind
   const catalogSelectors = [];
   let remoteReads = 0;
   let conventionReads = 0;
+  let finalRootReads = 0;
 
   const dependencies = {
     readProjectRegistrations: async ({ projectSelector }) => {
@@ -898,6 +1206,10 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID requires the candidate bind
     inspectConventionInventory: async () => {
       conventionReads += 1;
       return structuredClone(allConventions);
+    },
+    revalidateProjectRoot: async () => {
+      finalRootReads += 1;
+      return structuredClone(project.rootIdentity);
     }
   };
   const proposal = await resolveProjectRoute({
@@ -944,6 +1256,7 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID requires the candidate bind
       project_id: "project-launch-001",
       project_slug: "launch-work",
       location: "/customer/projects/launch-work",
+      root_identity: project.rootIdentity,
       advisory: true,
       revalidated_at_exact_resolution: true,
       fresh_context_required: true,
@@ -957,6 +1270,78 @@ test("EPR-001, EPR-005, and EPR-015: exact stable ID requires the candidate bind
   assert.deepEqual(catalogSelectors, [null, "project-launch-001"]);
   assert.equal(remoteReads, 2, "each router call observes the authoritative live remote once");
   assert.equal(conventionReads, 2, "each router call observes convention identities once");
+  assert.equal(finalRootReads, 1, "ready emission performs one final root identity observation");
+});
+
+test("R4: exact resolution refuses when the final root identity revalidation fails", async () => {
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const project = projectRecord({
+    id: "project-root-race-001",
+    slug: "root-race",
+    name: "Root race",
+    purpose: "Prepare the root race launch.",
+    repository: "https://github.com/customer/root-race"
+  });
+  let finalRootReads = 0;
+  const dependencies = {
+    readProjectRegistrations: async () => [project],
+    inspectLiveRemote: async () => project.repository,
+    inspectConventionInventory: async () => [convention("agents-md", "AGENTS.md", "root-race")],
+    revalidateProjectRoot: async () => {
+      finalRootReads += 1;
+      throw new Error("root changed after convention inspection");
+    }
+  };
+  const request = {
+    intent: "Prepare the root race launch.",
+    supportedConventionKinds: ["agents-md"]
+  };
+  const candidate = await resolveProjectRoute(request, dependencies);
+  const exact = await resolveProjectRoute({
+    ...request,
+    projectSelector: project.id,
+    approvalBinding: candidate.approval_binding
+  }, dependencies);
+
+  assert.equal(candidate.status, "candidate");
+  assert.equal(finalRootReads, 1);
+  assertPathFreeIdentityRefusal(exact);
+});
+
+test("R4: route-root revalidation catches a symlink swap between pathname checks", async (t) => {
+  const { revalidateProjectRouteRoot } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-root-recheck-"));
+  const projectPath = path.join(fixtureRoot, "project");
+  const movedPath = path.join(fixtureRoot, "project-moved");
+  await fs.mkdir(projectPath);
+  t.after(() => fs.rm(fixtureRoot, { recursive: true, force: true }));
+  const stats = await fs.lstat(projectPath, { bigint: true });
+  let lstatCalls = 0;
+  const filesystem = {
+    lstat: async (target, options) => {
+      lstatCalls += 1;
+      if (lstatCalls === 3) {
+        const originalStats = await fs.lstat(target, options);
+        await fs.rename(projectPath, movedPath);
+        await fs.symlink(movedPath, projectPath, "dir");
+        return originalStats;
+      }
+      return fs.lstat(target, options);
+    },
+    realpath: (...args) => fs.realpath(...args)
+  };
+
+  await assert.rejects(
+    revalidateProjectRouteRoot({
+      location: projectPath,
+      root_identity: {
+        type: "directory",
+        dev: stats.dev.toString(),
+        ino: stats.ino.toString()
+      }
+    }, filesystem),
+    /changed during revalidation/
+  );
 });
 
 test("R3: approval binding normalizes action, host support, remotes, and observation ordering with framed fields", async () => {
@@ -1165,7 +1550,7 @@ test("EPR-004: tied lexical matches are ambiguous and disclose handles only", as
   assert.deepEqual(result, {
     status: "ambiguous",
     project: null,
-    match: { kind: "low_separation", confidence: 0.5, fields: ["metadata"] },
+    match: { kind: "exact_handle_collision", confidence: 0.5, fields: ["name"] },
     routability: null,
     route: null,
     reason: "multiple_registered_project_matches",
@@ -1410,7 +1795,8 @@ test("EPR-014: stalled local Git inspection returns a path-free no-match within 
     deadline
   ]);
 
-  assert.equal(result.status, "no_match");
+  assert.equal(result.status, "refused");
+  assert.equal(result.reason, "project_remote_unverified");
   assert.equal(result.route, null);
   assert.ok(observedTimeouts.length > 0);
   assert.ok(observedTimeouts.every((timeout) => Number.isSafeInteger(timeout) && timeout > 0));
@@ -1627,7 +2013,8 @@ test("EPR-001: origin remains authoritative while multiple non-origin fallbacks 
     intent: "Prepare the unique remote routing launch.",
     supportedConventionKinds: ["agents-md"]
   });
-  assert.equal(withoutOrigin.status, "no_match");
+  assert.equal(withoutOrigin.status, "refused");
+  assert.equal(withoutOrigin.reason, "project_remote_unverified");
   assert.equal(withoutOrigin.route, null);
   assert.doesNotMatch(JSON.stringify(withoutOrigin), new RegExp(fixture.projectPath));
 });
@@ -1683,7 +2070,8 @@ test("EPR-001: exactly one safe fallback remote is accepted and conflicting orig
     intent: "Prepare the unique fallback routing audit.",
     supportedConventionKinds: ["agents-md"]
   });
-  assert.equal(conflictingOrigin.status, "no_match");
+  assert.equal(conflictingOrigin.status, "refused");
+  assert.equal(conflictingOrigin.reason, "project_remote_unverified");
   assert.equal(conflictingOrigin.route, null);
 });
 
@@ -1739,14 +2127,16 @@ test("EPR-001: live remote authority is local-only and requires a local fetch re
   }, { execFileAsync });
 
   const inherited = await resolve();
-  assert.equal(inherited.status, "no_match");
+  assert.equal(inherited.status, "refused");
+  assert.equal(inherited.reason, "project_remote_mismatch");
 
   await run("git", [
     "-C", fixture.projectPath, "config", "--local",
     "remote.origin.url", registeredRemote
   ]);
   const missingFetch = await resolve();
-  assert.equal(missingFetch.status, "no_match");
+  assert.equal(missingFetch.status, "refused");
+  assert.equal(missingFetch.reason, "project_remote_unverified");
 
   await run("git", [
     "-C", fixture.projectPath, "config", "--local",
@@ -1782,7 +2172,8 @@ test("EPR-001: an invalidly named second local fetch remote refuses fallback aut
     supportedConventionKinds: ["agents-md"]
   });
 
-  assert.equal(result.status, "no_match");
+  assert.equal(result.status, "refused");
+  assert.equal(result.reason, "project_remote_unverified");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.projectPath));
 });
@@ -1970,7 +2361,7 @@ test("EPR-002: an adapter cannot claim a linked, invented, or off-contract conve
   });
 
   assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_identity_unverified");
+  assert.equal(result.reason, "project_conventions_unverified");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), /\/customer\/projects\/unsafe-convention/);
 });
@@ -2130,7 +2521,7 @@ test("EPR-001: two forged IDs mapped to one root are ineligible for routing", as
       approvalBinding: "0".repeat(64)
     });
     assert.equal(exact.status, "refused", projectSelector);
-    assert.equal(exact.reason, "project_identity_unverified", projectSelector);
+    assert.equal(exact.reason, "project_mapping_unverified", projectSelector);
     assert.equal(exact.route, null, projectSelector);
     assert.doesNotMatch(JSON.stringify(exact), new RegExp(fixture.projectPath));
   }
@@ -2238,12 +2629,16 @@ test("EPR-001 and EPR-004: exact slug selection retains global duplicate-ID conf
   });
 
   assert.equal(result.status, "refused");
-  assert.equal(result.reason, "project_identity_unverified");
+  assert.equal(result.reason, "project_mapping_unverified");
   assert.equal(result.route, null);
   assert.doesNotMatch(JSON.stringify(result), new RegExp(fixture.projectPath));
 });
 
 function projectRecord({ id, slug, name, purpose, repository }) {
+  const numericId = String(Array.from(id).reduce(
+    (total, character) => total + character.codePointAt(0),
+    0
+  ));
   return {
     id,
     slug,
@@ -2256,7 +2651,7 @@ function projectRecord({ id, slug, name, purpose, repository }) {
     mappingStatus: "verified",
     pathAvailable: true,
     placement: "external",
-    rootIdentity: { type: "directory", dev: "101", ino: id }
+    rootIdentity: { type: "directory", dev: "101", ino: numericId }
   };
 }
 

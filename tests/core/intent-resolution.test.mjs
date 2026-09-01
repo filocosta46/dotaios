@@ -238,6 +238,46 @@ test("R4 and R6: unresolved project routes restart safely without inventing an e
       reason: "no_registered_project_match"
     },
     {
+      status: "no_match",
+      project: null,
+      match: null,
+      routability: null,
+      route: null,
+      reason: "no_registered_projects"
+    },
+    {
+      status: "no_match",
+      project: null,
+      match: null,
+      routability: null,
+      route: null,
+      reason: "concrete_action_required"
+    },
+    {
+      status: "refused",
+      project: null,
+      match: null,
+      routability: null,
+      route: null,
+      reason: "project_path_unavailable"
+    },
+    ...[
+      "project_inactive",
+      "project_mapping_unverified",
+      "project_placement_unsafe",
+      "project_remote_unverified",
+      "project_remote_mismatch",
+      "project_conventions_unverified",
+      "discovery_bound_exceeded"
+    ].map((reason) => ({
+      status: "refused",
+      project: null,
+      match: null,
+      routability: null,
+      route: null,
+      reason
+    })),
+    {
       status: "refused",
       project: null,
       match: null,
@@ -256,13 +296,28 @@ test("R4 and R6: unresolved project routes restart safely without inventing an e
     const guidance = `${result.recovery.action || ""} ${result.next_action.summary || ""}`;
 
     assert.equal(result.location, null, projectRoute.status);
-    assert.match(guidance, /implicit discovery|discover again|rerun discovery|connect/i, projectRoute.status);
-    if (projectRoute.status !== "no_match") {
-      assert.doesNotMatch(guidance, /--project|retry exact resolution|choose one displayed slug/i, projectRoute.status);
-    } else {
+    assert.match(guidance, /implicit discovery|discover again|rerun discovery|connect|project list|project doctor/i, projectRoute.reason);
+    if (projectRoute.reason === "no_registered_projects") {
       assert.match(guidance, /project add <folder> --json/i);
       assert.match(guidance, /--operation-id[\s\S]*--plan-fingerprint[\s\S]*--apply --json/i);
       assert.match(guidance, /registered_project stable ID/i);
+    } else if (projectRoute.reason === "no_registered_project_match") {
+      assert.match(guidance, /project list/i);
+      assert.doesNotMatch(guidance, /project add <folder>/i);
+    } else if (projectRoute.reason === "concrete_action_required") {
+      assert.match(guidance, /concrete action/i);
+      assert.match(guidance, /do not reconnect/i);
+      assert.doesNotMatch(guidance, /project add <folder>/i);
+    } else if (projectRoute.reason === "project_path_unavailable") {
+      assert.match(guidance, /project doctor/i);
+      assert.match(guidance, /path/i);
+      assert.doesNotMatch(guidance, /project add <folder>/i);
+    } else if (projectRoute.status === "refused" && projectRoute.reason !== "approval_binding_mismatch") {
+      assert.match(guidance, /project doctor/i);
+      assert.doesNotMatch(guidance, /project add <folder>/i);
+    }
+    if (projectRoute.status !== "no_match") {
+      assert.doesNotMatch(guidance, /--project|retry exact resolution|choose one displayed slug/i, projectRoute.status);
     }
     if (projectRoute.reason === "approval_binding_mismatch") {
       assert.doesNotMatch(guidance, /doctor|repair|reconnect/i);
@@ -310,6 +365,95 @@ test("EPR-012 and EPR-015: exact native route survives an AIOS skill no-match", 
     approval: "not_applicable",
     summary: "Start a fresh context rooted at the project location revalidated by exact resolution for the approved action; changing directory in this run is insufficient."
   });
+});
+
+test("R4: the native host refuses a root replacement after exact routing", async (t) => {
+  const { resolveIntentResolution, renderIntentResolution } = await import(
+    "../../packages/core/src/intent-resolution.mjs"
+  );
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await makeFixture(t);
+  const intent = "Prepare the client's approved launch.";
+  const supportedConventionKinds = ["agents-md"];
+  const candidate = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent,
+    supportedConventionKinds
+  });
+  let replaced = false;
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    project: "client-work",
+    intent,
+    supportedConventionKinds,
+    approvalBinding: candidate.project_route.approval_binding
+  }, {
+    resolveProjectRoute: async (request) => {
+      const route = await resolveProjectRoute(request);
+      if (route.status === "ready" && !replaced) {
+        replaced = true;
+        await fs.rename(fixture.projectPath, `${fixture.projectPath}-replaced-after-route`);
+        await fs.mkdir(fixture.projectPath);
+      }
+      return route;
+    }
+  });
+  const rendered = renderIntentResolution(result);
+
+  assert.equal(replaced, true);
+  assert.equal(result.status, "refused");
+  assert.equal(result.project_route.reason, "project_identity_unverified");
+  assert.equal(result.location, null);
+  assert.doesNotMatch(
+    rendered,
+    new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
+});
+
+test("R4: the native host refuses a symlink substituted after exact routing", async (t) => {
+  const { resolveIntentResolution, renderIntentResolution } = await import(
+    "../../packages/core/src/intent-resolution.mjs"
+  );
+  const { resolveProjectRoute } = await import("../../packages/core/src/project-native-routing.mjs");
+  const fixture = await makeFixture(t);
+  const intent = "Prepare the client's approved launch.";
+  const supportedConventionKinds = ["agents-md"];
+  const candidate = await resolveIntentResolution({
+    ...fixture,
+    cwd: fixture.root,
+    intent,
+    supportedConventionKinds
+  });
+  const replacement = path.join(fixture.root, "replacement-project");
+  await fs.mkdir(replacement);
+
+  const result = await resolveIntentResolution({
+    ...fixture,
+    project: "client-work",
+    intent,
+    supportedConventionKinds,
+    approvalBinding: candidate.project_route.approval_binding
+  }, {
+    resolveProjectRoute: async (request) => {
+      const route = await resolveProjectRoute(request);
+      if (route.status === "ready") {
+        await fs.rename(fixture.projectPath, `${fixture.projectPath}-before-symlink`);
+        await fs.symlink(replacement, fixture.projectPath, "dir");
+      }
+      return route;
+    }
+  });
+  const rendered = renderIntentResolution(result);
+
+  assert.equal(result.status, "refused");
+  assert.equal(result.project_route.reason, "project_identity_unverified");
+  assert.equal(result.location, null);
+  assert.doesNotMatch(
+    rendered,
+    new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+  );
 });
 
 test("skill and tool no-match remain explicit without suppressing the verified primary location", async (t) => {
@@ -691,7 +835,7 @@ test("EPR-012 and EPR-014: a compact exact-root refusal preserves its authority 
     match: null,
     routability: null,
     route: null,
-    reason: "project_identity_unverified"
+    reason: "project_mapping_unverified"
   });
   assert.deepEqual(result.skill, {
     status: "not_evaluated",

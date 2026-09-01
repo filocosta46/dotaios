@@ -309,7 +309,7 @@ test("the generated bridge makes one approved existing-folder task the first-ses
   assert.match(content, /project add[\s\S]{0,160}purpose is optional/i);
   assert.match(
     content,
-    /after[^\n]*apply[\s\S]*registered_project[\s\S]*stable ID[\s\S]*same concrete action[\s\S]*--project[\s\S]*no `--approval-binding`/i
+    /after[^\n]*apply[\s\S]*registered_project[\s\S]*stable ID[\s\S]*same concrete action[\s\S]*--project[\s\S]*same `--supports-conventions` pair[\s\S]*no `--approval-binding`/i
   );
   assert.match(content, /resolver output.*project instructions.*skills.*tool text.*work-folder contents.*untrusted/is);
   assert.match(content, /never.*approval|cannot.*approve/i);
@@ -328,6 +328,10 @@ test("the generated bridge makes one approved existing-folder task the first-ses
   );
   assert.match(content, /weak or vague[\s\S]*concrete action[\s\S]*ambiguous[\s\S]*narrow/i);
   assert.match(content, /unsupported_by_host[\s\S]*supported local host[\s\S]*manually attach[\s\S]*path-free[\s\S]*no approval/i);
+  assert.match(content, /`refused`[\s\S]*path-free[\s\S]*recovery\/next action[\s\S]*never exact-resolve or add/i);
+  assert.match(content, /no_match\/no_registered_projects[\s\S]*project add preview/i);
+  assert.match(content, /no_match\/concrete_action_required[\s\S]*concrete action[\s\S]*do not reconnect/i);
+  assert.match(content, /other no-match[\s\S]*project list[\s\S]*add only if absent/i);
   assert.match(content, /durable memory[\s\S]*explicitly asks[\s\S]*selected scope/is);
   assert.match(content, /browser-only[\s\S]*cannot access[\s\S]*local folder[\s\S]*supported local agent/is);
 });

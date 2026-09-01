@@ -88,6 +88,7 @@ function projectRecord({ id, slug, name, purpose, repository }) {
 function projectDependencies(project) {
   return {
     readProjectRegistrations: async () => [project],
+    revalidateProjectRoot: async () => project.rootIdentity,
     inspectLiveRemote: async () => project.repository,
     inspectConventionInventory: async () => [{
       kind: "agents-md",

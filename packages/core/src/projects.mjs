@@ -11,6 +11,7 @@ import {
 } from "./contained-read.mjs";
 import { isPathWithin } from "./paths.mjs";
 import { stableJson } from "./json.mjs";
+import { inspectAuthoritativeProjectRemote } from "./project-git-remote.mjs";
 import { schemaVersion } from "./schema.mjs";
 import { processBirthToken, processRecordIsAlive } from "./process-identity.mjs";
 import {
@@ -1036,6 +1037,14 @@ export async function doctorProjects(options = {}) {
     listProjectRecords(context),
     readProjectState(context)
   ]);
+  let boundedRouteRecords = null;
+  try {
+    boundedRouteRecords = await readBoundedProjectRouteRecords(context, {
+      enforceImplicitBounds: false
+    });
+  } catch (error) {
+    if (error?.code !== "DOTAIOS_PROJECT_ROUTE_DISCOVERY_BOUND_EXCEEDED") throw error;
+  }
   const durableIds = new Set(projects.map((project) => project.id).filter(Boolean));
   const orphanProjects = Object.entries(state.paths)
     .filter(([id]) => !durableIds.has(id))
@@ -1054,6 +1063,30 @@ export async function doctorProjects(options = {}) {
     }));
   const checkedProjects = [...projects, ...orphanProjects];
   const issues = [];
+  if (boundedRouteRecords === null) {
+    issues.push({
+      type: "implicit_routing_limit",
+      reason: "project_catalog_bound_exceeded",
+      project: null,
+      actual: projects.length,
+      limit: MAX_PROJECT_ROUTE_CATALOG_ENTRIES,
+      message: `The project catalog exceeds the ${MAX_PROJECT_ROUTE_CATALOG_ENTRIES}-entry safety bound. Remove stale catalog entries before using project routing; project doctor remains available for the per-project issues below.`
+    });
+  }
+  const activeRouteRecordCount = boundedRouteRecords?.reduce(
+    (count, project) => count + Number(project.status === "active"),
+    0
+  ) ?? 0;
+  if (boundedRouteRecords !== null && activeRouteRecordCount > MAX_PROJECT_ROUTE_ACTIVE_RECORDS) {
+    issues.push({
+      type: "implicit_routing_limit",
+      reason: "too_many_active_projects",
+      project: null,
+      actual: activeRouteRecordCount,
+      limit: MAX_PROJECT_ROUTE_ACTIVE_RECORDS,
+      message: `${activeRouteRecordCount} active projects are eligible for implicit routing, but the safety limit is ${MAX_PROJECT_ROUTE_ACTIVE_RECORDS}. Exact routing by slug or stable ID still works; pause unused projects to restore implicit routing.`
+    });
+  }
 
   for (const project of checkedProjects) {
     if (orphanProjects.includes(project)) {
@@ -1093,7 +1126,7 @@ export async function doctorProjects(options = {}) {
         expectedRemote: project.repoUrl,
         fileSystem: context.fs,
         readRepositoryHead: context.readRepoHead,
-        readRepositoryRemote: context.readRepoUrl
+        readRepositoryRemote: context.inspectRepoUrl
       });
       if (managedState.state === "remote-mismatch") {
         issues.push({
@@ -1142,7 +1175,7 @@ export async function doctorProjects(options = {}) {
       continue;
     }
     if (project.placement === "unsafe") continue;
-    if (!project.repoUrl) continue;
+    if (!project.remoteSafe && project.remoteReason !== "missing") continue;
 
     if (managedDestination && path.resolve(project.projectPath) === managedDestination) {
       continue;
@@ -1150,10 +1183,26 @@ export async function doctorProjects(options = {}) {
 
     let actualRepoUrl = null;
     try {
-      actualRepoUrl = readOptionalString(await context.readRepoUrl(project.projectPath));
+      actualRepoUrl = readOptionalString(await context.inspectRepoUrl(project.projectPath));
     } catch {
-      // A broken or unreadable checkout is a doctor finding, not a reason for
-      // the whole report to abort.
+      issues.push({
+        type: "remote_unverified",
+        reason: "project_remote_unverified",
+        project,
+        message: `Project "${project.slug}" local Git metadata could not be verified safely. Ensure local Git is available and responsive; if it is, repair the checkout's local config, then rerun project doctor.`
+      });
+      continue;
+    }
+    if (!project.repoUrl) {
+      if (actualRepoUrl !== null) {
+        issues.push({
+          type: "remote_mismatch",
+          reason: "unexpected_live_remote",
+          project,
+          message: `Project "${project.slug}" is registered as local-only but its checkout has a live Git remote.`
+        });
+      }
+      continue;
     }
     const actualRemote = classifyProjectRemote(actualRepoUrl);
     if (!actualRemote.safe && actualRemote.reason !== "missing") {
@@ -1221,6 +1270,7 @@ function createContext(options) {
     options.statePath || defaultStatePath,
     homePath
   );
+  const readRepoUrl = options.readRepoUrl || readGitRemoteUrl;
   return {
     aiosPath,
     createId: options.createId || randomUUID,
@@ -1229,7 +1279,10 @@ function createContext(options) {
     homePath,
     ownsStateDirectory: statePath === defaultStatePath,
     readRepoHead: options.readRepoHead || readGitHead,
-    readRepoUrl: options.readRepoUrl || readGitRemoteUrl,
+    inspectRepoUrl: options.inspectRepoUrl
+      || options.readRepoUrl
+      || ((projectPath) => inspectAuthoritativeProjectRemote(projectPath)),
+    readRepoUrl,
     statePath
   };
 }

@@ -565,7 +565,13 @@ function printDoctorReport(output, report) {
   }
 
   for (const issue of report.issues.filter((issue) => !issue.project)) {
-    output.log(`[boundary] Workspace boundary: ${issue.message}`);
+    if (issue.type === "workspace_boundary") {
+      output.log(`[boundary] Workspace boundary: ${issue.message}`);
+    } else if (issue.type === "implicit_routing_limit") {
+      output.log(`[routing] Implicit routing: ${issue.message}`);
+    } else {
+      output.log(`[issue] ${issue.message}`);
+    }
   }
   const issuesByProject = new Map();
   for (const issue of report.issues.filter((issue) => issue.project)) {
@@ -581,6 +587,7 @@ function printDoctorReport(output, report) {
     for (const issue of projectIssues) {
       const status = {
         incomplete_checkout: "incomplete",
+        remote_unverified: "unverified",
         remote_mismatch: "mismatch",
         unsafe_placement: "unsafe",
         unsafe_remote: "unsafe"
