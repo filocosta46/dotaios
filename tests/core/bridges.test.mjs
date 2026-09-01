@@ -440,13 +440,17 @@ test("resolveCliInvocation always pins the exact candidate without probing PATH"
 // that never asked for the person.
 test("the global bridge names the AIOS folder instead of importing it", async () => {
   const aiosPath = "/tmp/example-aios";
+  const localCli = {
+    executable: "/opt/hostedtoolcache/node/20.19.5/x64/bin/node",
+    entrypoint: "/home/runner/work/dotaios/dotaios/packages/cli/src/index.mjs"
+  };
   // The shipped registry, not hand-made agents: the @-import only ever reached
   // users through the agents that actually get a bridge file written for them.
   const bridged = (await loadAgentRegistry()).filter((agent) => agent.bridge);
   assert.ok(bridged.length >= 3, "the registry must still ship bridge-writing agents");
 
   for (const agent of bridged) {
-    const block = findManagedBlock(await bridgeContent(agent, aiosPath));
+    const block = findManagedBlock(await bridgeContent(agent, aiosPath, { localCli }));
     assert.ok(block, `${agent.name}: one managed block`);
     const managed = block.text;
 
