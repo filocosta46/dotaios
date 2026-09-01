@@ -439,7 +439,7 @@ test("resolveCliInvocation always pins the exact candidate without probing PATH"
 // is expanded by the host at launch and drags the whole router into a session
 // that never asked for the person.
 test("the global bridge names the AIOS folder instead of importing it", async () => {
-  const aiosPath = "/tmp/example-aios";
+  const aiosPath = "/home/example-user/workspaces/customer/dotaios-context-with-a-long-name";
   const localCli = {
     executable: "/opt/hostedtoolcache/node/20.19.5/x64/bin/node",
     entrypoint: "/home/runner/work/dotaios/dotaios/packages/cli/src/index.mjs"
@@ -475,9 +475,11 @@ test("the global bridge names the AIOS folder instead of importing it", async ()
       false,
       `${agent.name}: no always-on boot order`
     );
+    const templateText = [aiosPath, localCli.executable, localCli.entrypoint]
+      .reduce((text, runtimePath) => text.replaceAll(runtimePath, ""), managed);
     assert.ok(
-      managed.length < 6000,
-      `${agent.name}: the always-loaded bridge and hidden handoff stay bounded (${managed.length} characters)`
+      templateText.length < 6000,
+      `${agent.name}: the path-independent bridge template stays bounded (${templateText.length} characters)`
     );
   }
 });
