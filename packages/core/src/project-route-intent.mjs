@@ -211,7 +211,16 @@ function hasDeclarativeTaskClause(tokens, handleTokenPositions) {
 }
 
 function actionIsParticiple(action) {
-  return typeof action === "string" && /(?:ed|ing)$/.test(action) && action.length >= 5;
+  if (typeof action !== "string") return false;
+  let suffix;
+  if (action.endsWith("ing")) suffix = "ing";
+  else if (action.endsWith("ed")) suffix = "ed";
+  else return false;
+
+  const stem = action.slice(0, -suffix.length);
+  const baseVerbs = [stem, `${stem}e`];
+  if (stem.at(-1) === stem.at(-2)) baseVerbs.push(stem.slice(0, -1));
+  return baseVerbs.some((verb) => ROUTE_ACTION_VERBS.has(verb));
 }
 
 function hasConcreteDiagnosticQuestion(tokens, handleTokenPositions) {
