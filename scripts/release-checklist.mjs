@@ -6,10 +6,21 @@ import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { PACKAGE_ADMISSION_ASSERTION_KEYS } from "./onboarding-release-acceptance.mjs";
+import {
+  PACKAGE_ADMISSION_ASSERTION_KEYS,
+  inspectPackageArchive,
+} from "./onboarding-release-acceptance.mjs";
 
 const HASH_256 = /^[a-f0-9]{64}$/;
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/;
+const MAX_PUBLISH_ARTIFACT_BYTES = 64 * 1024 * 1024;
+// pruneBundledDependencyJunk runs inside the admission build, so only the
+// admitted tarball is clean. A plain `npm publish` in the repo root re-packs the
+// working node_modules instead, which is how a dependency's test corpus and its
+// bundled jQuery fixtures reached the registry. These are the exact shapes that
+// proved it, plus the frozen dependency graph a hand-rolled pack drops.
+const DIRTY_ARTIFACT_BASENAMES = Object.freeze(["jquery-1.9.1.js", "html5lib-tests.json"]);
+const REQUIRED_ARTIFACT_ENTRIES = Object.freeze(["package/npm-shrinkwrap.json"]);
 const NATIVE_EVENT_TYPES = [
   "profile_authenticated",
   "global_bridge_discovered",
@@ -144,7 +155,66 @@ export function runReleaseChecklist(args, { output = console.log } = {}) {
   output(`Package admission: ${admission.package_admission}`);
   output(`Native-agent admission: ${admission.native_agent_admission}`);
   output(`Public-release admission: ${admission.public_release_admission}`);
-  return admission.public_release_admission === "GO" ? 0 : 1;
+  const artifact = options.artifact
+    ? inspectPublishArtifact(options.artifact)
+    : {
+        publish_artifact: "NOT PROVIDED",
+        refusals: [
+          "Re-run with --artifact <admitted tarball> so this gate reads the exact bytes.",
+        ],
+      };
+  output(`Publish artifact: ${artifact.publish_artifact}`);
+  for (const refusal of artifact.refusals) output(`  - ${refusal}`);
+  const decision = publishDecision(admission.public_release_admission, artifact.publish_artifact);
+  if (!decision.go) return 1;
+  output(`Publish exactly the admitted artifact: npm publish ${options.artifact}`);
+  return 0;
+}
+
+/** Refuse the artifact shapes a repo-root pack produces that an admitted build cannot. */
+export function evaluatePublishArtifact(entryNames) {
+  const names = [...entryNames];
+  const refusals = [
+    ...names
+      .filter((name) => DIRTY_ARTIFACT_BASENAMES.includes(name.split("/").at(-1)))
+      .map((name) => `Bundled dependency material must not ship: ${name}`),
+    ...REQUIRED_ARTIFACT_ENTRIES
+      .filter((required) => !names.includes(required))
+      .map((required) => `The artifact is missing its frozen dependency graph: ${required}`),
+  ];
+  return {
+    publish_artifact: refusals.length === 0 ? "ADMITTED" : "REFUSED",
+    refusals,
+  };
+}
+
+/** Publication needs the reviewed release AND the exact bytes it admitted. */
+export function publishDecision(publicReleaseAdmission, publishArtifact) {
+  return { go: publicReleaseAdmission === "GO" && publishArtifact === "ADMITTED" };
+}
+
+function inspectPublishArtifact(file) {
+  let archive;
+  try {
+    archive = inspectPackageArchive(readBoundedPublishArtifact(file));
+  } catch (error) {
+    return {
+      publish_artifact: "REFUSED",
+      refusals: [`The artifact is not an admitted package: ${error.message}`],
+    };
+  }
+  return evaluatePublishArtifact([...archive.entries.keys()]);
+}
+
+function readBoundedPublishArtifact(file) {
+  const stats = lstatSync(file);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error("Release artifact must be one regular file.");
+  }
+  if (stats.size <= 0 || stats.size > MAX_PUBLISH_ARTIFACT_BYTES) {
+    throw new Error("Release artifact is outside its byte boundary.");
+  }
+  return readFileSync(realpathSync(file));
 }
 
 export function evaluateReleaseAdmission(input) {
@@ -257,14 +327,18 @@ export function evaluateReleaseAdmission(input) {
 }
 
 function parseOptions(args) {
-  const parsed = { admission: null };
+  const parsed = { admission: null, artifact: null };
+  // A plain object would resolve "constructor" and "__proto__" through the
+  // prototype chain and accept them as option names.
+  const keys = new Map([["--admission", "admission"], ["--artifact", "artifact"]]);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg !== "--admission") throw new Error(`Unknown option: ${arg}`);
+    const key = keys.get(arg);
+    if (!key) throw new Error(`Unknown option: ${arg}`);
     const value = args[index + 1];
     if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
-    if (parsed.admission) throw new Error("--admission may be provided only once");
-    parsed.admission = path.resolve(value);
+    if (parsed[key]) throw new Error(`${arg} may be provided only once`);
+    parsed[key] = path.resolve(value);
     index += 1;
   }
   return parsed;
