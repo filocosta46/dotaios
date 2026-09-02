@@ -291,7 +291,7 @@ test("Hermes claims a global adapter without inventing a project-local selector"
 
 test("first-time onboarding stays assistant-guided, consent-first, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  const publishedVersion = "2.0.15";
+  const publishedVersion = "2.0.16";
   assert.equal(pkg.version, publishedVersion, "the package and public install contract must identify the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
@@ -310,12 +310,12 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   for (const relativePath of relativeFiles) {
     assert.match(
       documents[relativePath],
-      /npx dotaios@2\.0\.15 setup --dry-run/,
+      /npx dotaios@2\.0\.16 setup --dry-run/,
       `${relativePath} must preview the currently published release`
     );
     assert.match(
       documents[relativePath],
-      /^npx dotaios@2\.0\.15 setup$/m,
+      /^npx dotaios@2\.0\.16 setup$/m,
       `${relativePath} must retain an exact-version manual recovery path`
     );
     assert.doesNotMatch(
@@ -375,11 +375,11 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
-  assert.match(documents["docs/friend-setup.md"], /dotaios@2\.0\.15 setup/, "friend setup must use the currently published release");
+  assert.match(documents["docs/friend-setup.md"], /dotaios@2\.0\.16 setup/, "friend setup must use the currently published release");
   assert.match(documents["INSTALL.md"], /shared\s+`~\/\.agents\/skills` directory/i, "INSTALL must disclose the shared global skill surface");
   assert.match(documents["INSTALL.md"], /each attached checkout listed in `~\/\.dotaios\/projects\.json`/i, "INSTALL must cover project-local removal");
   assert.doesNotMatch(documents["INSTALL.md"], /use `\/memory-maintenance`/, "INSTALL must use cross-client skill invocation language");
-  assert.match(documents["INSTALL.md"], /npx dotaios@2\.0\.15 setup/i, "INSTALL must run the currently published release");
+  assert.match(documents["INSTALL.md"], /npx dotaios@2\.0\.16 setup/i, "INSTALL must run the currently published release");
   assert.match(documents["INSTALL.md"], /package version pinned in this guide/i, "INSTALL must explain its frozen release pin");
   assert.match(documents["INSTALL.md"], /`~\/aios\/memory\/sessions`.*private GitHub mirror/is, "INSTALL must disclose capture and sync composition");
   assert.match(documents["INSTALL.md"], /GitHub\s+repository remains.*revoke the token/is, "INSTALL must disclose remote and credential cleanup");
@@ -595,7 +595,7 @@ test("macOS Node bootstrap is immutable, verified, fresh-shell safe, and approva
   assert.match(macBootstrap, /printf 'NODE_BIN=%s\/bin\\n'/, "the bootstrap must print the exact Node bin directory");
   assert.match(
     macBootstrap,
-    /PATH="<exact NODE_BIN value printed above>:\$PATH" npx dotaios@2\.0\.15 setup --dry-run/,
+    /PATH="<exact NODE_BIN value printed above>:\$PATH" npx dotaios@2\.0\.16 setup --dry-run/,
     "later fresh-shell commands must carry the exact printed Node bin directory inline"
   );
   assert.match(unwrapped, /show .*exact .*profile.*line.*before .*chang/i, "profile persistence must be previewed");
@@ -900,4 +900,98 @@ test("package author exception covers only the exact author field", () => {
 test("tracked public files contain no private maintainer identifiers", async () => {
   const offenders = findPrivateIdentifierOffenders(await trackedPublicEntries(repoRoot));
   assert.deepEqual(offenders, [], `private identifiers in tracked files:\n${offenders.join("\n")}`);
+});
+
+// Assembled from leaves so this file does not match its own stale-path scan,
+// the same way the private-identifier markers above avoid matching themselves.
+const INTERNAL_PROGRAMME_LEAVES = Object.freeze([
+  "foundation-program",
+  "plans",
+  "probes",
+  "benchmarks",
+  "managed-skill-store-design.md",
+  "managed-skill-store-architecture-review.md",
+]);
+const INTERNAL_PROGRAMME_DOCS = Object.freeze(
+  INTERNAL_PROGRAMME_LEAVES.map((leaf) => ["docs", leaf].join("/"))
+);
+
+function readmeDocLinks(markdown) {
+  return Array.from(
+    markdown.matchAll(/\[[^\]]+\]\((docs\/[^)\s]*|INSTALL\.md)\)/g),
+    (match) => match[1]
+  );
+}
+
+test("the README guides section sends readers to user guides, not the internal programme", async () => {
+  const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
+  const links = readmeDocLinks(readme);
+
+  assert.ok(links.length > 0, "README must link at least one guide");
+  assert.ok(
+    !links.includes("docs/"),
+    "README must not dump readers into the docs/ directory listing"
+  );
+  for (const link of links) {
+    assert.ok(
+      !INTERNAL_PROGRAMME_DOCS.some((internal) => link === internal || link.startsWith(`${internal}/`)),
+      `README links to internal programme material: ${link}`
+    );
+  }
+  for (const guide of [
+    "docs/architecture.md",
+    "docs/projects.md",
+    "docs/client-support.md",
+    "docs/security.md",
+    "docs/getting-started.md",
+    "INSTALL.md",
+  ]) {
+    assert.ok(links.includes(guide), `README must link the ${guide} user guide`);
+  }
+});
+
+test("every README documentation link resolves to a real file", async () => {
+  const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
+  for (const link of readmeDocLinks(readme)) {
+    await fs.access(path.join(repoRoot, link));
+  }
+});
+
+test("internal programme material is off the public guides path", async () => {
+  for (const internal of INTERNAL_PROGRAMME_DOCS) {
+    await assert.rejects(
+      fs.access(path.join(repoRoot, internal)),
+      `${internal} must move under docs/internal/`
+    );
+    await fs.access(path.join(repoRoot, internal.replace("docs/", "docs/internal/")));
+  }
+});
+
+test("nothing still points at the old public location of the internal programme", async () => {
+  const { stdout } = await run("git", ["-C", repoRoot, "ls-files", "-z"]);
+  const offenders = [];
+  for (const relative of stdout.split("\0").filter(Boolean)) {
+    // The moved documents keep their own prose, including their own old paths.
+    if (relative.startsWith("docs/internal/")) continue;
+    let content;
+    try {
+      content = await fs.readFile(path.join(repoRoot, relative), "utf8");
+    } catch {
+      continue;
+    }
+    // Plain string search, not a built regex: escaping a path fragment into a
+    // pattern is the kind of half-escape CodeQL flags, and nothing here needs
+    // more than a substring test. Blanking the new prefix first is what stops a
+    // correctly relocated path from reading as a stale one.
+    const remaining = content.split(["docs", "internal", ""].join("/")).join(" ");
+    const collapsed = remaining.replace(/\s+/g, " ");
+    for (const [index, internal] of INTERNAL_PROGRAMME_DOCS.entries()) {
+      const leaf = INTERNAL_PROGRAMME_LEAVES[index];
+      const joined = `"docs", "${leaf}"`;
+      if (remaining.includes(internal) || collapsed.includes(joined)) {
+        offenders.push(`${relative} -> ${internal}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `stale internal-programme paths:\n${offenders.join("\n")}`);
 });

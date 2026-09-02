@@ -167,3 +167,42 @@ test("writeFileSafe preserve rejects an unsafe destination that wins publication
     "the rejected staged file must be removed"
   );
 });
+
+test("writeFileSafe creates a managed boundary root that does not exist yet", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-missing-root-"));
+  const boundaryRoot = path.join(root, ".client");
+  const destination = path.join(boundaryRoot, "CLIENT.md");
+
+  const result = await writeFileSafe(destination, "managed\n", "preserve", { boundaryRoot });
+
+  assert.equal(result.action, "created");
+  assert.equal(fs.readFileSync(destination, "utf8"), "managed\n");
+  assert.equal(fs.lstatSync(boundaryRoot).isDirectory(), true);
+});
+
+test("writeFileSafe still refuses a managed boundary root that is a symlink", async (t) => {
+  if (process.platform === "win32") t.skip("POSIX symlink semantics");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-symlink-root-"));
+  const elsewhere = path.join(root, "elsewhere");
+  const boundaryRoot = path.join(root, ".client");
+  fs.mkdirSync(elsewhere);
+  fs.symlinkSync(elsewhere, boundaryRoot);
+
+  await assert.rejects(
+    writeFileSafe(path.join(boundaryRoot, "CLIENT.md"), "managed\n", "preserve", { boundaryRoot }),
+    /unsafe managed root/
+  );
+  assert.deepEqual(fs.readdirSync(elsewhere), []);
+});
+
+test("writeFileSafe still refuses a managed boundary root that is a regular file", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-file-root-"));
+  const boundaryRoot = path.join(root, ".client");
+  fs.writeFileSync(boundaryRoot, "not a directory\n");
+
+  await assert.rejects(
+    writeFileSafe(path.join(boundaryRoot, "CLIENT.md"), "managed\n", "preserve", { boundaryRoot }),
+    /unsafe managed root|ENOTDIR|EEXIST/
+  );
+  assert.equal(fs.readFileSync(boundaryRoot, "utf8"), "not a directory\n");
+});

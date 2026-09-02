@@ -127,8 +127,8 @@ Configuration is not invocation proof. For a bounded acceptance check, run the
 explicit client probe against a disposable project fixture:
 
 ```bash
-npx dotaios@2.0.15 skills probe --client codex --path ~/aios --dry-run
-npx dotaios@2.0.15 skills probe --client codex --path ~/aios --run \
+npx dotaios@2.0.16 skills probe --client codex --path ~/aios --dry-run
+npx dotaios@2.0.16 skills probe --client codex --path ~/aios --run \
   --receipt /tmp/dotaios-codex-invocation.json
 ```
 
@@ -192,13 +192,13 @@ a project launcher that selects a checkout-local configuration. Writing
 `<project>/.hermes/config.yaml` would therefore look configured while remaining
 inert in an ordinary launch. Project-local Hermes support stays disabled until
 DotAIOS satisfies all re-entry gates in the accepted
-[Hermes support boundary](foundation-program/decisions/2026-08-09-hermes-support-boundary.md):
+[Hermes support boundary](internal/foundation-program/decisions/2026-08-09-hermes-support-boundary.md):
 an owned selector, version/capability policy, safe host mode, produced receipt,
 and one shared production/health/probe resolver.
 
 ```bash
-npx dotaios@2.0.15 attach /path/to/project --path ~/aios
-npx dotaios@2.0.15 attach /path/to/project --path ~/aios --dry-run
+npx dotaios@2.0.16 attach /path/to/project --path ~/aios
+npx dotaios@2.0.16 attach /path/to/project --path ~/aios --dry-run
 ```
 
 This proves filesystem/configuration propagation. It does not claim that every

@@ -228,13 +228,6 @@ export async function projectCommand(args = [], dependencies = {}) {
       env: dependencies.env,
       filesystem: dependencies.fs
     });
-    const readRepoUrl = coreOptions.readRepoUrl || (async (repositoryPath) => {
-      try {
-        return await projectGit.readRepositoryRemote(repositoryPath);
-      } catch {
-        return null;
-      }
-    });
     const readRepoHead = coreOptions.readRepoHead || (async (repositoryPath) => {
       try {
         return await projectGit.readRepositoryHead(repositoryPath);
@@ -244,7 +237,6 @@ export async function projectCommand(args = [], dependencies = {}) {
     });
     const report = await doctorProjects({
       ...coreOptions,
-      readRepoUrl,
       readRepoHead,
       inspectWorkspaceBoundary: async () => {
         const outerGit = await mirrorGit.isRepositoryRoot();
@@ -565,7 +557,13 @@ function printDoctorReport(output, report) {
   }
 
   for (const issue of report.issues.filter((issue) => !issue.project)) {
-    output.log(`[boundary] Workspace boundary: ${issue.message}`);
+    if (issue.type === "workspace_boundary") {
+      output.log(`[boundary] Workspace boundary: ${issue.message}`);
+    } else if (issue.type === "implicit_routing_limit") {
+      output.log(`[routing] Implicit routing: ${issue.message}`);
+    } else {
+      output.log(`[issue] ${issue.message}`);
+    }
   }
   const issuesByProject = new Map();
   for (const issue of report.issues.filter((issue) => issue.project)) {
@@ -581,6 +579,7 @@ function printDoctorReport(output, report) {
     for (const issue of projectIssues) {
       const status = {
         incomplete_checkout: "incomplete",
+        remote_unverified: "unverified",
         remote_mismatch: "mismatch",
         unsafe_placement: "unsafe",
         unsafe_remote: "unsafe"

@@ -109,14 +109,14 @@ bounded projection is never rejected merely because JSON escaping expands it.
 ## Preview client configuration
 
 ```bash
-npx dotaios@2.0.15 mcp status
-npx dotaios@2.0.15 mcp install --dry-run --agent claude
-npx dotaios@2.0.15 mcp install --dry-run --agent codex
-npx dotaios@2.0.15 mcp install --dry-run --agent cursor
-npx dotaios@2.0.15 mcp install --dry-run --agent gemini
-npx dotaios@2.0.15 mcp install --dry-run --agent antigravity
-npx dotaios@2.0.15 mcp install --dry-run --agent kimi
-npx dotaios@2.0.15 mcp install --dry-run --agent opencode
+npx dotaios@2.0.16 mcp status
+npx dotaios@2.0.16 mcp install --dry-run --agent claude
+npx dotaios@2.0.16 mcp install --dry-run --agent codex
+npx dotaios@2.0.16 mcp install --dry-run --agent cursor
+npx dotaios@2.0.16 mcp install --dry-run --agent gemini
+npx dotaios@2.0.16 mcp install --dry-run --agent antigravity
+npx dotaios@2.0.16 mcp install --dry-run --agent kimi
+npx dotaios@2.0.16 mcp install --dry-run --agent opencode
 ```
 
 DotAIOS prints a client-specific local stdio fragment and the documented user

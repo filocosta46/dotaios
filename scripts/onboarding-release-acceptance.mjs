@@ -15,7 +15,7 @@ const MAX_UNPACKED_BYTES = 128 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 4_096;
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
-const THIRD_PARTY_NOTICES_SHA256 = "04ee3214c012182756d36e55863cb62ea8923e1032baea955c4c10d8f648f14a";
+const THIRD_PARTY_NOTICES_SHA256 = "bd4e11ecefd89ad814199633fd659fca6b2278bda466443fc977764b9a9eca32";
 export const ADMISSION_NPM_VERSION = "11.6.4";
 export const PACKAGE_ADMISSION_ASSERTION_KEYS = Object.freeze([
   "archive_regular_files_only",
@@ -60,6 +60,7 @@ export function buildPackageArtifact({ destination, dryRun = false, sourceCommit
     runNpm11([
       "ci", "--ignore-scripts", "--omit=dev", "--no-audit", "--no-fund",
     ], stageRoot, "Install of the admitted dependency graph failed");
+    pruneBundledDependencyJunk(stageRoot);
     const packArgs = ["pack", "--ignore-scripts", "--silent"];
     if (dryRun) packArgs.push("--dry-run");
     packArgs.push("--pack-destination", path.resolve(destination));
@@ -609,6 +610,24 @@ function stagePackageSource(stageRoot, sourceCommit) {
     path.join(stageRoot, "package.json"),
     `${JSON.stringify({ ...manifest, gitHead: sourceCommit }, null, 2)}\n`,
   );
+}
+
+function pruneBundledDependencyJunk(stageRoot) {
+  const nodeModulesRoot = path.join(stageRoot, "node_modules");
+  const pending = [nodeModulesRoot];
+  const prunedDirectories = new Set(["test", "tests", ".yarn"]);
+  while (pending.length > 0) {
+    const current = pending.pop();
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      const candidate = path.join(current, entry.name);
+      const stats = fs.lstatSync(candidate);
+      if (prunedDirectories.has(entry.name) || entry.name.endsWith(".map")) {
+        fs.rmSync(candidate, { recursive: stats.isDirectory(), force: false });
+      } else if (stats.isDirectory()) {
+        pending.push(candidate);
+      }
+    }
+  }
 }
 
 function listTrackedPackageFiles(sourceCommit, sourceEntries) {

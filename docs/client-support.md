@@ -38,7 +38,7 @@ exact routing, and invokes Codex at the returned root. `--run` launches the
 external client; use `--dry-run` instead when you only want to inspect the
 route-bound command and receipt shape.
 
-Bounded invocation receipts are committed under `docs/probes/`. On 2026-08-30,
+Bounded invocation receipts are committed under `docs/internal/probes/`. On 2026-08-30,
 Codex 0.149.1 reported the exact disposable project root and produced the
 repository skill marker. The receipt
 redacts the temporary path, raw marker, and client warnings. On 2026-08-08,

@@ -4,6 +4,32 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.16] - 2026-09-02
+
+### Added
+
+- Natural project-task requests can select one unique healthy registration
+  without requiring an imperative first word. Ambiguous, negated, bare-name,
+  and unsupported requests still fail closed.
+
+### Changed
+
+- Project routing and doctor now use one live Git-remote authority and recheck
+  the selected root before native host entry.
+- Internal plans, evidence, benchmarks, and probes now live under
+  `docs/internal/` instead of the public guides path.
+
+### Fixed
+
+- Activation previews treat a missing managed client root as a planned
+  creation while continuing to refuse file and symlink roots.
+- The admitted npm package removes bundled dependency test corpora, binds the
+  exact tarball SHA-256 to its receipt, and separates candidate publication
+  from promotion to `latest` so the same bytes are never repacked.
+- Bridge-size checks no longer depend on the runner's username or checkout
+  path, and natural-action matching no longer mistakes ordinary participles
+  for commands.
+
 ## [2.0.15] - 2026-08-31
 
 ### Changed

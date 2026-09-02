@@ -159,7 +159,20 @@ async function validateDestinationParent(
     throw new Error(`Cannot write outside the managed file boundary: ${destination}`);
   }
 
-  const rootStats = await lstatIfPresent(root);
+  // A managed root that does not exist yet is not hostile, it is simply a
+  // client directory nobody has created. A preview has nothing below it to
+  // inspect, and a write creates it exactly as it creates every missing segment
+  // below. Only a root that does exist and is a symlink or not a directory is
+  // refused, and the re-read below keeps that refusal after the directory is
+  // created.
+  let rootStats = await lstatIfPresent(root);
+  if (!rootStats) {
+    if (allowMissingTail) return;
+    if (createMissing) {
+      await fs.mkdir(root, { recursive: true });
+      rootStats = await lstatIfPresent(root);
+    }
+  }
   if (!rootStats || !rootStats.isDirectory() || rootStats.isSymbolicLink()) {
     throw new Error(`Cannot write through unsafe managed root: ${root}`);
   }

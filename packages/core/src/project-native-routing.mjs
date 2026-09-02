@@ -10,6 +10,7 @@ import {
   readContainedDirectory
 } from "./contained-read.mjs";
 import { stableJson } from "./json.mjs";
+import { inspectAuthoritativeProjectRemote } from "./project-git-remote.mjs";
 import {
   classifyProjectRemote,
   projectRemotesMatch
@@ -18,12 +19,18 @@ import {
   readBoundedProjectRegistrations,
   validateProjectSelector
 } from "./projects.mjs";
+import {
+  hasConcreteAction,
+  matchedStableProjectHandles,
+  matchReason,
+  remoteBasename,
+  stableHandleMatchReason
+} from "./project-route-intent.mjs";
 import { rankSkills } from "./skill-resolver.mjs";
 
 const MAX_LIVE_GIT_CONCURRENCY = 8;
 const MAX_SKILL_CONVENTION_CONCURRENCY = 4;
 const MAX_SKILL_CONVENTION_OBSERVATIONS = 64;
-const GIT_INSPECTION_TIMEOUT_MS = 5000;
 const PROJECT_ROUTE_APPROVAL_DOMAIN = "dotaios-project-route-approval/v1";
 const SAFE_LOCAL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,100}$/;
 export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
@@ -32,38 +39,6 @@ export const PROJECT_NATIVE_CONVENTION_KINDS = Object.freeze([
   "repository-skill"
 ]);
 const CONVENTION_KINDS = new Set(PROJECT_NATIVE_CONVENTION_KINDS);
-const ROUTE_ACTION_VERBS = new Set([
-  "add", "analyze", "approve", "archive", "assess", "audit", "bill", "build", "change",
-  "check", "clean",
-  "collect", "commit", "compare", "configure", "connect", "convert", "coordinate", "copy",
-  "create", "debug", "delete", "deploy", "design", "document", "draft", "edit", "evaluate", "export",
-  "fix", "generate", "import", "implement", "inspect", "install", "integrate", "investigate",
-  "launch", "maintain", "measure", "merge", "migrate", "monitor", "move", "open", "optimize",
-  "organize", "package", "patch", "plan", "prepare", "publish", "pull", "push", "reconcile",
-  "read", "refactor", "release", "remove", "rename", "report", "research",
-  "resolve", "restore", "review", "run", "scan", "schedule", "search", "secure", "ship",
-  "simplify", "summarize", "sync", "test", "track", "troubleshoot", "update", "upgrade",
-  "validate", "verify", "write"
-]);
-const OPEN_ACTION_OBJECT_TOKENS = new Set([
-  "branch", "document", "file", "issue", "pr", "pull", "readme", "request", "ticket"
-]);
-const REQUEST_FILLER_TOKENS = new Set(["hey", "kindly", "please"]);
-const ACTION_REQUEST_PREFIXES = Object.freeze([
-  ["can", "you"],
-  ["could", "you"],
-  ["how", "do", "i"],
-  ["i", "need", "you", "to"],
-  ["i", "want", "you", "to"],
-  ["will", "you"],
-  ["would", "you"]
-]);
-const MATCH_KIND_BY_FIELD = Object.freeze({
-  slug: "slug_overlap",
-  purpose: "purpose_overlap",
-  name: "name_overlap",
-  repository: "remote_name_overlap"
-});
 const execFileAsync = promisify(execFile);
 
 /** Resolve a registered project route without executing project instructions. */
@@ -104,7 +79,6 @@ export async function resolveProjectRoute({
       ? "discovery_bound_exceeded"
       : "project_identity_unverified");
   }
-  const active = projects.filter(projectEligibleForInspection);
   if (projectSelector !== null) {
     return resolveExactProject({
       intent,
@@ -115,8 +89,50 @@ export async function resolveProjectRoute({
       dependencies: runtime
     });
   }
-  const observation = await observeRoutableProjects(active, runtime);
+  if (projects.length === 0) return noMatch("no_registered_projects");
+  const stableHandleMatches = matchedStableProjectHandles(intent, projects);
+  if (stableHandleMatches.length > 1) {
+    return ambiguous(stableHandleMatches, {
+      kind: "exact_handle_collision",
+      confidence: 0.5,
+      fields: [...new Set(stableHandleMatches.map(({ field }) => field))].sort()
+    });
+  }
+  const stableHandleMatch = stableHandleMatches[0] || null;
+  if (stableHandleMatch && !hasConcreteAction(intent, stableHandleMatch.project)) {
+    return noMatch("concrete_action_required");
+  }
+  const stableHandleRefusal = stableHandleMatch
+    ? projectInspectionRefusalReason(stableHandleMatch.project)
+    : null;
+  if (stableHandleRefusal) {
+    return refused(stableHandleRefusal);
+  }
+  const inspectionTargets = stableHandleMatch
+    ? [stableHandleMatch.project]
+    : projects.filter(projectEligibleForInspection);
+  const observation = await observeRoutableProjects(
+    inspectionTargets,
+    runtime
+  );
   if (observation.error) return refused(observation.error);
+  if (stableHandleMatch) {
+    const unavailable = observation.unroutable.find(({ project }) => (
+      project.id === stableHandleMatch.project.id
+    ));
+    if (unavailable) return refused(unavailable.reason);
+    const selected = observation.routable.find(({ project }) => (
+      project.id === stableHandleMatch.project.id
+    ));
+    if (!selected) return refused("project_identity_unverified");
+    return resolveStableHandleProject({
+      intent,
+      supportedConventionKinds,
+      selected,
+      handleField: stableHandleMatch.field,
+      routable: observation.routable
+    });
+  }
   return resolveImplicitProject({
     intent,
     supportedConventionKinds,
@@ -130,26 +146,30 @@ async function observeRoutableProjects(projects, dependencies) {
     MAX_LIVE_GIT_CONCURRENCY,
     (project) => settleInspection(async () => {
       const observed = await dependencies.inspectLiveRemote(project);
-      if (project.repository === null) {
-        if (observed !== null) throw new Error("An undeclared live Git remote is present.");
-        return null;
-      }
-      return canonicalLiveRemote(observed);
+      return observed === null ? null : canonicalLiveRemote(observed);
     })
   );
   if (liveRemoteResults.some(({ error }) => isDiscoveryBoundError(error))) {
     return { error: "discovery_bound_exceeded", routable: [] };
   }
-  const remoteVerified = projects
-    .map((project, index) => ({ project, liveRemote: liveRemoteResults[index].value }))
-    .filter(({ project, liveRemote }, index) => (
-      liveRemoteResults[index].ok
-      && (
-        project.repository === null
-          ? liveRemote === null
-          : projectRemotesMatch(project.repository, liveRemote)
-      )
-    ));
+  const remoteVerified = [];
+  const unroutable = [];
+  for (const [index, project] of projects.entries()) {
+    const result = liveRemoteResults[index];
+    if (!result.ok) {
+      unroutable.push({ project, reason: "project_remote_unverified" });
+      continue;
+    }
+    const liveRemote = result.value;
+    const matches = project.repository === null
+      ? liveRemote === null
+      : projectRemotesMatch(project.repository, liveRemote);
+    if (!matches) {
+      unroutable.push({ project, reason: "project_remote_mismatch" });
+      continue;
+    }
+    remoteVerified.push({ project, liveRemote });
+  }
   const inventoryResults = await mapWithConcurrency(
     remoteVerified,
     MAX_LIVE_GIT_CONCURRENCY,
@@ -160,14 +180,35 @@ async function observeRoutableProjects(projects, dependencies) {
   if (inventoryResults.some(({ error }) => isDiscoveryBoundError(error))) {
     return { error: "discovery_bound_exceeded", routable: [] };
   }
-  const routable = remoteVerified
-    .map(({ project, liveRemote }, index) => ({
-      project,
-      liveRemote,
-      conventions: inventoryResults[index].ok ? inventoryResults[index].value : null
-    }))
-    .filter(({ conventions }) => Array.isArray(conventions));
-  return { error: null, routable };
+  const routable = [];
+  for (const [index, { project, liveRemote }] of remoteVerified.entries()) {
+    const result = inventoryResults[index];
+    if (!result.ok) {
+      unroutable.push({ project, reason: "project_conventions_unverified" });
+      continue;
+    }
+    routable.push({ project, liveRemote, conventions: result.value });
+  }
+  return { error: null, routable, unroutable };
+}
+
+function resolveStableHandleProject({
+  intent,
+  supportedConventionKinds,
+  selected,
+  handleField,
+  routable
+}) {
+  const winner = rankedProjectMatches(intent, routable)
+    .find((entry) => entry.dir === selected.project.slug);
+  const match = winner
+    ? matchReason(selected.project, winner)
+    : stableHandleMatchReason(handleField);
+  const supported = supportedConventions(selected.conventions, supportedConventionKinds);
+  if (selected.conventions.length > 0 && supported.length === 0) {
+    return unsupported(selected.project, selected.conventions, match);
+  }
+  return candidate(selected, match, { intent, supportedConventionKinds });
 }
 
 function resolveImplicitProject({
@@ -176,27 +217,13 @@ function resolveImplicitProject({
   routable,
   minimumConfidence = 0.67
 }) {
-  const ranked = rankSkills(String(intent || ""), routable.map(({ project }) => ({
-    name: project.slug,
-    dir: project.slug,
-    description: "",
-    triggers: [
-      project.slug,
-      project.name,
-      project.purpose,
-      remoteBasename(project.repository)
-    ].filter(Boolean)
-  })));
+  const ranked = rankedProjectMatches(intent, routable);
   const winner = ranked[0];
-  if (winner && winner.confidence === undefined) {
-    const runnerUp = ranked[1]?.score;
-    winner.confidence = runnerUp === undefined
-      ? Math.min(1, winner.score)
-      : winner.score / (winner.score + runnerUp);
-  }
   if (winner && winner.confidence >= minimumConfidence) {
     const selected = routable.find(({ project }) => project.slug === winner.dir);
-    if (!hasConcreteAction(intent, selected.project)) return noMatch();
+    if (!hasConcreteAction(intent, selected.project)) {
+      return noMatch("concrete_action_required");
+    }
     const match = matchReason(selected.project, winner);
     const supported = supportedConventions(selected.conventions, supportedConventionKinds);
     if (selected.conventions.length > 0 && supported.length === 0) {
@@ -217,113 +244,53 @@ function resolveImplicitProject({
   return noMatch();
 }
 
-function noMatch() {
+function rankedProjectMatches(intent, routable) {
+  const ranked = rankSkills(String(intent || ""), routable.map(({ project }) => ({
+    name: project.slug,
+    dir: project.slug,
+    description: "",
+    triggers: [
+      project.slug,
+      project.name,
+      project.purpose,
+      remoteBasename(project.repository)
+    ].filter(Boolean)
+  })));
+  const winner = ranked[0];
+  if (winner && winner.confidence === undefined) {
+    const runnerUp = ranked[1]?.score;
+    winner.confidence = runnerUp === undefined
+      ? Math.min(1, winner.score)
+      : winner.score / (winner.score + runnerUp);
+  }
+  return ranked;
+}
+
+function noMatch(reason = "no_registered_project_match") {
   return {
     status: "no_match",
     project: null,
     match: null,
     routability: null,
     route: null,
-    reason: "no_registered_project_match"
+    reason
   };
 }
 
-function hasConcreteAction(intent, project) {
-  const actionTokens = routeTokens(intent);
-  const stableHandleTokens = [
-    project.slug,
-    project.name,
-    remoteBasename(project.repository)
-  ].filter(Boolean).map(routeTokens);
-  const handleTokenPositions = matchedHandleTokenPositions(actionTokens, stableHandleTokens);
-  const action = concreteAction(intent, actionTokens, stableHandleTokens);
-  if (action === null || (!action.explicitHandlePrefix && handleTokenPositions.has(action.index))) {
-    return false;
+function projectInspectionRefusalReason(project) {
+  if (project?.status !== "active") return "project_inactive";
+  if (["unavailable", "unmapped"].includes(project.mappingStatus)) {
+    return "project_path_unavailable";
   }
-  return actionTokens[action.index] !== "open"
-    || actionTokens.some((token, index) => (
-      index > action.index
-      && !handleTokenPositions.has(index)
-      && OPEN_ACTION_OBJECT_TOKENS.has(token)
-    ));
-}
-
-function concreteAction(intent, tokens, handleSequences) {
-  const separatorIndex = String(intent || "").indexOf(":");
-  if (separatorIndex !== -1) {
-    const prefixTokens = routeTokens(String(intent).slice(0, separatorIndex));
-    const isHandlePrefix = handleSequences.some((sequence) => (
-      sequence.length === prefixTokens.length
-      && sequence.every((token, index) => prefixTokens[index] === token)
-    ));
-    if (isHandlePrefix) {
-      const suffixStart = actionRequestStart(tokens.slice(prefixTokens.length));
-      const actionIndex = prefixTokens.length + suffixStart;
-      if (ROUTE_ACTION_VERBS.has(tokens[actionIndex])) {
-        return { index: actionIndex, explicitHandlePrefix: true };
-      }
-    }
+  if (project.mappingStatus !== "verified") return "project_mapping_unverified";
+  if (project.pathAvailable !== true) return "project_path_unavailable";
+  if (project.placement !== "external" && project.placement !== "managed") {
+    return "project_placement_unsafe";
   }
-
-  const requestStart = actionRequestStart(tokens);
-  return ROUTE_ACTION_VERBS.has(tokens[requestStart])
-    ? { index: requestStart, explicitHandlePrefix: false }
-    : null;
-}
-
-function actionRequestStart(tokens) {
-  let index = 0;
-  let advanced = true;
-  while (advanced) {
-    advanced = false;
-    while (REQUEST_FILLER_TOKENS.has(tokens[index])) {
-      index += 1;
-      advanced = true;
-    }
-    const prefix = ACTION_REQUEST_PREFIXES
-      .filter((candidate) => tokensStartWith(tokens.slice(index), candidate))
-      .sort((left, right) => right.length - left.length)[0];
-    if (prefix) {
-      index += prefix.length;
-      advanced = true;
-    }
+  if (project.repository !== null && typeof project.repository !== "string") {
+    return "project_identity_unverified";
   }
-  return index;
-}
-
-function matchedHandleTokenPositions(tokens, sequences) {
-  const positions = new Set();
-  const uniqueSequences = [...new Map(
-    sequences.map((sequence) => [sequence.join("\u0000"), sequence])
-  ).values()].sort((left, right) => right.length - left.length);
-  for (const sequence of uniqueSequences) {
-    if (sequence.length === 0 || sequence.length > tokens.length) continue;
-    const matchingIndexes = [];
-    for (let index = 0; index <= tokens.length - sequence.length; index += 1) {
-      if (!sequence.every((token, offset) => tokens[index + offset] === token)) continue;
-      matchingIndexes.push(index);
-    }
-    if (matchingIndexes.length === 0) continue;
-    const overlappingIndex = matchingIndexes.find((index) => (
-      sequence.every((_, offset) => positions.has(index + offset))
-    ));
-    const selectedIndex = overlappingIndex ?? matchingIndexes.at(-1);
-    for (let offset = 0; offset < sequence.length; offset += 1) {
-      positions.add(selectedIndex + offset);
-    }
-  }
-  return positions;
-}
-
-function tokensStartWith(tokens, prefix) {
-  return prefix.every((token, index) => tokens[index] === token);
-}
-
-function routeTokens(value) {
-  return String(value || "")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
+  return null;
 }
 
 async function resolveExactProject({
@@ -343,12 +310,13 @@ async function resolveExactProject({
       : "approval_binding_mismatch");
   }
   const selected = matches[0];
-  if (!projectEligibleForInspection(selected)) {
-    return refused("project_identity_unverified");
-  }
+  const eligibilityRefusal = projectInspectionRefusalReason(selected);
+  if (eligibilityRefusal) return refused(eligibilityRefusal);
   const observation = await observeRoutableProjects([selected], dependencies);
   if (observation.error) return refused(observation.error);
-  if (observation.routable.length !== 1) return refused("project_identity_unverified");
+  if (observation.routable.length !== 1) {
+    return refused(observation.unroutable[0]?.reason || "project_identity_unverified");
+  }
   const observed = observation.routable[0];
   const explicitProposal = proposeExplicitProject({
     intent,
@@ -356,14 +324,24 @@ async function resolveExactProject({
     observed
   });
   if (approvalBinding === null) return explicitProposal;
+  const stableHandle = matchedStableProjectHandles(intent, [selected])[0] || null;
+  const stableHandleProposal = stableHandle
+    ? resolveStableHandleProject({
+        intent,
+        supportedConventionKinds,
+        selected: observed,
+        handleField: stableHandle.field,
+        routable: [observed]
+      })
+    : null;
   const implicitProposal = resolveImplicitProject({
     intent,
     supportedConventionKinds,
     routable: [observed],
     minimumConfidence: 0
   });
-  const proposal = [explicitProposal, implicitProposal].find((entry) => (
-    entry.status === "candidate"
+  const proposal = [explicitProposal, stableHandleProposal, implicitProposal].find((entry) => (
+    entry?.status === "candidate"
     && entry.project.id === selected.id
     && entry.approval_binding === approvalBinding
   ));
@@ -376,11 +354,24 @@ async function resolveExactProject({
     observed.conventions,
     supportedConventionKinds
   );
+  let finalRootIdentity;
+  try {
+    finalRootIdentity = await dependencies.revalidateProjectRoot(selected);
+  } catch {
+    return refused("project_identity_unverified");
+  }
+  if (
+    !validProjectRootIdentity(finalRootIdentity)
+    || !sameRootIdentity(selected.rootIdentity, finalRootIdentity)
+  ) {
+    return refused("project_identity_unverified");
+  }
   return ready(
     selected,
     observed.conventions,
     finalSupported,
-    projectSelector === selected.id ? "stable_id" : "slug"
+    projectSelector === selected.id ? "stable_id" : "slug",
+    finalRootIdentity
   );
 }
 
@@ -389,7 +380,7 @@ function proposeExplicitProject({
   supportedConventionKinds,
   observed
 }) {
-  if (!hasConcreteAction(intent, observed.project)) return noMatch();
+  if (!hasConcreteAction(intent, observed.project, { requireHandle: false })) return noMatch();
   const match = {
     kind: "exact_handle",
     confidence: 1,
@@ -407,33 +398,7 @@ function proposeExplicitProject({
 }
 
 function projectEligibleForInspection(project) {
-  return project?.status === "active"
-    && project.mappingStatus === "verified"
-    && project.pathAvailable === true
-    && (project.placement === "external" || project.placement === "managed")
-    && (project.repository === null || typeof project.repository === "string");
-}
-
-function remoteBasename(repository) {
-  const trimmed = String(repository || "").replace(/\.git$/i, "").replace(/\/+$/, "");
-  return trimmed.slice(trimmed.lastIndexOf("/") + 1).replace(/^.*:/, "");
-}
-
-function matchReason(project, winner) {
-  const reason = winner.reason || "";
-  const field = reason === "exact name match"
-    ? "slug"
-    : [
-        ["slug", project.slug],
-        ["name", project.name],
-        ["purpose", project.purpose],
-        ["repository", remoteBasename(project.repository)]
-      ].find(([, value]) => reason === `matched trigger "${value}"`)?.[0] || "repository";
-  return {
-    kind: MATCH_KIND_BY_FIELD[field],
-    confidence: winner.confidence,
-    fields: [field]
-  };
+  return projectInspectionRefusalReason(project) === null;
 }
 
 function candidate({ project, liveRemote, conventions }, match, {
@@ -524,7 +489,7 @@ function ambiguous(candidates, match, reason = "multiple_registered_project_matc
   };
 }
 
-function ready(project, conventions, supported, handleField) {
+function ready(project, conventions, supported, handleField, rootIdentity) {
   return {
     status: "ready",
     project: publicProject(project),
@@ -535,6 +500,11 @@ function ready(project, conventions, supported, handleField) {
       project_id: project.id,
       project_slug: project.slug,
       location: project.mappingPath || project.projectPath,
+      root_identity: {
+        type: "directory",
+        dev: rootIdentity.dev,
+        ino: rootIdentity.ino
+      },
       advisory: true,
       revalidated_at_exact_resolution: true,
       fresh_context_required: true,
@@ -627,7 +597,11 @@ function defaultDependencies(options, overrides) {
       projectSelector
     }),
     inspectLiveRemote: (project) => inspectLiveRemote(project, { filesystem, runGit }),
-    inspectConventionInventory: (project) => inspectConventionInventory(project, { filesystem })
+    inspectConventionInventory: (project) => inspectConventionInventory(project, { filesystem }),
+    revalidateProjectRoot: (project) => revalidateProjectRouteRoot({
+      location: project.projectPath,
+      root_identity: project.rootIdentity
+    }, filesystem)
   };
 }
 
@@ -705,6 +679,12 @@ function validConventionIdentity(value) {
     && boundedDecimal(value.ctime_ns, 40);
 }
 
+function validProjectRootIdentity(value) {
+  return value?.type === "directory"
+    && boundedDecimal(value.dev, 40)
+    && boundedDecimal(value.ino, 40);
+}
+
 function boundedDecimal(value, maximumLength) {
   return typeof value === "string"
     && value.length <= maximumLength
@@ -719,162 +699,12 @@ function routeConventionError(code) {
 
 async function inspectLiveRemote(project, { filesystem, runGit }) {
   const before = await observeProjectRoot(project, filesystem);
-  let origin;
-  try {
-    origin = await readLocalFetchRemote(project.projectPath, "origin", runGit);
-  } catch (error) {
-    if (!await proveNonGitDirectory(project.projectPath, runGit)) throw error;
-    const after = await observeProjectRoot(project, filesystem);
-    if (!sameRootIdentity(before, after)) throw new Error("The registered project root changed.");
-    return null;
-  }
-  let remote = origin.url;
-  if (!origin.present) {
-    const rawFetchKeys = await gitConfig(
-      project.projectPath,
-      ["config", "--local", "--no-includes", "--name-only", "--get-regexp", "^remote\\..*\\.fetch$"],
-      runGit
-    );
-    const remotes = [...new Set(String(rawFetchKeys || "")
-      .split(/\r?\n/)
-      .map((value) => /^remote\.(.+)\.fetch$/.exec(value.trim())?.[1] || null)
-      .filter((value) => value && value !== "origin"))];
-    if (remotes.length === 0) {
-      const after = await observeProjectRoot(project, filesystem);
-      if (!sameRootIdentity(before, after)) throw new Error("The registered project root changed.");
-      return null;
-    }
-    if (remotes.length !== 1 || !SAFE_LOCAL_NAME_RE.test(remotes[0])) {
-      throw new Error("A unique authoritative local Git remote is required.");
-    }
-    const fallback = await readLocalFetchRemote(project.projectPath, remotes[0], runGit);
-    if (!fallback.present || !fallback.url) {
-      throw new Error("A unique authoritative local Git remote is required.");
-    }
-    remote = fallback.url;
-  }
-  if (!remote) throw new Error("The authoritative local Git remote is incomplete.");
-  const classified = classifyProjectRemote(remote);
-  if (!classified.safe) throw new Error("The live local Git remote is unsafe.");
+  const remote = await inspectAuthoritativeProjectRemote(project.projectPath, {
+    execFileAsync: runGit
+  });
   const after = await observeProjectRoot(project, filesystem);
   if (!sameRootIdentity(before, after)) throw new Error("The registered project root changed.");
-  return classified.canonicalUrl;
-}
-
-async function readLocalFetchRemote(projectPath, remoteName, runGit) {
-  if (!SAFE_LOCAL_NAME_RE.test(remoteName)) return { present: false, url: null };
-  const escapedName = remoteName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const rawConfig = await gitConfig(
-    projectPath,
-    [
-      "config", "--local", "--no-includes", "--null", "--get-regexp",
-      `^remote\\.${escapedName}\\.(url|fetch)$`
-    ],
-    runGit
-  );
-  const { urls, fetches } = remoteConfigValues(rawConfig, remoteName);
-  const present = urls.length > 0 || fetches.length > 0;
-  if (!present) return { present: false, url: null };
-  if (urls.length !== 1 || !fetches.some(safeFetchRefspec)) {
-    throw new Error("The authoritative local Git remote is incomplete.");
-  }
-  return { present: true, url: urls[0] };
-}
-
-function remoteConfigValues(value, remoteName) {
-  const urls = [];
-  const fetches = [];
-  for (const record of String(value || "").split("\0")) {
-    const separator = record.indexOf("\n");
-    if (separator < 0) continue;
-    const key = record.slice(0, separator);
-    const configValue = record.slice(separator + 1).trim();
-    if (!configValue) continue;
-    if (key === `remote.${remoteName}.url`) urls.push(configValue);
-    else if (key === `remote.${remoteName}.fetch`) fetches.push(configValue);
-  }
-  return { urls, fetches };
-}
-
-function safeFetchRefspec(value) {
-  return value.length <= 2048
-    && !/[\p{Cc}\uD800-\uDFFF]/u.test(value)
-    && /^\+?refs\/[^:\s]+(?::refs\/[^\s]+)?$/.test(value);
-}
-
-async function gitConfig(projectPath, args, runGit) {
-  try {
-    const { stdout, stderr } = await runGit(
-      "git",
-      ["-C", projectPath, ...args],
-      {
-        encoding: "utf8",
-        env: sanitizedGitEnvironment(),
-        timeout: GIT_INSPECTION_TIMEOUT_MS,
-        killSignal: "SIGTERM"
-      }
-    );
-    const value = String(stdout || "").trim();
-    if (!value || String(stderr || "").trim() !== "") {
-      throw new Error("Local Git inspection returned an invalid success result.");
-    }
-    return value;
-  } catch (error) {
-    if (
-      error?.code === 1
-      && error?.killed !== true
-      && error?.signal == null
-      && String(error?.stdout || "").trim() === ""
-      && String(error?.stderr || "").trim() === ""
-    ) {
-      return null;
-    }
-    throw error;
-  }
-}
-
-async function proveNonGitDirectory(projectPath, runGit) {
-  try {
-    const { stdout, stderr } = await runGit(
-      "git",
-      ["-C", projectPath, "rev-parse", "--is-inside-work-tree"],
-      {
-        encoding: "utf8",
-        env: sanitizedGitEnvironment(),
-        timeout: GIT_INSPECTION_TIMEOUT_MS,
-        killSignal: "SIGTERM"
-      }
-    );
-    const state = String(stdout || "").trim();
-    if ((state === "true" || state === "false") && String(stderr || "").trim() === "") {
-      return false;
-    }
-    throw new Error("Local Git repository probe returned an invalid success result.");
-  } catch (error) {
-    if (
-      error?.code === 128
-      && error?.killed !== true
-      && error?.signal == null
-      && String(error?.stdout || "").trim() === ""
-      && /^fatal: not a git repository \(or any of the parent directories\): \.git$/u.test(
-        String(error?.stderr || "").trim()
-      )
-    ) {
-      return true;
-    }
-    throw error;
-  }
-}
-
-function sanitizedGitEnvironment(environment = process.env) {
-  return {
-    ...Object.fromEntries(
-    Object.entries(environment).filter(([key]) => !key.toUpperCase().startsWith("GIT_"))
-    ),
-    LANG: "C",
-    LANGUAGE: "C",
-    LC_ALL: "C"
-  };
+  return remote;
 }
 
 async function inspectConventionInventory(project, { filesystem }) {
@@ -962,6 +792,9 @@ async function observeProjectRoot(project, filesystem, enforceExpected = true) {
   }
   const canonical = await filesystem.realpath(project.projectPath);
   const canonicalStats = await filesystem.lstat(canonical, { bigint: true });
+  if (!canonicalStats.isDirectory() || canonicalStats.isSymbolicLink()) {
+    throw new Error("The registered project canonical root is unavailable.");
+  }
   const observed = {
     type: "directory",
     dev: canonicalStats.dev.toString(),
@@ -970,6 +803,41 @@ async function observeProjectRoot(project, filesystem, enforceExpected = true) {
   if (enforceExpected && !sameRootIdentity(project.rootIdentity, observed)) {
     throw new Error("The registered project root identity changed.");
   }
+  return observed;
+}
+
+/** Revalidate the emitted native route against the same bounded directory identity contract. */
+export async function revalidateProjectRouteRoot(route, filesystem = fs) {
+  const location = route?.location;
+  const rootIdentity = route?.root_identity;
+  if (
+    typeof location !== "string"
+    || !path.isAbsolute(location)
+    || !validProjectRootIdentity(rootIdentity)
+  ) throw new Error("The project route root identity is invalid.");
+  const observed = await observeProjectRoot({ projectPath: location, rootIdentity }, filesystem);
+  const finalStats = await filesystem.lstat(location, { bigint: true });
+  if (
+    !finalStats.isDirectory()
+    || finalStats.isSymbolicLink()
+    || finalStats.dev.toString() !== observed.dev
+    || finalStats.ino.toString() !== observed.ino
+  ) throw new Error("The project route root changed during revalidation.");
+  const finalCanonical = await filesystem.realpath(location);
+  const finalCanonicalStats = await filesystem.lstat(finalCanonical, { bigint: true });
+  if (
+    !finalCanonicalStats.isDirectory()
+    || finalCanonicalStats.isSymbolicLink()
+    || finalCanonicalStats.dev.toString() !== observed.dev
+    || finalCanonicalStats.ino.toString() !== observed.ino
+  ) throw new Error("The project route canonical root changed during revalidation.");
+  const finalPathStats = await filesystem.lstat(location, { bigint: true });
+  if (
+    !finalPathStats.isDirectory()
+    || finalPathStats.isSymbolicLink()
+    || finalPathStats.dev.toString() !== observed.dev
+    || finalPathStats.ino.toString() !== observed.ino
+  ) throw new Error("The project route path changed during revalidation.");
   return observed;
 }
 

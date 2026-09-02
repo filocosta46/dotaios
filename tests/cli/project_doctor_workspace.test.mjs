@@ -7,6 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { projectCommand } from "../../packages/cli/src/commands/project.mjs";
+import { resolveProjectRoute } from "../../packages/core/src/project-native-routing.mjs";
 import { doctorProjects } from "../../packages/core/src/projects.mjs";
 
 const run = promisify(execFile);
@@ -185,4 +186,126 @@ test("project doctor reports unregistered workspace debris without requiring an 
   assert.match(report.issues.find((issue) => issue.type === "workspace_boundary").message, /unregistered/i);
   assert.match(capture.lines.join("\n"), /unregistered/i);
   assert.deepEqual(exitCodes, [1]);
+});
+
+test("project doctor surfaces the active-project implicit routing ceiling", async (t) => {
+  const { aiosPath, statePath } = await fixture(t);
+  for (let index = 0; index < 33; index += 1) {
+    const slug = `active-${String(index).padStart(2, "0")}`;
+    await writeProject(aiosPath, slug, `https://github.com/acme/${slug}.git`);
+  }
+  const capture = captureOutput();
+  const exitCodes = [];
+
+  const report = await projectCommand(
+    ["doctor", "--path", aiosPath, "--state-path", statePath],
+    {
+      output: capture.output,
+      setExitCode: (code) => exitCodes.push(code)
+    }
+  );
+  const routingIssue = report.issues.find((issue) => issue.type === "implicit_routing_limit");
+
+  assert.equal(report.ok, false);
+  assert.equal(routingIssue.reason, "too_many_active_projects");
+  assert.equal(routingIssue.actual, 33);
+  assert.equal(routingIssue.limit, 32);
+  assert.match(routingIssue.message, /33 active projects.*limit is 32/i);
+  assert.match(capture.lines.join("\n"), /implicit routing.*33 active projects.*32/i);
+  assert.deepEqual(exitCodes, [1]);
+});
+
+test("project doctor remains available when the project catalog exceeds its discovery bound", async (t) => {
+  const { aiosPath, statePath } = await fixture(t);
+  for (let index = 0; index < 257; index += 1) {
+    const slug = `catalog-${String(index).padStart(3, "0")}`;
+    await writeProject(aiosPath, slug, `https://github.com/acme/${slug}.git`);
+  }
+  const capture = captureOutput();
+  const exitCodes = [];
+
+  const report = await projectCommand(
+    ["doctor", "--path", aiosPath, "--state-path", statePath],
+    {
+      output: capture.output,
+      setExitCode: (code) => exitCodes.push(code)
+    }
+  );
+  const routingIssue = report.issues.find((issue) => (
+    issue.reason === "project_catalog_bound_exceeded"
+  ));
+
+  assert.equal(report.ok, false);
+  assert.equal(routingIssue.actual, 257);
+  assert.equal(routingIssue.limit, 256);
+  assert.match(routingIssue.message, /catalog exceeds.*256-entry safety bound/i);
+  assert.match(capture.lines.join("\n"), /implicit routing.*catalog exceeds.*256-entry/i);
+  assert.deepEqual(exitCodes, [1]);
+});
+
+test("project doctor diagnoses the same malformed local Git metadata that blocks routing", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = path.join(root, "external", "malformed-local-git");
+  await fs.mkdir(projectPath, { recursive: true });
+  await run("git", ["init", "-q", "-b", "main", projectPath]);
+  await fs.writeFile(
+    path.join(projectPath, ".git", "config"),
+    "[remote \"origin\"\n\turl = https://secret-token@example.invalid/private.git\n"
+  );
+  await writeProject(aiosPath, "malformed-local-git", null);
+  await writeState(statePath, { "id-malformed-local-git": projectPath });
+
+  const route = await resolveProjectRoute({
+    aiosPath,
+    statePath,
+    intent: "Review malformed-local-git",
+    supportedConventionKinds: []
+  });
+  const report = await doctorProjects({ aiosPath, statePath });
+
+  assert.equal(route.status, "refused");
+  assert.equal(route.reason, "project_remote_unverified");
+  assert.equal(report.ok, false);
+  assert.deepEqual(
+    report.issues.map((issue) => [issue.type, issue.reason, issue.project?.slug]),
+    [["remote_unverified", "project_remote_unverified", "malformed-local-git"]]
+  );
+  assert.doesNotMatch(JSON.stringify(route), /secret-token|example\.invalid|private\.git/);
+  assert.doesNotMatch(JSON.stringify(report), /secret-token|example\.invalid|private\.git/);
+});
+
+test("project doctor applies strict Git inspection to a managed checkout", async (t) => {
+  const { aiosPath, statePath } = await fixture(t);
+  const canonicalAiosPath = await fs.realpath(aiosPath);
+  const projectPath = path.join(canonicalAiosPath, "workspaces", "managed-malformed-git");
+  await fs.mkdir(projectPath, { recursive: true });
+  await run("git", ["init", "-q", "-b", "main", projectPath]);
+  await fs.writeFile(
+    path.join(projectPath, ".git", "config"),
+    "[remote \"origin\"\n\turl = https://secret-token@example.invalid/private.git\n"
+  );
+  await writeProject(
+    canonicalAiosPath,
+    "managed-malformed-git",
+    "https://github.com/customer/managed-malformed-git.git"
+  );
+  await writeState(statePath, { "id-managed-malformed-git": projectPath });
+
+  const route = await resolveProjectRoute({
+    aiosPath: canonicalAiosPath,
+    statePath,
+    intent: "Review managed-malformed-git",
+    supportedConventionKinds: []
+  });
+  const report = await doctorProjects({ aiosPath: canonicalAiosPath, statePath });
+
+  assert.equal(route.status, "refused");
+  assert.equal(route.reason, "project_remote_unverified");
+  assert.ok(report.issues.some((issue) => (
+    issue.project?.slug === "managed-malformed-git"
+    && issue.type === "incomplete_checkout"
+    && issue.reason === "partial-clone"
+  )));
+  assert.doesNotMatch(JSON.stringify(route), /secret-token|example\.invalid|private\.git/);
+  assert.doesNotMatch(JSON.stringify(report), /secret-token|example\.invalid|private\.git/);
 });

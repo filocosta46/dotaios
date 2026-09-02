@@ -16,13 +16,26 @@ import {
   inspectConfiguredConnections,
   resolveConnectionTool
 } from "./connection-tool-resolver.mjs";
-import { resolveProjectRoute } from "./project-native-routing.mjs";
+import {
+  resolveProjectRoute,
+  revalidateProjectRouteRoot
+} from "./project-native-routing.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
 
 export const DEFAULT_INTENT_RESOLUTION_BUDGET = 8000;
 export const MIN_INTENT_RESOLUTION_BUDGET = 1024;
 export const MAX_INTENT_RESOLUTION_BUDGET = 32000;
 const SCHEMA = "dotaios.intent-resolution/v1";
+const PROJECT_HEALTH_RECOVERY = Object.freeze({
+  project_inactive: "The matched project is inactive. Run dotaios project doctor and project list; deliberately reactivate that existing registration or select another project, then retry.",
+  project_mapping_unverified: "The matched project's machine-local mapping is not verified. Run dotaios project doctor, restore its original external mapping without creating a duplicate registration, then retry.",
+  project_path_unavailable: "The matched project's registered path is unavailable. Run dotaios project doctor, restore the folder at its registered location, then retry without reconnecting it.",
+  project_placement_unsafe: "The matched project's registered placement is unsafe. Run dotaios project doctor, move the existing project outside AIOS and repair its mapping, then retry.",
+  project_remote_unverified: "The matched project's local Git metadata could not be verified safely. Run dotaios project doctor, ensure local Git is available and responsive, and repair the checkout's local config if needed before retrying.",
+  project_remote_mismatch: "The matched project's live Git remote does not match its registration. Run dotaios project doctor, deliberately align the local fetch remote with the existing registration, then retry.",
+  project_conventions_unverified: "The matched project's native conventions could not be verified. Run dotaios project doctor, then repair unreadable, linked, oversized, or excessive AGENTS.md, CLAUDE.md, or repository-skill entries before retrying.",
+  discovery_bound_exceeded: "Implicit project discovery exceeded a safety bound. Run dotaios project doctor. If it reports the active-project limit, reduce active projects to 32 or fewer and exact routing remains available; otherwise reduce the catalog or native convention inventory, or repair bounded machine-local project state, then retry."
+});
 
 /** Compose existing project, context, skill, and connection authorities locally. */
 export async function resolveIntentResolution(options = {}, dependencies = {}) {
@@ -92,7 +105,8 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
         })
       : await prepareNativeAuthority({
           aiosPath,
-          projectRoute
+          projectRoute,
+          filesystem
         });
   } catch (error) {
     return refuse(error?.reason || "local_authority_unreadable", error?.recovery || "Run dotaios doctor, then retry.");
@@ -217,15 +231,15 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     return refuse("fixed_envelope_exceeds_budget", "Retry with a larger --budget value.");
   }
 
-  // Explicit tools retain main's final primary-directory check. An exact
-  // native route is already the router's one fresh, bound observation; do not
-  // run that router again after it succeeds.
+  // Recheck the selected root immediately before returning a location. Native
+  // routes carry the exact root identity observed after approval so host entry
+  // cannot silently follow a replacement at the same path.
   try {
-    if (toolRequested) await authority.revalidate();
+    await authority.revalidate();
   } catch {
     return refuse(
       "project_identity_unverified",
-      `To re-register it, preview dotaios project add <repo-path> --slug ${selected.slug}, then apply it with the displayed operation id and plan fingerprint.`,
+      `Run dotaios project doctor for ${selected.slug}; restore the existing folder at its registered location or repair its external mapping without creating a duplicate registration, then restart discovery.`,
       {
         ...projectRoute,
         status: "refused",
@@ -278,7 +292,7 @@ async function prepareToolAuthority({
   };
 }
 
-async function prepareNativeAuthority({ aiosPath, projectRoute }) {
+async function prepareNativeAuthority({ aiosPath, projectRoute, filesystem }) {
   let skills;
   try {
     skills = await collectSkills(aiosPath);
@@ -302,7 +316,8 @@ async function prepareNativeAuthority({ aiosPath, projectRoute }) {
       description: projectRoute.project.purpose
     },
     skills,
-    configured: null
+    configured: null,
+    revalidate: () => revalidateProjectRouteRoot(projectRoute.route, filesystem)
   };
 }
 
@@ -620,9 +635,21 @@ function projectRouteRecovery(projectRoute) {
     };
   }
   if (projectRoute.status === "no_match") {
+    if (projectRoute.reason === "no_registered_projects") {
+      return {
+        required: true,
+        action: "Keep the folder where it is and connect it once: preview dotaios project add <folder> --json, then repeat it with the displayed --operation-id and --plan-fingerprint plus --apply --json. A description is optional. After connection, use the returned registered_project stable ID to request a path-free candidate for the same concrete action without an approval binding."
+      };
+    }
+    if (projectRoute.reason === "concrete_action_required") {
+      return {
+        required: true,
+        action: "State one concrete action for the already registered project, then rerun implicit discovery; do not reconnect the folder."
+      };
+    }
     return {
       required: true,
-      action: "Keep the folder where it is and connect it once: preview dotaios project add <folder> --json, then repeat it with the displayed --operation-id and --plan-fingerprint plus --apply --json. A description is optional. After connection, use the returned registered_project stable ID to request a path-free candidate for the same concrete action without an approval binding."
+      action: "Run dotaios project list to discover registered slugs and stable IDs, then name one exact project in a concrete action. Connect a folder only if the list confirms it is not registered."
     };
   }
   if (projectRoute.status === "refused") {
@@ -635,9 +662,11 @@ function projectRouteRecovery(projectRoute) {
         action: "Rerun path-free implicit discovery for the unchanged concrete action, obtain a fresh candidate binding, and ask for fresh approval before exact resolution."
       };
     }
+    const healthRecovery = projectHealthRecovery(projectRoute.reason);
+    if (healthRecovery) return { required: true, action: healthRecovery };
     return {
       required: true,
-      action: "Run dotaios project doctor and repair or reconnect the registration, then rerun implicit discovery for the concrete action."
+      action: "Do not exact-resolve or add. Run dotaios project doctor to identify the affected existing registration; repair its registered path, mapping, remote, or native files for the reported condition, then rerun implicit discovery."
     };
   }
   return { required: false, action: null };
@@ -666,10 +695,24 @@ function projectRouteNextAction(intent, projectRoute) {
     };
   }
   if (projectRoute.status === "no_match") {
+    if (projectRoute.reason === "no_registered_projects") {
+      return {
+        state: "connection_required",
+        approval: "not_applicable",
+        summary: "No projects are connected on this machine. Use the proof-bound project add recovery once, then retry the unchanged concrete action with the returned stable ID."
+      };
+    }
+    if (projectRoute.reason === "concrete_action_required") {
+      return {
+        state: "clarification_required",
+        approval: "not_applicable",
+        summary: "The project is already known, but the text is only a name, navigation request, or vague reference. State one concrete action and rerun implicit discovery."
+      };
+    }
     return {
       state: "clarification_required",
       approval: "not_applicable",
-      summary: "Connect the existing folder once; a description is optional. Then select the returned stable project ID for the unchanged action, or make the action more concrete and rerun discovery."
+      summary: "Run dotaios project list, name one exact registered slug or stable ID in a concrete action, and rerun discovery. Connect a folder only when the list confirms it is absent."
     };
   }
   if (
@@ -682,11 +725,23 @@ function projectRouteNextAction(intent, projectRoute) {
       summary: "Rerun implicit discovery for a fresh candidate binding, explain the unchanged proposal, and obtain fresh approval before exact resolution."
     };
   }
+  const healthRecovery = projectHealthRecovery(projectRoute.reason);
+  if (healthRecovery) {
+    return {
+      state: "recovery_required",
+      approval: "not_applicable",
+      summary: healthRecovery
+    };
+  }
   return {
     state: "recovery_required",
     approval: "not_applicable",
     summary: projectRoute.reason
   };
+}
+
+function projectHealthRecovery(reason) {
+  return PROJECT_HEALTH_RECOVERY[reason] || null;
 }
 
 function nativeRouteNextAction() {
