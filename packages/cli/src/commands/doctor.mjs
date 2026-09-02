@@ -1127,7 +1127,8 @@ async function readNativeRuntimes(aiosPath, homePath, detection) {
 
 function nativeRuntimeCheck(agent, target, runtimes) {
   const name = `${agent.name} native skills`;
-  const capabilities = runtimes?.get(agent.name)?.capabilities;
+  const runtime = runtimes?.get(agent.name);
+  const capabilities = runtime?.capabilities;
   if (!capabilities) {
     return {
       name,
@@ -1146,6 +1147,15 @@ function nativeRuntimeCheck(agent, target, runtimes) {
       status: "warn",
       detail: `Detected, but ~/${agent.skills.configFile} does not list ${skillsDir}.`,
       fix: `Add ${skillsDir} to ${agent.skills.key || "skills.external_dirs"} in ~/${agent.skills.configFile}, then run \`npx dotaios skills doctor\`.`
+    };
+  }
+  const skillTarget = runtime?.evidence?.skillTarget;
+  if (skillTarget?.linkedCount > 0) {
+    return {
+      name,
+      status: "warn",
+      detail: `Detected and partially connected: ${skillTarget.linkedCount} of ${skillTarget.sourceCount} canonical skills have live links in ~/${agent.skills?.dir}.`,
+      fix: `Run \`npx dotaios skills doctor\` to inspect the remaining entries; \`npx dotaios activate${pathOptionFor(target)}\` connects every non-conflicting skill without overwriting user files.`
     };
   }
   return {

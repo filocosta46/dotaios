@@ -248,11 +248,11 @@ describe("doctor native-skill runtimes", () => {
 
   // With no source skills, "every skill is linked" is vacuously true and a
   // symlink target looks complete however empty it is.
-  async function addSourceSkill(aiosPath) {
-    await fs.mkdir(path.join(aiosPath, "skills", "today"), { recursive: true });
+  async function addSourceSkill(aiosPath, name = "today") {
+    await fs.mkdir(path.join(aiosPath, "skills", name), { recursive: true });
     await fs.writeFile(
-      path.join(aiosPath, "skills", "today", "SKILL.md"),
-      "---\nname: today\ndescription: plan today\n---\n"
+      path.join(aiosPath, "skills", name, "SKILL.md"),
+      `---\nname: ${name}\ndescription: ${name}\n---\n`
     );
   }
 
@@ -306,6 +306,27 @@ describe("doctor native-skill runtimes", () => {
 
     assert.match(output, /\[warn\] Antigravity native skills/);
     assert.doesNotMatch(output, /\[ok\] Antigravity native skills/);
+  });
+
+  it("reports a partial native projection without claiming it has no live links", async () => {
+    const aiosPath = await makeMinimalAios(path.join(tmpBase, "partial-cursor"));
+    await addSourceSkill(aiosPath, "today");
+    await addSourceSkill(aiosPath, "personal-workflow");
+    const homePath = await makeHome("partial-cursor");
+    const targetDir = path.join(homePath, ".agents", "skills");
+    await fs.mkdir(path.join(homePath, ".cursor"), { recursive: true });
+    await fs.mkdir(path.join(targetDir, "personal-workflow"), { recursive: true });
+    await fs.symlink(
+      path.join(aiosPath, "skills", "today"),
+      path.join(targetDir, "today"),
+      "dir"
+    );
+
+    const { output } = await runDoctor({ aiosPath, homePath, detection: noAgentBinaries });
+
+    assert.match(output, /\[warn\] Cursor native skills/);
+    assert.match(output, /partially connected/i);
+    assert.doesNotMatch(output, /Cursor[^\n]*no live links/i);
   });
 
   it("reports a runtime whose config really lists the skills directory as healthy", async () => {
