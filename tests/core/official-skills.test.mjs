@@ -22,6 +22,10 @@ import {
 import { createManagedSkillStore } from "../../packages/core/src/managed-skill-store.mjs";
 import { snapshotTree } from "../helpers/managed-skills.mjs";
 import {
+  candidatePredecessorFixture,
+  legacyPredecessorFixture,
+  predecessorFileBytes,
+  predecessorFiles,
   predecessorFixture,
   renderGeneratedPrompt,
   writePredecessorSkills
@@ -32,6 +36,15 @@ const packageVersion = JSON.parse(
   fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")
 ).version;
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
+const predecessorCases = [
+  { origin: legacyPredecessorFixture.origin, fixture: legacyPredecessorFixture },
+  ...predecessorFixture.origins.map((origin) => ({ origin, fixture: predecessorFixture })),
+  {
+    origin: candidatePredecessorFixture.origin,
+    fixture: candidatePredecessorFixture,
+    candidateVersion: candidatePredecessorFixture.origin.candidate_version
+  }
+];
 test("the predecessor fixture reconstructs the exact tagged Git skills tree", () => {
   assert.deepEqual(predecessorFixture.origins, [
     {
@@ -46,29 +59,41 @@ test("the predecessor fixture reconstructs the exact tagged Git skills tree", ()
     }
   ]);
 
-  const filesBySkill = new Map();
-  for (const file of predecessorFixture.files) {
-    const coordinates = file.path.split("/");
-    assert.equal(coordinates.length, 2, file.path);
-    const bytes = Buffer.from(predecessorFixture.blobs[file.sha256], "base64");
-    assert.equal(sha256(bytes), file.sha256, file.path);
-    const rows = filesBySkill.get(coordinates[0]) || [];
-    rows.push({
-      mode: `100${file.mode.toString(8)}`,
-      name: coordinates[1],
-      objectId: gitObjectId("blob", bytes)
-    });
-    filesBySkill.set(coordinates[0], rows);
-  }
-  assert.deepEqual([...filesBySkill.keys()].sort(compareUtf8), officialSkillNames());
+  assert.deepEqual(candidatePredecessorFixture.origin, {
+    release: "2.0.11",
+    commit: "fa8a86a93158ea6dbdb776ed6d8765318e6ba073",
+    skills_tree: "101fa76231716a6860ef9cb185b4efd7cc0731b0",
+    candidate_version: "2.0.11",
+    base_release: "2.0.10"
+  });
+  assert.deepEqual(legacyPredecessorFixture.origin, {
+    release: "2.0.8",
+    commit: "5f67beaad959702752f6451e87034c12e4726c0f",
+    skills_tree: "0dada46561d2f41c87f2a8a85b6e65664806f430",
+    base_release: "2.0.9"
+  });
 
-  const skillTrees = [...filesBySkill.entries()].map(([name, rows]) => ({
-    mode: "40000",
-    name,
-    objectId: gitTreeObjectId(rows)
-  }));
-  const reconstructed = gitTreeObjectId(skillTrees);
-  for (const origin of predecessorFixture.origins) {
+  for (const { origin, fixture } of predecessorCases) {
+    const filesBySkill = new Map();
+    for (const { fixture: sourceFixture, file } of predecessorFiles(fixture)) {
+      const coordinates = file.path.split("/");
+      assert.equal(coordinates.length, 2, file.path);
+      const bytes = predecessorFileBytes(sourceFixture, file);
+      const rows = filesBySkill.get(coordinates[0]) || [];
+      rows.push({
+        mode: `100${file.mode.toString(8)}`,
+        name: coordinates[1],
+        objectId: gitObjectId("blob", bytes)
+      });
+      filesBySkill.set(coordinates[0], rows);
+    }
+    assert.deepEqual([...filesBySkill.keys()].sort(compareUtf8), officialSkillNames());
+    const skillTrees = [...filesBySkill.entries()].map(([name, rows]) => ({
+      mode: "40000",
+      name,
+      objectId: gitTreeObjectId(rows)
+    }));
+    const reconstructed = gitTreeObjectId(skillTrees);
     assert.equal(reconstructed, origin.skills_tree, origin.release);
   }
 });
@@ -100,8 +125,8 @@ test("the official manifest owns every packed skill file and materializes exact-
       if (process.platform !== "win32") {
         assert.equal(fs.statSync(packedPath).mode & 0o7777, file.mode, `${skill.name}/${file.path} mode`);
       }
-      assert.equal(file.predecessors.length, 2);
-      assert.deepEqual(file.predecessors.map(({ release }) => release), ["2.0.9", "2.0.10"]);
+      assert.equal(file.predecessors.length, 4);
+      assert.deepEqual(file.predecessors.map(({ release }) => release), ["2.0.8", "2.0.9", "2.0.10", "2.0.11"]);
     }
 
     const instructions = skill.files.find(({ path: relative }) => relative === "SKILL.md");
@@ -502,7 +527,7 @@ test("root-only repair preserves already-current catalog bytes and inodes", asyn
   }
 });
 
-for (const origin of predecessorFixture.origins) {
+for (const { origin, fixture, candidateVersion } of predecessorCases) {
   test(`official-batch upgrades the real ${origin.release} skill bytes and preserves generated personalization`, async (t) => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), `dotaios-official-${origin.release}-`));
     const aiosPath = path.join(root, "aios");
@@ -510,7 +535,7 @@ for (const origin of predecessorFixture.origins) {
     fs.mkdirSync(path.join(aiosPath, "skills"), { recursive: true });
     fs.mkdirSync(homePath);
     t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-    writePredecessorSkills(aiosPath);
+    writePredecessorSkills(aiosPath, { fixture, candidateVersion });
     fs.mkdirSync(path.join(aiosPath, "skills", "personal-workflow"));
     fs.writeFileSync(path.join(aiosPath, "skills", "personal-workflow", "SKILL.md"), [
       "---",

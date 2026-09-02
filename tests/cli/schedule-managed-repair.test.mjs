@@ -13,10 +13,10 @@ import {
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
-const candidateVersion = "2.0.11";
+const candidateVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 const candidateInvocation = `npx dotaios@${candidateVersion}`;
 
-for (const origin of ["2.0.9", "2.0.10"]) {
+for (const origin of ["2.0.9", "2.0.10", "2.0.11"]) {
   test(`repairs only generated ${origin} schedule command scalars`, () => {
     const predecessor = `npx dotaios@${origin}`;
     const source = [
@@ -162,7 +162,7 @@ test("classifies every generated command from its own bytes without a folder ori
   assert.equal(plan.status, "blocked-conflict");
   assert.equal(plan.changes.length, 1);
   assert.deepEqual(plan.changes.map(({ name }) => name), ["daily-brief"]);
-  assert.match(JSON.stringify(plan.conflicts), /weekly-health-check|custom-official-command|2\.0\.9\/2\.0\.10/i);
+  assert.match(JSON.stringify(plan.conflicts), /weekly-health-check|custom-official-command|2\.0\.9\/2\.0\.10\/2\.0\.11/i);
   assert.doesNotMatch(JSON.stringify(plan.conflicts), /unsupported-origin/i);
   assert.throws(() => applyManagedScheduleRepair(source, plan), /conflict/i);
   assert.match(source, /npx dotaios@2\.0\.8 doctor/);

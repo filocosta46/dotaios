@@ -173,13 +173,17 @@ function skillTargetEvidence(agent, targetByDir) {
       path: target.path,
       status: target.status,
       complete: target.complete,
-      canonicalPresent: target.canonicalPresent
+      canonicalPresent: target.canonicalPresent,
+      linkedCount: target.linked.length,
+      sourceCount: target.sourceCount
     }
     : {
       path: agent.skills.dir,
       status: "not-detected",
       complete: false,
-      canonicalPresent: null
+      canonicalPresent: null,
+      linkedCount: 0,
+      sourceCount: null
     };
 }
 

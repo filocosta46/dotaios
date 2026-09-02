@@ -20,7 +20,7 @@ import {
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const MANAGED_SCHEDULE_REPAIR_FORMAT = "dotaios-managed-schedule-repair-plan/v1";
-const RECOGNIZED_SCHEDULE_PREDECESSORS = new Set(["2.0.9", "2.0.10"]);
+const RECOGNIZED_SCHEDULE_PREDECESSORS = new Set(["2.0.9", "2.0.10", "2.0.11"]);
 const TERMINAL_SCHEDULE_FIELDS = new Set(["name", "cadence", "command"]);
 const UNSAFE_TERMINAL_TEXT = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]|\p{Bidi_Control}/u;
 export const OFFICIAL_SCHEDULES = Object.freeze([
@@ -615,7 +615,7 @@ function buildManagedScheduleRepairPlan(
       conflicts.push({
         name,
         reason: "custom-official-command",
-        detail: "the command is not an exact generated 2.0.9/2.0.10 predecessor"
+        detail: "the command is not an exact generated 2.0.9/2.0.10/2.0.11 predecessor"
       });
       continue;
     }

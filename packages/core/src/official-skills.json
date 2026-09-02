@@ -2,8 +2,10 @@
   "format": "dotaios-official-skill-manifest/v1",
   "candidate_version_placeholder": "<exact-candidate-version>",
   "supported_predecessors": [
+    "2.0.8",
     "2.0.9",
-    "2.0.10"
+    "2.0.10",
+    "2.0.11"
   ],
   "skills": [
     {
@@ -20,11 +22,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -39,6 +49,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "1052a15db9b21ec0e544371cfec9ecc2622075f0f1f0e87fa889797ffd029080"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "2b502f4b542ccaa201347a778238fb1019e24ff8ccc11f75528be297f384acb4"
@@ -46,6 +60,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "2b502f4b542ccaa201347a778238fb1019e24ff8ccc11f75528be297f384acb4"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "0dd359e85079565cd7673be47b339d83dde43663b6f68648d6c3beb2f7bd44da"
             }
           }
         }
@@ -65,11 +83,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -84,11 +110,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "c7f90374a418e0ec0a279ec9cb1fd36933f27299a4dc536d317bb2e33dd8635f"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "c7f90374a418e0ec0a279ec9cb1fd36933f27299a4dc536d317bb2e33dd8635f"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "c7f90374a418e0ec0a279ec9cb1fd36933f27299a4dc536d317bb2e33dd8635f"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "c7f90374a418e0ec0a279ec9cb1fd36933f27299a4dc536d317bb2e33dd8635f"
             }
@@ -110,11 +144,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -129,6 +171,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "15439a264ee8bfe4f65c7e6a30b3d594b2f835c5cc08eb8c1d932ecfc5eb3e31"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "bfc19b6b7d4739e3f7425cf8d4efb1166c673cfe29310f66055cb526058e8597"
@@ -136,6 +182,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "bfc19b6b7d4739e3f7425cf8d4efb1166c673cfe29310f66055cb526058e8597"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "716b9196431768423f2b3aafbd6f4744f3bc9e59c0d5cab2a3b66a939feffa99"
             }
           }
         }
@@ -155,11 +205,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -174,6 +232,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "0b0cad0423126f56e33970bb79fbb0febad658148148ee384f89c759eab4b6a3"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "852d6ceb0f87d80d40ed75ba98dd55fb6b320b08c0bbdc8f1ad7a197bb46cb11"
@@ -181,6 +243,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "852d6ceb0f87d80d40ed75ba98dd55fb6b320b08c0bbdc8f1ad7a197bb46cb11"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "dfc6400ab745a7399f18d11b17db940d2e6fa27cf380932092aded8e9ab91280"
             }
           }
         }
@@ -200,11 +266,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -219,6 +293,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "c707d5b2d25bd88998150e299677619e49b72e77ee4e864142e51b4e4da522bc"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "c707d5b2d25bd88998150e299677619e49b72e77ee4e864142e51b4e4da522bc"
@@ -226,6 +304,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "c707d5b2d25bd88998150e299677619e49b72e77ee4e864142e51b4e4da522bc"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "d6630d71d0d3e4e0d9b3ce258c3e7f8b19c45951a55d898e0b577eb9d3c6d0e8"
             }
           }
         }
@@ -245,11 +327,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -264,6 +354,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "bd20a8a65568ce44cd744754e8ca1e5cdfcce7165249683e432374a246b02e0b"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "ba064dbe53ee8b9775e21744094ffd4413d17ff766c519ffec476946d35f9941"
@@ -271,6 +365,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "ba064dbe53ee8b9775e21744094ffd4413d17ff766c519ffec476946d35f9941"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "0c2d8baadfacfbfa207dcff36a3baa2fefe5e4aa8fc1a8e43559d1484d1e2995"
             }
           }
         }
@@ -296,11 +394,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -315,6 +421,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "c5101868ca426369bc1ae1f280c4ceb587b10472c009d0971b215654184000dc"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "9b955f4ec186f4b2bd2e0db05a304599b9549d49ac2b2bdf9c943a2cf7f366a1"
@@ -322,6 +432,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "9b955f4ec186f4b2bd2e0db05a304599b9549d49ac2b2bdf9c943a2cf7f366a1"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "7d0549d8a908a74da5757b82be9a7876868d4baf6b5d4ead478b867c155cd62f"
             }
           }
         }
@@ -341,11 +455,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -360,11 +482,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "764ed2e1dae0b15cc2a9dbee41f638c883224ba70208ac7b24922279807ae2c0"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "764ed2e1dae0b15cc2a9dbee41f638c883224ba70208ac7b24922279807ae2c0"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "764ed2e1dae0b15cc2a9dbee41f638c883224ba70208ac7b24922279807ae2c0"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "764ed2e1dae0b15cc2a9dbee41f638c883224ba70208ac7b24922279807ae2c0"
             }
@@ -386,11 +516,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -405,11 +543,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "839b80769b92fc21cd829d7607380f11db39edd5a520bdb27652384837dcae70"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "839b80769b92fc21cd829d7607380f11db39edd5a520bdb27652384837dcae70"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "839b80769b92fc21cd829d7607380f11db39edd5a520bdb27652384837dcae70"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "839b80769b92fc21cd829d7607380f11db39edd5a520bdb27652384837dcae70"
             }
@@ -431,11 +577,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -450,11 +604,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120"
             }
@@ -476,11 +638,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -495,6 +665,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "a463716e70e127c7c3256b4d94ff1a2d2b74ba4e4023a72f0ec312d29973b28a"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "a463716e70e127c7c3256b4d94ff1a2d2b74ba4e4023a72f0ec312d29973b28a"
@@ -502,6 +676,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "a463716e70e127c7c3256b4d94ff1a2d2b74ba4e4023a72f0ec312d29973b28a"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "e26bbd4899a304bb9b6c734dca3afce0dcd51bcd5af6f9a1c0408a9bdaf9bfeb"
             }
           }
         }
@@ -521,11 +699,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -540,6 +726,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "8f486661d147b38495c9f380c2ad73db09416c7f6eb9b22105191bddef0d3842"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "8f486661d147b38495c9f380c2ad73db09416c7f6eb9b22105191bddef0d3842"
@@ -547,6 +737,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "8f486661d147b38495c9f380c2ad73db09416c7f6eb9b22105191bddef0d3842"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "284a1f6b7d6959e4a3f6837f42c366a5d3ec6872d165055d19054b8148c9bc79"
             }
           }
         }
@@ -566,11 +760,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -585,11 +787,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "a8576263831c1f27f2d406a2604b027d950e5a72fc1bf9160d097f646f295425"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "a8576263831c1f27f2d406a2604b027d950e5a72fc1bf9160d097f646f295425"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "a8576263831c1f27f2d406a2604b027d950e5a72fc1bf9160d097f646f295425"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "a8576263831c1f27f2d406a2604b027d950e5a72fc1bf9160d097f646f295425"
             }
@@ -611,11 +821,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -630,6 +848,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "d657117439ae052ac9b513b649858e0bab63a85fceebac51b49452a2750b160e"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "e1d4fdfff79abe7a571d5c955326af08a045ad2a8dd4b41f28bb4ba6f9643ecb"
@@ -637,6 +859,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "e1d4fdfff79abe7a571d5c955326af08a045ad2a8dd4b41f28bb4ba6f9643ecb"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "24fd6dd4ec062850d7c064e5d2c42f8eb0a0a7df3e346ceecdecd0792787b4c6"
             }
           }
         }
@@ -656,11 +882,19 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             },
             "2.0.10": {
+              "mode": 420,
+              "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
+            },
+            "2.0.11": {
               "mode": 420,
               "sha256": "98279b9fdbfd05a952e79f2371a25e25d1fcfa3e54940a6c5bd17af8d2250bbf"
             }
@@ -675,6 +909,10 @@
             "kind": "verbatim"
           },
           "accepted_predecessors": {
+            "2.0.8": {
+              "mode": 420,
+              "sha256": "b7fc1e24a101488655e0581efccbfa449c904545ec9b058b9b6c8044a8bf3ff9"
+            },
             "2.0.9": {
               "mode": 420,
               "sha256": "da81c84d7abe67db35bf9f85e930a6f341191f760996cfd807911c6c122a985d"
@@ -682,6 +920,10 @@
             "2.0.10": {
               "mode": 420,
               "sha256": "da81c84d7abe67db35bf9f85e930a6f341191f760996cfd807911c6c122a985d"
+            },
+            "2.0.11": {
+              "mode": 420,
+              "sha256": "8f86a128c02943dc9074eedab0c93f9f109e7e70d992ace7f07edf6cc5f35566"
             }
           }
         }
