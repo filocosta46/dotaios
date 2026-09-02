@@ -5,7 +5,7 @@ artifact intentionally bundles one frozen dependency graph so installation
 does not re-resolve production dependencies. This document supplements the
 license files shipped inside those bundled packages.
 
-<!-- bundled-dependency-graph-sha256: 965a9dd9616eeea020637151c01030f1cee8a1bc0276e7b8a73a693b8c9a2033 -->
+<!-- bundled-dependency-graph-sha256: 405a4a3e39bc5541173aa552ff84be9875470b6c068f594704ba34bd8eb760b9 -->
 
 ## Bundled dependency inventory
 
