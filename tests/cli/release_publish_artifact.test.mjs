@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
@@ -19,6 +20,7 @@ import {
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const checklist = path.join(repoRoot, "scripts", "release-checklist.mjs");
+const FIXTURE_VERSION = "9.8.7";
 
 const CLEAN_ENTRIES = Object.freeze([
   "package/package.json",
@@ -60,7 +62,7 @@ function makeTarball(entries) {
 
 function packageContents(extra = {}) {
   return {
-    "package/package.json": JSON.stringify({ name: "dotaios", version: "2.0.15" }),
+    "package/package.json": JSON.stringify({ name: "dotaios", version: FIXTURE_VERSION }),
     "package/npm-shrinkwrap.json": JSON.stringify({ lockfileVersion: 3, packages: {} }),
     "package/README.md": "# DotAIOS\n",
     ...extra,
@@ -70,7 +72,7 @@ function packageContents(extra = {}) {
 function writeArtifact(t, label, contents) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `dotaios-${label}-`));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const artifact = path.join(root, "dotaios-2.0.15.tgz");
+  const artifact = path.join(root, `dotaios-${FIXTURE_VERSION}.tgz`);
   fs.writeFileSync(artifact, makeTarball(contents));
   return artifact;
 }
@@ -81,6 +83,112 @@ function runChecklist(args) {
     encoding: "utf8",
     env: { PATH: path.dirname(process.execPath) },
   });
+}
+
+function releaseAdmissionForArtifact(artifact, {
+  artifactSha256 = createHash("sha256").update(fs.readFileSync(artifact)).digest("hex"),
+  includeFullReleaseEvidence = false,
+  includePublicAuthority = true,
+} = {}) {
+  const sourceCommit = "a".repeat(40);
+  const dependencyGraphSha256 = "5".repeat(64);
+  const source = {
+    schema: "dotaios.reviewed-source.v1",
+    source_go: "GO",
+    source_commit: sourceCommit,
+    reviewed_pr: {
+      number: 123,
+      head: sourceCommit,
+      required_checks_sha256: "b".repeat(64),
+    },
+  };
+  const packageReceipt = {
+    schema: "dotaios.package-admission.v1",
+    verdict: "go",
+    package_go: "GO",
+    source_commit: sourceCommit,
+    artifact: {
+      name: "dotaios",
+      version: FIXTURE_VERSION,
+      sha256: artifactSha256,
+      payload_sha256: "3".repeat(64),
+      dependency_graph_sha256: dependencyGraphSha256,
+    },
+    assertions: {
+      archive_regular_files_only: true,
+      artifact_identity_stable: true,
+      bundled_graph_complete: true,
+      candidate_loaded_without_ambient_modules: true,
+      lifecycle_scripts_absent: true,
+      shrinkwrap_admitted: true,
+      third_party_notices_admitted: true,
+    },
+  };
+  const publicAuthority = includePublicAuthority ? {
+    schema: "dotaios.public-release-authority.v1",
+    authorized: "yes",
+    source_commit: sourceCommit,
+    artifact_sha256: artifactSha256,
+  } : undefined;
+  const admission = {
+    source,
+    package_receipt: packageReceipt,
+    public_authority: publicAuthority,
+  };
+  if (!includeFullReleaseEvidence) return admission;
+
+  const nativeAdmission = (client, digit) => ({
+    schema: "dotaios.native-admission.v1",
+    client,
+    native_agent_go: "GO",
+    challenge_id: digit.repeat(64),
+    source_commit: sourceCommit,
+    reviewed_pr_head: sourceCommit,
+    artifact_sha256: artifactSha256,
+    dependency_graph_sha256: dependencyGraphSha256,
+    consume: {
+      challenge_id: digit.repeat(64),
+      receipt_sha256: digit.repeat(64),
+    },
+  });
+  return {
+    ...admission,
+    registry_receipt: {
+      schema: "dotaios.registry-artifact.v1",
+      package: "dotaios",
+      version: FIXTURE_VERSION,
+      artifact_sha256: artifactSha256,
+      dependency_source: "npm-shrinkwrap",
+      git_head: sourceCommit,
+      integrity_sha512: `sha512-${"A".repeat(86)}==`,
+    },
+    native_admissions: [nativeAdmission("codex", "6"), nativeAdmission("claude", "7")],
+    evidence_commit: {
+      schema: "dotaios.evidence-commit.v1",
+      evidence_go: "GO",
+      candidate_source_commit: sourceCommit,
+      evidence_commit: "c".repeat(40),
+      reviewed_pr: { number: 124, head: "c".repeat(40) },
+      package_tree_sha256: "d".repeat(64),
+      evidence_files_sha256: "e".repeat(64),
+    },
+    non_founder_outcome: {
+      schema: "dotaios.non-founder-outcome.v1",
+      completed: "yes",
+      source_commit: sourceCommit,
+      artifact_sha256: artifactSha256,
+      instruction_file_designed: "no",
+      transcript_retained: "no",
+    },
+  };
+}
+
+function writeAdmission(t, label, admission) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `dotaios-${label}-`));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const admissionPath = path.join(root, "admission.json");
+  fs.writeFileSync(admissionPath, JSON.stringify(admission));
+  return admissionPath;
 }
 
 test("a clean artifact listing is admitted for publication", () => {
@@ -171,6 +279,72 @@ test("a clean pack is admitted even while the release itself stays NO-GO", (t) =
   assert.doesNotMatch(result.stdout, /npm publish/i);
 });
 
+test("the checklist refuses clean bytes that do not match the package receipt", (t) => {
+  const artifact = writeArtifact(t, "receipt-mismatch", packageContents());
+  const admission = releaseAdmissionForArtifact(artifact, {
+    artifactSha256: "4".repeat(64),
+    includeFullReleaseEvidence: true,
+  });
+  const admissionPath = writeAdmission(t, "receipt-mismatch", admission);
+
+  const result = runChecklist(["--admission", admissionPath, "--artifact", artifact]);
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /Publish artifact: REFUSED/);
+  assert.match(result.stdout, /SHA-256 does not match the package receipt/);
+  assert.doesNotMatch(result.stdout, /npm publish|npm dist-tag/i);
+});
+
+test("candidate publication authorizes the exact admitted bytes once", (t) => {
+  const artifact = writeArtifact(t, "candidate", packageContents());
+  const admissionPath = writeAdmission(
+    t,
+    "candidate",
+    releaseAdmissionForArtifact(artifact),
+  );
+
+  const result = runChecklist([
+    "--candidate-publish", "--admission", admissionPath, "--artifact", artifact,
+  ]);
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /Candidate publication: GO/);
+  assert.match(result.stdout, /npm publish .*\.tgz --tag candidate/);
+  assert.doesNotMatch(result.stdout, /npm dist-tag/i);
+});
+
+test("candidate publication needs explicit authority", (t) => {
+  const artifact = writeArtifact(t, "candidate-no-authority", packageContents());
+  const admissionPath = writeAdmission(
+    t,
+    "candidate-no-authority",
+    releaseAdmissionForArtifact(artifact, { includePublicAuthority: false }),
+  );
+
+  const result = runChecklist([
+    "--candidate-publish", "--admission", admissionPath, "--artifact", artifact,
+  ]);
+
+  assert.equal(result.status, 1, `${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /Candidate publication: NO-GO/);
+  assert.doesNotMatch(result.stdout, /npm publish|npm dist-tag/i);
+});
+
+test("full public GO promotes the already-published candidate instead of republishing", (t) => {
+  const artifact = writeArtifact(t, "public-release", packageContents());
+  const admissionPath = writeAdmission(
+    t,
+    "public-release",
+    releaseAdmissionForArtifact(artifact, { includeFullReleaseEvidence: true }),
+  );
+
+  const result = runChecklist(["--admission", admissionPath, "--artifact", artifact]);
+
+  assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /npm dist-tag add dotaios@9\.8\.7 latest/);
+  assert.doesNotMatch(result.stdout, /npm publish/i);
+});
+
 test("an unadmitted pack is reported rather than silently skipped", () => {
   const result = runChecklist([]);
 
@@ -179,13 +353,15 @@ test("an unadmitted pack is reported rather than silently skipped", () => {
   assert.doesNotMatch(result.stdout, /npm publish/i);
 });
 
-test("the release runbook sends the maintainer to the admitted tarball", async () => {
+test("the release runbook publishes one candidate and promotes it without repacking", async () => {
   const runbook = await fs.promises.readFile(
     path.join(repoRoot, ".claude", "commands", "release-check.md"),
     "utf8"
   );
   assert.match(runbook, /--artifact/);
+  assert.match(runbook, /--candidate-publish/);
   assert.match(runbook, /npm publish <[^>]*\.tgz>|npm publish .*admitted/i);
+  assert.match(runbook, /npm dist-tag add/);
   assert.doesNotMatch(runbook, /npm publish\s*$/m);
 });
 

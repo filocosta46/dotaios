@@ -149,14 +149,15 @@ export function runReleaseChecklist(args, { output = console.log } = {}) {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const options = parseOptions(args);
   output(`DotAIOS release checklist — v${pkg.version}`);
-  const admission = options.admission
-    ? evaluateReleaseAdmission(readBoundedAdmission(options.admission))
-    : evaluateReleaseAdmission({});
+  const admissionInput = options.admission
+    ? readBoundedAdmission(options.admission)
+    : {};
+  const admission = evaluateReleaseAdmission(admissionInput);
   output(`Package admission: ${admission.package_admission}`);
   output(`Native-agent admission: ${admission.native_agent_admission}`);
   output(`Public-release admission: ${admission.public_release_admission}`);
   const artifact = options.artifact
-    ? inspectPublishArtifact(options.artifact)
+    ? inspectPublishArtifact(options.artifact, admissionInput.package_receipt?.artifact)
     : {
         publish_artifact: "NOT PROVIDED",
         refusals: [
@@ -165,9 +166,26 @@ export function runReleaseChecklist(args, { output = console.log } = {}) {
       };
   output(`Publish artifact: ${artifact.publish_artifact}`);
   for (const refusal of artifact.refusals) output(`  - ${refusal}`);
+  if (options.candidatePublish) {
+    const candidateGo = admission.package_admission === "GO"
+      && artifact.publish_artifact === "ADMITTED"
+      && hasPublicReleaseAuthority(
+        admissionInput.public_authority,
+        admissionInput.source,
+        admissionInput.package_receipt,
+      );
+    output(`Candidate publication: ${candidateGo ? "GO" : "NO-GO"}`);
+    if (!candidateGo) return 1;
+    output(
+      `Publish exactly the admitted artifact: npm publish ${options.artifact} --tag candidate`
+    );
+    return 0;
+  }
   const decision = publishDecision(admission.public_release_admission, artifact.publish_artifact);
   if (!decision.go) return 1;
-  output(`Publish exactly the admitted artifact: npm publish ${options.artifact}`);
+  output(
+    `Promote the admitted candidate: npm dist-tag add dotaios@${admissionInput.package_receipt.artifact.version} latest`
+  );
   return 0;
 }
 
@@ -193,17 +211,30 @@ export function publishDecision(publicReleaseAdmission, publishArtifact) {
   return { go: publicReleaseAdmission === "GO" && publishArtifact === "ADMITTED" };
 }
 
-function inspectPublishArtifact(file) {
+function inspectPublishArtifact(file, expectedArtifact) {
   let archive;
+  let artifactSha256;
   try {
-    archive = inspectPackageArchive(readBoundedPublishArtifact(file));
+    const bytes = readBoundedPublishArtifact(file);
+    artifactSha256 = sha256(bytes);
+    archive = inspectPackageArchive(bytes);
   } catch (error) {
     return {
       publish_artifact: "REFUSED",
       refusals: [`The artifact is not an admitted package: ${error.message}`],
     };
   }
-  return evaluatePublishArtifact([...archive.entries.keys()]);
+  const inspected = evaluatePublishArtifact([...archive.entries.keys()]);
+  const refusals = [
+    ...inspected.refusals,
+    ...(expectedArtifact && artifactSha256 !== expectedArtifact.sha256
+      ? ["Artifact SHA-256 does not match the package receipt."]
+      : []),
+  ];
+  return {
+    publish_artifact: refusals.length === 0 ? "ADMITTED" : "REFUSED",
+    refusals,
+  };
 }
 
 function readBoundedPublishArtifact(file) {
@@ -313,11 +344,7 @@ export function evaluateReleaseAdmission(input) {
     && nonFounder.artifact_sha256 === packageReceipt.artifact.sha256
     && nonFounder.instruction_file_designed === "no"
     && nonFounder.transcript_retained === "no"
-    && hasExactKeys(authority, ["schema", "authorized", "source_commit", "artifact_sha256"])
-    && authority.schema === "dotaios.public-release-authority.v1"
-    && authority.authorized === "yes"
-    && authority.source_commit === source.source_commit
-    && authority.artifact_sha256 === packageReceipt.artifact.sha256;
+    && hasPublicReleaseAuthority(authority, source, packageReceipt);
   return {
     schema: "dotaios.release-admission.v1",
     package_admission: packageGo ? "GO" : "NO-GO",
@@ -327,12 +354,17 @@ export function evaluateReleaseAdmission(input) {
 }
 
 function parseOptions(args) {
-  const parsed = { admission: null, artifact: null };
+  const parsed = { admission: null, artifact: null, candidatePublish: false };
   // A plain object would resolve "constructor" and "__proto__" through the
   // prototype chain and accept them as option names.
   const keys = new Map([["--admission", "admission"], ["--artifact", "artifact"]]);
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
+    if (arg === "--candidate-publish") {
+      if (parsed.candidatePublish) throw new Error(`${arg} may be provided only once`);
+      parsed.candidatePublish = true;
+      continue;
+    }
     const key = keys.get(arg);
     if (!key) throw new Error(`Unknown option: ${arg}`);
     const value = args[index + 1];
@@ -342,6 +374,16 @@ function parseOptions(args) {
     index += 1;
   }
   return parsed;
+}
+
+function hasPublicReleaseAuthority(authority, source, packageReceipt) {
+  return Boolean(
+    hasExactKeys(authority, ["schema", "authorized", "source_commit", "artifact_sha256"])
+    && authority.schema === "dotaios.public-release-authority.v1"
+    && authority.authorized === "yes"
+    && authority.source_commit === source?.source_commit
+    && authority.artifact_sha256 === packageReceipt?.artifact?.sha256
+  );
 }
 
 function readBoundedAdmission(file) {

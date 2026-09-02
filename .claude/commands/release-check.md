@@ -1,24 +1,28 @@
 ---
-description: Run the pre-publish release checklist (admission receipts plus the exact tarball about to be published).
-allowed-tools: Bash(npm run release:check), Bash(npm run release:check -- --artifact *), Bash(npm run release:check -- --admission * --artifact *)
+description: Check the exact tarball before candidate publication or final latest promotion.
+allowed-tools: Bash(npm run release:check), Bash(npm run release:check -- --artifact *), Bash(npm run release:check -- --admission * --artifact *), Bash(npm run release:check -- --candidate-publish --admission * --artifact *)
 ---
 
-Run the checklist from the repo root against the artifact the admission firewall
-built, not against the working tree:
+After source and package admission plus explicit maintainer authority, check the
+candidate from the repo root:
+
+```sh
+npm run release:check -- --candidate-publish --admission <admission.json> --artifact <admitted.tgz>
+```
+
+Use the tarball that `npm run pack:admission` produced and CI uploaded. The gate
+binds its SHA-256 to the package receipt and prints the exact candidate publish
+command, `npm publish <admitted.tgz> --tag candidate`, only on GO.
+
+After the registry, native-client, evidence-commit, and non-founder receipts are
+also present, run the full public-release check:
 
 ```sh
 npm run release:check -- --admission <admission.json> --artifact <admitted.tgz>
 ```
 
-The admitted tarball is the one `npm run pack:admission` produced and CI uploaded
-(`.artifacts/dotaios-*.tgz`). The checklist reads its exact bytes and refuses the
-shapes a repo-root pack produces: a bundled dependency's `jquery-1.9.1.js` or
-`html5lib-tests.json`, or a package that lost `npm-shrinkwrap.json`.
+On full GO it prints the exact `npm dist-tag add dotaios@<version> latest`
+command. This promotes the same bytes without republishing them.
 
-This is a read-only gate — it never publishes, tags, or pushes. Summarize which
-checks passed/failed and, if any failed, what the maintainer needs to fix.
-
-Publication is `npm publish <admitted.tgz>` — the exact tarball this gate read.
-Never `npm publish` from the repo root: that re-packs whatever `node_modules`
-currently holds, which reintroduces the bundled dependency junk that
-`pruneBundledDependencyJunk` strips only inside the admission build.
+The gate is read-only. Never publish from the repo root; that repacks the
+working tree instead of using the admitted bytes.
