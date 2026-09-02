@@ -36,9 +36,9 @@ export async function writeSyncConfig(filePathOrPatch, maybePatch) {
     try { await fs.chmod(dir, 0o700); } catch {}
   }
 
-  // TODO: a file lock would prevent two concurrent ticks from clobbering each
-  // other's read-modify-write basis. The atomic rename below covers half-written
-  // file visibility, but not the read-merge-write race.
+  // Production sync writers hold the shared sync.lock around this
+  // read-merge-write sequence. The atomic rename also keeps direct readers
+  // from observing a half-written file.
   const existing = (await readSyncConfig(filePath)) ?? {};
   const merged = { ...existing, ...patch };
 
