@@ -8,12 +8,47 @@ export const predecessorFixture = JSON.parse(fs.readFileSync(
   "utf8"
 ));
 
-export function writePredecessorSkills(aiosPath) {
-  assert.equal(predecessorFixture.format, "dotaios-official-skill-predecessor-fixture/v1");
-  for (const file of predecessorFixture.files) {
+export const candidatePredecessorFixture = JSON.parse(fs.readFileSync(
+  new URL("../fixtures/official-skills-2.0.11.json", import.meta.url),
+  "utf8"
+));
+
+export const legacyPredecessorFixture = JSON.parse(fs.readFileSync(
+  new URL("../fixtures/official-skills-2.0.8.json", import.meta.url),
+  "utf8"
+));
+
+export function predecessorFiles(fixture) {
+  if (fixture === predecessorFixture) {
+    return fixture.files.map((file) => ({ fixture, file }));
+  }
+  assert.ok(new Set([
+    "dotaios-official-skill-predecessor-delta/v1",
+    "dotaios-official-skill-candidate-predecessor-delta/v1"
+  ]).has(fixture.format));
+  assert.ok(predecessorFixture.origins.some(({ release }) => release === fixture.origin.base_release));
+  const overrides = new Map(fixture.files.map((file) => [file.path, file]));
+  return predecessorFixture.files.map((file) => overrides.has(file.path)
+    ? { fixture, file: overrides.get(file.path) }
+    : { fixture: predecessorFixture, file });
+}
+
+export function predecessorFileBytes(fixture, file, { candidateVersion } = {}) {
+  let bytes = Buffer.from(fixture.blobs[file.sha256], "base64");
+  assert.equal(fileSha256(bytes), file.sha256, file.path);
+  if (candidateVersion && bytes.includes("<exact-candidate-version>")) {
+    bytes = Buffer.from(bytes.toString("utf8").replaceAll("<exact-candidate-version>", candidateVersion), "utf8");
+  }
+  return bytes;
+}
+
+export function writePredecessorSkills(aiosPath, {
+  fixture = predecessorFixture,
+  candidateVersion
+} = {}) {
+  for (const { fixture: sourceFixture, file } of predecessorFiles(fixture)) {
     const destination = path.join(aiosPath, "skills", ...file.path.split("/"));
-    const bytes = Buffer.from(predecessorFixture.blobs[file.sha256], "base64");
-    assert.equal(sha256(bytes), file.sha256, file.path);
+    const bytes = predecessorFileBytes(sourceFixture, file, { candidateVersion });
     fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o755 });
     fs.writeFileSync(destination, bytes, { mode: file.mode });
     fs.chmodSync(destination, file.mode);
@@ -48,6 +83,6 @@ export function renderGeneratedPrompt(
   ].join("\n");
 }
 
-function sha256(bytes) {
+function fileSha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
 }

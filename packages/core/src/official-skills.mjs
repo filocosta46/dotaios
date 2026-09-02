@@ -162,7 +162,7 @@ function validateManifestShape(value) {
     || value.format !== MANIFEST_FORMAT
     || value.candidate_version_placeholder !== "<exact-candidate-version>"
     || !Array.isArray(value.supported_predecessors)
-    || !sameStringArray(value.supported_predecessors, ["2.0.9", "2.0.10"])
+    || !sameStringArray(value.supported_predecessors, ["2.0.8", "2.0.9", "2.0.10", "2.0.11"])
     || !Array.isArray(value.skills)
   ) throw officialPackageError("The bundled official skill manifest is invalid.");
 
