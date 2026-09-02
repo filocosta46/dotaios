@@ -442,9 +442,17 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   );
   assert.match(unwrapped["INSTALL.md"], /does not use the macOS Keychain or another operating-system credential store/i, "INSTALL must not imply an OS credential store it does not use");
   assert.doesNotMatch(corpus.replace(/\s+/g, " "), /[Cc]redentials stay in the machine credential store/, "no public page may claim an OS credential store");
-  assert.match(documents["INSTALL.md"], /current removal contract/i, "INSTALL must keep a removal contract without pinning a release number");
+  assert.match(
+    unwrapped["INSTALL.md"],
+    /Disconnect.*keeps `<aios-path>`.*Remove.*archives `<aios-path>`/i,
+    "INSTALL must separate reversible disconnection from data removal"
+  );
   assert.match(documents["INSTALL.md"], /doctor --path <aios-path>/i, "INSTALL must make custom-path removal inspectable");
-  assert.match(documents["INSTALL.md"], /retired `~\/\.cursor\/skills`.*`~\/\.gemini\/skills`.*`~\/\.gemini\/config\/skills`/is, "INSTALL must cover retired global skill targets");
+  assert.match(
+    unwrapped["INSTALL.md"],
+    /Retired skill directories.*`~\/\.cursor\/skills`.*`~\/\.gemini\/skills`.*`~\/\.gemini\/antigravity\/skills`/i,
+    "INSTALL must cover retired global skill targets without misclassifying active Antigravity"
+  );
   assert.match(documents["INSTALL.md"], /\.cursor\/rules\/dotaios\.mdc.*remove only that block/is, "INSTALL must cover the retired project Cursor bridge");
 
   const pinnedCommandFiles = [

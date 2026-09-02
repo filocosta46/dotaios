@@ -434,10 +434,21 @@ client config automatically. Do not replace `<version>` with `latest`.
 
 ## Disconnect or remove
 
-The steps below are the current removal contract. After updating, use the exact
+DotAIOS does not yet automate the destructive final step. Use the exact
 installed version and the reviewed `INSTALL.md` shipped with that release.
-`<aios-path>` below means the folder you installed; the default is `~/aios`.
-Back up any local context you want to keep. Then:
+`<aios-path>` means the folder you installed; the default is `~/aios`.
+
+Choose the outcome before changing anything:
+
+- **Disconnect** removes DotAIOS integrations and optional writers but keeps
+  `<aios-path>` and its user-owned memory.
+- **Remove** performs the disconnect, clears DotAIOS-owned machine state, and
+  archives `<aios-path>` somewhere outside every removal target. Permanent
+  deletion is a separate decision; never infer it from a request to uninstall.
+
+Back up any local context you want to keep before either path.
+
+### Stop optional writers
 
 ```sh
 npx dotaios@2.0.16 capture disable claude-code --path <aios-path>
@@ -449,38 +460,102 @@ repository remains intact, and the GitHub token grant may still need revocation.
 For full remote removal, first keep any backup you need, then delete or archive
 the repository in GitHub and revoke the token in GitHub settings.
 
-Run `npx dotaios@2.0.16 doctor --path <aios-path>` first so you have the exact
-configured paths.
+Run `npx dotaios@2.0.16 doctor --path <aios-path>` so you have the exact
+configured paths before editing shared client configuration.
+
+### Global instruction files
+
 In `~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`,
-`~/.gemini/GEMINI.md`, and `~/.config/opencode/AGENTS.md`, remove only content between the
-`dotaios-managed:start` and `dotaios-managed:end` markers. In configured skill
-directories, remove only links whose resolved target is inside
-`<aios-path>/skills`;
-preserve every other entry. Check the retired `~/.cursor/skills`,
-`~/.gemini/skills`, and `~/.gemini/config/skills` directories under the same
-rule: remove only links into `<aios-path>/skills`. If enabled, inspect the root
-Hermes config and each discovered profile config, then remove only the exact
-`<aios-path>/skills` entry from `skills.external_dirs`. The optional browser
-binary is `~/.dotaios/bin/lightpanda`.
+`~/.gemini/GEMINI.md`, and `~/.config/opencode/AGENTS.md`, remove only content
+between the `dotaios-managed:start` and `dotaios-managed:end` markers. Preserve
+all surrounding bytes. If enabled, inspect `~/.hermes/config.yaml` and each
+`~/.hermes/profiles/*/config.yaml`, then remove only that exact entry from
+`skills.external_dirs`: `<aios-path>/skills`.
+
+### Active global skill directories
+
+These paths come from `packages/core/src/agents.json`. Remove only links whose
+resolved target is inside `<aios-path>/skills`; preserve every other entry.
+
+| Used by | Directory |
+| --- | --- |
+| Shared Agent Skills clients | `~/.agents/skills` |
+| Claude Code | `~/.claude/skills` |
+| Antigravity | `~/.gemini/config/skills` |
+| Grok | `~/.grok/skills` |
+
+### Attached project integrations
 
 For each attached checkout listed in `~/.dotaios/projects.json`, remove only the
-DotAIOS-managed block from its root `AGENTS.md`. In that checkout's
-`.claude/skills` and `.agents/skills` directories, remove only links whose
-resolved target is inside the checkout's own `skills` directory. If its
-`.hermes/config.yaml` lists that same `skills` directory under
-`skills.external_dirs`, remove only that exact entry. Apply the same link rule
-to the retired `.cursor/skills`, `.gemini/skills`, and
-`.gemini/config/skills` directories. If `.cursor/rules/dotaios.mdc` contains a
-DotAIOS managed block, remove only that block and preserve all surrounding
-content. Then review or remove the machine-local project record and archive or
-delete `<aios-path>`.
+DotAIOS-managed block from its root `AGENTS.md`. If `.cursor/rules/dotaios.mdc`
+contains a DotAIOS-managed block, remove only that block. Preserve the project
+repository and all surrounding content.
 
-DotAIOS does not yet automate this destructive final step, so unmanaged client
-configuration and project repositories remain yours.
+### Active project skill directories
+
+Within each attached checkout, remove only links whose resolved target is
+inside that checkout's own `skills` directory.
+
+| Used by | Directory |
+| --- | --- |
+| Shared Agent Skills clients and Antigravity | `<checkout>/.agents/skills` |
+| Claude Code | `<checkout>/.claude/skills` |
+| Grok | `<checkout>/.grok/skills` |
+
+### Retired skill directories
+
+Old DotAIOS releases may have left managed links in these retired paths. They
+are not active installation targets. Apply the same target-resolution rule and
+preserve unrelated entries.
+
+- `~/.cursor/skills` and `<checkout>/.cursor/skills`
+- `~/.gemini/skills` and `<checkout>/.gemini/skills`
+- `~/.gemini/antigravity/skills` and `<checkout>/.gemini/antigravity/skills`
+
+### Machine-local state
+
+`~/.dotaios` is separate from `<aios-path>`. For **Remove** only, classify each
+current owned entry before removing it. **Disconnect** keeps the project and
+source registry entries needed to reconnect; `sync logout` above already
+handles the separate sync credential and connection.
+
+- `~/.dotaios/projects.json` maps attached project IDs to paths. Remove a row
+  only after that checkout's integrations are disconnected; remove the file
+  when no rows remain.
+- `~/.dotaios/sync.json` stores the local sync connection and credential.
+  `sync logout` removes it. `~/.dotaios/sync.lock` is an operation lock; if it
+  remains, first verify that no sync process owns it instead of force-deleting
+  a live lock.
+- `~/.dotaios/managed-skills` contains owned skill receipts and recovery
+  records. Archive it if you need removal evidence; otherwise remove it only
+  after its managed links are gone.
+- `~/.dotaios/project-sources` contains machine-local source bindings, grants,
+  and access receipts. Remove it only after the corresponding project
+  integrations are disconnected. This does not delete any source folder.
+- `~/.dotaios/bin/lightpanda` is the optional DotAIOS-managed browser binary.
+  `~/.dotaios/.lightpanda_hint_shown` is its local prompt marker. Neither entry
+  owns or replaces any general-purpose browser.
+
+After handling those entries, inspect `~/.dotaios` again. Preserve and report
+any unexpected entry instead of guessing its ownership. Remove `~/.dotaios`
+only when it is empty.
+
+### Data and package
+
+For **Disconnect**, keep `<aios-path>`. For **Remove**, archive it outside every
+target above by default. Permanently delete it only after a separate explicit
+approval. If DotAIOS was installed globally, remove that package with
+`npm uninstall -g dotaios`; an `npx` run has no global package to uninstall.
+
+Unmanaged client configuration, AI applications, Node.js, npm, Homebrew,
+project repositories, remote GitHub repositories, and provider-side grants
+remain yours unless you separately remove them.
 
 Bridge updates may have left `*.dotaios-backup-*` files containing your earlier
 configuration; inspect them before keeping or deleting them. npm may also retain
-downloaded package artifacts in its own cache, outside DotAIOS.
+downloaded package artifacts in its own cache, outside DotAIOS. Do not clear the
+entire npm cache as part of normal removal. Finally, start a new agent session:
+the current session may retain instructions it loaded before the files changed.
 
 ## Troubleshooting
 
