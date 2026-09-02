@@ -81,7 +81,7 @@ instead of at a shell prompt.
 
      ```sh
      PATH="<exact NODE_BIN value printed above>:$PATH" node --version
-     PATH="<exact NODE_BIN value printed above>:$PATH" npx dotaios@2.0.16 setup --dry-run
+     PATH="<exact NODE_BIN value printed above>:$PATH" npx dotaios@2.0.17 setup --dry-run
      ```
 
      Prepend the exact printed directory inline each time instead of exporting
@@ -115,7 +115,7 @@ instead of at a shell prompt.
 
    Do not install Homebrew in order to install Node. It is a far larger change
    to their machine than the one they asked you for.
-2. Run `npx dotaios@2.0.16 setup --dry-run` and show what it reports. It writes
+2. Run `npx dotaios@2.0.17 setup --dry-run` and show what it reports. It writes
    nothing, and it is the record of what the next command is about to change:
    it creates `~/aios` and connects the AI apps already on that machine.
 3. Ask these three questions in the conversation, one at a time, and wait for
@@ -146,7 +146,7 @@ instead of at a shell prompt.
    like anything else they type to an assistant. Pass it through like this:
 
 ```sh
-npx dotaios@2.0.16 setup --answers - <<'JSON'
+npx dotaios@2.0.17 setup --answers - <<'JSON'
 {
   "name": "...",
   "role": "...",
@@ -172,7 +172,7 @@ JSON
    evaluate, and it is the reason the rest can be automatic.
 5. If a file already exists that DotAIOS does not own, stop and let them choose.
    Never replace something they wrote on your own initiative.
-6. Verify with `npx dotaios@2.0.16 doctor`, then close in their language rather
+6. Verify with `npx dotaios@2.0.17 doctor`, then close in their language rather
    than yours. They asked you to set up their context. They did not ask to learn
    how it works, and the install is not the interesting part — what they can now
    do is.
@@ -198,9 +198,19 @@ and nothing here asks you to skip a confirmation you would otherwise seek.
 
 DotAIOS is the [`dotaios` package on npm](https://www.npmjs.com/package/dotaios),
 published from [`filocosta46/dotaios`](https://github.com/filocosta46/dotaios).
-Setup uses the package version pinned in this guide (`dotaios@2.0.16`). That is
+Setup uses the package version pinned in this guide (`dotaios@2.0.17`). That is
 this product, not its complete dependency graph; npm may still resolve
 compatible versions allowed by its runtime dependencies.
+
+The reviewed candidate can be newer than npm's `latest` channel. The exact
+version in this guide does not float between them. DotAIOS's public-release gate
+promotes the admitted candidate bytes to `latest`; until that happens, a
+candidate publication does not create a stable tag or GitHub Release.
+
+After the full gate passes, the stable tag must point to npm's `gitHead`, the
+GitHub Release must use that same tag, and npm's `latest` must name the exact
+admitted version. Verify those three postconditions after promotion. Until all
+three agree, treat the version as a candidate rather than a stable release.
 
 You need Node.js 20 or newer:
 
@@ -248,9 +258,9 @@ These commands read package metadata and list package contents without running
 DotAIOS setup:
 
 ```sh
-npm view dotaios version dist.integrity dist.tarball gitHead _npmUser.name
-npm view dotaios scripts
-npm pack dotaios --dry-run
+npm view dotaios@2.0.17 version dist.integrity dist.tarball gitHead _npmUser.name
+npm view dotaios@2.0.17 scripts
+npm pack dotaios@2.0.17 --dry-run
 ```
 
 Review the npm integrity value. `npm pack --dry-run` lists the archive entries;
@@ -262,7 +272,7 @@ For a deeper review, download and extract the current tarball without running
 DotAIOS:
 
 ```sh
-npm pack dotaios --ignore-scripts
+npm pack dotaios@2.0.17 --ignore-scripts
 mkdir dotaios-review
 tar -tf dotaios-*.tgz
 tar -xzf dotaios-*.tgz -C dotaios-review
@@ -283,7 +293,7 @@ Run the no-change preview yourself in Terminal, PowerShell, or another system
 shell:
 
 ```sh
-npx dotaios@2.0.16 setup --dry-run
+npx dotaios@2.0.17 setup --dry-run
 ```
 
 The preview inspects the selected target, detected client paths, and bridge
@@ -299,7 +309,7 @@ that setup would make.
 ## Run setup
 
 ```sh
-npx dotaios@2.0.16 setup
+npx dotaios@2.0.17 setup
 ```
 
 This one command creates the folder, connects detected supported clients, and
@@ -322,8 +332,8 @@ conversation and pass them through. This is the recommended non-interactive
 route, because the resulting folder is actually theirs:
 
 ```sh
-npx dotaios@2.0.16 setup --answers -            # JSON on stdin, no answers file left behind
-npx dotaios@2.0.16 setup --answers ./answers.json
+npx dotaios@2.0.17 setup --answers -            # JSON on stdin, no answers file left behind
+npx dotaios@2.0.17 setup --answers ./answers.json
 ```
 
 The accepted keys are `name`, `role`, `work`, `priorities`, and `ai_tools`; all
@@ -341,14 +351,14 @@ context files with placeholders and skips the questions.
 Do not use this for your personal installation:
 
 ```sh
-npx dotaios@2.0.16 setup --yes --skip-reveal
+npx dotaios@2.0.17 setup --yes --skip-reveal
 ```
 
 ## Verify
 
 ```sh
-npx dotaios@2.0.16 doctor
-npx dotaios@2.0.16 skills doctor
+npx dotaios@2.0.17 doctor
+npx dotaios@2.0.17 skills doctor
 ```
 
 These checks verify the local folder, managed bridge files, and skill links.
@@ -373,7 +383,7 @@ Private GitHub sync stays off unless you explicitly opt in during interactive
 setup or later run:
 
 ```sh
-npx dotaios@2.0.16 sync setup
+npx dotaios@2.0.17 sync setup
 ```
 
 The mirror must be a private repository you control. The access token is stored
@@ -386,13 +396,13 @@ can, and revoke it on GitHub if the machine is lost. Stop sync and remove the
 token with:
 
 ```sh
-npx dotaios@2.0.16 sync logout
+npx dotaios@2.0.17 sync logout
 ```
 
 Claude Code session capture is also opt-in:
 
 ```sh
-npx dotaios@2.0.16 capture enable claude-code
+npx dotaios@2.0.17 capture enable claude-code
 ```
 
 Other clients use explicit saving or import.
@@ -451,8 +461,8 @@ Back up any local context you want to keep before either path.
 ### Stop optional writers
 
 ```sh
-npx dotaios@2.0.16 capture disable claude-code --path <aios-path>
-npx dotaios@2.0.16 sync logout --path <aios-path>
+npx dotaios@2.0.17 capture disable claude-code --path <aios-path>
+npx dotaios@2.0.17 sync logout --path <aios-path>
 ```
 
 `sync logout` removes the local connection and credential. The private GitHub
@@ -460,7 +470,7 @@ repository remains intact, and the GitHub token grant may still need revocation.
 For full remote removal, first keep any backup you need, then delete or archive
 the repository in GitHub and revoke the token in GitHub settings.
 
-Run `npx dotaios@2.0.16 doctor --path <aios-path>` so you have the exact
+Run `npx dotaios@2.0.17 doctor --path <aios-path>` so you have the exact
 configured paths before editing shared client configuration.
 
 ### Global instruction files
@@ -562,7 +572,7 @@ the current session may retain instructions it loaded before the files changed.
 - `npx: command not found`: install the Node.js LTS release from
   [nodejs.org](https://nodejs.org), then run `node --version` again.
 - Existing `~/aios`: do not delete it blindly. Run
-  `npx dotaios@2.0.16 doctor` and inspect the folder first.
+  `npx dotaios@2.0.17 doctor` and inspect the folder first.
 - `interactive terminal required`: setup could not find a terminal, which is
   normal when an assistant is driving it. Supply the interview answers with
   `--answers <file>` as described in the assistant section above. `--yes` also
@@ -572,7 +582,7 @@ the current session may retain instructions it loaded before the files changed.
   that you asked for this, and it can continue. If you would rather run the
   preview and setup yourself, that path is equally supported — ask the
   assistant to inspect the finished installation afterwards.
-- Other failures: run `npx dotaios@2.0.16 status` and keep the exact output. If
+- Other failures: run `npx dotaios@2.0.17 status` and keep the exact output. If
   you cannot recover, open a
   [GitHub issue](https://github.com/filocosta46/dotaios/issues) with the failed
   command, status output, Node version, and operating system. Do not include

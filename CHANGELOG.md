@@ -4,6 +4,22 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.17] - 2026-09-02
+
+### Changed
+
+- Removal guidance now separates disconnecting integrations from removing
+  machine state and preserves the user-owned AIOS folder by default.
+- Release inspection commands stay pinned to the reviewed candidate while the
+  candidate and stable `latest` channels remain explicitly distinct.
+
+### Fixed
+
+- The removal inventory now names the active Antigravity and Grok skill paths,
+  distinguishes every retired path, and classifies current `~/.dotaios` state.
+- A registry-backed regression test keeps active, project, and retired skill
+  paths synchronized with the shipped removal guide.
+
 ## [2.0.16] - 2026-09-02
 
 ### Added

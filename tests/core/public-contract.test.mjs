@@ -9,6 +9,8 @@ import { ADMISSION_NPM_VERSION } from "../../scripts/onboarding-release-acceptan
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const run = promisify(execFile);
+const RELEASE_VERSION = "2.0.17";
+const RELEASE_VERSION_PATTERN = RELEASE_VERSION.replaceAll(".", "\\.");
 
 function extractAssistantInstallRefs(markdown) {
   return Array.from(
@@ -291,7 +293,7 @@ test("Hermes claims a global adapter without inventing a project-local selector"
 
 test("first-time onboarding stays assistant-guided, consent-first, pinned, and free of install lifecycle scripts", async () => {
   const pkg = JSON.parse(await fs.readFile(path.join(repoRoot, "package.json"), "utf8"));
-  const publishedVersion = "2.0.16";
+  const publishedVersion = RELEASE_VERSION;
   assert.equal(pkg.version, publishedVersion, "the package and public install contract must identify the release candidate");
   for (const lifecycle of ["preinstall", "install", "postinstall"]) {
     assert.equal(pkg.scripts?.[lifecycle], undefined, `${lifecycle} must remain absent`);
@@ -310,12 +312,12 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   for (const relativePath of relativeFiles) {
     assert.match(
       documents[relativePath],
-      /npx dotaios@2\.0\.16 setup --dry-run/,
+      new RegExp(`npx dotaios@${RELEASE_VERSION_PATTERN} setup --dry-run`),
       `${relativePath} must preview the currently published release`
     );
     assert.match(
       documents[relativePath],
-      /^npx dotaios@2\.0\.16 setup$/m,
+      new RegExp(`^npx dotaios@${RELEASE_VERSION_PATTERN} setup$`, "m"),
       `${relativePath} must retain an exact-version manual recovery path`
     );
     assert.doesNotMatch(
@@ -375,11 +377,19 @@ test("first-time onboarding stays assistant-guided, consent-first, pinned, and f
   assert.match(corpus, /meaningful choices|choices I can evaluate/i, "assistant-led setup must leave consent with the person");
   assert.doesNotMatch(corpus, /\bpreview makes no changes\b/i);
   assert.match(corpus, /npm may download and cache the named package/i);
-  assert.match(documents["docs/friend-setup.md"], /dotaios@2\.0\.16 setup/, "friend setup must use the currently published release");
+  assert.match(
+    documents["docs/friend-setup.md"],
+    new RegExp(`dotaios@${RELEASE_VERSION_PATTERN} setup`),
+    "friend setup must use the currently published release"
+  );
   assert.match(documents["INSTALL.md"], /shared\s+`~\/\.agents\/skills` directory/i, "INSTALL must disclose the shared global skill surface");
   assert.match(documents["INSTALL.md"], /each attached checkout listed in `~\/\.dotaios\/projects\.json`/i, "INSTALL must cover project-local removal");
   assert.doesNotMatch(documents["INSTALL.md"], /use `\/memory-maintenance`/, "INSTALL must use cross-client skill invocation language");
-  assert.match(documents["INSTALL.md"], /npx dotaios@2\.0\.16 setup/i, "INSTALL must run the currently published release");
+  assert.match(
+    documents["INSTALL.md"],
+    new RegExp(`npx dotaios@${RELEASE_VERSION_PATTERN} setup`, "i"),
+    "INSTALL must run the currently published release"
+  );
   assert.match(documents["INSTALL.md"], /package version pinned in this guide/i, "INSTALL must explain its frozen release pin");
   assert.match(documents["INSTALL.md"], /`~\/aios\/memory\/sessions`.*private GitHub mirror/is, "INSTALL must disclose capture and sync composition");
   assert.match(documents["INSTALL.md"], /GitHub\s+repository remains.*revoke the token/is, "INSTALL must disclose remote and credential cleanup");
@@ -561,6 +571,20 @@ test("public update guidance reviews metadata before one exact-version upgrade",
   }
 });
 
+test("release inspection stays pinned and stable promotion has one verifiable postcondition", async () => {
+  const install = await fs.readFile(path.join(repoRoot, "INSTALL.md"), "utf8");
+  const inspect = install.split("## Inspect the release")[1]?.split(/\n## /)[0] || "";
+
+  assert.match(inspect, new RegExp(`npm view dotaios@${RELEASE_VERSION_PATTERN} version`));
+  assert.match(inspect, new RegExp(`npm pack dotaios@${RELEASE_VERSION_PATTERN} --dry-run`));
+  assert.match(install, /candidate[\s\S]*newer than[\s\S]*latest/i);
+  assert.match(install, /public-release gate[\s\S]*promotes[\s\S]*latest/i);
+  assert.match(install, /stable tag[\s\S]*npm(?:'s)? `gitHead`/i);
+  assert.match(install, /GitHub Release[\s\S]*same tag/i);
+  assert.match(install, /npm's `latest`[\s\S]*exact\s+admitted version/i);
+  assert.match(install, /until all\s+three agree[\s\S]*candidate/i);
+});
+
 test("macOS Node bootstrap is immutable, verified, fresh-shell safe, and approval-gated", async (t) => {
   const install = await fs.readFile(path.join(repoRoot, "INSTALL.md"), "utf8");
   const macBootstrap = install.split("   - **macOS**")[1]?.split("   - **Windows**")[0] || "";
@@ -603,7 +627,7 @@ test("macOS Node bootstrap is immutable, verified, fresh-shell safe, and approva
   assert.match(macBootstrap, /printf 'NODE_BIN=%s\/bin\\n'/, "the bootstrap must print the exact Node bin directory");
   assert.match(
     macBootstrap,
-    /PATH="<exact NODE_BIN value printed above>:\$PATH" npx dotaios@2\.0\.16 setup --dry-run/,
+    new RegExp(`PATH="<exact NODE_BIN value printed above>:\\$PATH" npx dotaios@${RELEASE_VERSION_PATTERN} setup --dry-run`),
     "later fresh-shell commands must carry the exact printed Node bin directory inline"
   );
   assert.match(unwrapped, /show .*exact .*profile.*line.*before .*chang/i, "profile persistence must be previewed");
