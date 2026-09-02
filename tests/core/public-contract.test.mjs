@@ -979,11 +979,16 @@ test("nothing still points at the old public location of the internal programme"
     } catch {
       continue;
     }
-    for (const internal of INTERNAL_PROGRAMME_DOCS) {
-      const leaf = internal.slice("docs/".length);
-      const literal = new RegExp(`(?<!internal/)docs/${leaf.replace(/[.]/g, "\\.")}`);
-      const joined = new RegExp(`"docs"\\s*,\\s*"${leaf.replace(/[.]/g, "\\.")}"`);
-      if (literal.test(content) || joined.test(content)) {
+    // Plain string search, not a built regex: escaping a path fragment into a
+    // pattern is the kind of half-escape CodeQL flags, and nothing here needs
+    // more than a substring test. Blanking the new prefix first is what stops a
+    // correctly relocated path from reading as a stale one.
+    const remaining = content.split(["docs", "internal", ""].join("/")).join(" ");
+    const collapsed = remaining.replace(/\s+/g, " ");
+    for (const [index, internal] of INTERNAL_PROGRAMME_DOCS.entries()) {
+      const leaf = INTERNAL_PROGRAMME_LEAVES[index];
+      const joined = `"docs", "${leaf}"`;
+      if (remaining.includes(internal) || collapsed.includes(joined)) {
         offenders.push(`${relative} -> ${internal}`);
       }
     }
