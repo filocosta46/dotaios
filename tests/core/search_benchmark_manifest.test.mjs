@@ -21,11 +21,11 @@ import {
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const manifestPath = path.join(repoRoot, "benchmarks", "search", "manifest.json");
 const benchmarkReceiptPaths = [
-  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-baseline.md"),
-  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-optimized.md"),
-  path.join(repoRoot, "docs", "benchmarks", "2026-08-13-search-final.md")
+  path.join(repoRoot, "docs", "internal", "benchmarks", "2026-08-13-search-baseline.md"),
+  path.join(repoRoot, "docs", "internal", "benchmarks", "2026-08-13-search-optimized.md"),
+  path.join(repoRoot, "docs", "internal", "benchmarks", "2026-08-13-search-final.md")
 ];
-const finalReportsDirectory = path.join(repoRoot, "docs", "benchmarks", "reports");
+const finalReportsDirectory = path.join(repoRoot, "docs", "internal", "benchmarks", "reports");
 
 function declaredManifestReceipt(receiptPath, receipt) {
   const declarations = [...receipt.matchAll(/^\- Manifest SHA-256: `([^`]+)`\s*$/gmi)];

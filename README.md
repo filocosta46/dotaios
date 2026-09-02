@@ -156,7 +156,7 @@ Feature-specific workflows are in the linked guides below.
 
 - [INSTALL.md](INSTALL.md) — assistant-guided install, manual recovery, and removal
 - [Getting started](docs/getting-started.md) — product walkthrough
-- [Architecture](docs/architecture.md) · [Projects](docs/projects.md) · [Client support](docs/client-support.md) · [Security](docs/security.md) · [all guides](docs/)
+- [Architecture](docs/architecture.md) · [Projects](docs/projects.md) · [Client support](docs/client-support.md) · [Security](docs/security.md)
 
 ## License
 

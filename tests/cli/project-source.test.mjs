@@ -214,7 +214,7 @@ test("guided connect and the project-search selector migration are documented", 
 test("project identity documentation matches the bounded cross-namespace collision scan", () => {
   const architecture = fs.readFileSync(path.join(repoRoot, "docs", "architecture.md"), "utf8");
   const plan = fs.readFileSync(
-    path.join(repoRoot, "docs", "plans", "2026-08-10-003-feat-consumer-project-source-retrieval-plan.md"),
+    path.join(repoRoot, "docs", "internal", "plans", "2026-08-10-003-feat-consumer-project-source-retrieval-plan.md"),
     "utf8",
   );
 

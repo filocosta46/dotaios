@@ -901,3 +901,92 @@ test("tracked public files contain no private maintainer identifiers", async () 
   const offenders = findPrivateIdentifierOffenders(await trackedPublicEntries(repoRoot));
   assert.deepEqual(offenders, [], `private identifiers in tracked files:\n${offenders.join("\n")}`);
 });
+
+// Assembled from leaves so this file does not match its own stale-path scan,
+// the same way the private-identifier markers above avoid matching themselves.
+const INTERNAL_PROGRAMME_LEAVES = Object.freeze([
+  "foundation-program",
+  "plans",
+  "probes",
+  "benchmarks",
+  "managed-skill-store-design.md",
+  "managed-skill-store-architecture-review.md",
+]);
+const INTERNAL_PROGRAMME_DOCS = Object.freeze(
+  INTERNAL_PROGRAMME_LEAVES.map((leaf) => ["docs", leaf].join("/"))
+);
+
+function readmeDocLinks(markdown) {
+  return Array.from(
+    markdown.matchAll(/\[[^\]]+\]\((docs\/[^)\s]*|INSTALL\.md)\)/g),
+    (match) => match[1]
+  );
+}
+
+test("the README guides section sends readers to user guides, not the internal programme", async () => {
+  const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
+  const links = readmeDocLinks(readme);
+
+  assert.ok(links.length > 0, "README must link at least one guide");
+  assert.ok(
+    !links.includes("docs/"),
+    "README must not dump readers into the docs/ directory listing"
+  );
+  for (const link of links) {
+    assert.ok(
+      !INTERNAL_PROGRAMME_DOCS.some((internal) => link === internal || link.startsWith(`${internal}/`)),
+      `README links to internal programme material: ${link}`
+    );
+  }
+  for (const guide of [
+    "docs/architecture.md",
+    "docs/projects.md",
+    "docs/client-support.md",
+    "docs/security.md",
+    "docs/getting-started.md",
+    "INSTALL.md",
+  ]) {
+    assert.ok(links.includes(guide), `README must link the ${guide} user guide`);
+  }
+});
+
+test("every README documentation link resolves to a real file", async () => {
+  const readme = await fs.readFile(path.join(repoRoot, "README.md"), "utf8");
+  for (const link of readmeDocLinks(readme)) {
+    await fs.access(path.join(repoRoot, link));
+  }
+});
+
+test("internal programme material is off the public guides path", async () => {
+  for (const internal of INTERNAL_PROGRAMME_DOCS) {
+    await assert.rejects(
+      fs.access(path.join(repoRoot, internal)),
+      `${internal} must move under docs/internal/`
+    );
+    await fs.access(path.join(repoRoot, internal.replace("docs/", "docs/internal/")));
+  }
+});
+
+test("nothing still points at the old public location of the internal programme", async () => {
+  const { stdout } = await run("git", ["-C", repoRoot, "ls-files", "-z"]);
+  const offenders = [];
+  for (const relative of stdout.split("\0").filter(Boolean)) {
+    // The moved documents keep their own prose, including their own old paths.
+    if (relative.startsWith("docs/internal/")) continue;
+    let content;
+    try {
+      content = await fs.readFile(path.join(repoRoot, relative), "utf8");
+    } catch {
+      continue;
+    }
+    for (const internal of INTERNAL_PROGRAMME_DOCS) {
+      const leaf = internal.slice("docs/".length);
+      const literal = new RegExp(`(?<!internal/)docs/${leaf.replace(/[.]/g, "\\.")}`);
+      const joined = new RegExp(`"docs"\\s*,\\s*"${leaf.replace(/[.]/g, "\\.")}"`);
+      if (literal.test(content) || joined.test(content)) {
+        offenders.push(`${relative} -> ${internal}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, [], `stale internal-programme paths:\n${offenders.join("\n")}`);
+});
