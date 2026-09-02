@@ -15,7 +15,7 @@ const MAX_UNPACKED_BYTES = 128 * 1024 * 1024;
 const MAX_ENTRY_BYTES = 16 * 1024 * 1024;
 const MAX_ARCHIVE_ENTRIES = 4_096;
 const UTF8 = new TextDecoder("utf-8", { fatal: true });
-const THIRD_PARTY_NOTICES_SHA256 = "bd4e11ecefd89ad814199633fd659fca6b2278bda466443fc977764b9a9eca32";
+const THIRD_PARTY_NOTICES_SHA256 = "8bc2ace0dddefb130016d4520ef9af46b87efb32684bc5b00106c7bf2571af7a";
 export const ADMISSION_NPM_VERSION = "11.6.4";
 export const PACKAGE_ADMISSION_ASSERTION_KEYS = Object.freeze([
   "archive_regular_files_only",
