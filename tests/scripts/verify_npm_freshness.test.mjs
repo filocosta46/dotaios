@@ -16,7 +16,17 @@ const FAKE_GIT_HEAD = "0123456789abcdef0123456789abcdef01234567";
 const WINDOWS = process.platform === "win32";
 
 // A git repo with the given tags, plus `npx`/`npm` shims that answer offline.
-function fixture(t, { npmVersion, tags = [], origin = false, gitHead = "tagged" }) {
+function fixture(t, {
+  npmVersion,
+  publishedVersions = [npmVersion],
+  tags = [],
+  origin = false,
+  pushedTags = [],
+  gitHead = "tagged",
+  gitHeads = {},
+  gitHeadFailures = [],
+  retagAfterPush = []
+}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-freshness-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -32,6 +42,13 @@ function fixture(t, { npmVersion, tags = [], origin = false, gitHead = "tagged" 
     const bare = path.join(root, "origin.git");
     execFileSync("git", ["init", "--bare", "-q", bare], { encoding: "utf8" });
     git("remote", "add", "origin", bare);
+    for (const tag of pushedTags) git("push", "-q", "origin", `refs/tags/${tag}`);
+  }
+  if (retagAfterPush.length > 0) {
+    fs.appendFileSync(path.join(repo, "README.md"), "correct published source\n");
+    git("add", "README.md");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-qm", "published");
+    for (const tag of retagAfterPush) git("tag", "-f", tag);
   }
 
   const bin = path.join(root, "bin");
@@ -48,7 +65,23 @@ function fixture(t, { npmVersion, tags = [], origin = false, gitHead = "tagged" 
   const head = gitHead === "tagged"
     ? git("rev-parse", "HEAD").trim()
     : FAKE_GIT_HEAD;
-  shim("npm", `echo "${head}"`);
+  const recordedHeads = Object.fromEntries(
+    publishedVersions.map((version) => [version, gitHeads[version] || head])
+  );
+  shim("npm", [
+    'if [ "$1" = "view" ] && [ "$2" = "dotaios" ] && [ "$3" = "versions" ]; then',
+    `  echo '${JSON.stringify(publishedVersions)}'`,
+    "  exit 0",
+    "fi",
+    'case "$2" in',
+    ...Object.entries(recordedHeads).map(([version, recordedHead]) =>
+      gitHeadFailures.includes(version)
+        ? `  dotaios@${version}) exit 1 ;;`
+        : `  dotaios@${version}) echo "${recordedHead}" ;;`
+    ),
+    '  *) echo "" ;;',
+    "esac"
+  ].join("\n"));
 
   return { root, repo, bin, head };
 }
@@ -77,11 +110,37 @@ test("npm ahead of every tag fails, and says which commit to tag", { skip: WINDO
   assert.match(result.stderr, /404/, "must say release-pinned doc links are broken until then");
 });
 
+test("a historical published version without a tag fails even when latest is tagged", { skip: WINDOWS }, (t) => {
+  const environment = fixture(t, {
+    npmVersion: "1.2.0",
+    publishedVersions: ["1.0.0", "1.1.0", "1.2.0"],
+    tags: ["v1.0.0", "v1.2.0"]
+  });
+  const result = run(environment);
+  assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stderr, /published npm release.*missing.*source tag/is);
+  assert.match(result.stderr, /v1\.1\.0/);
+  assert.match(result.stderr, new RegExp(`git tag -a v1\\.1\\.0 ${environment.head}`));
+});
+
 test("a tag that only exists locally fails — origin is what the docs resolve", { skip: WINDOWS }, (t) => {
   const result = run(fixture(t, { npmVersion: "1.0.0", tags: ["v1.0.0"], origin: true }));
   assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
-  assert.match(result.stderr, /FAIL: unpushed release tag/);
+  assert.match(result.stderr, /published release tag.*not on origin/);
   assert.match(result.stderr, /git push origin v1\.0\.0/);
+});
+
+test("an older local-only tag fails even when latest is pushed", { skip: WINDOWS }, (t) => {
+  const result = run(fixture(t, {
+    npmVersion: "1.1.0",
+    publishedVersions: ["1.0.0", "1.1.0"],
+    tags: ["v1.0.0", "v1.1.0"],
+    origin: true,
+    pushedTags: ["v1.1.0"]
+  }));
+  assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stderr, /not on origin: v1\.0\.0/);
+  assert.doesNotMatch(result.stderr, /v1\.1\.0.*not on origin/);
 });
 
 test("npm behind the newest tag still fails (pre-existing check intact)", { skip: WINDOWS }, (t) => {
@@ -112,4 +171,54 @@ test("a tag on the wrong commit fails — the tag existing is not the property d
   assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
   assert.match(result.stderr, /points at .*, but npm published 1\.0\.0 from/);
   assert.doesNotMatch(result.stderr, /untagged npm release/, "the tag exists; this is a different failure");
+});
+
+test("an older tag on the wrong commit fails even when latest matches", { skip: WINDOWS }, (t) => {
+  const result = run(fixture(t, {
+    npmVersion: "1.1.0",
+    publishedVersions: ["1.0.0", "1.1.0"],
+    tags: ["v1.0.0", "v1.1.0"],
+    origin: true,
+    pushedTags: ["v1.0.0", "v1.1.0"],
+    gitHeads: { "1.0.0": FAKE_GIT_HEAD }
+  }));
+  assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stderr, /v1\.0\.0 points at .*, but npm published 1\.0\.0 from/);
+  assert.doesNotMatch(result.stderr, /v1\.1\.0 points at/);
+});
+
+test("a historical gitHead lookup failure cannot produce a green check", { skip: WINDOWS }, (t) => {
+  const result = run(fixture(t, {
+    npmVersion: "1.1.0",
+    publishedVersions: ["1.0.0", "1.1.0"],
+    tags: ["v1.0.0", "v1.1.0"],
+    gitHeadFailures: ["1.0.0"]
+  }));
+  assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stderr, /could not read npm gitHead metadata/);
+  assert.match(result.stderr, /1\.0\.0/);
+  assert.doesNotMatch(result.stdout, /^OK:/m);
+});
+
+test("a remote tag on different source fails even when the local tag matches npm", { skip: WINDOWS }, (t) => {
+  const result = run(fixture(t, {
+    npmVersion: "1.0.0",
+    tags: ["v1.0.0"],
+    origin: true,
+    pushedTags: ["v1.0.0"],
+    retagAfterPush: ["v1.0.0"]
+  }));
+  assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stderr, /v1\.0\.0 points at .*, but npm published 1\.0\.0 from/);
+});
+
+test("malformed non-empty gitHead metadata cannot produce a green check", { skip: WINDOWS }, (t) => {
+  const result = run(fixture(t, {
+    npmVersion: "1.0.0",
+    tags: ["v1.0.0"],
+    gitHeads: { "1.0.0": "not-a-commit" }
+  }));
+  assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stderr, /invalid gitHead for 1\.0\.0/);
+  assert.doesNotMatch(result.stdout, /^OK:/m);
 });
