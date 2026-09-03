@@ -1,5 +1,9 @@
 # DotAIOS
 
+[![CI](https://github.com/filocosta46/dotaios/actions/workflows/ci.yml/badge.svg)](https://github.com/filocosta46/dotaios/actions/workflows/ci.yml)
+[![npm package](https://img.shields.io/badge/npm-dotaios-CB3837?logo=npm)](https://www.npmjs.com/package/dotaios)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 **Stop starting from zero every time you change AI tools.**
 
 DotAIOS gives your assistants one readable folder for the context that should
@@ -16,6 +20,21 @@ The expensive part of changing tools is not the new interface. It is having
 to retell the useful context again.
 
 The free core is available now.
+
+### What it creates
+
+```text
+~/aios/
+├── context/   # Identity, priorities, and current work
+├── projects/  # Portable project records
+├── memory/    # Recent evidence you chose to keep
+├── vault/     # Long-term knowledge
+└── skills/    # Reusable workflows
+```
+
+Everything is readable plain text. DotAIOS connects this folder to supported
+local assistants while keeping project locations and app configuration on the
+machine where they belong.
 
 ### How it stays with you
 
@@ -145,6 +164,13 @@ memory. You save the important parts on purpose, in the right place.
   locked-in account.
 - **Works with the assistants you choose.** Models are rented. Your context
   is owned.
+
+## Feedback
+
+DotAIOS is early, and real-work reports are useful. If something is confusing,
+breaks, or behaves differently across assistants, [open a feedback
+issue](https://github.com/filocosta46/dotaios/issues/new?template=feedback.yml).
+Please remove personal context, credentials, and local paths before posting.
 
 ## Technical reference
 
