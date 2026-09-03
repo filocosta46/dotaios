@@ -311,6 +311,24 @@ test("project add CLI preview is zero-write and keeps absolute paths out of port
   assert.equal(await fs.readFile(path.join(projectPath, "source.txt"), "utf8"), "source for json-preview\n");
 });
 
+test("project identify --json reports Memory: Off when the AIOS folder is missing", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-project-identify-missing-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const missingAiosPath = path.join(root, "moved-aios");
+
+  const result = runCli([
+    "project", "identify", "--json",
+    "--path", missingAiosPath,
+    "--home", root
+  ]);
+
+  assert.deepEqual(JSON.parse(result.stdout), {
+    receipt: "Memory: Off",
+    registered_project: null
+  });
+  assert.equal(result.stderr, "");
+});
+
 test("project add CLI applies only the exact proof from its zero-write preview", async (t) => {
   const { root, aiosPath, statePath } = await fixture(t);
   const projectPath = await makeRepo(root, "proved-cli");

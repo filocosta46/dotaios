@@ -82,7 +82,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     });
   }
   if (!toolRequested && projectRoute.status !== "ready") {
-    return budgetedProjectRoute({ limit: visibleCharacterBudget, intent, projectRoute, memoryPolicy });
+    return budgetedProjectRoute({ limit: visibleCharacterBudget, intent, projectRoute });
   }
   const refuse = (reason, recovery, refusedRoute = projectRoute) => budgetedRefusal({
     limit: visibleCharacterBudget,
@@ -90,8 +90,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     recovery,
     projectRoute: refusedRoute,
     includeTool: toolRequested,
-    includeProjectRoute: !toolRequested,
-    memoryPolicy
+    includeProjectRoute: !toolRequested
   });
   let authority;
   try {
@@ -487,8 +486,7 @@ function budgetedRefusal({
   recovery,
   projectRoute = null,
   includeTool = true,
-  includeProjectRoute = true,
-  memoryPolicy
+  includeProjectRoute = true
 }) {
   const safeProjectRoute = refusedProjectRoute(projectRoute, reason);
   const envelope = {
@@ -496,7 +494,7 @@ function budgetedRefusal({
     status: "refused",
     project: null,
     ...(includeProjectRoute ? { project_route: safeProjectRoute } : {}),
-    memory: { receipt: memoryPolicy.receipt, scope: null, generated_at: null, context: "", truncated: false },
+    memory: { receipt: "Memory: Off", scope: null, generated_at: null, context: "", truncated: false },
     skill: { status: "not_evaluated", name: null, resource: null, confidence: 0, reason: "project_not_verified" },
     ...(includeTool ? {
       tool: { status: "not_evaluated", capability: null, connection: null, configured: false, authenticated: "unknown" }
@@ -597,14 +595,14 @@ function compactCandidateEnvelope(envelope) {
   envelope.location = null;
 }
 
-function budgetedProjectRoute({ limit, intent, projectRoute, memoryPolicy }) {
+function budgetedProjectRoute({ limit, intent, projectRoute }) {
   const failed = projectRoute.status === "refused" || projectRoute.status === "unsupported_by_host";
   const envelope = {
     schema: SCHEMA,
     status: failed ? "refused" : "partial",
     project: null,
     project_route: projectRoute,
-    memory: { receipt: memoryPolicy.receipt, scope: null, generated_at: null, context: "", truncated: false },
+    memory: { receipt: "Memory: Off", scope: null, generated_at: null, context: "", truncated: false },
     skill: {
       status: "not_evaluated",
       name: null,
@@ -644,7 +642,7 @@ function projectRouteRecovery(projectRoute) {
     if (projectRoute.reason === "concrete_action_required") {
       return {
         required: true,
-        action: "State one concrete action for the already registered project, then rerun implicit discovery; do not reconnect the folder."
+        action: "DotAIOS did not recognize the wording as an action. Try a concrete action such as “review the March invoices,” then rerun implicit discovery; do not reconnect the folder."
       };
     }
     return {
@@ -706,7 +704,7 @@ function projectRouteNextAction(intent, projectRoute) {
       return {
         state: "clarification_required",
         approval: "not_applicable",
-        summary: "The project is already known, but the text is only a name, navigation request, or vague reference. State one concrete action and rerun implicit discovery."
+        summary: "The project is already known, but DotAIOS did not recognize the wording as an action. Ask the customer to try a concrete action such as “review the March invoices,” then rerun implicit discovery; do not reconnect the folder."
       };
     }
     return {
