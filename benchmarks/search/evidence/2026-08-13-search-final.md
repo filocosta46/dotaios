@@ -23,8 +23,8 @@ sample was accepted only after inventory and exact ordered-result validation.
 The full unsafe canonical-search control retains matching, snippets, corpus
 statistics, ranking, fixture selection, queries, limits, and result validation;
 it omits containment only. The bytes-only `raw-read` control remains an
-informational lower bound under the accepted
-[performance amendment](../plans/2026-08-13-002-search-performance-gate-amendment.md).
+informational lower bound because it also omits traversal, containment,
+generation validation, decoding, and canonical search work.
 
 ## End-to-end safe search
 
@@ -80,12 +80,10 @@ parity, safety, regression, or scaling gates.
   111.40 / 109.07 / 107.91 ms and nested 942.54 / 958.30 / 958.66 ms for
   no-hit / low-hit / high-hit, plus the larger of 20% or 50 ms.
 - **Relative diagnostic: EXCEPTION.** The 10,000-file nested safe/full-unsafe
-  ratios are 1.66x / 1.67x / 1.59x for no-hit / low-hit / high-hit. The governing
-  [performance amendment](../plans/2026-08-13-002-search-performance-gate-amendment.md)
-  supersedes the original 1.5x proxy gate and makes this comparator diagnostic:
-  the nested safe path performs the required containment and final-generation
-  validation omitted by the full unsafe control, while R1, parity, safety,
-  regression, and scaling all pass.
+  ratios are 1.66x / 1.67x / 1.59x for no-hit / low-hit / high-hit. This
+  comparator is diagnostic because the nested safe path performs the required
+  containment and final-generation validation omitted by the full unsafe
+  control, while R1, parity, safety, regression, and scaling all pass.
 - **U5 bytes-only diagnostic: EXCEPTION.** On the 10,000-file nested fixture,
   safe-corpus p95 minus raw-read p95 is +401.66 ms (551.26 - 149.60), above the
   original raw-read-plus-150 ms proxy. The same amendment supersedes that clause

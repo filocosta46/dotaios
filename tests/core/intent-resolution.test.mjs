@@ -295,6 +295,8 @@ test("R4 and R6: unresolved project routes restart safely without inventing an e
     });
     const guidance = `${result.recovery.action || ""} ${result.next_action.summary || ""}`;
 
+    assert.equal(result.project, null, projectRoute.status);
+    assert.equal(result.memory.receipt, "Memory: Off", projectRoute.status);
     assert.equal(result.location, null, projectRoute.status);
     assert.match(guidance, /implicit discovery|discover again|rerun discovery|connect|project list|project doctor/i, projectRoute.reason);
     if (projectRoute.reason === "no_registered_projects") {
@@ -305,7 +307,12 @@ test("R4 and R6: unresolved project routes restart safely without inventing an e
       assert.match(guidance, /project list/i);
       assert.doesNotMatch(guidance, /project add <folder>/i);
     } else if (projectRoute.reason === "concrete_action_required") {
-      assert.match(guidance, /concrete action/i);
+      for (const message of [result.recovery.action, result.next_action.summary]) {
+        assert.match(message, /concrete action/i);
+        assert.match(message, /did not recognize|didn't recognize/i);
+        assert.match(message, /review the March invoices/i);
+        assert.doesNotMatch(message, /only a name|navigation request|vague reference/i);
+      }
       assert.match(guidance, /do not reconnect/i);
       assert.doesNotMatch(guidance, /project add <folder>/i);
     } else if (projectRoute.reason === "project_path_unavailable") {
@@ -489,7 +496,7 @@ test("a replaced primary root returns a path-free refusal with no Shared fallbac
 
   assert.equal(result.status, "refused");
   assert.equal(result.location, null);
-  assert.equal(result.memory.receipt, "Memory: This project");
+  assert.equal(result.memory.receipt, "Memory: Off");
   assert.doesNotMatch(rendered, new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.doesNotMatch(rendered, /Memory: Shared/);
 });
@@ -877,7 +884,7 @@ test("an unreadable local routing authority returns one path-free fixed refusal"
   assert.equal(result.location, null);
   assert.equal(result.project_route.status, "refused");
   assert.equal(result.project_route.route, null);
-  assert.equal(result.memory.receipt, "Memory: This project");
+  assert.equal(result.memory.receipt, "Memory: Off");
   assert.doesNotMatch(
     rendered,
     new RegExp(fixture.projectPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))

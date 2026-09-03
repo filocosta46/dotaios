@@ -191,10 +191,9 @@ DotAIOS does not configure a project-local Hermes file. Hermes reads
 a project launcher that selects a checkout-local configuration. Writing
 `<project>/.hermes/config.yaml` would therefore look configured while remaining
 inert in an ordinary launch. Project-local Hermes support stays disabled until
-DotAIOS satisfies all re-entry gates in the accepted
-[Hermes support boundary](internal/foundation-program/decisions/2026-08-09-hermes-support-boundary.md):
-an owned selector, version/capability policy, safe host mode, produced receipt,
-and one shared production/health/probe resolver.
+DotAIOS has an owned selector, a version and capability policy, a safe host
+mode, a produced receipt, and one shared production, health, and probe
+resolver.
 
 ```bash
 npx dotaios@2.0.18 attach /path/to/project --path ~/aios

@@ -2200,7 +2200,11 @@ async function assertDirectory(fileSystem, target, label) {
   try {
     stats = await fileSystem.stat(target);
   } catch (error) {
-    if (error.code === "ENOENT") throw new Error(`${label} does not exist: ${target}`);
+    if (error.code === "ENOENT") {
+      const missing = new Error(`${label} does not exist: ${target}`);
+      missing.code = "DOTAIOS_DIRECTORY_MISSING";
+      throw missing;
+    }
     throw error;
   }
   if (!stats.isDirectory()) throw new Error(`${label} is not a directory: ${target}`);

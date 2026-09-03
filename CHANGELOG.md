@@ -4,6 +4,21 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Internal planning and handoff records are no longer tracked in the public
+  repository. Reproducible benchmark and client-probe evidence remains beside
+  its public harness and documentation.
+
+### Fixed
+
+- Unverified project routes report `Memory: Off`, including when project
+  identity or its AIOS folder cannot be established.
+- Unrecognized action wording now gets an honest clarification with a concrete
+  example instead of being mislabeled as a bare project reference.
+- Release freshness checks every published npm version for a corresponding
+  source tag, not only the latest version.
+
 ## [2.0.18] - 2026-09-03
 
 ### Fixed

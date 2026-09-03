@@ -159,10 +159,16 @@ export async function projectCommand(args = [], dependencies = {}) {
 
   if (subcommand === "identify") {
     assertPositionals(positionals, 0, "dotaios project identify");
-    const project = await resolveProjectContext({
-      ...coreOptions,
-      cwd: dependencies.cwd || process.cwd()
-    });
+    let project;
+    try {
+      project = await resolveProjectContext({
+        ...coreOptions,
+        cwd: dependencies.cwd || process.cwd()
+      });
+    } catch (error) {
+      if (error?.code !== "DOTAIOS_DIRECTORY_MISSING") throw error;
+      project = null;
+    }
     const result = {
       receipt: project ? "Memory: This project" : "Memory: Off",
       registered_project: project ? { id: project.id, slug: project.slug } : null

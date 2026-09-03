@@ -121,7 +121,7 @@ test("dotaios resolve uses one unique cwd attachment without widening to Shared"
   assert.equal(result.project_route.status, "candidate");
   assert.equal(result.project_route.project.slug, "primary");
   assert.equal(result.location, null);
-  assert.equal(result.memory.receipt, "Memory: This project");
+  assert.equal(result.memory.receipt, "Memory: Off");
   assert.doesNotMatch(captured.lines[0], /Memory: Shared/);
 });
 

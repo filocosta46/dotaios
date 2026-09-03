@@ -42,10 +42,27 @@ function compareSemver(a, b) {
 function publishedGitHead(version) {
   try {
     const out = execFileSync("npm", ["view", `dotaios@${version}`, "gitHead"], { encoding: "utf8" }).trim();
-    return /^[0-9a-f]{7,40}$/.test(out) ? out : null;
-  } catch {
-    return null;
+    if (out === "") return { gitHead: null, error: null };
+    if (!/^[0-9a-f]{7,40}$/.test(out)) {
+      return { gitHead: null, error: new Error(`npm returned an invalid gitHead for ${version}`) };
+    }
+    return { gitHead: out, error: null };
+  } catch (error) {
+    return { gitHead: null, error };
   }
+}
+
+function publishedVersions() {
+  const out = execFileSync("npm", ["view", "dotaios", "versions", "--json"], { encoding: "utf8" });
+  const parsed = JSON.parse(out);
+  const versions = Array.isArray(parsed) ? parsed : [parsed];
+  if (
+    versions.length === 0
+    || versions.some((version) => typeof version !== "string" || !/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version))
+  ) {
+    throw new Error("npm returned an invalid published-version list");
+  }
+  return [...new Set(versions)];
 }
 
 const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
@@ -101,7 +118,7 @@ if (cmp < 0) {
 // information at all (no git, no tags): that is unknown, not broken.
 const expectedTag = `v${npmVersion}`;
 if (tagVersion && !tagNames.includes(expectedTag)) {
-  const gitHead = publishedGitHead(npmVersion);
+  const { gitHead, error: gitHeadError } = publishedGitHead(npmVersion);
   console.error(
     `FAIL: untagged npm release. \`npx dotaios@latest\` serves ${npmVersion} but no ${expectedTag} tag exists ` +
     `(newest released tag is v${tagVersion}). Tag the published commit and push it to origin:\n` +
@@ -109,6 +126,8 @@ if (tagVersion && !tagNames.includes(expectedTag)) {
     `  git push origin ${expectedTag}\n` +
     (gitHead
       ? `${gitHead} is npm's recorded gitHead for ${npmVersion} — the commit that was published.`
+      : gitHeadError
+        ? `The npm gitHead lookup failed: ${gitHeadError.message}`
       : `Find the published commit with: npm view dotaios@${npmVersion} gitHead.`) +
     ` Until that tag is on origin, every release-pinned link 404s — including README's ` +
     `blob/${expectedTag}/INSTALL.md install path and releases/tag/${expectedTag}.`
@@ -116,50 +135,121 @@ if (tagVersion && !tagNames.includes(expectedTag)) {
   process.exit(1);
 }
 
-// A tag that exists only locally still 404s on github.com. This may add a
-// failure, never mask one: if origin is unreachable the check degrades to a note
-// rather than passing something it did not verify.
+// The latest-version checks above cannot see older holes once a newer release
+// is tagged. Every published version is a documentation namespace, so a
+// historical gap still leaves version-pinned safety links returning 404.
+let allPublishedVersions;
+try {
+  allPublishedVersions = publishedVersions();
+} catch (error) {
+  console.error(`FAIL: could not read the full published version list from npm: ${error.message}`);
+  process.exit(1);
+}
+const missingPublishedTags = tagNames.length === 0
+  ? []
+  : allPublishedVersions.filter((version) => !tagNames.includes(`v${version}`));
+if (missingPublishedTags.length > 0) {
+  const instructions = missingPublishedTags.map((version) => {
+    const tag = `v${version}`;
+    const { gitHead, error: gitHeadError } = publishedGitHead(version);
+    return gitHead
+      ? `  git tag -a ${tag} ${gitHead} -m "${tag}"\n  git push origin ${tag}`
+      : gitHeadError
+        ? `  ${tag}: npm gitHead lookup failed (${gitHeadError.message}); retry before tagging.`
+      : `  ${tag}: npm records no usable gitHead; identify the published commit before tagging (do not guess).`;
+  });
+  console.error(
+    `FAIL: ${missingPublishedTags.length} published npm release${missingPublishedTags.length === 1 ? " is" : "s are"} `
+    + `missing source tag${missingPublishedTags.length === 1 ? "" : "s"}: `
+    + `${missingPublishedTags.map((version) => `v${version}`).join(", ")}.\n`
+    + `${instructions.join("\n")}`
+  );
+  process.exit(1);
+}
+
+// A tag that exists only locally still 404s on github.com. Verify the full
+// published namespace in one remote query so an older local-only tag cannot be
+// hidden by a healthy latest release. If origin is unreachable, degrade to a
+// note rather than passing something the script did not verify.
+let remoteTagCommits = null;
 if (tagVersion) {
-  let remoteTag = null;
   try {
-    remoteTag = execFileSync("git", ["ls-remote", "--tags", "origin", `refs/tags/${expectedTag}`], {
+    const output = execFileSync("git", ["ls-remote", "--tags", "origin", "refs/tags/v*"], {
       encoding: "utf8"
     }).trim();
+    remoteTagCommits = new Map();
+    const peeledTags = new Set();
+    for (const line of output.split("\n").filter(Boolean)) {
+      const [commit = "", ref = ""] = line.trim().split(/\s+/);
+      const peeled = ref.endsWith("^{}");
+      const tag = ref.replace(/^refs\/tags\//, "").replace(/\^\{\}$/, "");
+      if (tag && (peeled || !peeledTags.has(tag))) remoteTagCommits.set(tag, commit);
+      if (peeled) peeledTags.add(tag);
+    }
   } catch {
-    console.log(`(note: could not reach origin to confirm ${expectedTag} is pushed.)`);
+    console.log("(note: could not reach origin to confirm published tags are pushed.)");
   }
-  if (remoteTag === "") {
+  const unpushedPublishedTags = remoteTagCommits === null
+    ? []
+    : allPublishedVersions.map((version) => `v${version}`).filter((tag) => !remoteTagCommits.has(tag));
+  if (unpushedPublishedTags.length > 0) {
     console.error(
-      `FAIL: unpushed release tag. ${expectedTag} exists locally but not on origin, so release-pinned ` +
-      `links like blob/${expectedTag}/INSTALL.md still 404 for everyone else. Run: git push origin ${expectedTag}.`
+      `FAIL: ${unpushedPublishedTags.length} published release tag${unpushedPublishedTags.length === 1 ? " is" : "s are"} ` +
+      `not on origin: ${unpushedPublishedTags.join(", ")}. Release-pinned links still 404 for everyone else.\n` +
+      unpushedPublishedTags.map((tag) => `  git push origin ${tag}`).join("\n")
     );
     process.exit(1);
   }
 }
 
-// The tag existing is not the property the docs depend on — the tag pointing at
-// the published commit is. A v<x> on the wrong commit passes every check above
-// while blob/v<x>/INSTALL.md serves source that was never published, which is
-// worse than the 404: it looks verified. Degrades to a note when npm records no
-// gitHead (2.0.1 has none) or the tag is unreadable, rather than guessing.
-if (tagVersion && tagNames.includes(expectedTag)) {
-  const gitHead = publishedGitHead(npmVersion);
-  let tagCommit = null;
-  try {
-    tagCommit = execFileSync("git", ["rev-parse", `${expectedTag}^{commit}`], { encoding: "utf8" }).trim();
-  } catch {
-    tagCommit = null;
+// A tag must point at the commit npm actually published. Check every published
+// namespace, not only latest, because an older wrong tag serves plausible but
+// unverified source. Missing npm gitHead metadata remains explicitly unknown;
+// never guess a commit for it.
+if (tagNames.length > 0) {
+  const mismatchedTags = [];
+  const gitHeadLookupFailures = [];
+  for (const version of allPublishedVersions) {
+    const tag = `v${version}`;
+    const { gitHead, error: gitHeadError } = publishedGitHead(version);
+    if (gitHeadError) {
+      gitHeadLookupFailures.push({ version, message: gitHeadError.message });
+      continue;
+    }
+    if (!gitHead) {
+      console.log(`(note: npm records no gitHead for ${version}; could not confirm ${tag} points at it.)`);
+      continue;
+    }
+    let tagCommit = remoteTagCommits?.get(tag) || null;
+    if (remoteTagCommits === null) {
+      try {
+        tagCommit = execFileSync("git", ["rev-parse", `${tag}^{commit}`], { encoding: "utf8" }).trim();
+      } catch {
+        gitHeadLookupFailures.push({ version, message: `could not resolve ${tag} to a commit` });
+        continue;
+      }
+    }
+    if (tagCommit && gitHead !== tagCommit) {
+      mismatchedTags.push({ version, tag, tagCommit, gitHead });
+    }
   }
-  if (gitHead && tagCommit && gitHead !== tagCommit) {
+  if (gitHeadLookupFailures.length > 0) {
     console.error(
-      `FAIL: ${expectedTag} points at ${tagCommit}, but npm published ${npmVersion} from ${gitHead}. ` +
+      "FAIL: could not read npm gitHead metadata for published releases:\n" +
+      gitHeadLookupFailures.map(({ version, message }) => `  ${version}: ${message}`).join("\n")
+    );
+    process.exit(1);
+  }
+  if (mismatchedTags.length > 0) {
+    console.error(
+      "FAIL: published source tags do not match npm's recorded commits:\n" +
+      mismatchedTags.map(({ version, tag, tagCommit, gitHead }) =>
+        `  ${tag} points at ${tagCommit}, but npm published ${version} from ${gitHead}.`
+      ).join("\n") + "\n" +
       `Anyone following INSTALL.md's "compare gitHead with the source tag" step reads different source than ` +
       "they installed. Move the tag to the published commit, or publish the tagged commit."
     );
     process.exit(1);
-  }
-  if (!gitHead) {
-    console.log(`(note: npm records no gitHead for ${npmVersion}; could not confirm ${expectedTag} points at it.)`);
   }
 }
 

@@ -533,7 +533,7 @@ test("AE1-AE6: one approval-bound journey connects, routes, refuses drift, and s
   }
 
   const liveReceipt = JSON.parse(await fs.readFile(
-    path.join(repoRoot, "docs", "internal", "probes", "2026-08-30-codex-project-native-invocation.json"),
+    path.join(repoRoot, "docs", "probes", "2026-08-30-codex-project-native-invocation.json"),
     "utf8"
   ));
   assert.equal(liveReceipt.schema, "dotaios.skill-invocation.v1");

@@ -176,6 +176,7 @@ test("the packed product carries one non-founder induction through exact approve
   assert.equal(candidateResolution.project_route.status, "candidate");
   assert.equal(candidateResolution.project_route.project.id, projectPreview.plan.project.id);
   assert.match(candidateResolution.project_route.approval_binding, /^[a-f0-9]{64}$/u);
+  assert.equal(candidateResolution.memory.receipt, "Memory: Off");
   assert.equal(candidateResolution.location, null);
   assert.equal(candidateResolution.next_action.approval, "direct_user_required");
   assert.match(candidateResolution.next_action.summary, /immediately.*exact resolution/i);
