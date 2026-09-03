@@ -127,8 +127,8 @@ Configuration is not invocation proof. For a bounded acceptance check, run the
 explicit client probe against a disposable project fixture:
 
 ```bash
-npx dotaios@2.0.18 skills probe --client codex --path ~/aios --dry-run
-npx dotaios@2.0.18 skills probe --client codex --path ~/aios --run \
+npx dotaios@2.0.19 skills probe --client codex --path ~/aios --dry-run
+npx dotaios@2.0.19 skills probe --client codex --path ~/aios --run \
   --receipt /tmp/dotaios-codex-invocation.json
 ```
 
@@ -196,8 +196,8 @@ mode, a produced receipt, and one shared production, health, and probe
 resolver.
 
 ```bash
-npx dotaios@2.0.18 attach /path/to/project --path ~/aios
-npx dotaios@2.0.18 attach /path/to/project --path ~/aios --dry-run
+npx dotaios@2.0.19 attach /path/to/project --path ~/aios
+npx dotaios@2.0.19 attach /path/to/project --path ~/aios --dry-run
 ```
 
 This proves filesystem/configuration propagation. It does not claim that every
