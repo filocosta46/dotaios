@@ -939,8 +939,6 @@ test("tracked public files contain no private maintainer identifiers", async () 
 const INTERNAL_PROGRAMME_LEAVES = Object.freeze([
   "foundation-program",
   "plans",
-  "probes",
-  "benchmarks",
   "managed-skill-store-design.md",
   "managed-skill-store-architecture-review.md",
 ]);
@@ -989,38 +987,44 @@ test("every README documentation link resolves to a real file", async () => {
   }
 });
 
-test("internal programme material is off the public guides path", async () => {
+test("internal planning material is absent from the public repository", async () => {
   for (const internal of INTERNAL_PROGRAMME_DOCS) {
     await assert.rejects(
       fs.access(path.join(repoRoot, internal)),
-      `${internal} must move under docs/internal/`
+      `${internal} must not be public`
     );
-    await fs.access(path.join(repoRoot, internal.replace("docs/", "docs/internal/")));
+    await assert.rejects(
+      fs.access(path.join(repoRoot, internal.replace("docs/", "docs/internal/"))),
+      `${internal.replace("docs/", "docs/internal/")} must not be public`
+    );
   }
+  await assert.rejects(fs.access(path.join(repoRoot, "docs", "internal")));
+  await fs.access(path.join(repoRoot, "docs", "probes"));
+  await fs.access(path.join(repoRoot, "benchmarks", "search", "evidence"));
 });
 
-test("nothing still points at the old public location of the internal programme", async () => {
+test("nothing still points at removed internal planning locations", async () => {
   const { stdout } = await run("git", ["-C", repoRoot, "ls-files", "-z"]);
   const offenders = [];
   for (const relative of stdout.split("\0").filter(Boolean)) {
-    // The moved documents keep their own prose, including their own old paths.
-    if (relative.startsWith("docs/internal/")) continue;
     let content;
     try {
       content = await fs.readFile(path.join(repoRoot, relative), "utf8");
     } catch {
       continue;
     }
-    // Plain string search, not a built regex: escaping a path fragment into a
-    // pattern is the kind of half-escape CodeQL flags, and nothing here needs
-    // more than a substring test. Blanking the new prefix first is what stops a
-    // correctly relocated path from reading as a stale one.
-    const remaining = content.split(["docs", "internal", ""].join("/")).join(" ");
-    const collapsed = remaining.replace(/\s+/g, " ");
+    const collapsed = content.replace(/\s+/g, " ");
     for (const [index, internal] of INTERNAL_PROGRAMME_DOCS.entries()) {
       const leaf = INTERNAL_PROGRAMME_LEAVES[index];
       const joined = `"docs", "${leaf}"`;
-      if (remaining.includes(internal) || collapsed.includes(joined)) {
+      const relocated = ["docs", "internal", leaf].join("/");
+      const relocatedJoined = `"docs", "internal", "${leaf}"`;
+      if (
+        content.includes(internal)
+        || content.includes(relocated)
+        || collapsed.includes(joined)
+        || collapsed.includes(relocatedJoined)
+      ) {
         offenders.push(`${relative} -> ${internal}`);
       }
     }

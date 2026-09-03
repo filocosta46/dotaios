@@ -211,27 +211,14 @@ test("guided connect and the project-search selector migration are documented", 
   assert.match(changelog, /`--session-project` remains the session-tag filter/);
 });
 
-test("project identity documentation matches the bounded cross-namespace collision scan", () => {
+test("project identity documentation states the bounded cross-namespace collision scan", () => {
   const architecture = fs.readFileSync(path.join(repoRoot, "docs", "architecture.md"), "utf8");
-  const plan = fs.readFileSync(
-    path.join(repoRoot, "docs", "internal", "plans", "2026-08-10-003-feat-consumer-project-source-retrieval-plan.md"),
-    "utf8",
-  );
 
   assert.match(
     architecture,
     /both slug and stable-ID selectors\s+perform a bounded identity-only\s+catalog scan/i,
   );
   assert.match(architecture, /neighboring project bodies and source declarations\s+are never read/i);
-  assert.match(
-    plan,
-    /KTD15\.[\s\S]*both slug and stable-ID selectors perform a bounded identity-only scan/i,
-  );
-  assert.match(plan, /detect slug\/stable-ID namespace collisions/i);
-  assert.match(
-    plan,
-    /U4\.[\s\S]*both direct slug and stable-ID selectors scan bounded identity-only catalog headers/i,
-  );
 });
 
 test("guided connect resumes only matching source-only state and refuses mismatches", () => {

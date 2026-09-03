@@ -21,11 +21,11 @@ import {
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const manifestPath = path.join(repoRoot, "benchmarks", "search", "manifest.json");
 const benchmarkReceiptPaths = [
-  path.join(repoRoot, "docs", "internal", "benchmarks", "2026-08-13-search-baseline.md"),
-  path.join(repoRoot, "docs", "internal", "benchmarks", "2026-08-13-search-optimized.md"),
-  path.join(repoRoot, "docs", "internal", "benchmarks", "2026-08-13-search-final.md")
+  path.join(repoRoot, "benchmarks", "search", "evidence", "2026-08-13-search-baseline.md"),
+  path.join(repoRoot, "benchmarks", "search", "evidence", "2026-08-13-search-optimized.md"),
+  path.join(repoRoot, "benchmarks", "search", "evidence", "2026-08-13-search-final.md")
 ];
-const finalReportsDirectory = path.join(repoRoot, "docs", "internal", "benchmarks", "reports");
+const finalReportsDirectory = path.join(repoRoot, "benchmarks", "search", "evidence", "reports");
 
 function declaredManifestReceipt(receiptPath, receipt) {
   const declarations = [...receipt.matchAll(/^\- Manifest SHA-256: `([^`]+)`\s*$/gmi)];
@@ -243,6 +243,28 @@ test("checked-in benchmark receipts declare the current manifest receipt", async
   for (const receiptPath of benchmarkReceiptPaths) {
     const receipt = await fs.readFile(receiptPath, "utf8");
     assert.equal(declaredManifestReceipt(receiptPath, receipt), expectedManifestReceipt, receiptPath);
+  }
+});
+
+test("checked-in benchmark evidence keeps local Markdown links resolvable", async () => {
+  const evidenceDirectory = path.dirname(benchmarkReceiptPaths[0]);
+  const evidenceNames = (await fs.readdir(evidenceDirectory))
+    .filter((name) => name.endsWith(".md"));
+
+  for (const evidenceName of evidenceNames) {
+    const evidencePath = path.join(evidenceDirectory, evidenceName);
+    const evidence = await fs.readFile(evidencePath, "utf8");
+    const links = [...evidence.matchAll(/\]\(([^)]+)\)/g)]
+      .map((match) => match[1])
+      .filter((target) => !target.startsWith("http") && !target.startsWith("#"));
+
+    for (const target of links) {
+      const localTarget = target.split("#", 1)[0];
+      await assert.doesNotReject(
+        () => fs.access(path.resolve(evidenceDirectory, localTarget)),
+        `${evidenceName} must not link to a missing local artifact: ${target}`
+      );
+    }
   }
 });
 

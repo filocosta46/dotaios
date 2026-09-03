@@ -40,7 +40,8 @@ exact controlled results.
   or bytes-only raw-read sample was rerun.
 - The fixture and raw baseline reports used for this document were generated
   in an external temporary directory outside the repository. The committed
-  reports under `docs/benchmarks/reports/` are separate repository artifacts.
+  reports under `benchmarks/search/evidence/reports/` are separate repository
+  artifacts.
 
 The nested topology is a bounded, shared three-level tree with branching factor
 8 (at most 512 leaf directory chains), rather than a unique ancestor chain per
