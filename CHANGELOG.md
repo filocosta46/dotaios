@@ -4,6 +4,12 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Managed upgrades recognize exact generated schedule commands from every
+  supported predecessor release instead of refusing legitimate installs newer
+  than 2.0.11.
+
 ## [2.0.19] - 2026-09-03
 
 ### Changed

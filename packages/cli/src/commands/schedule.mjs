@@ -20,7 +20,7 @@ import {
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 
 const MANAGED_SCHEDULE_REPAIR_FORMAT = "dotaios-managed-schedule-repair-plan/v1";
-const RECOGNIZED_SCHEDULE_PREDECESSORS = new Set(["2.0.9", "2.0.10", "2.0.11"]);
+const EARLIEST_RECOGNIZED_SCHEDULE_PREDECESSOR = Object.freeze([2, 0, 9]);
 const TERMINAL_SCHEDULE_FIELDS = new Set(["name", "cadence", "command"]);
 const UNSAFE_TERMINAL_TEXT = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]|\p{Bidi_Control}/u;
 export const OFFICIAL_SCHEDULES = Object.freeze([
@@ -615,7 +615,7 @@ function buildManagedScheduleRepairPlan(
       conflicts.push({
         name,
         reason: "custom-official-command",
-        detail: "the command is not an exact generated 2.0.9/2.0.10/2.0.11 predecessor"
+        detail: "the command is not an exact generated predecessor from 2.0.9 through the prior release"
       });
       continue;
     }
@@ -707,9 +707,30 @@ function classifyOfficialScheduleCommand(value, commandTail, current) {
   if (
     !match
     || match[2] !== commandTail
-    || (match[1] !== currentVersion && !RECOGNIZED_SCHEDULE_PREDECESSORS.has(match[1]))
+    || (match[1] !== currentVersion && !isRecognizedSchedulePredecessor(match[1], currentVersion))
   ) return null;
   return `version-${match[1]}`;
+}
+
+function isRecognizedSchedulePredecessor(version, currentVersion) {
+  const predecessor = stableVersionParts(version);
+  const candidate = stableVersionParts(currentVersion);
+  return predecessor !== null
+    && candidate !== null
+    && compareVersionParts(predecessor, EARLIEST_RECOGNIZED_SCHEDULE_PREDECESSOR) >= 0
+    && compareVersionParts(predecessor, candidate) < 0;
+}
+
+function stableVersionParts(version) {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(version || "");
+  return match ? match.slice(1).map(Number) : null;
+}
+
+function compareVersionParts(left, right) {
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index] < right[index] ? -1 : 1;
+  }
+  return 0;
 }
 
 function platformForInvocation(invocation) {
