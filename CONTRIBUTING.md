@@ -11,7 +11,7 @@ pnpm cli -- --help
 ```
 
 Before sending changes, run `npm test` and `npm run smoke` (both must pass). For
-agent-specific architecture, rules, and gotchas see [CLAUDE.md](CLAUDE.md).
+agent-specific architecture, rules, and gotchas see [AGENTS.md](AGENTS.md).
 
 Optional: enable the test gate so pushes are blocked when tests fail:
 

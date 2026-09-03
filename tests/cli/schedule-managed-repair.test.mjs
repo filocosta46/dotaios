@@ -15,8 +15,10 @@ const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 const candidateVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 const candidateInvocation = `npx dotaios@${candidateVersion}`;
+const candidateParts = candidateVersion.split(".").map(Number);
+const futureVersion = [...candidateParts.slice(0, 2), candidateParts[2] + 1].join(".");
 
-for (const origin of ["2.0.9", "2.0.10", "2.0.11"]) {
+for (const origin of ["2.0.9", "2.0.10", "2.0.11", "2.0.12", "2.0.18"]) {
   test(`repairs only generated ${origin} schedule command scalars`, () => {
     const predecessor = `npx dotaios@${origin}`;
     const source = [
@@ -58,6 +60,25 @@ for (const origin of ["2.0.9", "2.0.10", "2.0.11"]) {
     assert.deepEqual(plan.conflicts, []);
     assert.equal(applyManagedScheduleRepair(source, plan), expected);
     assert.match(expected, new RegExp(`^# keep this historical example: ${predecessor.replaceAll(".", "\\.")}`, "m"));
+  });
+}
+
+for (const unsupported of ["2.0.8", futureVersion, `${candidateVersion}-beta.1`, `0${candidateVersion}`]) {
+  test(`refuses unsupported generated-looking ${unsupported} schedule commands`, () => {
+    const source = [
+      "schedules:",
+      "  - name: daily-brief",
+      `    command: "npx dotaios@${unsupported} brief"`,
+      "    enabled: false",
+      ""
+    ].join("\n");
+
+    const plan = planManagedScheduleRepair(source, { candidateVersion });
+
+    assert.equal(plan.status, "blocked-conflict");
+    assert.deepEqual(plan.changes, []);
+    assert.match(JSON.stringify(plan.conflicts), /custom-official-command/);
+    assert.throws(() => applyManagedScheduleRepair(source, plan), /conflict/i);
   });
 }
 
