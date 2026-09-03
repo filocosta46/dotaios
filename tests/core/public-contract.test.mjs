@@ -9,7 +9,7 @@ import { ADMISSION_NPM_VERSION } from "../../scripts/onboarding-release-acceptan
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const run = promisify(execFile);
-const RELEASE_VERSION = "2.0.17";
+const RELEASE_VERSION = "2.0.18";
 const RELEASE_VERSION_PATTERN = RELEASE_VERSION.replaceAll(".", "\\.");
 
 function extractAssistantInstallRefs(markdown) {
