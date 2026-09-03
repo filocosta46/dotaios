@@ -25,7 +25,8 @@ function fixture(t, {
   gitHead = "tagged",
   gitHeads = {},
   gitHeadFailures = [],
-  retagAfterPush = []
+  retagAfterPush = [],
+  gitShimBody = null
 }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-freshness-test-"));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -82,6 +83,7 @@ function fixture(t, {
     '  *) echo "" ;;',
     "esac"
   ].join("\n"));
+  if (gitShimBody) shim("git", gitShimBody);
 
   return { root, repo, bin, head };
 }
@@ -185,6 +187,29 @@ test("an older tag on the wrong commit fails even when latest matches", { skip: 
   assert.equal(result.status, 1, `expected failure, got: ${result.stdout}${result.stderr}`);
   assert.match(result.stderr, /v1\.0\.0 points at .*, but npm published 1\.0\.0 from/);
   assert.doesNotMatch(result.stderr, /v1\.1\.0 points at/);
+});
+
+test("the byte-proven v1.6.0 source tag survives npm's stale gitHead metadata", { skip: WINDOWS }, (t) => {
+  const publishedGitHead = "40ea3cc8666da5a3aff4c6802d9d362d4ae91abb";
+  const sourceTagCommit = "2a6724eadf61e96acbdc17b9a41739eef2a23bf6";
+  const result = run(fixture(t, {
+    npmVersion: "1.6.0",
+    publishedVersions: ["1.6.0"],
+    gitHeads: { "1.6.0": publishedGitHead },
+    gitShimBody: [
+      'if [ "$1" = "tag" ]; then',
+      '  echo "v1.6.0"',
+      "  exit 0",
+      "fi",
+      'if [ "$1" = "ls-remote" ]; then',
+      `  printf '%s\\t%s\\n' "${sourceTagCommit}" "refs/tags/v1.6.0"`,
+      "  exit 0",
+      "fi",
+      "exit 2"
+    ].join("\n")
+  }));
+  assert.equal(result.status, 0, `expected pass, got: ${result.stdout}${result.stderr}`);
+  assert.match(result.stdout, /v1\.6\.0 source tag was verified from package bytes/);
 });
 
 test("a historical gitHead lookup failure cannot produce a green check", { skip: WINDOWS }, (t) => {

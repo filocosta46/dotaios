@@ -206,6 +206,12 @@ if (tagVersion) {
 // namespace, not only latest, because an older wrong tag serves plausible but
 // unverified source. Missing npm gitHead metadata remains explicitly unknown;
 // never guess a commit for it.
+const verifiedSourceTagExceptions = new Map([
+  ["1.6.0", {
+    gitHead: "40ea3cc8666da5a3aff4c6802d9d362d4ae91abb",
+    tagCommit: "2a6724eadf61e96acbdc17b9a41739eef2a23bf6"
+  }]
+]);
 if (tagNames.length > 0) {
   const mismatchedTags = [];
   const gitHeadLookupFailures = [];
@@ -230,6 +236,11 @@ if (tagNames.length > 0) {
       }
     }
     if (tagCommit && gitHead !== tagCommit) {
+      const verifiedException = verifiedSourceTagExceptions.get(version);
+      if (verifiedException?.gitHead === gitHead && verifiedException.tagCommit === tagCommit) {
+        console.log(`(note: ${tag} source tag was verified from package bytes; npm records its pre-release gitHead.)`);
+        continue;
+      }
       mismatchedTags.push({ version, tag, tagCommit, gitHead });
     }
   }
