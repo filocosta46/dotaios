@@ -10,21 +10,18 @@ import { applyApprovedProjectRegistration } from "../helpers/project-registratio
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
-test("an AIOS folder inside home renders as a home-relative pointer", () => {
+test("portable AIOS pointers stay path-free inside and outside home", () => {
   assert.equal(
     portableAiosPointer("/Users/alice/aios", "/Users/alice"),
-    "~/aios/AGENTS.md"
+    "the `AGENTS.md` selected by the host-managed global bridge"
   );
   assert.equal(
     portableAiosPointer("/Users/alice/nested/aios", "/Users/alice"),
-    "~/nested/aios/AGENTS.md"
+    "the `AGENTS.md` selected by the host-managed global bridge"
   );
-});
-
-test("an AIOS folder outside home keeps its absolute pointer", () => {
   assert.equal(
     portableAiosPointer("/opt/aios", "/Users/alice"),
-    "/opt/aios/AGENTS.md"
+    "the `AGENTS.md` selected by the host-managed global bridge"
   );
 });
 
@@ -84,7 +81,7 @@ test("attach never writes the author's home path into the project bridge", () =>
       receipt: "Memory: This project",
       registered_project: projectRecord.registered_project
     });
-    assert.match(bridge, /~\/aios\/AGENTS\.md/);
+    assert.match(bridge, /AGENTS\.md.*host-managed global bridge/);
     assert.match(bridge, /Memory: This project/);
     assert.match(bridge, /project["`, ]+identify[\s\S]*same attached checkout/is);
     assert.match(bridge, /Only after[\s\S]*Memory: This project[\s\S]*registered_project/is);
@@ -103,6 +100,36 @@ test("attach never writes the author's home path into the project bridge", () =>
       `the bridge published an absolute home path:\n${bridge}`
     );
     assert.doesNotMatch(bridge, /\/Users\/|\/home\//);
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("attach never writes an outside-home custom AIOS path into the project bridge", () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-outside-home-bridge-leak-"));
+  const home = path.join(base, "home");
+  const aios = path.join(base, "private", "Filippo AIOS");
+  const repo = path.join(base, "myrepo");
+  fs.mkdirSync(repo, { recursive: true });
+
+  try {
+    const initialized = spawnSync(
+      process.execPath,
+      [cli, "init", "--yes", "--path", aios, "--home", home],
+      { encoding: "utf8" }
+    );
+    assert.equal(initialized.status, 0, initialized.stderr);
+    registerApprovedProject({ aiosPath: aios, homePath: home, projectPath: repo });
+    const attach = spawnSync(
+      process.execPath,
+      [cli, "attach", repo, "--path", aios, "--home", home],
+      { encoding: "utf8" }
+    );
+    assert.equal(attach.status, 0, attach.stderr);
+
+    const bridge = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
+    assert.doesNotMatch(bridge, new RegExp(aios.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(bridge, /AGENTS\.md.*host-managed global bridge/);
   } finally {
     fs.rmSync(base, { recursive: true, force: true });
   }

@@ -1,3 +1,4 @@
+import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
@@ -10,7 +11,7 @@ import {
   restoreProjects
 } from "../../../core/src/projects.mjs";
 import { buildSessionDigest } from "../../../core/src/digest.mjs";
-import { inspectMigrationState } from "../../../core/src/migrations.mjs";
+import { inspectAiosRootIdentity } from "../../../core/src/migrations.mjs";
 import { isPathWithin } from "../../../core/src/paths.mjs";
 import { managedWorkspaceRoot } from "../../../core/src/project-workspaces.mjs";
 import { createProjectGitAdapter } from "../project-git.mjs";
@@ -163,25 +164,45 @@ export async function projectCommand(args = [], dependencies = {}) {
   if (subcommand === "identify") {
     assertPositionals(positionals, 0, "dotaios project identify");
     const cwd = dependencies.cwd || process.cwd();
-    let project;
-    try {
-      project = await resolveProjectContext({
-        ...coreOptions,
-        cwd
-      });
-    } catch (error) {
-      if (error?.code !== "DOTAIOS_DIRECTORY_MISSING") throw error;
-      project = null;
+    const initialAiosRootBinding = await validatedAiosRootBinding({
+      aiosPath: coreOptions.aiosPath,
+      fileSystem: coreOptions.fs
+    });
+    let project = null;
+    if (initialAiosRootBinding !== null) {
+      try {
+        project = await resolveProjectContext({
+          ...coreOptions,
+          cwd
+        });
+      } catch (error) {
+        if (error?.code !== "DOTAIOS_DIRECTORY_MISSING") throw error;
+      }
     }
     // A registered project always wins. The Shared fallback is narrower than
     // plain path containment: the root must pass the bounded AIOS compatibility
     // inspection, and the reserved managed-workspace shelf stays closed unless
     // project resolution proved an exact, verified mapping above.
-    const aiosFolder = project ? false : await isSharedAiosContext({
+    let aiosFolder = initialAiosRootBinding !== null && !project && await isSharedAiosContext({
       aiosPath: coreOptions.aiosPath,
       cwd,
       fileSystem: coreOptions.fs
     });
+    // Bind either privileged receipt to the exact root generation that was
+    // validated before catalog reads and containment checks. If the root is
+    // replaced anywhere in that window, both scopes fail closed.
+    const finalAiosRootBinding = initialAiosRootBinding === null
+      ? null
+      : await validatedAiosRootBinding({
+          aiosPath: coreOptions.aiosPath,
+          fileSystem: coreOptions.fs
+        });
+    const validAiosRoot = initialAiosRootBinding !== null
+      && finalAiosRootBinding === initialAiosRootBinding;
+    if (!validAiosRoot) {
+      project = null;
+      aiosFolder = false;
+    }
     const result = {
       receipt: project
         ? "Memory: This project"
@@ -288,13 +309,50 @@ async function isSharedAiosContext({ aiosPath, cwd, fileSystem }) {
       isPathWithin(aiosPath, cwd, { fileSystem }),
       isPathWithin(managedWorkspaceRoot(aiosPath), cwd, { fileSystem })
     ]);
-    if (!insideAios || insideManagedWorkspaces) return false;
-
-    await inspectMigrationState({ aiosPath }, { filesystem: fileSystem });
-    return true;
+    return insideAios && !insideManagedWorkspaces;
   } catch {
     return false;
   }
+}
+
+async function validatedAiosRootBinding({ aiosPath, fileSystem = fs }) {
+  try {
+    const before = await aiosRootGeneration(aiosPath, fileSystem);
+    const identity = await inspectAiosRootIdentity({ aiosPath }, { filesystem: fileSystem });
+    const after = await aiosRootGeneration(aiosPath, fileSystem);
+    if (before !== after) return null;
+    return `${before}\u0000${identity.config_identity}\u0000${identity.status}`;
+  } catch {
+    return null;
+  }
+}
+
+async function aiosRootGeneration(aiosPath, fileSystem) {
+  const lexical = await fileSystem.lstat(aiosPath, { bigint: true });
+  if (!lexical.isDirectory() && !lexical.isSymbolicLink()) {
+    throw new Error("AIOS root must be a directory or a stable directory symlink.");
+  }
+  const canonicalPath = await fileSystem.realpath(aiosPath);
+  const canonical = await fileSystem.lstat(canonicalPath, { bigint: true });
+  if (!canonical.isDirectory() || canonical.isSymbolicLink()) {
+    throw new Error("AIOS root must resolve to a real directory.");
+  }
+  return [
+    path.resolve(canonicalPath),
+    filesystemGenerationToken(lexical),
+    filesystemGenerationToken(canonical)
+  ].join("\u0000");
+}
+
+function filesystemGenerationToken(stats) {
+  return [
+    stats.dev,
+    stats.ino,
+    stats.mode,
+    stats.size,
+    stats.mtimeNs ?? stats.mtimeMs,
+    stats.ctimeNs ?? stats.ctimeMs
+  ].map(String).join(":");
 }
 
 function createCoreOptions(options, dependencies) {

@@ -24,13 +24,25 @@ const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/;
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const cliPath = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
+function validAiosConfig(overrides = {}) {
+  return {
+    schema_version: "1.2.0",
+    created_at: "2026-09-04T00:00:00.000Z",
+    ai_tools: [],
+    vault_path: null,
+    skills_first: false,
+    extension_fixture: { preserved: true },
+    ...overrides
+  };
+}
+
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-project-"));
   const aiosPath = path.join(root, "aios");
   const homePath = path.join(root, "home");
   const statePath = path.join(root, "local-state", "projects.json");
   await fs.mkdir(path.join(aiosPath, "projects"), { recursive: true });
-  await fs.writeFile(path.join(aiosPath, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  await fs.writeFile(path.join(aiosPath, "aios.json"), `${JSON.stringify(validAiosConfig())}\n`);
   await fs.mkdir(homePath, { recursive: true });
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   return { root, aiosPath, homePath, statePath };
@@ -385,7 +397,18 @@ test("project identify --json refuses Shared for unvalidated AIOS roots", async 
 
   for (const [name, config] of [
     ["missing-config", null],
-    ["malformed-config", "{not-json\n"]
+    ["malformed-config", "{not-json\n"],
+    ["future-config", `${JSON.stringify(validAiosConfig({ schema_version: "9.0.0" }))}\n`],
+    ["invalid-known-fields", `${JSON.stringify({
+      schema_version: "1.2.0",
+      created_at: 7,
+      ai_tools: "not-an-array",
+      vault_path: {}
+    })}\n`],
+    [
+      "duplicate-schema",
+      '{"schema_version":"9.0.0","schema_version":"1.2.0","created_at":"2026-09-04T00:00:00.000Z","ai_tools":[],"vault_path":null}\n'
+    ]
   ]) {
     const aiosPath = path.join(root, name);
     const nested = path.join(aiosPath, "vault", "notes");
@@ -403,6 +426,159 @@ test("project identify --json refuses Shared for unvalidated AIOS roots", async 
       registered_project: null
     }, name);
   }
+});
+
+test("project identify --json validates the AIOS root before accepting a registered project", async (t) => {
+  const cases = [
+    ["missing", null],
+    ["malformed", "{not-json\n"],
+    ["future", `${JSON.stringify(validAiosConfig({ schema_version: "9.0.0" }))}\n`],
+    ["semantically invalid", `${JSON.stringify({
+      schema_version: "1.2.0",
+      created_at: 7,
+      ai_tools: "not-an-array",
+      vault_path: {}
+    })}\n`],
+    [
+      "duplicate schema",
+      '{"schema_version":"9.0.0","schema_version":"1.2.0","created_at":"2026-09-04T00:00:00.000Z","ai_tools":[],"vault_path":null}\n'
+    ]
+  ];
+
+  for (const [name, replacement] of cases) {
+    await t.test(name, async (subtest) => {
+      const { root, aiosPath, statePath } = await fixture(subtest);
+      const projectPath = await makeRepo(root, `invalid-root-${name.replaceAll(" ", "-")}`);
+      const registered = await registerApprovedProject({
+        aiosPath,
+        statePath,
+        projectPath,
+        createId: () => `invalid-root-${name.replaceAll(" ", "-")}-id`,
+        readRepoUrl: async () => null
+      });
+      assert.equal(registered.applied, true);
+
+      const configPath = path.join(aiosPath, "aios.json");
+      if (replacement === null) await fs.unlink(configPath);
+      else await fs.writeFile(configPath, replacement);
+
+      const result = runCli(
+        [
+          "project", "identify", "--json",
+          "--path", aiosPath,
+          "--state-path", statePath,
+          "--home", root
+        ],
+        { cwd: projectPath }
+      );
+
+      assert.deepEqual(JSON.parse(result.stdout), {
+        receipt: "Memory: Off",
+        registered_project: null
+      });
+    });
+  }
+});
+
+test("project identify --json revalidates the same AIOS root after project resolution", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "root-swap-target");
+  const replacement = path.join(root, "replacement-aios");
+  const displaced = path.join(root, "validated-aios");
+  await fs.mkdir(path.join(replacement, "projects"), { recursive: true });
+  await writeProjectReadme(
+    replacement,
+    "evil",
+    ["id: evil-id", "project: evil", "status: active"].join("\n")
+  );
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    paths: { "evil-id": await verifiedPathMapping(projectPath) }
+  }, null, 2)}\n`);
+
+  let swapped = false;
+  const racingFs = new Proxy(fs, {
+    get(target, property) {
+      if (property === "readdir") {
+        return async (candidate, options) => {
+          if (!swapped && path.resolve(candidate) === path.join(aiosPath, "projects")) {
+            swapped = true;
+            await fs.rename(aiosPath, displaced);
+            await fs.rename(replacement, aiosPath);
+          }
+          return fs.readdir(candidate, options);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+  const captured = outputCapture();
+
+  const result = await projectCommand(
+    [
+      "identify", "--json",
+      "--path", aiosPath,
+      "--state-path", statePath,
+      "--home", root
+    ],
+    { fs: racingFs, cwd: projectPath, output: captured.output }
+  );
+
+  assert.equal(swapped, true);
+  assert.deepEqual(result, {
+    receipt: "Memory: Off",
+    registered_project: null
+  });
+  assert.deepEqual(JSON.parse(captured.lines.join("\n")), result);
+});
+
+test("project identify --json revalidates the AIOS root after Shared containment", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const cwd = path.join(aiosPath, "vault", "notes");
+  const replacement = path.join(root, "replacement-aios");
+  const displaced = path.join(root, "validated-aios");
+  await fs.mkdir(cwd, { recursive: true });
+  await fs.mkdir(path.join(aiosPath, "workspaces"), { recursive: true });
+  await fs.mkdir(path.join(replacement, "vault", "notes"), { recursive: true });
+  await fs.mkdir(path.join(replacement, "workspaces"), { recursive: true });
+
+  let swapped = false;
+  const racingFs = new Proxy(fs, {
+    get(target, property) {
+      if (property === "lstat") {
+        return async (candidate, options) => {
+          if (!swapped && path.resolve(candidate) === path.join(aiosPath, "workspaces")) {
+            swapped = true;
+            await fs.rename(aiosPath, displaced);
+            await fs.rename(replacement, aiosPath);
+          }
+          return fs.lstat(candidate, options);
+        };
+      }
+      const value = Reflect.get(target, property, target);
+      return typeof value === "function" ? value.bind(target) : value;
+    }
+  });
+  const captured = outputCapture();
+
+  const result = await projectCommand(
+    [
+      "identify", "--json",
+      "--path", aiosPath,
+      "--state-path", statePath,
+      "--home", root
+    ],
+    { fs: racingFs, cwd, output: captured.output }
+  );
+
+  assert.equal(swapped, true);
+  assert.deepEqual(result, {
+    receipt: "Memory: Off",
+    registered_project: null
+  });
+  assert.deepEqual(JSON.parse(captured.lines.join("\n")), result);
 });
 
 test("project identify --json keeps unverified managed workspaces closed", async (t) => {
@@ -509,6 +685,129 @@ test("project identify --json still scopes a verified managed workspace", async 
   assert.deepEqual(JSON.parse(result.stdout), {
     receipt: "Memory: This project",
     registered_project: { id, slug }
+  });
+});
+
+test("project identify --json refuses inode-verified mappings at unsafe managed-workspace paths", async (t) => {
+  for (const targetName of ["workspace-root", "wrong-slug"]) {
+    await t.test(targetName, async (subtest) => {
+      const { root, aiosPath, statePath } = await fixture(subtest);
+      const slug = "expected-slug";
+      const id = `${targetName}-id`;
+      const workspaceRoot = path.join(aiosPath, "workspaces");
+      const target = targetName === "workspace-root"
+        ? workspaceRoot
+        : path.join(workspaceRoot, "another-slug");
+      await fs.mkdir(target, { recursive: true });
+      await writeProjectReadme(
+        aiosPath,
+        slug,
+        [`id: ${id}`, `project: ${slug}`, "status: active"].join("\n")
+      );
+      await fs.mkdir(path.dirname(statePath), { recursive: true });
+      await fs.writeFile(statePath, `${JSON.stringify({
+        version: 1,
+        paths: { [id]: await verifiedPathMapping(target) }
+      }, null, 2)}\n`);
+
+      const result = runCli(
+        [
+          "project", "identify", "--json",
+          "--path", aiosPath,
+          "--state-path", statePath,
+          "--home", root
+        ],
+        { cwd: target }
+      );
+
+      assert.deepEqual(JSON.parse(result.stdout), {
+        receipt: "Memory: Off",
+        registered_project: null
+      });
+    });
+  }
+});
+
+test("project identify --json refuses two active projects that claim the same verified root", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const sharedRoot = await makeRepo(root, "shared-root");
+  const mapping = await verifiedPathMapping(sharedRoot);
+  await writeProjectReadme(
+    aiosPath,
+    "alpha",
+    ["id: alpha-id", "project: alpha", "status: active"].join("\n")
+  );
+  await writeProjectReadme(
+    aiosPath,
+    "beta",
+    ["id: beta-id", "project: beta", "status: active"].join("\n")
+  );
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    paths: {
+      "alpha-id": mapping,
+      "beta-id": mapping
+    }
+  }, null, 2)}\n`);
+
+  const result = runCli(
+    [
+      "project", "identify", "--json",
+      "--path", aiosPath,
+      "--state-path", statePath,
+      "--home", root
+    ],
+    { cwd: sharedRoot }
+  );
+
+  assert.deepEqual(JSON.parse(result.stdout), {
+    receipt: "Memory: Off",
+    registered_project: null
+  });
+});
+
+test("project identify --json infers only active owners when paused records share their root", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const sharedRoot = await makeRepo(root, "active-shared-root");
+  const mapping = await verifiedPathMapping(sharedRoot);
+  await writeProjectReadme(
+    aiosPath,
+    "alpha",
+    ["id: alpha-paused-id", "project: alpha", "status: paused"].join("\n")
+  );
+  const betaReadme = await writeProjectReadme(
+    aiosPath,
+    "beta",
+    ["id: beta-active-id", "project: beta", "status: active"].join("\n")
+  );
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    paths: {
+      "alpha-paused-id": mapping,
+      "beta-active-id": mapping
+    }
+  }, null, 2)}\n`);
+  const args = [
+    "project", "identify", "--json",
+    "--path", aiosPath,
+    "--state-path", statePath,
+    "--home", root
+  ];
+
+  assert.deepEqual(JSON.parse(runCli(args, { cwd: sharedRoot }).stdout), {
+    receipt: "Memory: This project",
+    registered_project: { id: "beta-active-id", slug: "beta" }
+  });
+
+  await fs.writeFile(
+    betaReadme,
+    "---\nid: beta-active-id\nproject: beta\nstatus: paused\n---\n# beta\n"
+  );
+  assert.deepEqual(JSON.parse(runCli(args, { cwd: sharedRoot }).stdout), {
+    receipt: "Memory: Off",
+    registered_project: null
   });
 });
 

@@ -7,9 +7,9 @@ All notable changes to DotAIOS will be documented in this file.
 ### Fixed
 
 - Project identification reports `Memory: Shared` only inside a validated AIOS
-  folder outside its managed workspace shelf. Verified projects still win;
-  malformed roots and unverified workspace mappings stay closed, and the
-  two-field JSON response remains compatible.
+  folder outside its managed workspace shelf. A unique active verified project
+  still wins; malformed roots plus unsafe, conflicting, or unverified mappings
+  stay closed, and the two-field JSON response remains compatible.
 - Generated global bridges bind every CLI call to their configured AIOS folder,
   while portable project bridges reuse that host-managed path suffix without
   publishing a machine-local path.
