@@ -122,8 +122,7 @@ test("the packed product carries one non-founder induction through exact approve
   ], { cwd: project, env: isolatedEnv }).stdout);
   assert.deepEqual(unregistered, {
     receipt: "Memory: Off",
-    registered_project: null,
-    aios_folder: false
+    registered_project: null
   });
 
   const addArgs = [
@@ -166,8 +165,7 @@ test("the packed product carries one non-founder induction through exact approve
     registered_project: {
       id: projectPreview.plan.project.id,
       slug: "friend-work",
-    },
-    aios_folder: false,
+    }
   });
 
   const approvedAction = "Plan and complete this week's priority.";

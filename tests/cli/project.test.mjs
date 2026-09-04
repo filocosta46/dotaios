@@ -324,8 +324,7 @@ test("project identify --json reports Memory: Off when the AIOS folder is missin
 
   assert.deepEqual(JSON.parse(result.stdout), {
     receipt: "Memory: Off",
-    registered_project: null,
-    aios_folder: false
+    registered_project: null
   });
   assert.equal(result.stderr, "");
 });
@@ -342,8 +341,7 @@ test("project identify --json reports Memory: Shared inside the AIOS folder", as
 
   assert.deepEqual(JSON.parse(result.stdout), {
     receipt: "Memory: Shared",
-    registered_project: null,
-    aios_folder: true
+    registered_project: null
   });
 });
 
@@ -357,7 +355,10 @@ test("project identify --json reports Memory: Shared from a nested AIOS director
     { cwd: nested }
   );
 
-  assert.equal(JSON.parse(result.stdout).receipt, "Memory: Shared");
+  assert.deepEqual(JSON.parse(result.stdout), {
+    receipt: "Memory: Shared",
+    registered_project: null
+  });
 });
 
 // A sibling that merely starts with the same characters is not inside the folder.
@@ -374,8 +375,140 @@ test("project identify --json does not treat a path prefix as the AIOS folder", 
 
   assert.deepEqual(JSON.parse(result.stdout), {
     receipt: "Memory: Off",
-    registered_project: null,
-    aios_folder: false
+    registered_project: null
+  });
+});
+
+test("project identify --json refuses Shared for unvalidated AIOS roots", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-project-identify-invalid-root-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+
+  for (const [name, config] of [
+    ["missing-config", null],
+    ["malformed-config", "{not-json\n"]
+  ]) {
+    const aiosPath = path.join(root, name);
+    const nested = path.join(aiosPath, "vault", "notes");
+    await fs.mkdir(path.join(aiosPath, "projects"), { recursive: true });
+    await fs.mkdir(nested, { recursive: true });
+    if (config !== null) await fs.writeFile(path.join(aiosPath, "aios.json"), config);
+
+    const result = runCli(
+      ["project", "identify", "--json", "--path", aiosPath, "--home", root],
+      { cwd: nested }
+    );
+
+    assert.deepEqual(JSON.parse(result.stdout), {
+      receipt: "Memory: Off",
+      registered_project: null
+    }, name);
+  }
+});
+
+test("project identify --json keeps unverified managed workspaces closed", async (t) => {
+  const cases = [
+    {
+      name: "missing registration",
+      configure: async () => {}
+    },
+    {
+      name: "missing mapping",
+      configure: async ({ aiosPath, slug, id }) => {
+        await writeProjectReadme(
+          aiosPath,
+          slug,
+          [`id: ${id}`, `project: ${slug}`, "status: active"].join("\n")
+        );
+      }
+    },
+    {
+      name: "legacy unverified mapping",
+      configure: async ({ aiosPath, statePath, workspace, slug, id }) => {
+        await writeProjectReadme(
+          aiosPath,
+          slug,
+          [`id: ${id}`, `project: ${slug}`, "status: active"].join("\n")
+        );
+        await fs.mkdir(path.dirname(statePath), { recursive: true });
+        await fs.writeFile(statePath, `${JSON.stringify({ version: 1, paths: { [id]: workspace } }, null, 2)}\n`);
+      }
+    },
+    {
+      name: "mismatched root identity",
+      configure: async ({ aiosPath, statePath, workspace, slug, id }) => {
+        await writeProjectReadme(
+          aiosPath,
+          slug,
+          [`id: ${id}`, `project: ${slug}`, "status: active"].join("\n")
+        );
+        const mapping = await verifiedPathMapping(workspace);
+        mapping.root_identity.ino = (BigInt(mapping.root_identity.ino) + 1n).toString();
+        await fs.mkdir(path.dirname(statePath), { recursive: true });
+        await fs.writeFile(statePath, `${JSON.stringify({
+          version: 1,
+          paths: { [id]: mapping }
+        }, null, 2)}\n`);
+      }
+    }
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async (subtest) => {
+      const { root, aiosPath, statePath } = await fixture(subtest);
+      const slug = scenario.name.replaceAll(" ", "-");
+      const id = `${slug}-id`;
+      const workspace = path.join(aiosPath, "workspaces", slug);
+      await fs.mkdir(workspace, { recursive: true });
+      await scenario.configure({ aiosPath, statePath, workspace, slug, id });
+
+      const result = runCli(
+        [
+          "project", "identify", "--json",
+          "--path", aiosPath,
+          "--state-path", statePath,
+          "--home", root
+        ],
+        { cwd: workspace }
+      );
+
+      assert.deepEqual(JSON.parse(result.stdout), {
+        receipt: "Memory: Off",
+        registered_project: null
+      });
+    });
+  }
+});
+
+test("project identify --json still scopes a verified managed workspace", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const slug = "verified-managed";
+  const id = "verified-managed-id";
+  const workspace = path.join(aiosPath, "workspaces", slug);
+  await fs.mkdir(workspace, { recursive: true });
+  await writeProjectReadme(
+    aiosPath,
+    slug,
+    [`id: ${id}`, `project: ${slug}`, "status: active"].join("\n")
+  );
+  await fs.mkdir(path.dirname(statePath), { recursive: true });
+  await fs.writeFile(statePath, `${JSON.stringify({
+    version: 1,
+    paths: { [id]: await verifiedPathMapping(workspace) }
+  }, null, 2)}\n`);
+
+  const result = runCli(
+    [
+      "project", "identify", "--json",
+      "--path", aiosPath,
+      "--state-path", statePath,
+      "--home", root
+    ],
+    { cwd: workspace }
+  );
+
+  assert.deepEqual(JSON.parse(result.stdout), {
+    receipt: "Memory: This project",
+    registered_project: { id, slug }
   });
 });
 
@@ -412,8 +545,8 @@ test("project identify --json still scopes a registered project", async (t) => {
   ).stdout);
 
   assert.equal(result.receipt, "Memory: This project");
-  assert.equal(result.aios_folder, false);
   assert.equal(result.registered_project.slug, applied.registered_project.slug);
+  assert.deepEqual(Object.keys(result).sort(), ["receipt", "registered_project"]);
 });
 
 test("project add CLI applies only the exact proof from its zero-write preview", async (t) => {

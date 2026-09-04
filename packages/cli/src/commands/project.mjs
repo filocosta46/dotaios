@@ -10,7 +10,9 @@ import {
   restoreProjects
 } from "../../../core/src/projects.mjs";
 import { buildSessionDigest } from "../../../core/src/digest.mjs";
+import { inspectMigrationState } from "../../../core/src/migrations.mjs";
 import { isPathWithin } from "../../../core/src/paths.mjs";
+import { managedWorkspaceRoot } from "../../../core/src/project-workspaces.mjs";
 import { createProjectGitAdapter } from "../project-git.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { createGit } from "../sync/git.mjs";
@@ -171,17 +173,20 @@ export async function projectCommand(args = [], dependencies = {}) {
       if (error?.code !== "DOTAIOS_DIRECTORY_MISSING") throw error;
       project = null;
     }
-    // The AIOS folder is never itself a registered project, so identifying from
-    // inside it used to fall through to `Memory: Off` — the most closed mode, in
-    // the one folder whose entire purpose is the memory it holds. A registered
-    // project still wins, so project scoping is unchanged.
-    const aiosFolder = project ? false : await isPathWithin(coreOptions.aiosPath, cwd);
+    // A registered project always wins. The Shared fallback is narrower than
+    // plain path containment: the root must pass the bounded AIOS compatibility
+    // inspection, and the reserved managed-workspace shelf stays closed unless
+    // project resolution proved an exact, verified mapping above.
+    const aiosFolder = project ? false : await isSharedAiosContext({
+      aiosPath: coreOptions.aiosPath,
+      cwd,
+      fileSystem: coreOptions.fs
+    });
     const result = {
       receipt: project
         ? "Memory: This project"
         : aiosFolder ? "Memory: Shared" : "Memory: Off",
-      registered_project: project ? { id: project.id, slug: project.slug } : null,
-      aios_folder: aiosFolder
+      registered_project: project ? { id: project.id, slug: project.slug } : null
     };
     if (options.json) {
       output.log(JSON.stringify(result, null, 2));
@@ -190,7 +195,7 @@ export async function projectCommand(args = [], dependencies = {}) {
       output.log(project
         ? `Registered project: ${project.slug} (${project.id})`
         : aiosFolder
-          ? "This working directory is inside the AIOS folder."
+          ? "This working directory is inside the validated AIOS folder."
           : "This working directory is not a registered project.");
     }
     return result;
@@ -275,6 +280,21 @@ export async function projectCommand(args = [], dependencies = {}) {
   }
 
   throw new Error(`Unknown project subcommand: ${subcommand}. Try \`dotaios project --help\`.`);
+}
+
+async function isSharedAiosContext({ aiosPath, cwd, fileSystem }) {
+  try {
+    const [insideAios, insideManagedWorkspaces] = await Promise.all([
+      isPathWithin(aiosPath, cwd, { fileSystem }),
+      isPathWithin(managedWorkspaceRoot(aiosPath), cwd, { fileSystem })
+    ]);
+    if (!insideAios || insideManagedWorkspaces) return false;
+
+    await inspectMigrationState({ aiosPath }, { filesystem: fileSystem });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function createCoreOptions(options, dependencies) {

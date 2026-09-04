@@ -82,8 +82,7 @@ test("attach never writes the author's home path into the project bridge", () =>
     assert.equal(identified.status, 0, identified.stderr);
     assert.deepEqual(JSON.parse(identified.stdout), {
       receipt: "Memory: This project",
-      registered_project: projectRecord.registered_project,
-      aios_folder: false
+      registered_project: projectRecord.registered_project
     });
     assert.match(bridge, /~\/aios\/AGENTS\.md/);
     assert.match(bridge, /Memory: This project/);
@@ -91,6 +90,7 @@ test("attach never writes the author's home path into the project bridge", () =>
     assert.match(bridge, /Only after[\s\S]*Memory: This project[\s\S]*registered_project/is);
     assert.match(bridge, /--memory project --project/);
     assert.match(bridge, /host-managed `candidate_invocation`/);
+    assert.match(bridge, /exact configured AIOS path suffix from the global bridge/);
     assert.match(bridge, /\["brief","--compact","--memory","project","--project","[^"]+"\]/);
     assert.doesNotMatch(bridge, /\bnpx(?:\.cmd)?\s+dotaios/, "a project bridge must not define another CLI authority");
     assert.doesNotMatch(bridge, /`dotaios\s+[a-z]/, "a managed project bridge must never use PATH selection");
@@ -131,8 +131,7 @@ test("attach refuses an unregistered project before writing registration or brid
     assert.equal(identified.status, 0, identified.stderr);
     assert.deepEqual(JSON.parse(identified.stdout), {
       receipt: "Memory: Off",
-      registered_project: null,
-      aios_folder: false
+      registered_project: null
     });
 
     for (const args of [
