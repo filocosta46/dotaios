@@ -108,7 +108,7 @@ test("attach never writes the author's home path into the project bridge", () =>
 test("attach never writes an outside-home custom AIOS path into the project bridge", () => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "dotaios-outside-home-bridge-leak-"));
   const home = path.join(base, "home");
-  const aios = path.join(base, "private", "Filippo AIOS");
+  const aios = path.join(base, "private", "Operator AIOS");
   const repo = path.join(base, "myrepo");
   fs.mkdirSync(repo, { recursive: true });
 
