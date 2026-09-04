@@ -120,7 +120,11 @@ test("the packed product carries one non-founder induction through exact approve
   const unregistered = JSON.parse(run(process.execPath, [
     cli, "project", "identify", "--json", "--path", aios, "--home", home,
   ], { cwd: project, env: isolatedEnv }).stdout);
-  assert.deepEqual(unregistered, { receipt: "Memory: Off", registered_project: null });
+  assert.deepEqual(unregistered, {
+    receipt: "Memory: Off",
+    registered_project: null,
+    aios_folder: false
+  });
 
   const addArgs = [
     cli, "project", "add", project,
@@ -163,6 +167,7 @@ test("the packed product carries one non-founder induction through exact approve
       id: projectPreview.plan.project.id,
       slug: "friend-work",
     },
+    aios_folder: false,
   });
 
   const approvedAction = "Plan and complete this week's priority.";
