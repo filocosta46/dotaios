@@ -6,6 +6,9 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Fixed
 
+- Opening the AIOS folder itself now reports `Memory: Shared` through project
+  identification, while registered projects remain project-scoped and unrelated
+  directories remain closed.
 - Managed upgrades recognize exact generated schedule commands from every
   supported predecessor release instead of refusing legitimate installs newer
   than 2.0.11.
