@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import {
   MANAGED_END,
   MANAGED_START,
@@ -16,6 +18,9 @@ import {
   loadAgentRegistry,
   resolveCliInvocation
 } from "../../packages/core/src/bridges.mjs";
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const cliPath = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
 
 test("managed bridge detection requires ordered markers", () => {
   const block = `${MANAGED_START}\nmanaged\n${MANAGED_END}`;
@@ -271,10 +276,20 @@ test("managed bridges route working memory through the canonical projection", as
   assert.match(content, /an attached working directory alone is never project identity/i);
   assert.match(content, /project["`, ]+identify[\s\S]*same cwd/is);
   assert.match(content, /Host admission[\s\S]*only registration metadata[\s\S]*receipt[\s\S]*registered_project/is);
-  assert.match(content, /Without `Memory: This project`[\s\S]*non-null[\s\S]*do not claim\/read memory[\s\S]*`Memory: Off`/is);
+  assert.doesNotMatch(content, /aios_folder/);
+  // The receipt is the whole decision: identify now answers Shared for the AIOS
+  // folder itself, so the bridge must forward it rather than re-deriving a mode.
+  assert.match(content, /use it verbatim unless `Private chat` locked it/i);
   assert.doesNotMatch(content, /In an attached working directory[^\n]*use `Memory: This project`/i);
-  assert.match(content, /keep AIOS closed.*re-activate.*never Shared/is);
-  assert.match(content, /Then read AGENTS\.md.*append.*brief.*--memory.*project/is);
+  assert.ok(content.includes(JSON.stringify([
+    "brief", "--compact", "--memory", "project", "--project", "<id>"
+  ])));
+  assert.ok(content.includes(JSON.stringify([
+    "brief", "--compact", "--memory", "shared"
+  ])));
+  assert.ok(content.includes(JSON.stringify(["--path", "/tmp/example-aios"])));
+  assert.match(content, /`Memory: Shared` \(validated AIOS; outside workspaces\)/);
+  assert.match(content, /`Memory: Off`: keep AIOS closed, register\/re-activate/);
   assert.match(content, /Only in Shared.*read AGENTS\.md.*append.*brief.*--memory.*shared/is);
   assert.match(content, /host.*history/i);
   assert.match(content, /`read_working_context`, `search_aios`, and `resolve_skill`/);
@@ -285,6 +300,62 @@ test("managed bridges route working memory through the canonical projection", as
     ["google", "calendar", "agenda"], ["google", "drive", "search"]
   ].map((parts) => parts.join("_"));
   assert.equal(retiredToolNames.some((name) => content.includes(name)), false);
+});
+
+test("managed bridges pin custom-root admission and memory reads to the same AIOS folder", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-custom-root-bridge-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const homePath = path.join(root, "home");
+  const aiosPath = path.join(root, "custom AIOS");
+  const environment = { ...process.env, HOME: homePath, USERPROFILE: homePath };
+  const initialized = spawnSync(
+    process.execPath,
+    [cliPath, "init", "--yes", "--path", aiosPath, "--home", homePath],
+    { cwd: repoRoot, encoding: "utf8", env: environment }
+  );
+  assert.equal(initialized.status, 0, initialized.stderr);
+
+  const content = await bridgeManagedBlock(aiosPath, {
+    localCli: { executable: process.execPath, entrypoint: cliPath }
+  });
+  const suffixMatch = content.match(/AIOS suffix: (\[[^\n]+?\])\./);
+  assert.ok(suffixMatch, "bridge omitted its configured AIOS path suffix");
+  const pathSuffix = JSON.parse(suffixMatch[1]);
+  assert.deepEqual(pathSuffix, ["--path", aiosPath]);
+  const identifyBase = ["project", "identify", "--json"];
+  const sharedBriefBase = ["brief", "--compact", "--memory", "shared"];
+  const projectBriefBase = ["brief", "--compact", "--memory", "project", "--project", "<id>"];
+  for (const args of [identifyBase, sharedBriefBase, projectBriefBase]) {
+    assert.ok(content.includes(JSON.stringify(args)), `bridge omitted argument vector: ${JSON.stringify(args)}`);
+  }
+  const identifyArgs = [...identifyBase, ...pathSuffix];
+  const sharedBriefArgs = [...sharedBriefBase, ...pathSuffix];
+
+  const nested = path.join(aiosPath, "vault", "notes");
+  await fs.mkdir(nested, { recursive: true });
+  const identified = spawnSync(process.execPath, [cliPath, ...identifyArgs], {
+    cwd: nested,
+    encoding: "utf8",
+    env: environment
+  });
+  assert.equal(identified.status, 0, identified.stderr);
+  assert.deepEqual(JSON.parse(identified.stdout), {
+    receipt: "Memory: Shared",
+    registered_project: null
+  });
+
+  const brief = spawnSync(process.execPath, [cliPath, ...sharedBriefArgs], {
+    cwd: nested,
+    encoding: "utf8",
+    env: environment
+  });
+  assert.equal(brief.status, 0, brief.stderr);
+  assert.match(brief.stdout, /Memory: Shared/);
+
+  const legacy = await bridgeManagedBlock(aiosPath, { cli: "npx dotaios@9.9.9" });
+  assert.match(legacy, /npx dotaios@9\.9\.9 project identify --json --path '.*custom AIOS'/);
+  assert.match(legacy, /npx dotaios@9\.9\.9 brief --compact --memory shared --path '.*custom AIOS'/);
+  assert.match(legacy, /npx dotaios@9\.9\.9 brief --compact --memory project --project <id> --path '.*custom AIOS'/);
 });
 
 test("the generated bridge makes one approved existing-folder task the first-session contract", async () => {
@@ -386,7 +457,7 @@ test("a missing captured local entrypoint stops resolution with bounded re-activ
 // one wrong word cost the agent its entire memory while `doctor` stayed green.
 test("a bridge accepts only an exact candidate invocation", async () => {
   const withoutBinary = await bridgeManagedBlock("/tmp/example-aios", { cli: "npx dotaios@9.9.9" });
-  assert.match(withoutBinary, /`npx dotaios@9\.9\.9 brief --compact --memory shared`/);
+  assert.match(withoutBinary, /npx dotaios@9\.9\.9 brief --compact --memory shared --path '\/tmp\/example-aios'/);
   assert.equal(
     /`dotaios /.test(withoutBinary),
     false,
@@ -395,6 +466,33 @@ test("a bridge accepts only an exact candidate invocation", async () => {
   await assert.rejects(
     bridgeManagedBlock("/tmp/example-aios", { cli: "dotaios" }),
     /exact candidate/i
+  );
+});
+
+test("legacy bridges quote custom AIOS paths for POSIX and PowerShell without breaking Markdown", async () => {
+  const posixPath = "/tmp/O'Brien $HOME $(touch nope); `probe`";
+  const posix = await bridgeManagedBlock(posixPath, { cli: "npx dotaios@9.9.9" });
+  assert.ok(posix.includes("--path '/tmp/O'\"'\"'Brien $HOME $(touch nope); `probe`'"));
+  assert.match(posix, /run ``npx dotaios@9\.9\.9 project identify/);
+
+  const powershellPath = "C:\\Users\\O'Brien\\AIOS $env:TEMP; `probe`";
+  const powershell = await bridgeManagedBlock(powershellPath, { cli: "npx.cmd dotaios@9.9.9" });
+  assert.ok(powershell.includes("--path 'C:\\Users\\O''Brien\\AIOS $env:TEMP; `probe`'"));
+  assert.match(powershell, /run ``npx\.cmd dotaios@9\.9\.9 project identify/);
+});
+
+test("managed bridges reject relative or control-character AIOS paths", async () => {
+  const localCli = {
+    executable: "/opt/dotaios/node/bin/node",
+    entrypoint: "/opt/dotaios/package/packages/cli/src/index.mjs"
+  };
+  await assert.rejects(
+    bridgeManagedBlock("relative-aios", { localCli }),
+    /absolute path without control characters/i
+  );
+  await assert.rejects(
+    bridgeManagedBlock("/tmp/bad\npath", { localCli }),
+    /absolute path without control characters/i
   );
 });
 

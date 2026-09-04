@@ -8,6 +8,7 @@ import {
   readContainedDirectory,
   readContainedFile
 } from "./contained-read.mjs";
+import { repeatedJsonObjectKey } from "./json.mjs";
 import { schemaVersion } from "./schema.mjs";
 import { endsWithManagedWorkspaceIgnoreRule } from "./workspace-ignore.mjs";
 
@@ -108,13 +109,32 @@ export async function previewMigration({ aiosPath }) {
  * reading the user's memory.
  */
 export async function inspectMigrationState({ aiosPath }, dependencies = {}) {
+  return inspectMigrationStateWithPolicy({ aiosPath }, dependencies, { requireAiosIdentity: false });
+}
+
+/**
+ * Authenticate the bounded portable config before a caller grants any memory
+ * scope. Compatibility alone is insufficient here: JSON.parse can hide a
+ * duplicate schema key, and a lookalike folder can copy only schema_version.
+ */
+export async function inspectAiosRootIdentity({ aiosPath }, dependencies = {}) {
+  return inspectMigrationStateWithPolicy({ aiosPath }, dependencies, { requireAiosIdentity: true });
+}
+
+async function inspectMigrationStateWithPolicy(
+  { aiosPath },
+  dependencies,
+  { requireAiosIdentity }
+) {
   const root = requireAiosPath(aiosPath);
   const fileSystem = dependencies.filesystem || dependencies.fs || fs;
   const configState = await readConfigState(root, fileSystem, { maxBytes: 1024 * 1024 });
   assertSupportedSchema(configState.version);
+  if (requireAiosIdentity) assertAiosIdentityConfig(configState);
 
   const activeTransactions = await inspectActiveTransactions(root, fileSystem);
   const confirmedConfig = await readConfigState(root, fileSystem, { maxBytes: 1024 * 1024 });
+  if (requireAiosIdentity) assertAiosIdentityConfig(confirmedConfig);
   const confirmedTransactions = await inspectActiveTransactions(root, fileSystem);
   if (
     !configState.bytes.equals(confirmedConfig.bytes)
@@ -122,27 +142,66 @@ export async function inspectMigrationState({ aiosPath }, dependencies = {}) {
   ) {
     throw new MigrationError("STATE_CHANGED", "Migration compatibility state changed during inspection.");
   }
+  const withIdentity = (state) => requireAiosIdentity
+    ? { ...state, config_identity: sha256(configState.bytes) }
+    : state;
   if (activeTransactions.length > 0) {
-    return {
+    return withIdentity({
       status: "transaction_present",
       folder_schema_version: configState.version,
       supported_schema_version: schemaVersion
-    };
+    });
   }
 
   if (configState.version === schemaVersion) {
-    return {
+    return withIdentity({
       status: "current",
       folder_schema_version: configState.version,
       supported_schema_version: schemaVersion
-    };
+    });
   }
 
-  return {
+  return withIdentity({
     status: "schema_outdated",
     folder_schema_version: configState.version,
     supported_schema_version: schemaVersion
-  };
+  });
+}
+
+function assertAiosIdentityConfig(configState) {
+  const text = configState.bytes.toString("utf8");
+  const repeatedKey = repeatedJsonObjectKey(text, { topLevelOnly: true });
+  if (repeatedKey !== null) {
+    throw new MigrationError(
+      "INVALID_CONFIG_IDENTITY",
+      `aios.json contains a duplicate top-level key (${JSON.stringify(repeatedKey)}).`
+    );
+  }
+
+  const config = configState.config;
+  const has = (key) => Object.prototype.hasOwnProperty.call(config, key);
+  if (!["schema_version", "created_at", "ai_tools", "vault_path"].every(has)) {
+    throw new MigrationError(
+      "INVALID_CONFIG_IDENTITY",
+      "aios.json is missing required DotAIOS identity fields."
+    );
+  }
+  if (
+    typeof config.created_at !== "string"
+    || Number.isNaN(Date.parse(config.created_at))
+    || new Date(config.created_at).toISOString() !== config.created_at
+  ) {
+    throw new MigrationError("INVALID_CONFIG_IDENTITY", "aios.json created_at must be a canonical ISO timestamp.");
+  }
+  if (!Array.isArray(config.ai_tools) || config.ai_tools.some((tool) => typeof tool !== "string")) {
+    throw new MigrationError("INVALID_CONFIG_IDENTITY", "aios.json ai_tools must be an array of strings.");
+  }
+  if (config.vault_path !== null && typeof config.vault_path !== "string") {
+    throw new MigrationError("INVALID_CONFIG_IDENTITY", "aios.json vault_path must be a string or null.");
+  }
+  if (has("skills_first") && typeof config.skills_first !== "boolean") {
+    throw new MigrationError("INVALID_CONFIG_IDENTITY", "aios.json skills_first must be a boolean when present.");
+  }
 }
 
 async function inspectActiveTransactions(root, fileSystem) {

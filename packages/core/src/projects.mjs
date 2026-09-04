@@ -1000,7 +1000,9 @@ export async function resolveProjectContext(options = {}) {
   const context = createContext(options);
   await assertDirectory(context.fs, context.aiosPath, "AIOS folder");
   await assertStateOutsideAios(context);
-  const projects = await listProjectRecords(context);
+  const projects = rejectConflictingProjectOwners(
+    await listProjectRecords(context, { includeRootIdentity: true })
+  );
   const reference = readOptionalString(options.project ?? options.slug ?? options.id);
 
   if (reference) {
@@ -1018,13 +1020,20 @@ export async function resolveProjectContext(options = {}) {
 
   const cwd = path.resolve(options.cwd || process.cwd());
   const matches = (await Promise.all(projects.map(async (project) => {
-    if (!project.projectPath || !project.pathAvailable) return null;
+    if (!isSafeProjectContext(project)) return null;
     return await isPathWithin(project.projectPath, cwd, { fileSystem: context.fs })
       ? project
       : null;
   }))).filter(Boolean);
   matches.sort((left, right) => right.projectPath.length - left.projectPath.length);
   return matches[0] ? toProjectContext(matches[0]) : null;
+}
+
+function isSafeProjectContext(project) {
+  return project.status === "active"
+    && project.mappingStatus === "verified"
+    && project.pathAvailable
+    && (project.placement === "managed" || project.placement === "external");
 }
 
 function toProjectContext(project) {
@@ -1296,7 +1305,7 @@ function createContext(options) {
   };
 }
 
-async function listProjectRecords(context) {
+async function listProjectRecords(context, { includeRootIdentity = false } = {}) {
   const [records, state] = await Promise.all([
     readProjectRecords(context),
     readProjectState(context)
@@ -1323,6 +1332,7 @@ async function listProjectRecords(context) {
       repoUrl: record.repoUrl,
       projectPath,
       mappingStatus: mapping.status,
+      ...(includeRootIdentity ? { rootIdentity: mapping.rootIdentity || null } : {}),
       pathAvailable: placement.pathAvailable,
       placement: placement.placement,
       remoteSafe: record.remote.safe,

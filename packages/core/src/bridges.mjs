@@ -756,6 +756,30 @@ function assertExactCandidateInvocation(cli) {
   return cli;
 }
 
+function legacyManagedCommand(cli, args, aiosPath) {
+  const quotedPath = cli.startsWith("npx.cmd ")
+    ? `'${String(aiosPath).replaceAll("'", "''")}'`
+    : `'${String(aiosPath).replaceAll("'", `'"'"'`)}'`;
+  return markdownInlineCode(`${cli} ${args.join(" ")} --path ${quotedPath}`);
+}
+
+function assertManagedAiosPath(value) {
+  if (
+    typeof value !== "string"
+    || /[\0-\x1f\x7f]/.test(value)
+    || (!path.isAbsolute(value) && !path.win32.isAbsolute(value))
+  ) {
+    throw new Error("Managed bridges require an absolute path without control characters.");
+  }
+  return value;
+}
+
+function markdownInlineCode(value) {
+  const longestRun = Math.max(0, ...Array.from(String(value).matchAll(/`+/g), ([run]) => run.length));
+  const fence = "`".repeat(longestRun + 1);
+  return `${fence}${value}${fence}`;
+}
+
 // A first-session bridge must keep using the package that activation admitted.
 // Record a direct executable + argv prefix instead of a shell command: this is
 // safe for spaces and metacharacters in either absolute path, and it gives the
@@ -869,6 +893,7 @@ export function bridgePointer(aiosPath) {
 // into the same file `activate` writes: a second body meant whichever command
 // ran last silently replaced the other's.
 export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skillsCatalog, cli, localCli } = {}) {
+  aiosPath = assertManagedAiosPath(aiosPath);
   const { current: pointerLine } = bridgePointer(aiosPath);
   const skillsIndex = path.join(aiosPath, "skills", "INDEX.md");
   const resolver = path.join(aiosPath, "skills", "RESOLVER.md");
@@ -877,18 +902,41 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
   // as an executable + argv prefix instead.
   const legacyDotaios = cli ? assertExactCandidateInvocation(cli) : null;
   const invocation = legacyDotaios ? null : localCliRecord(localCli);
+  const configuredAiosPathSuffix = ["--path", aiosPath];
+  const identifyArgs = ["project", "identify", "--json"];
+  const projectBriefArgs = ["brief", "--compact", "--memory", "project", "--project", "<id>"];
+  const sharedBriefArgs = ["brief", "--compact", "--memory", "shared"];
+  const identifyInstruction = legacyDotaios
+    ? legacyManagedCommand(legacyDotaios, ["project", "identify", "--json"], aiosPath)
+    : JSON.stringify(identifyArgs);
+  const projectBriefInstruction = legacyDotaios
+    ? legacyManagedCommand(
+      legacyDotaios,
+      ["brief", "--compact", "--memory", "project", "--project", "<id>"],
+      aiosPath
+    )
+    : JSON.stringify(projectBriefArgs);
+  const sharedBriefInstruction = legacyDotaios
+    ? legacyManagedCommand(legacyDotaios, ["brief", "--compact", "--memory", "shared"], aiosPath)
+    : JSON.stringify(sharedBriefArgs);
+  const activateInstruction = legacyDotaios
+    ? legacyManagedCommand(legacyDotaios, ["activate"], aiosPath)
+    : null;
 
   const lines = [
     MANAGED_START,
     pointerLine,
+    ...(legacyDotaios ? [] : [
+      `AIOS suffix: ${JSON.stringify(configuredAiosPathSuffix)}. Append to every DotAIOS call below.`
+    ]),
     "Choose memory access before any AIOS memory read:",
     "- `Private chat` locks `Memory: Off`: keep AIOS closed — no read, search, save, or capture. Say the host may keep its history.",
     legacyDotaios
-      ? `- An attached working directory alone is never project identity. For it or \`Only this project\`, run \`${legacyDotaios} project identify --json\` in the same cwd. Host admission reads only registration metadata and returns receipt + \`registered_project\` id/slug; use verbatim. Without \`Memory: This project\` + non-null project, do not claim/read memory: lead \`Memory: Off\`, keep AIOS closed, request registration or \`${legacyDotaios} activate\`, never Shared. Then read AGENTS.md; run \`${legacyDotaios} brief --compact --memory project --project <id>\`.`
-      : "- An attached working directory alone is never project identity. For it or `Only this project`, append [`project`,`identify`,`--json`] below and run in the same cwd. Host admission reads only registration metadata and returns receipt + `registered_project` id/slug; use verbatim. Without `Memory: This project` + non-null project, do not claim/read memory: lead `Memory: Off`, keep AIOS closed, register/re-activate, never Shared. Then read AGENTS.md; append [`brief`,`--compact`,`--memory`,`project`,`--project`,`<id>`].",
+      ? `- An attached working directory alone is never project identity. For it or \`Only this project\`, run ${identifyInstruction} in the same cwd. Host admission reads only registration metadata and returns receipt + \`registered_project\` id/slug; use it verbatim unless \`Private chat\` locked it. \`Memory: This project\`: read AGENTS.md, then run ${projectBriefInstruction}. \`Memory: Shared\` (validated AIOS; outside workspaces): read AGENTS.md, then run ${sharedBriefInstruction}. \`Memory: Off\`: keep AIOS closed, request registration or ${activateInstruction}.`
+      : `- An attached working directory alone is never project identity. For it or \`Only this project\`, append ${identifyInstruction} below and run in the same cwd. Host admission reads only registration metadata and returns receipt + \`registered_project\` id/slug; use it verbatim unless \`Private chat\` locked it. \`Memory: This project\`: read AGENTS.md, then append ${projectBriefInstruction}. \`Memory: Shared\` (validated AIOS; outside workspaces): read AGENTS.md, then append ${sharedBriefInstruction}. \`Memory: Off\`: keep AIOS closed, register/re-activate.`,
     legacyDotaios
-      ? `- When the user asks \`Use my memory\`, use \`Memory: Shared\`; default elsewhere. Only in Shared, read AGENTS.md and run \`${legacyDotaios} brief --compact --memory shared\`.`
-      : "- When the user asks `Use my memory`, use `Memory: Shared`; default elsewhere. Only in Shared, read AGENTS.md and append [`brief`,`--compact`,`--memory`,`shared`] below.",
+      ? `- When the user asks \`Use my memory\`, use \`Memory: Shared\`; default elsewhere. Only in Shared, read AGENTS.md and run ${sharedBriefInstruction}.`
+      : `- When the user asks \`Use my memory\`, use \`Memory: Shared\`; default elsewhere. Only in Shared, read AGENTS.md and append ${sharedBriefInstruction} below.`,
     "Lead every response with the selected receipt: `Memory: Shared`, `Memory: This project`, or `Memory: Off`.",
     "Route events, signals, and saved sessions only through the canonical bounded projection."
   ];

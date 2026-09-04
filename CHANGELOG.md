@@ -6,6 +6,13 @@ All notable changes to DotAIOS will be documented in this file.
 
 ### Fixed
 
+- Project identification reports `Memory: Shared` only inside a validated AIOS
+  folder outside its managed workspace shelf. A unique active verified project
+  still wins; malformed roots plus unsafe, conflicting, or unverified mappings
+  stay closed, and the two-field JSON response remains compatible.
+- Generated global bridges bind every CLI call to their configured AIOS folder,
+  while portable project bridges reuse that host-managed path suffix without
+  publishing a machine-local path.
 - Managed upgrades recognize exact generated schedule commands from every
   supported predecessor release instead of refusing legitimate installs newer
   than 2.0.11.
