@@ -10,6 +10,7 @@ import {
   restoreProjects
 } from "../../../core/src/projects.mjs";
 import { buildSessionDigest } from "../../../core/src/digest.mjs";
+import { isPathWithin } from "../../../core/src/paths.mjs";
 import { createProjectGitAdapter } from "../project-git.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { createGit } from "../sync/git.mjs";
@@ -159,19 +160,28 @@ export async function projectCommand(args = [], dependencies = {}) {
 
   if (subcommand === "identify") {
     assertPositionals(positionals, 0, "dotaios project identify");
+    const cwd = dependencies.cwd || process.cwd();
     let project;
     try {
       project = await resolveProjectContext({
         ...coreOptions,
-        cwd: dependencies.cwd || process.cwd()
+        cwd
       });
     } catch (error) {
       if (error?.code !== "DOTAIOS_DIRECTORY_MISSING") throw error;
       project = null;
     }
+    // The AIOS folder is never itself a registered project, so identifying from
+    // inside it used to fall through to `Memory: Off` — the most closed mode, in
+    // the one folder whose entire purpose is the memory it holds. A registered
+    // project still wins, so project scoping is unchanged.
+    const aiosFolder = project ? false : await isPathWithin(coreOptions.aiosPath, cwd);
     const result = {
-      receipt: project ? "Memory: This project" : "Memory: Off",
-      registered_project: project ? { id: project.id, slug: project.slug } : null
+      receipt: project
+        ? "Memory: This project"
+        : aiosFolder ? "Memory: Shared" : "Memory: Off",
+      registered_project: project ? { id: project.id, slug: project.slug } : null,
+      aios_folder: aiosFolder
     };
     if (options.json) {
       output.log(JSON.stringify(result, null, 2));
@@ -179,7 +189,9 @@ export async function projectCommand(args = [], dependencies = {}) {
       output.log(result.receipt);
       output.log(project
         ? `Registered project: ${project.slug} (${project.id})`
-        : "This working directory is not a registered project.");
+        : aiosFolder
+          ? "This working directory is inside the AIOS folder."
+          : "This working directory is not a registered project.");
     }
     return result;
   }

@@ -270,11 +270,14 @@ test("managed bridges route working memory through the canonical projection", as
   assert.match(content, /^Choose memory access before any AIOS memory read:$/m);
   assert.match(content, /an attached working directory alone is never project identity/i);
   assert.match(content, /project["`, ]+identify[\s\S]*same cwd/is);
-  assert.match(content, /Host admission[\s\S]*only registration metadata[\s\S]*receipt[\s\S]*registered_project/is);
-  assert.match(content, /Without `Memory: This project`[\s\S]*non-null[\s\S]*do not claim\/read memory[\s\S]*`Memory: Off`/is);
+  assert.match(content, /Host admission[\s\S]*only registration metadata[\s\S]*receipt[\s\S]*registered_project[\s\S]*aios_folder/is);
+  // The receipt is the whole decision: identify now answers Shared for the AIOS
+  // folder itself, so the bridge must forward it rather than re-deriving a mode.
+  assert.match(content, /use the receipt verbatim unless `Private chat` locked it/i);
   assert.doesNotMatch(content, /In an attached working directory[^\n]*use `Memory: This project`/i);
-  assert.match(content, /keep AIOS closed.*re-activate.*never Shared/is);
-  assert.match(content, /Then read AGENTS\.md.*append.*brief.*--memory.*project/is);
+  assert.match(content, /`Memory: This project`: read AGENTS\.md, then append \[`brief`,`--compact`,`--memory`,`project`,`--project`,`<id>`\]/);
+  assert.match(content, /`Memory: Shared` \(cwd inside the AIOS folder\): read AGENTS\.md, then append \[`brief`,`--compact`,`--memory`,`shared`\]/);
+  assert.match(content, /`Memory: Off`: keep AIOS closed, register\/re-activate/);
   assert.match(content, /Only in Shared.*read AGENTS\.md.*append.*brief.*--memory.*shared/is);
   assert.match(content, /host.*history/i);
   assert.match(content, /`read_working_context`, `search_aios`, and `resolve_skill`/);

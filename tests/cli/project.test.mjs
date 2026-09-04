@@ -87,9 +87,9 @@ function outputCapture() {
   };
 }
 
-function runCli(args) {
+function runCli(args, { cwd = repoRoot } = {}) {
   const result = spawnSync(process.execPath, [cliPath, ...args], {
-    cwd: repoRoot,
+    cwd,
     encoding: "utf8",
     env: { ...process.env, DOTAIOS_ALLOW_AUTO_SYNC_HOOK: "0" }
   });
@@ -324,9 +324,96 @@ test("project identify --json reports Memory: Off when the AIOS folder is missin
 
   assert.deepEqual(JSON.parse(result.stdout), {
     receipt: "Memory: Off",
-    registered_project: null
+    registered_project: null,
+    aios_folder: false
   });
   assert.equal(result.stderr, "");
+});
+
+// The AIOS folder is never a registered project, so before this it identified as
+// `Memory: Off` — the most closed mode, in the folder that exists to hold memory.
+test("project identify --json reports Memory: Shared inside the AIOS folder", async (t) => {
+  const { root, aiosPath } = await fixture(t);
+
+  const result = runCli(
+    ["project", "identify", "--json", "--path", aiosPath, "--home", root],
+    { cwd: aiosPath }
+  );
+
+  assert.deepEqual(JSON.parse(result.stdout), {
+    receipt: "Memory: Shared",
+    registered_project: null,
+    aios_folder: true
+  });
+});
+
+test("project identify --json reports Memory: Shared from a nested AIOS directory", async (t) => {
+  const { root, aiosPath } = await fixture(t);
+  const nested = path.join(aiosPath, "vault", "notes");
+  await fs.mkdir(nested, { recursive: true });
+
+  const result = runCli(
+    ["project", "identify", "--json", "--path", aiosPath, "--home", root],
+    { cwd: nested }
+  );
+
+  assert.equal(JSON.parse(result.stdout).receipt, "Memory: Shared");
+});
+
+// A sibling that merely starts with the same characters is not inside the folder.
+// Opening memory on a string prefix would leak Shared scope to unrelated work.
+test("project identify --json does not treat a path prefix as the AIOS folder", async (t) => {
+  const { root, aiosPath } = await fixture(t);
+  const lookalike = `${aiosPath}-backup`;
+  await fs.mkdir(lookalike, { recursive: true });
+
+  const result = runCli(
+    ["project", "identify", "--json", "--path", aiosPath, "--home", root],
+    { cwd: lookalike }
+  );
+
+  assert.deepEqual(JSON.parse(result.stdout), {
+    receipt: "Memory: Off",
+    registered_project: null,
+    aios_folder: false
+  });
+});
+
+// Opening the AIOS folder to Shared must not loosen project scoping: a
+// registered checkout still identifies as its own project.
+test("project identify --json still scopes a registered project", async (t) => {
+  const { root, aiosPath, statePath } = await fixture(t);
+  const projectPath = await makeRepo(root, "still-scoped");
+  const baseArgs = [
+    "project", "add", projectPath,
+    "--path", aiosPath,
+    "--state-path", statePath,
+    "--purpose", "Prove project scoping survives the AIOS folder default",
+    "--json"
+  ];
+
+  const preview = JSON.parse(runCli(baseArgs).stdout);
+  const applied = JSON.parse(runCli([
+    ...baseArgs,
+    "--operation-id", preview.plan.operation_id,
+    "--plan-fingerprint", preview.plan.plan_fingerprint,
+    "--apply"
+  ]).stdout);
+  assert.equal(applied.applied, true);
+
+  const result = JSON.parse(runCli(
+    [
+      "project", "identify", "--json",
+      "--path", aiosPath,
+      "--state-path", statePath,
+      "--home", root
+    ],
+    { cwd: projectPath }
+  ).stdout);
+
+  assert.equal(result.receipt, "Memory: This project");
+  assert.equal(result.aios_folder, false);
+  assert.equal(result.registered_project.slug, applied.registered_project.slug);
 });
 
 test("project add CLI applies only the exact proof from its zero-write preview", async (t) => {

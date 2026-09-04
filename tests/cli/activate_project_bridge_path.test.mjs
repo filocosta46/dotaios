@@ -82,7 +82,8 @@ test("attach never writes the author's home path into the project bridge", () =>
     assert.equal(identified.status, 0, identified.stderr);
     assert.deepEqual(JSON.parse(identified.stdout), {
       receipt: "Memory: This project",
-      registered_project: projectRecord.registered_project
+      registered_project: projectRecord.registered_project,
+      aios_folder: false
     });
     assert.match(bridge, /~\/aios\/AGENTS\.md/);
     assert.match(bridge, /Memory: This project/);
@@ -130,7 +131,8 @@ test("attach refuses an unregistered project before writing registration or brid
     assert.equal(identified.status, 0, identified.stderr);
     assert.deepEqual(JSON.parse(identified.stdout), {
       receipt: "Memory: Off",
-      registered_project: null
+      registered_project: null,
+      aios_folder: false
     });
 
     for (const args of [
