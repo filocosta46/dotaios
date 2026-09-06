@@ -2,9 +2,9 @@ import { buildSessionDigest } from "./digest.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { inspectMigrationState } from "./migrations.mjs";
 import { resolveCliInvocation } from "./bridges.mjs";
-import { assertWorkingContextCoverageBound } from "./working-context-coverage.mjs";
 
 export const WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT = 1024;
+const WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT = 512;
 
 /**
  * Build the canonical digest and its read-only operational state together.
@@ -47,6 +47,17 @@ export async function buildWorkingContextEnvelope(aiosPath, options = {}, depend
     operational,
     notice
   };
+}
+
+function assertWorkingContextCoverageBound(coverage) {
+  // Count the longest consumer key, pretty JSON overhead, and the repeated
+  // notice plus separator in hook text against one separate fixed allowance.
+  const overhead = coverage
+    ? JSON.stringify({ contextCoverage: coverage }, null, 2).length + (coverage.notice?.length || 0) + 2
+    : 0;
+  if (overhead > WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT) {
+    throw new Error("Working-context coverage exceeded its fixed bound.");
+  }
 }
 
 function buildOffEnvelope(memoryPolicy) {

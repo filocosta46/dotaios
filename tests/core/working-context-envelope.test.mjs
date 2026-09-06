@@ -16,7 +16,6 @@ import {
   buildWorkingContextEnvelope,
   renderOperationalNotice
 } from "../../packages/core/src/working-context-envelope.mjs";
-import { WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT } from "../../packages/core/src/working-context-coverage.mjs";
 
 const packageVersion = JSON.parse(await fs.readFile(new URL("../../package.json", import.meta.url), "utf8")).version;
 const exactCli = `npx dotaios@${packageVersion}`;
@@ -73,7 +72,7 @@ test("coverage bounds include metadata and the repeated text notice together", a
     selectedProjectReadme: { excerptClipped: true, budgetOmitted: true },
     notice: "x".repeat(250),
   };
-  assert.ok(JSON.stringify({ contextCoverage: coverage }, null, 2).length < WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT);
+  assert.ok(JSON.stringify({ contextCoverage: coverage }, null, 2).length < 512);
   await assert.rejects(buildWorkingContextEnvelope("/not-opened", {}, {
     buildSessionDigest: async () => ({ digest: "Short digest.", coverage }),
     inspectMigrationState: async () => ({ status: "current" }),

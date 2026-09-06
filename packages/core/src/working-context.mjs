@@ -12,7 +12,6 @@ import {
 } from "./contained-read.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { readProjectCatalog } from "./projects.mjs";
-import { projectReadmeCoverage } from "./working-context-coverage.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
@@ -317,24 +316,36 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
   };
   const rendered = renderWorkingContext(provisional);
   const used = rendered.length;
+  const coverage = projectReadmeCoverage(selected, candidates.activeProject, rendered);
   return {
     ...provisional,
-    ...(base.projectFilter && candidates.activeProject ? {
-      coverage: projectReadmeCoverage({
-        excerptClipped: candidates.activeProject.contextExcerptClipped,
-        // Timeline sections follow the project in the renderer. Check the
-        // entire prefix through that project: the final budget marker can cut
-        // an accepted excerpt even when later timeline items were omitted.
-        budgetOmitted: selected.activeProject === null || !rendered.startsWith(renderUnbounded({
-          ...selected, sessions: [], signals: [], events: [],
-        })),
-      }),
-    } : {}),
+    ...(coverage ? { coverage } : {}),
     budget: {
       ...provisional.budget,
       used,
       remaining: Math.max(0, limit - used),
     },
+  };
+}
+
+function projectReadmeCoverage(context, candidate, rendered) {
+  if (!context.projectFilter || !candidate) return null;
+  const excerptClipped = candidate.contextExcerptClipped;
+  // Timeline sections follow the project. The final budget marker can cut
+  // an accepted excerpt, so check the complete rendered prefix through it.
+  const budgetOmitted = context.activeProject === null || !rendered.startsWith(renderUnbounded({
+    ...context, sessions: [], signals: [], events: [],
+  }));
+  const reasons = [];
+  if (excerptClipped) reasons.push("excerpt clipped");
+  if (budgetOmitted) reasons.push("text omitted by output budget");
+  const notice = reasons.length > 0
+    ? `> [DotAIOS] Selected project README context is incomplete: ${reasons.join("; ")}. Missing text may contain constraints. Do not infer it.`
+    : null;
+  return {
+    version: 1,
+    selectedProjectReadme: { excerptClipped, budgetOmitted },
+    notice,
   };
 }
 
