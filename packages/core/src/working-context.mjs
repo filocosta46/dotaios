@@ -12,6 +12,7 @@ import {
 } from "./contained-read.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { readProjectCatalog } from "./projects.mjs";
+import { projectReadmeCoverage } from "./working-context-coverage.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
@@ -314,9 +315,21 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
       truncated,
     },
   };
-  const used = renderWorkingContext(provisional).length;
+  const rendered = renderWorkingContext(provisional);
+  const used = rendered.length;
   return {
     ...provisional,
+    ...(base.projectFilter && candidates.activeProject ? {
+      coverage: projectReadmeCoverage({
+        excerptClipped: candidates.activeProject.contextExcerptClipped,
+        // Timeline sections follow the project in the renderer. Check the
+        // entire prefix through that project: the final budget marker can cut
+        // an accepted excerpt even when later timeline items were omitted.
+        budgetOmitted: selected.activeProject === null || !rendered.startsWith(renderUnbounded({
+          ...selected, sessions: [], signals: [], events: [],
+        })),
+      }),
+    } : {}),
     budget: {
       ...provisional.budget,
       used,

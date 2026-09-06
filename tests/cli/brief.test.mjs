@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 
 import { buildDailyBrief } from "../../packages/cli/src/commands/brief.mjs";
 import { isoDate } from "../../packages/core/src/memory.mjs";
+import { buildWorkingContextEnvelope } from "../../packages/core/src/working-context-envelope.mjs";
 
 const repoRoot = path.resolve(new URL("../..", import.meta.url).pathname);
 const cli = path.join(repoRoot, "packages", "cli", "src", "index.mjs");
@@ -40,6 +41,33 @@ function yesterday() {
   const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
   return isoDate(date);
 }
+
+test("compact text and hook JSON carry selected README coverage outside the digest budget", async (t) => {
+  const { aiosPath, tempRoot } = setupAios();
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const directory = path.join(aiosPath, "projects", "coverage-demo");
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, "README.md"),
+    `---\nid: coverage-id\nproject: coverage-demo\ndescription: Overview.\n---\n# Demo\n\n${"🚀 Background. ".repeat(120)}\nLATE_CONSTRAINT\n`);
+  for (const budget of [256, 6000]) {
+    const args = ["brief", "--compact", "--project", "coverage-id", "--budget", String(budget), "--path", aiosPath];
+    const plain = run(args).stdout.trimEnd();
+    const hook = JSON.parse(run([...args, "--json"]).stdout);
+    const envelope = await buildWorkingContextEnvelope(aiosPath, {
+      project: "coverage-id", visibleCharacterBudget: budget,
+    });
+    assert.match(plain, /Selected project README context is incomplete: excerpt clipped/);
+    assert.equal(plain, hook.hookSpecificOutput.additionalContext);
+    assert.equal(plain, `${envelope.notice}\n\n${envelope.digest}`);
+    assert.deepEqual(hook.contextCoverage, envelope.coverage);
+    assert.deepEqual(hook.contextCoverage.selectedProjectReadme, {
+      excerptClipped: true, budgetOmitted: budget === 256,
+    });
+    assert.deepEqual(hook.contextBudget, envelope.budget);
+    assert.equal(hook.contextBudget.truncated, budget === 256);
+    assert.doesNotMatch(plain, /LATE_CONSTRAINT/);
+  }
+});
 
 test("compact brief never injects owned skill bodies", () => {
   const { aiosPath } = setupAios();

@@ -2,6 +2,7 @@ import { buildSessionDigest } from "./digest.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { inspectMigrationState } from "./migrations.mjs";
 import { resolveCliInvocation } from "./bridges.mjs";
+import { assertWorkingContextCoverageBound } from "./working-context-coverage.mjs";
 
 export const WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT = 1024;
 
@@ -33,10 +34,13 @@ export async function buildWorkingContextEnvelope(aiosPath, options = {}, depend
     : await Promise.resolve().then(() => invocationResolver()).catch(() => null);
   const operational = { migration: describeMigrationAction(migration, cli) };
 
-  const notice = renderOperationalNotice(operational);
-  if (notice && notice.length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
+  const operationalNotice = renderOperationalNotice(operational);
+  if (operationalNotice && operationalNotice.length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
     throw new Error("Working-context operational notice exceeded its fixed bound.");
   }
+  const coverage = digestResult.coverage;
+  assertWorkingContextCoverageBound(coverage);
+  const notice = [operationalNotice, coverage?.notice].filter(Boolean).join("\n\n") || null;
 
   return {
     ...digestResult,

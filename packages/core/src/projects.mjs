@@ -1457,6 +1457,7 @@ function projectMetadataProjection(directorySlug, metadata, source) {
 
 function toProjectCatalogRecord(record) {
   const body = record.source.body;
+  const excerpt = projectExcerpt(body);
   return {
     id: record.id,
     slug: record.slug,
@@ -1468,7 +1469,8 @@ function toProjectCatalogRecord(record) {
     remoteSafe: record.remote.safe,
     remoteReason: record.remote.reason,
     description: readOptionalString(record.metadata.description) || firstDescription(body),
-    contextExcerpt: projectExcerpt(body),
+    contextExcerpt: excerpt.text,
+    contextExcerptClipped: excerpt.clipped,
     readme: record.source.content,
   };
 }
@@ -2050,8 +2052,11 @@ function projectExcerpt(body, limit = 1200) {
   const excerpt = String(body || "")
     .replace(/^#\s+.+(?:\r?\n|$)/, "")
     .trim();
-  if (excerpt.length <= limit) return excerpt;
-  return `${excerpt.slice(0, limit - 1).trimEnd()}…`;
+  if (excerpt.length <= limit) return { text: excerpt, clipped: false };
+  // Keep the existing UTF-16 budget while preserving a character that straddles
+  // the clipping boundary. A paired high surrogate must not become lone text.
+  const prefix = excerpt.slice(0, limit - 1).replace(/[\uD800-\uDBFF]$/, "").trimEnd();
+  return { text: `${prefix}…`, clipped: true };
 }
 
 function resolveUserPath(value, homePath) {
