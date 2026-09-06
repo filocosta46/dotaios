@@ -100,6 +100,15 @@ stable id may stand alone; an alias shared by multiple catalog records requires
 the matching unique `project_id`. Malformed, conflicting, or differently
 attributed rows are excluded rather than widened into global context.
 
+For This project, catalog discovery reads bounded README frontmatter before
+opening the selected project's body. Sibling bodies stay unread; their size
+does not spend the selected-file limit or prevent a valid brief. Catalog
+identity checks still include slug, project alias, and stable-ID collisions.
+Frontmatter is capped at 16 KiB per record, and an opening delimiter without a
+closing delimiter inside that bound fails closed. Catalog files and directories
+are revalidated around the selected body read so identity changes cannot reuse
+the earlier selection. Shared projection selection is unchanged.
+
 Projection work is bounded separately from visible output. One projection may
 open at most 512 source files and reserve at most 16 MiB of raw source bytes.
 Ordinary context, daily, project README, and signal files are capped at 1 MiB
