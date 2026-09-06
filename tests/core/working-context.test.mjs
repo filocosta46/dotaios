@@ -41,6 +41,104 @@ function fixedClock() {
   return new Date(FIXED_NOW.getTime());
 }
 
+test("selected README reports excerpt clipping with room left in the visible budget", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "project-a");
+  fs.appendFileSync(path.join(aiosPath, "projects", "project-a", "README.md"),
+    `\nOverview.\n\n${"Background detail. ".repeat(100)}\nLATE_CONSTRAINT: use the approved asset only.\n`);
+
+  const { context, rendered } = await buildWorkingContext(aiosPath,
+    { project: "project-a" }, { clock: fixedClock });
+
+  assert.doesNotMatch(rendered, /LATE_CONSTRAINT/);
+  assert.equal(context.budget.truncated, false);
+  assert.ok(context.budget.remaining > 3000);
+  assert.equal(context.activeProject.contextExcerptClipped, true);
+  assert.deepEqual(context.coverage.selectedProjectReadme, {
+    excerptClipped: true, budgetOmitted: false,
+  });
+  assert.equal(context.coverage.version, 1);
+  assert.match(context.coverage.notice, /README.*excerpt clipped/);
+  assert.match(context.coverage.notice, /Missing text may contain constraints/);
+});
+
+test("selected README distinguishes excerpt clipping from omission by the visible budget", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  for (const [body, excerptClipped] of [["Short constraint 🚀.", false], ["Detail. ".repeat(200), true]]) {
+    registerProject(aiosPath, "project-a");
+    fs.appendFileSync(path.join(aiosPath, "projects", "project-a", "README.md"), `\n${body}\n`);
+    for (const visibleCharacterBudget of [0, 80, 6000]) {
+      const { context, rendered } = await buildWorkingContext(aiosPath,
+        { project: "project-a", visibleCharacterBudget }, { clock: fixedClock });
+      const budgetOmitted = visibleCharacterBudget < 6000;
+      assert.deepEqual(context.coverage.selectedProjectReadme, { excerptClipped, budgetOmitted });
+      assert.equal(context.budget.truncated, budgetOmitted);
+      assert.ok(rendered.length <= visibleCharacterBudget);
+      if (budgetOmitted) assert.match(context.coverage.notice, /text omitted by output budget/);
+      if (!budgetOmitted && !excerptClipped) assert.equal(context.coverage.notice, null);
+    }
+  }
+});
+
+test("selected README coverage follows final rendering when the budget marker clips an accepted project", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "project-a");
+  fs.appendFileSync(path.join(aiosPath, "projects", "project-a", "README.md"),
+    "\nOverview.\n\nKeep the approved asset unchanged.\n");
+  const options = { project: "project-a" };
+  const baseline = await buildWorkingContext(aiosPath, options, { clock: fixedClock });
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", project: "project-a", summary: "A later event that will not fit." },
+  ]);
+
+  const cut = await buildWorkingContext(aiosPath,
+    { ...options, visibleCharacterBudget: baseline.rendered.length }, { clock: fixedClock });
+  assert.ok(cut.context.activeProject, "the selector accepted the project before the marker was added");
+  assert.doesNotMatch(cut.rendered, /Keep the approved asset unchanged\./);
+  assert.deepEqual(cut.context.coverage.selectedProjectReadme, { excerptClipped: false, budgetOmitted: true });
+
+  const intact = await buildWorkingContext(aiosPath,
+    { ...options, visibleCharacterBudget: baseline.rendered.length + 30 }, { clock: fixedClock });
+  assert.equal(intact.context.budget.truncated, true, "omitting a later event does not imply project omission");
+  assert.match(intact.rendered, /Keep the approved asset unchanged\./);
+  assert.deepEqual(intact.context.coverage.selectedProjectReadme, { excerptClipped: false, budgetOmitted: false });
+});
+
+test("README excerpt limits use UTF-16 units without splitting a Unicode character", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  for (const [body, expected, clipped] of [
+    ["é".repeat(1200), "é".repeat(1200), false],
+    ["🚀".repeat(600), "🚀".repeat(600), false],
+    ["🚀".repeat(601), `${"🚀".repeat(599)}…`, true],
+  ]) {
+    registerProject(aiosPath, "project-a");
+    const readmePath = path.join(aiosPath, "projects", "project-a", "README.md");
+    fs.writeFileSync(readmePath,
+      `---\nid: project-a-id\nproject: project-a\ndescription: Overview.\n---\n# project-a\n\n${body}\n`);
+    const { context } = await buildWorkingContext(aiosPath, { project: "project-a" }, { clock: fixedClock });
+    assert.equal(context.activeProject.contextExcerpt, expected);
+    assert.equal(context.coverage.selectedProjectReadme.excerptClipped, clipped);
+  }
+});
+
+test("coverage assesses only an explicitly selected README and stays absent with memory Off", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "project-a");
+  const inferred = await selectWorkingContext(aiosPath, { memory: "shared" });
+  assert.ok(inferred.activeProject);
+  assert.equal(Object.hasOwn(inferred, "coverage"), false);
+  const off = await selectWorkingContext("/must-not-open", { memory: "off", project: "project-a" }, {
+    filesystem: new Proxy({}, { get() { throw new Error("Off read a filesystem method"); } }),
+    clock: () => { throw new Error("Off read the clock"); },
+  });
+  assert.equal(Object.hasOwn(off, "coverage"), false);
+});
+
 test("project filter scopes sessions, namespaced signals, and events with stable ordering", async () => {
   const aiosPath = tmpAios();
   registerProject(aiosPath, "project-a");
