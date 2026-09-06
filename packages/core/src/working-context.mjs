@@ -11,7 +11,7 @@ import {
   sameContainedFileSnapshot
 } from "./contained-read.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
-import { readProjectCatalog } from "./projects.mjs";
+import { readProjectCatalog, resolveProjectCatalogScope } from "./projects.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
@@ -156,20 +156,21 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
         maxBytes: MAX_TIMELINE_SOURCE_BYTES,
         sourcePath: "memory/events.jsonl",
       }),
-      readProjectCatalog({ aiosPath, fs: projectFilesystem }),
+      readProjectCatalog({ aiosPath, fs: projectFilesystem, projectSelector: requestedProject, budget: readBudget }),
     ]);
     const authorityAfter = await inspectContainedFile(aiosPath, authorityPath, { filesystem });
     if (!sameContainedFileSnapshot(authorityBefore, authorityAfter)) {
       throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
     }
   } catch (cause) {
+    if (["DOTAIOS_AMBIGUOUS_PROJECT", "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"].includes(cause?.code)) throw cause;
     const error = new Error("DotAIOS could not read working context safely.", { cause });
     error.code = "DOTAIOS_WORKING_CONTEXT_READ_FAILED";
     throw error;
   }
   const [identity, priorities, workNote, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] = sources;
 
-  const projectScope = resolveProjectScope(requestedProject, projects);
+  const projectScope = resolveProjectCatalogScope(requestedProject, projects);
   const projectFilter = projectScope?.filter || null;
   const sessions = stableSessionOrder(sessionEntries)
     .filter((session) => matchesProject(session, projectScope, memoryPolicy.mode))
@@ -605,45 +606,6 @@ function dedupeUpdateChannels(signals, events) {
 
 function timelineKey(entry) {
   return [entry.type, entry.source, entry.project || "", entry.project_id || "", timelineSummary(entry)].join("\n");
-}
-
-function resolveProjectScope(reference, projects) {
-  if (!reference) return null;
-  const matches = projects.filter((project) =>
-    project.id === reference || project.slug === reference || project.project === reference);
-  if (matches.length > 1) {
-    const error = new TypeError(`Project reference "${reference}" is ambiguous. Use its stable id.`);
-    error.code = "DOTAIOS_AMBIGUOUS_PROJECT";
-    throw error;
-  }
-  if (matches.length === 0) {
-    const error = new TypeError("Project selector is unknown.");
-    error.code = "DOTAIOS_PROJECT_SELECTOR_UNKNOWN";
-    throw error;
-  }
-  const selected = matches[0];
-  const filter = selected.slug;
-  const aliases = projectAliases(selected);
-  const uniqueAliases = new Set(
-    [...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1)
-  );
-  const selectedId = typeof selected?.id === "string" && selected.id.length > 0 ? selected.id : null;
-  const id = selectedId && projects.filter((project) => project.id === selectedId).length === 1
-    ? selectedId
-    : null;
-  return {
-    aliases,
-    filter,
-    id,
-    uniqueAliases,
-  };
-}
-
-function projectAliases(project) {
-  return new Set(
-    [project?.slug, project?.project, project?.id]
-      .filter((value) => typeof value === "string" && value.length > 0)
-  );
 }
 
 function isOperationalDate(date, today, yesterday) {

@@ -6,8 +6,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { promisify } from "node:util";
 import { parseDocument } from "yaml";
 import {
+  ContainedReadError,
+  assertContainedDirectorySnapshotsUnchanged,
+  inspectContainedDirectory,
+  inspectContainedFile,
   readContainedDirectory,
-  readContainedFile
+  readContainedFile,
+  sameContainedFileSnapshot
 } from "./contained-read.mjs";
 import { isPathWithin } from "./paths.mjs";
 import { stableJson } from "./json.mjs";
@@ -41,6 +46,9 @@ const MAX_PROJECT_ROUTE_METADATA_BYTES = 64 * 1024;
 const MAX_PROJECT_ROUTE_FRONTMATTER_BYTES = 16 * 1024;
 const MAX_PROJECT_ROUTE_README_BYTES = 1024 * 1024;
 const MAX_PROJECT_ROUTE_STATE_BYTES = 256 * 1024;
+const MAX_PROJECT_CONTEXT_FRONTMATTER_BYTES = 16 * 1024;
+const MAX_PROJECT_CONTEXT_README_BYTES = 1024 * 1024;
+const MAX_PROJECT_CONTEXT_CATALOG_ENTRIES = 256;
 const UNSELECTABLE_PROJECT_IDENTITY_CONTENT_ERRORS = new Set([
   "DOTAIOS_EVIDENCE_FILE_TOO_LARGE",
   "DOTAIOS_EVIDENCE_FRONTMATTER_INVALID",
@@ -510,8 +518,132 @@ async function managedRepositoryReceipt(context, projectPath) {
 /** Read the portable project catalog without consulting machine-local paths. */
 export async function readProjectCatalog(options = {}) {
   const context = createContext(options);
+  if (options.projectSelector) return readScopedProjectCatalog(context, options);
   const records = await readProjectRecords(context);
   return records.map(toProjectCatalogRecord);
+}
+
+/** Keep sibling identities for attribution checks without reading their bodies. */
+async function readScopedProjectCatalog(context, { projectSelector, budget }) {
+  const filesystem = context.fs;
+  const root = context.aiosPath;
+  const projectsPath = path.join(root, "projects");
+  const listing = await readContainedDirectory(root, projectsPath, {
+    filesystem,
+    budget,
+    maxEntries: MAX_PROJECT_CONTEXT_CATALOG_ENTRIES,
+    tooManyCode: "DOTAIOS_PROJECT_DIRECTORY_LIMIT_EXCEEDED",
+    readdirOptions: { withFileTypes: true },
+    returnSnapshot: true
+  });
+  const directories = listing ? [{ path: projectsPath, snapshot: listing.snapshot }] : [];
+  const observations = [];
+  const records = [];
+  for (const entry of (listing?.entries || []).sort((left, right) => left.name.localeCompare(right.name))) {
+    if (entry.isSymbolicLink()) throw new ContainedReadError();
+    if (!entry.isDirectory()) continue;
+    validateSlug(entry.name);
+    const directoryPath = path.join(projectsPath, entry.name);
+    const directorySnapshot = await inspectContainedDirectory(root, directoryPath, { filesystem, returnSnapshot: true });
+    if (!directorySnapshot) throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+    directories.push({ path: directoryPath, snapshot: directorySnapshot });
+    const readmePath = path.join(directoryPath, "README.md");
+    const snapshot = await inspectContainedFile(root, readmePath, { filesystem });
+    observations.push({ path: readmePath, snapshot });
+    if (!snapshot) continue;
+    const bytes = await readContainedFile(root, readmePath, {
+      filesystem,
+      budget,
+      expectedSnapshot: snapshot,
+      prefixBytes: MAX_PROJECT_CONTEXT_FRONTMATTER_BYTES,
+      frontmatterOnly: true,
+      stopOnMissingFrontmatter: true
+    });
+    // A missing opening delimiter is a legacy record, not permission to read
+    // its body. An opening without a bounded closing delimiter is invalid:
+    // treating truncated metadata as empty could hide an identity collision.
+    const hasFrontmatter = bytes.subarray(0, 5).toString("ascii").startsWith("---\n")
+      || bytes.subarray(0, 5).toString("ascii") === "---\r\n";
+    const frontmatter = hasFrontmatter ? bytes.toString("utf8") : "";
+    const match = hasFrontmatter ? FRONTMATTER_RE.exec(frontmatter) : null;
+    if (hasFrontmatter && (
+      !Buffer.from(frontmatter, "utf8").equals(bytes)
+      || !match
+      || (!match[0].endsWith("\n") && bytes.length !== snapshot.stats.size)
+    )) {
+      throw new ContainedReadError("DOTAIOS_PROJECT_FRONTMATTER_INVALID");
+    }
+    records.push(projectRecord(entry.name, readmePath, parseMarkdownSource(frontmatter, readmePath)));
+  }
+  await revalidateCatalog();
+  assertUniqueProjectIds(records);
+  const catalog = records.map(toProjectCatalogRecord);
+  const scope = resolveProjectCatalogScope(projectSelector, catalog);
+  const selected = records.find((record) => record.slug === scope.filter);
+  const selectedSnapshot = observations.find((observation) => observation.path === selected.readmePath).snapshot;
+  const content = await readContainedFile(root, selected.readmePath, {
+    filesystem,
+    budget,
+    expectedSnapshot: selectedSnapshot,
+    maxBytes: MAX_PROJECT_CONTEXT_README_BYTES,
+    tooLargeCode: "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE",
+    encoding: "utf8"
+  });
+  await revalidateCatalog();
+  const selectedProject = toProjectCatalogRecord(projectRecord(
+    selected.slug, selected.readmePath, parseMarkdownSource(content, selected.readmePath)
+  ));
+  return catalog.map((project) => project.slug === selected.slug ? selectedProject : project);
+
+  async function revalidateCatalog() {
+    for (const observation of observations) {
+      const current = await inspectContainedFile(root, observation.path, { filesystem });
+      if (observation.snapshot === null && current === null) continue;
+      if (!sameContainedFileSnapshot(observation.snapshot, current)) {
+        throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+      }
+    }
+    await assertContainedDirectorySnapshotsUnchanged(root, directories, { filesystem });
+  }
+}
+
+export function resolveProjectCatalogScope(reference, projects) {
+  if (!reference) return null;
+  const matches = projects.filter((project) =>
+    project.id === reference || project.slug === reference || project.project === reference);
+  if (matches.length > 1) {
+    const error = new TypeError(`Project reference "${reference}" is ambiguous. Use its stable id.`);
+    error.code = "DOTAIOS_AMBIGUOUS_PROJECT";
+    throw error;
+  }
+  if (matches.length === 0) {
+    const error = new TypeError("Project selector is unknown.");
+    error.code = "DOTAIOS_PROJECT_SELECTOR_UNKNOWN";
+    throw error;
+  }
+  const selected = matches[0];
+  const filter = selected.slug;
+  const aliases = projectAliases(selected);
+  const uniqueAliases = new Set(
+    [...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1)
+  );
+  const selectedId = typeof selected?.id === "string" && selected.id.length > 0 ? selected.id : null;
+  const id = selectedId && projects.filter((project) => project.id === selectedId).length === 1
+    ? selectedId
+    : null;
+  return {
+    aliases,
+    filter,
+    id,
+    uniqueAliases,
+  };
+}
+
+function projectAliases(project) {
+  return new Set(
+    [project?.slug, project?.project, project?.id]
+      .filter((value) => typeof value === "string" && value.length > 0)
+  );
 }
 
 /**

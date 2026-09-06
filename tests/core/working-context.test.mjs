@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import filesystem from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -40,6 +41,170 @@ function registerProject(aiosPath, slug, id = `${slug}-id`) {
 function fixedClock() {
   return new Date(FIXED_NOW.getTime());
 }
+
+test("This project reads only sibling identity metadata, even when a sibling body exceeds the source limit", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  registerProject(aiosPath, "sibling");
+  const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+  const siblingReadme = path.join(aiosPath, "projects", "sibling", "README.md");
+  const siblingMetadata = "---\nid: sibling-id\nproject: sibling\nstatus: active\n---\n";
+  fs.appendFileSync(selectedReadme, "\nSELECTED_PROJECT_BODY\n");
+  fs.writeFileSync(siblingReadme, `${siblingMetadata}PRIVATE_SIBLING_BODY\n${"x".repeat(1024 * 1024)}`);
+  let siblingBytesRead = 0;
+  const guardedFilesystem = {
+    ...filesystem,
+    async open(file, ...args) {
+      const handle = await filesystem.open(file, ...args);
+      if (file !== siblingReadme) return handle;
+      return {
+        stat: (...args) => handle.stat(...args),
+        close: () => handle.close(),
+        async read(...args) {
+          const result = await handle.read(...args);
+          siblingBytesRead += result.bytesRead;
+          assert.ok(siblingBytesRead <= Buffer.byteLength(siblingMetadata), "sibling body bytes must never be read");
+          return result;
+        },
+        async readFile() {
+          assert.fail("sibling body must never be read without a metadata bound");
+        }
+      };
+    }
+  };
+
+  const { rendered } = await buildWorkingContext(aiosPath, {
+    memory: "project", project: "selected-id"
+  }, { filesystem: guardedFilesystem, clock: fixedClock });
+
+  assert.match(rendered, /SELECTED_PROJECT_BODY/);
+  assert.doesNotMatch(rendered, /PRIVATE_SIBLING_BODY/);
+  assert.ok(siblingBytesRead > 0, "catalog identity still participates in collision checks");
+});
+
+test("This project preserves selected-body limits and rejects incomplete identity metadata", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+  const original = fs.readFileSync(selectedReadme, "utf8");
+  fs.appendFileSync(selectedReadme, "x".repeat(1024 * 1024));
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+      && error.cause?.code === "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE"
+  );
+  fs.writeFileSync(selectedReadme, original);
+  registerProject(aiosPath, "sibling");
+  fs.writeFileSync(path.join(aiosPath, "projects", "sibling", "README.md"),
+    `---\n${"# metadata padding\n".repeat(1000)}id: selected-id\n---\n`);
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+      && error.cause?.code === "DOTAIOS_PROJECT_FRONTMATTER_INVALID"
+  );
+});
+
+test("This project distinguishes actual EOF from a truncated frontmatter delimiter", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  registerProject(aiosPath, "sibling");
+  const siblingReadme = path.join(aiosPath, "projects", "sibling", "README.md");
+  const opening = "---\nproject: sibling\n#";
+  const prefix = `${opening}${"x".repeat(16 * 1024 - Buffer.byteLength(`${opening}\n---`))}\n---`;
+  assert.equal(Buffer.byteLength(prefix), 16 * 1024);
+  fs.writeFileSync(siblingReadme, `${prefix}: ignored\nid: selected-id\n---\n`);
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+      && error.cause?.code === "DOTAIOS_PROJECT_FRONTMATTER_INVALID"
+  );
+
+  // A closing delimiter at the same byte bound is valid at the actual EOF.
+  fs.writeFileSync(siblingReadme, prefix);
+  const { context } = await buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock });
+  assert.equal(context.projectFilter, "selected");
+});
+
+test("This project resolves aliases and rejects cross-namespace collisions before reading bodies", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  registerProject(aiosPath, "sibling");
+  const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+  fs.writeFileSync(selectedReadme, "---\nproject_id: selected-id\nproject: work-alias\n---\n# Work\n\nSELECTED_ALIAS_BODY\n");
+  const aliased = await buildWorkingContext(aiosPath, { project: "work-alias" }, { clock: fixedClock });
+  assert.equal(aliased.context.projectFilter, "selected");
+  assert.match(aliased.rendered, /SELECTED_ALIAS_BODY/);
+
+  // Oversized bodies would cause a read error if selection did not stop first.
+  fs.appendFileSync(selectedReadme, "x".repeat(1024 * 1024));
+  fs.writeFileSync(path.join(aiosPath, "projects", "sibling", "README.md"),
+    `---\nid: work-alias\nproject: selected-id\n---\n${"x".repeat(1024 * 1024)}`);
+  for (const selector of ["work-alias", "selected-id"]) {
+    await assert.rejects(
+      () => buildWorkingContext(aiosPath, { project: selector }, { clock: fixedClock }),
+      (error) => error.code === "DOTAIOS_AMBIGUOUS_PROJECT"
+    );
+  }
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "unknown" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+  );
+});
+
+test("This project refuses catalog identity changes across metadata and body reads", async (t) => {
+  for (const change of ["selected-identity", "sibling-alias", "new-collision"]) {
+    await t.test(change, async (t) => {
+      const aiosPath = tmpAios();
+      t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+      registerProject(aiosPath, "selected");
+      registerProject(aiosPath, "sibling");
+      const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+      const original = fs.readFileSync(selectedReadme, "utf8");
+      let changed = false;
+      const changingFilesystem = {
+        ...filesystem,
+        async open(file, ...args) {
+          const handle = await filesystem.open(file, ...args);
+          if (file !== selectedReadme) return handle;
+          let bytesRead = 0;
+          return {
+            stat: (...args) => handle.stat(...args),
+            async read(...args) {
+              const result = await handle.read(...args);
+              bytesRead += result.bytesRead;
+              return result;
+            },
+            async close() {
+              await handle.close();
+              const shouldChange = change === "selected-identity" ? bytesRead > 0 : bytesRead === Buffer.byteLength(original);
+              if (changed || !shouldChange) return;
+              changed = true;
+              if (change === "selected-identity") {
+                fs.writeFileSync(selectedReadme, original.replace("id: selected-id", "id: different-id"));
+              } else if (change === "sibling-alias") {
+                fs.appendFileSync(path.join(aiosPath, "projects", "sibling", "README.md"), "\nChanged after selection\n");
+                const sibling = path.join(aiosPath, "projects", "sibling", "README.md");
+                fs.writeFileSync(sibling, fs.readFileSync(sibling, "utf8").replace("project: sibling", "project: selected-id"));
+              } else {
+                registerProject(aiosPath, "new-collision", "selected-id");
+              }
+            }
+          };
+        }
+      };
+      await assert.rejects(
+        () => buildWorkingContext(aiosPath, { project: "selected-id" }, { filesystem: changingFilesystem, clock: fixedClock }),
+        (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+          && error.cause?.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED"
+      );
+      assert.equal(changed, true, "the fixture must reach the source-change boundary");
+    });
+  }
+});
 
 test("project filter scopes sessions, namespaced signals, and events with stable ordering", async () => {
   const aiosPath = tmpAios();
