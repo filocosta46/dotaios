@@ -247,7 +247,7 @@ test("selected README distinguishes excerpt clipping from omission by the visibl
   }
 });
 
-test("selected README coverage follows final rendering when the budget marker clips an accepted project", async (t) => {
+test("selected README coverage reports atomic omission when its reference and budget marker cannot fit", async (t) => {
   const aiosPath = tmpAios();
   t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
   registerProject(aiosPath, "project-a");
@@ -261,7 +261,7 @@ test("selected README coverage follows final rendering when the budget marker cl
 
   const cut = await buildWorkingContext(aiosPath,
     { ...options, visibleCharacterBudget: baseline.rendered.length }, { clock: fixedClock });
-  assert.ok(cut.context.activeProject, "the selector accepted the project before the marker was added");
+  assert.equal(cut.context.activeProject, null, "source text and its follow reference must be omitted together");
   assert.doesNotMatch(cut.rendered, /Keep the approved asset unchanged\./);
   assert.deepEqual(cut.context.coverage.selectedProjectReadme, { excerptClipped: false, budgetOmitted: true });
 
@@ -636,10 +636,10 @@ test("compact projection answers identity and priorities within the same budget"
   fs.writeFileSync(path.join(aiosPath, "context", "identity.md"), "# Identity\n\nI am the launch owner.\n");
   fs.writeFileSync(path.join(aiosPath, "context", "priorities.md"), "# Priorities\n\nShip the hardening release this week.\n");
 
-  const result = await buildWorkingContext(aiosPath, { visibleCharacterBudget: 220 }, { clock: fixedClock });
+  const result = await buildWorkingContext(aiosPath, { visibleCharacterBudget: 2200 }, { clock: fixedClock });
   assert.match(result.rendered, /### Identity[\s\S]*launch owner/);
   assert.match(result.rendered, /### Priorities[\s\S]*hardening release/);
-  assert.ok(result.rendered.length <= 220);
+  assert.ok(result.rendered.length <= 2200);
   assert.equal(result.context.budget.used, result.rendered.length);
 });
 

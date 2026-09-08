@@ -170,6 +170,47 @@ a bounded `operational.migration` sibling;
 selection, and `resolve_skill` routes
 workflow intent. There are no compatibility aliases.
 
+### Following a source
+
+Supported context and selected-project Markdown excerpts carry a source version
+and opaque follow reference derived from the same accepted read as the excerpt.
+`source-reference.mjs` owns this observation format; `source-evidence.mjs` owns
+the bounded follow read. The existing CLI `search --follow` and MCP `search_aios`
+follow mode call that operation without introducing another tool or store.
+Working context includes each excerpt and its reference atomically within its
+budget; query ranking is unchanged.
+
+A reference is a locator, not an access grant. Each read rechecks the requested
+memory scope, canonical project identity when applicable, contained source
+membership, root identity, file generation, and content hash. Off returns before
+any filesystem access. A changed or replaced source refuses with no text and
+requires fresh discovery. Unrelated edits between requests do not stale the
+reference. The existing in-request filesystem checks and their race limitations
+still apply.
+
+Follow pages report literal UTF-8 byte ranges, with an advancing `next` reference
+or `null`. The entire serialized JSON response fits the caller's character
+budget. Context headers and portable project READMEs retain a 1 MiB ceiling;
+other eligible context/project Markdown retains a 4 MiB ceiling. Each page
+rereads and validates the bounded source; there is no cache. Unsupported source
+families have no follow reference. See [the source follow contract](source-follow.md)
+for caller examples, coverage semantics, and explicit limits.
+
+### Research progress in a work folder
+
+The explicit `plan --workdir` mode owns one section of the work folder's current
+`plan.md`. It records the agreed goal and limits, completed steps, source/result
+versions and next action. `work-plan.mjs` owns validation, locking, atomic
+publication and local evidence verification. The CLI is an adapter; this path
+does not read or write ambient AIOS or trigger its sync hook.
+
+Work-folder ingestion qualifies public text URLs in the CLI adapter, retains
+originals and readable derivatives, and returns references for the plan. The
+host agent researches and authors the result using its available tools. The
+bundled research skill connects these commands without adding an execution
+runtime. See [research continuation](research-continuation.md) for the caller
+contract and limits.
+
 ### On-demand search
 
 Markdown search is a request-scoped safe corpus transaction. The evidence

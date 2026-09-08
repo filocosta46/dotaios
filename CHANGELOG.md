@@ -4,13 +4,25 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Follow an exact context or selected-project Markdown source from a brief or
+  search excerpt through `search --follow` or the existing read-only MCP search
+  tool. Bounded literal pages retain source version and byte coverage, refuse
+  changed sources, and recheck memory scope on every request.
+- Retain public HTML/text originals and readable research sources with
+  `ingest --workdir`, with qualified destinations and bounded fetching.
+- Discover and resume research with `plan start/checkpoint/inspect --workdir`.
+  The work folder preserves progress, verifies source/result versions and
+  refuses stale updates without writing personal AIOS memory.
+
 ### Fixed
 
 - Project identification reports `Memory: Shared` only inside a validated AIOS
   folder outside its managed workspace shelf. A unique active verified project
   still wins; malformed roots plus unsafe, conflicting, or unverified mappings
   stay closed, and the two-field JSON response remains compatible.
-- Generated global bridges bind every CLI call to their configured AIOS folder,
+- Generated global bridges bind AIOS CLI calls to their configured AIOS folder,
   while portable project bridges reuse that host-managed path suffix without
   publishing a machine-local path.
 - Managed upgrades recognize exact generated schedule commands from every

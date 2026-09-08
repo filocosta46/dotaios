@@ -35,7 +35,7 @@ test("MCP and hook JSON agree on bounded selected README coverage while retrieva
       assert.ok(payload.coverage, "MCP must carry the source coverage envelope");
       assert.deepEqual(payload.coverage, hook.contextCoverage);
       assert.deepEqual(payload.coverage.selectedProjectReadme, {
-        excerptClipped: clipped, budgetOmitted: clipped && budget === 256,
+        excerptClipped: clipped, budgetOmitted: budget === 256,
       });
       assert.deepEqual(payload.budget, hook.contextBudget);
       const expected = payload.coverage.notice ? `${payload.coverage.notice}\n\n${payload.markdown}` : payload.markdown;
@@ -252,7 +252,7 @@ test("read_working_context preserves visible identity and priorities but omits f
     jsonrpc: "2.0",
     id: 1,
     method: "tools/call",
-    params: { name: "read_working_context", arguments: { budget: 1000 } }
+    params: { name: "read_working_context", arguments: { budget: 2200 } }
   }]);
   const markdown = JSON.parse(toolText(response)).markdown;
 
@@ -422,7 +422,7 @@ test("search_aios stabilizes budget metadata across the pretty-to-compact bounda
   const { aiosPath } = setupAios();
   for (let index = 0; index < 20; index += 1) {
     fs.writeFileSync(
-      path.join(aiosPath, "context", `boundary-${index}.md`),
+      path.join(aiosPath, "vault", `boundary-${index}.md`),
       `# Boundary ${index}\n\nserialization-boundary ${"x".repeat(193)}\n`,
     );
   }
@@ -433,7 +433,7 @@ test("search_aios stabilizes budget metadata across the pretty-to-compact bounda
     method: "tools/call",
     params: {
       name: "search_aios",
-      arguments: { query: "serialization-boundary", scope: "context", limit: 20, budget: 32000 },
+      arguments: { query: "serialization-boundary", scope: "vault", limit: 20, budget: 32000 },
     },
   };
   const [fullResponse] = runMcp(aiosPath, [request]);
@@ -1402,7 +1402,7 @@ test("read_working_context preserves opaque stable project identifiers", () => {
     method: "tools/call",
     params: {
       name: "read_working_context",
-      arguments: { project: "café:client/01", budget: 512 }
+      arguments: { project: "café:client/01", budget: 2000 }
     },
   }]);
   const payload = JSON.parse(toolText(response));

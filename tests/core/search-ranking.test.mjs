@@ -4,6 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createEvidenceReader } from "../../packages/core/src/evidence-reader.mjs";
+import { sourceRootIdentity } from "../../packages/core/src/source-reference.mjs";
 import { searchAios, searchMemoryDir, searchMarkdownDir } from "../../packages/core/src/search.mjs";
 
 function tmpDir() {
@@ -38,6 +39,7 @@ function genericContainedCorpusReader(roots) {
       if (prepared?.kind !== "generic-contained-corpus") {
         return scopeReader.withPreparedTextCorpus(prepared, callback);
       }
+      const rootIdentity = await sourceRootIdentity(prepared.root);
       return callback(Object.freeze({
         async mapFiles(mapper) {
           return Promise.all(prepared.files.map(async (filePath) => {
@@ -45,7 +47,9 @@ function genericContainedCorpusReader(roots) {
             return mapper(Object.freeze({
               filePath,
               content: observed.content,
-              mtimeMs: observed.stats.mtimeMs
+              mtimeMs: observed.stats.mtimeMs,
+              stats: observed.stats,
+              rootIdentity
             }));
           }));
         }
@@ -56,6 +60,7 @@ function genericContainedCorpusReader(roots) {
     ...baseReader,
     async withTextCorpus(transactionRoot, directoryPath, options, callback) {
       const files = await baseReader.listFiles(transactionRoot, directoryPath, options);
+      const rootIdentity = await sourceRootIdentity(transactionRoot);
       return callback(Object.freeze({
         async mapFiles(mapper) {
           return Promise.all(files.map(async (filePath) => {
@@ -63,7 +68,9 @@ function genericContainedCorpusReader(roots) {
             return mapper(Object.freeze({
               filePath,
               content: observed.content,
-              mtimeMs: observed.stats.mtimeMs
+              mtimeMs: observed.stats.mtimeMs,
+              stats: observed.stats,
+              rootIdentity
             }));
           }));
         }

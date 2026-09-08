@@ -65,13 +65,13 @@ Commands:
   import <file>     Preview or apply structured context from old chats
   index             Generate ~/aios/_index.md — table of contents across context and vault
   init              Scaffold ~/aios with local context templates
-  ingest <input>    Copy material into vault/raw and log an event
+  ingest <input>    Retain source material (use --workdir for project research)
   install <path>    Preview or adopt a reviewed local Agent Skill bundle
   interview         Update your context by answering a few short questions
   mcp <cmd>         Print the read-only MCP server config to add to a client
   memory <cmd>      Audit recent memory or promote captured evidence explicitly
   migrate           Preview, apply, or recover a versioned folder migration
-  plan <title>      Write a lightweight plan.md artifact agents pick up across sessions
+  plan <title>      Save a plan; --workdir supports research start/checkpoint/inspect
   project <cmd>     Register, restore, and resolve projects across machines
   resolve "<intent>" Resolve project context, skill, and optional approved tool
   reveal            Open the AIOS folder in Finder, Explorer, or xdg-open

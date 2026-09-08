@@ -1,3 +1,4 @@
+import { sourceEvidence, sourceRootIdentity } from "./source-reference.mjs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -528,6 +529,7 @@ async function readScopedProjectCatalog(context, { projectSelector, budget }) {
   const filesystem = context.fs;
   const root = context.aiosPath;
   const projectsPath = path.join(root, "projects");
+  const rootIdentity = await sourceRootIdentity(root, filesystem);
   const listing = await readContainedDirectory(root, projectsPath, {
     filesystem,
     budget,
@@ -581,18 +583,21 @@ async function readScopedProjectCatalog(context, { projectSelector, budget }) {
   const scope = resolveProjectCatalogScope(projectSelector, catalog);
   const selected = records.find((record) => record.slug === scope.filter);
   const selectedSnapshot = observations.find((observation) => observation.path === selected.readmePath).snapshot;
-  const content = await readContainedFile(root, selected.readmePath, {
+  const observed = await readContainedFile(root, selected.readmePath, {
     filesystem,
     budget,
     expectedSnapshot: selectedSnapshot,
     maxBytes: MAX_PROJECT_CONTEXT_README_BYTES,
+    returnSnapshot: true,
     tooLargeCode: "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE",
     encoding: "utf8"
   });
   await revalidateCatalog();
   const selectedProject = toProjectCatalogRecord(projectRecord(
-    selected.slug, selected.readmePath, parseMarkdownSource(content, selected.readmePath)
+    selected.slug, selected.readmePath, parseMarkdownSource(observed.content, selected.readmePath)
   ));
+  if (rootIdentity !== await sourceRootIdentity(root, filesystem)) throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
+  selectedProject.sourceEvidence = sourceEvidence({ ...observed, source: `projects/${selected.slug}/README.md`, rootIdentity, projectId: selectedProject.id });
   return catalog.map((project) => project.slug === selected.slug ? selectedProject : project);
 
   async function revalidateCatalog() {

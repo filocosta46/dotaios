@@ -4,9 +4,14 @@ import { appendEvent } from "../../../core/src/memory.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome } from "../../../core/src/paths.mjs";
 import { hasHelpFlag, readOptionValue } from "../lib/args.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
+import { readContainedFile } from "../../../core/src/contained-read.mjs";
+import { startWorkPlan, checkpointWorkPlan, inspectWorkPlan } from "../../../core/src/work-plan.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios plan "<title>" [options]
+  dotaios plan start --workdir <dir> --input <relative.json> [--json]
+  dotaios plan checkpoint --workdir <dir> --input <relative.json> --expected <revision> [--json]
+  dotaios plan inspect --workdir <dir> [--json]
 
 Write a lightweight plan.md artifact an agent can pick up across sessions.
 Compound Engineering style: a goal, a few checkbox steps, a status, and open
@@ -19,6 +24,25 @@ Options:
   --project <slug> Tag the plan with a project slug
   --print          Print the plan to stdout instead of writing a file
   --dry-run        Print the plan and the target path without writing
+
+Work-folder research:
+  start            Record {goal, limits: [], nextAction} in the folder's plan.md
+  checkpoint       Preserve progress and pin source/result files to SHA-256 hashes
+  inspect          Resume from the current goal, progress, evidence and next action
+  --workdir <dir>   Explicit work folder; this mode does not read or write AIOS
+  --input <file>    Bounded JSON file inside the work folder (at most 64 KiB)
+  --expected <rev>  Exact revision from the last inspect/start/checkpoint result
+  --json           Emit a bounded machine-readable result
+
+Checkpoint fields (all optional): completed: [text], unresolved: [text],
+nextAction: text, status: in-progress|blocked|complete,
+sources: [{path: "research/sources/name.md", origin: "source URL or attribution"}],
+outputs: [{path: "research/results/name.md", sources: ["research/sources/name.md"]}].
+Source and result files must already exist. Completion requires a current result
+and no unresolved questions; nextAction may then be null. Digests check local
+file continuity, not source truth or whether an external action happened.
+Limits: 32 sources and 32 results, 16 MiB per evidence file, 64 MiB per evidence
+registration/verification pass, 64 KiB of record data, and a 256 KiB plan.md.
 `;
 
 export async function planCommand(args) {
@@ -26,6 +50,10 @@ export async function planCommand(args) {
     console.log(HELP_TEXT);
     return;
   }
+
+  const workdirMode = args.some((arg) => ["--workdir", "--input", "--expected"].some((flag) => arg === flag || arg.startsWith(`${flag}=`)))
+    || (["start", "checkpoint", "inspect"].includes(args[0]) && args.includes("--json"));
+  if (workdirMode) return workdirPlanCommand(args);
 
   const options = parseOptions(args);
   const aiosPath = path.resolve(expandHome(options.path || defaultAiosPath()));
@@ -74,6 +102,72 @@ export async function planCommand(args) {
   });
 
   console.log(`Plan saved at ${filePath}`);
+}
+
+async function workdirPlanCommand(args) {
+  try {
+    return await runWorkdirPlan(args);
+  } catch (error) {
+    if (args.includes("--json")) {
+      const code = typeof error.code === "string" && error.code.startsWith("DOTAIOS_")
+        ? error.code : "DOTAIOS_WORK_PLAN_REFUSED";
+      const message = error.code && !error.code.startsWith("DOTAIOS_")
+        ? "The work folder or input could not be read or updated safely. Inspect it before retrying."
+        : error.message;
+      console.log(JSON.stringify({ status: "refused", error: { code, message: message.slice(0, 300) } }));
+      error.dotaiosCliReported = true;
+    }
+    throw error;
+  }
+}
+
+async function runWorkdirPlan(args) {
+  const [command, ...flags] = args;
+  if (!["start", "checkpoint", "inspect"].includes(command)) {
+    throw new Error("Work-folder plans use start, checkpoint or inspect. See dotaios plan --help.");
+  }
+  const options = {};
+  for (let index = 0; index < flags.length; index += 1) {
+    const flag = flags[index];
+    if (!["--workdir", "--input", "--expected", "--json"].includes(flag) || Object.hasOwn(options, flag)) {
+      throw new Error("Unknown or duplicate work-folder plan option. See dotaios plan --help.");
+    }
+    options[flag] = flag === "--json" ? true : readOptionValue(flags, index++, flag);
+  }
+  if (!options["--workdir"] || (command === "inspect" && (options["--input"] || options["--expected"]))
+    || (command !== "inspect" && !options["--input"])
+    || (command === "checkpoint" && !options["--expected"])
+    || (command === "start" && options["--expected"])) {
+    throw new Error("Missing or incompatible work-folder plan options. See dotaios plan --help.");
+  }
+  const workdir = path.resolve(expandHome(options["--workdir"]));
+  let input;
+  if (options["--input"]) {
+    const relative = options["--input"];
+    if (path.isAbsolute(relative) || /[\\\x00-\x1f\x7f]/.test(relative)
+      || relative.split("/").some((part) => !part || part === "." || part === "..")) {
+      throw new Error("The input must be a relative JSON file inside the work folder.");
+    }
+    const text = await readContainedFile(workdir, path.join(workdir, relative), {
+      encoding: "utf8", maxBytes: 64 * 1024
+    });
+    if (text === null) throw new Error("The work-folder plan input is missing.");
+    try { input = JSON.parse(text); } catch { throw new Error("The work-folder plan input must be valid JSON."); }
+  }
+  const result = command === "inspect"
+    ? await inspectWorkPlan(workdir)
+    : command === "start"
+      ? await startWorkPlan(workdir, input)
+      : await checkpointWorkPlan(workdir, input, { expectedRevision: options["--expected"] });
+  if (options["--json"]) {
+    console.log(JSON.stringify(result, null, 2));
+  } else if (result.status === "not-found") {
+    console.log("No current research work plan in this folder.");
+  } else {
+    console.log(`${result.plan.goal}\nStatus: ${result.plan.status}; local evidence: ${result.verification.state}\nNext: ${result.plan.nextAction || "Complete"}\nRevision: ${result.revision}`);
+    for (const finding of result.verification.findings) console.log(`${finding.code}: ${finding.path}`);
+  }
+  return result;
 }
 
 function parseOptions(args = []) {

@@ -49,16 +49,24 @@ The canonical, deterministic, hard-bounded projection of user memory offered to 
 _Avoid_: memory dump, session memory, digest
 
 **On-demand retrieval**:
-A query-shaped, bounded view used to expand beyond working context for a specific task. Its results remain evidence pointers to canonical files rather than new durable truth.
+A query- or source-directed, bounded view used to expand beyond working context for a specific task. Its results remain evidence pointers to canonical files rather than new durable truth.
 _Avoid_: startup context, automatic memory, answer generation
 
 **Source evidence**:
 A retrieved excerpt together with enough provenance to identify its canonical origin and scope. Agent prose without a source reference is not source evidence.
 _Avoid_: generated answer, remembered fact
 
+**Source reference**:
+A derived locator for an observed source version and a continuation position. It grants no access: every follow request rechecks the current memory scope, source membership, and source identity before returning literal text.
+_Avoid_: permission token, permanent link, memory authority
+
 **Memory promotion**:
 An explicit, previewed transition from source evidence into durable user memory. Promotion preserves the source relationship and never treats a session inference as approved truth by default.
 _Avoid_: auto-memory, extraction, summarization
+
+**Research work plan**:
+The work folder's current research goal, limits, completed work, source/result references and next action. Its owned section is updated under a revision; it is a task artifact, not personal memory or an execution runtime.
+_Avoid_: Work Plane, autonomous memory, scheduler
 
 **Host receipt**:
 Reproducible evidence that a supported agent host discovered, invoked, and produced the expected DotAIOS result. Installed or configured state alone is not a host receipt.

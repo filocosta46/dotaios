@@ -1,5 +1,6 @@
 import localFilesystem from "node:fs/promises";
 import path from "node:path";
+import { sourceRootStamp } from "./source-reference.mjs";
 
 import {
   assertContainedPathEntrySnapshotsUnchanged,
@@ -507,6 +508,10 @@ function createEvidenceReaderView(roots, state) {
       throw new TypeError("Evidence corpus transactions require a callback.");
     }
     const { root: authorizedRoot, observation, options } = prepared;
+    // The first directory observation already binds the canonical root, even
+    // when the authorized path is a symlink. Its normal final revalidation also
+    // protects source provenance; no separate root reads are needed.
+    const rootIdentity = sourceRootStamp(observation.directories[0].snapshot.ancestors[0].resolvedStats);
     assertAuthorizedRoot(authorizedRoot);
     let active = true;
     let consumed = false;
@@ -524,7 +529,9 @@ function createEvidenceReaderView(roots, state) {
           authorizedRoot,
           observation.files,
           options,
-          mapper,
+          (observed) => mapper(Object.freeze(Object.defineProperties({ ...observed }, {
+            stats: { value: observed.stats }, rootIdentity: { value: rootIdentity }
+          }))),
           executionBudget,
           (filePath, snapshot) => {
             completedFiles.set(path.resolve(filePath), snapshot);
@@ -694,11 +701,11 @@ function createEvidenceReaderView(roots, state) {
           stats: observed.stats,
           ancestors: []
         }));
-        return mapper(Object.freeze({
+        return mapper(Object.freeze(Object.defineProperty({
           filePath: file.filePath,
           content: observed.content,
           mtimeMs: observed.stats.mtimeMs
-        }));
+        }, "stats", { value: observed.stats })));
       }));
       for (const [offset, value] of values.entries()) mapped[index + offset] = value;
     }

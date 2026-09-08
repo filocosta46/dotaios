@@ -927,7 +927,7 @@ export async function bridgeManagedBlock(aiosPath, { skillsFirst = false, skills
     MANAGED_START,
     pointerLine,
     ...(legacyDotaios ? [] : [
-      `AIOS suffix: ${JSON.stringify(configuredAiosPathSuffix)}. Append to every DotAIOS call below.`
+      `AIOS suffix: ${JSON.stringify(configuredAiosPathSuffix)}. Omit only for explicit --workdir calls.`
     ]),
     "Choose memory access before any AIOS memory read:",
     "- `Private chat` locks `Memory: Off`: keep AIOS closed — no read, search, save, or capture. Say the host may keep its history.",
