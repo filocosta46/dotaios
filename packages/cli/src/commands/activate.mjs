@@ -663,7 +663,7 @@ async function createProjectBridges(aiosPath, projectPath, options, lifecycle = 
   }
   const registry = await loadAgentRegistry(aiosPath);
   const bridges = [
-    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(aiosPath, project, homePath), {
+    await writeManagedFile(path.join(projectPath, "AGENTS.md"), projectAgentsBridge(project), {
       ...options,
       projectRoot: projectPath,
       beforeReplace: lifecycle.beforeBridgeReplace,
@@ -884,7 +884,7 @@ async function removeRetiredManagedFile(destination, { dryRun = false, projectRo
   };
 }
 
-function projectAgentsBridge(aiosPath, project, homePath) {
+function projectAgentsBridge(project) {
   const registeredProject = project.registered
     ? JSON.stringify({ registered_project: { id: project.id, slug: project.slug } })
     : null;
@@ -893,15 +893,15 @@ function projectAgentsBridge(aiosPath, project, homePath) {
     ...(registeredProject ? [
       "This is the host-written project identity selector:",
       registeredProject,
-      "At session start use the host-managed `candidate_invocation` from the global bridge and append [\"project\",\"identify\",\"--json\"] from this same attached checkout. Only after its receipt is `Memory: This project` and its `registered_project` exactly matches the record above may you emit that receipt or read project memory.",
-      `Then append [\"brief\",\"--compact\",\"--memory\",\"project\",\"--project\",\"${project.id}\"] to the same \`argv_prefix\` and launch its \`executable\` without a shell.`
+      "At session start use the host-managed `candidate_invocation` and exact configured AIOS path suffix from the global bridge. Append [\"project\",\"identify\",\"--json\"] plus that suffix from this same attached checkout. Only after its receipt is `Memory: This project` and its `registered_project` exactly matches the record above may you emit that receipt or read project memory.",
+      `Then append [\"brief\",\"--compact\",\"--memory\",\"project\",\"--project\",\"${project.id}\"] plus the same suffix to the \`argv_prefix\` and launch its \`executable\` without a shell.`
     ] : [
       "This checkout is not registered. Use `Memory: Off`, keep AIOS closed, and request proof-bound registration."
     ]),
     `Keep later searches and explicit saves in the same mode with \`--memory project --project ${project.id}\`.`,
     "This mode may use only this project's files and explicitly attributed sessions, signals, and events; exclude personal, unscoped, and other-project memory.",
     "",
-    `The DotAIOS entrypoint is ${portableAiosPointer(aiosPath, homePath)}. Do not open personal context from it while this session is in project mode.`,
+    `The DotAIOS entrypoint is ${portableAiosPointer()}. Do not open personal context from it while this session is in project mode.`,
     "",
     "Keep project-specific instructions in this file short."
   ]);
@@ -910,12 +910,8 @@ function projectAgentsBridge(aiosPath, project, homePath) {
 // This bridge lands in a shared checkout that teammates clone, so an absolute
 // path would both publish the author's username and point every other reader
 // at a directory that does not exist on their machine.
-export function portableAiosPointer(aiosPath, homePath = os.homedir()) {
-  const relative = path.relative(homePath, aiosPath);
-  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
-    return path.join(aiosPath, "AGENTS.md");
-  }
-  return `~/${path.join(relative, "AGENTS.md")}`;
+export function portableAiosPointer() {
+  return "the `AGENTS.md` selected by the host-managed global bridge";
 }
 
 function bridgeFile(title, lines) {

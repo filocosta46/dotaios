@@ -11,5 +11,6 @@ export async function buildSessionDigest(aiosPath, options = {}, dependencies = 
     projectFilter: context.projectFilter,
     memoryMode: context.memoryMode,
     memoryReceipt: context.memoryReceipt,
+    ...(context.coverage ? { coverage: context.coverage } : {}),
   };
 }

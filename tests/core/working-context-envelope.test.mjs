@@ -66,6 +66,46 @@ test("the operational envelope keeps the canonical digest and budget unchanged",
   assert.ok(envelope.notice.length < 512);
 });
 
+test("coverage bounds include metadata and the repeated text notice together", async () => {
+  const coverage = {
+    version: 1,
+    selectedProjectReadme: { excerptClipped: true, budgetOmitted: true },
+    notice: "x".repeat(250),
+  };
+  assert.ok(JSON.stringify({ contextCoverage: coverage }, null, 2).length < 512);
+  await assert.rejects(buildWorkingContextEnvelope("/not-opened", {}, {
+    buildSessionDigest: async () => ({ digest: "Short digest.", coverage }),
+    inspectMigrationState: async () => ({ status: "current" }),
+  }), /coverage exceeded its fixed bound/);
+});
+
+test("all selected README coverage states fit beside a full operational notice", async (t) => {
+  const aiosPath = await makeAios(t, "1.1.0");
+  const directory = path.join(aiosPath, "projects", "coverage-demo");
+  await fs.mkdir(directory, { recursive: true });
+  const migration = { status: "schema_outdated", folder_schema_version: "1.1.0", supported_schema_version: "1.2.0" };
+  const action = { command: "x migrate", path_scope: "configured_aios" };
+  const baseNotice = renderOperationalNotice({ migration: { ...migration, action } });
+  const exactCli = "x".repeat(1024 - baseNotice.length + 1);
+  for (const [body, excerptClipped] of [["Short constraint.", false], ["Detail. ".repeat(200), true]]) {
+    await fs.writeFile(path.join(directory, "README.md"),
+      `---\nid: coverage-id\nproject: coverage-demo\ndescription: Overview.\n---\n# Demo\n\n${body}\n`);
+    for (const visibleCharacterBudget of [0, 6000]) {
+      const envelope = await buildWorkingContextEnvelope(aiosPath,
+        { project: "coverage-id", visibleCharacterBudget }, { resolveCliInvocation: () => exactCli });
+      const operationalNotice = renderOperationalNotice(envelope.operational);
+      assert.equal(operationalNotice.length, 1024);
+      assert.deepEqual(envelope.coverage.selectedProjectReadme, {
+        excerptClipped, budgetOmitted: visibleCharacterBudget === 0,
+      });
+      const { coverage } = envelope;
+      assert.ok(JSON.stringify({ contextCoverage: coverage }, null, 2).length + (coverage.notice?.length || 0) + 2 <= 512);
+      assert.ok(envelope.notice.length <= 1024 + 512);
+      assert.ok(envelope.digest.length <= visibleCharacterBudget);
+    }
+  }
+});
+
 test("the envelope forwards its injected filesystem to migration inspection", async (t) => {
   const aiosPath = await makeAios(t, "1.2.0");
   let openedConfig = false;

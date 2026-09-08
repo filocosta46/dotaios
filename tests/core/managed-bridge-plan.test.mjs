@@ -47,7 +47,7 @@ test("a stale owned bridge is an upgrade target and refreshes through the shared
     assert.equal(result.action, "updated");
     const after = await fs.readFile(destination, "utf8");
     assert.match(after, /^# User instructions\n\nKeep this byte-for-byte\./);
-    assert.match(after, /`npx dotaios@2\.0\.11 brief --compact --memory shared`/);
+    assert.ok(after.includes(`npx dotaios@2.0.11 brief --compact --memory shared --path '${aiosPath}'`));
     assert.match(after, /\nUser tail\.\n$/);
   } finally {
     await fs.rm(root, { recursive: true, force: true });

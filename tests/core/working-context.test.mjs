@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import filesystem from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -40,6 +41,268 @@ function registerProject(aiosPath, slug, id = `${slug}-id`) {
 function fixedClock() {
   return new Date(FIXED_NOW.getTime());
 }
+
+test("This project reads only sibling identity metadata, even when a sibling body exceeds the source limit", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  registerProject(aiosPath, "sibling");
+  const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+  const siblingReadme = path.join(aiosPath, "projects", "sibling", "README.md");
+  const siblingMetadata = "---\nid: sibling-id\nproject: sibling\nstatus: active\n---\n";
+  fs.appendFileSync(selectedReadme, "\nSELECTED_PROJECT_BODY\n");
+  fs.writeFileSync(siblingReadme, `${siblingMetadata}PRIVATE_SIBLING_BODY\n${"x".repeat(1024 * 1024)}`);
+  let siblingBytesRead = 0;
+  const guardedFilesystem = {
+    ...filesystem,
+    async open(file, ...args) {
+      const handle = await filesystem.open(file, ...args);
+      if (file !== siblingReadme) return handle;
+      return {
+        stat: (...args) => handle.stat(...args),
+        close: () => handle.close(),
+        async read(...args) {
+          const result = await handle.read(...args);
+          siblingBytesRead += result.bytesRead;
+          assert.ok(siblingBytesRead <= Buffer.byteLength(siblingMetadata), "sibling body bytes must never be read");
+          return result;
+        },
+        async readFile() {
+          assert.fail("sibling body must never be read without a metadata bound");
+        }
+      };
+    }
+  };
+
+  const { rendered } = await buildWorkingContext(aiosPath, {
+    memory: "project", project: "selected-id"
+  }, { filesystem: guardedFilesystem, clock: fixedClock });
+
+  assert.match(rendered, /SELECTED_PROJECT_BODY/);
+  assert.doesNotMatch(rendered, /PRIVATE_SIBLING_BODY/);
+  assert.ok(siblingBytesRead > 0, "catalog identity still participates in collision checks");
+});
+
+test("This project preserves selected-body limits and rejects incomplete identity metadata", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+  const original = fs.readFileSync(selectedReadme, "utf8");
+  fs.appendFileSync(selectedReadme, "x".repeat(1024 * 1024));
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+      && error.cause?.code === "DOTAIOS_CONTEXT_SOURCE_TOO_LARGE"
+  );
+  fs.writeFileSync(selectedReadme, original);
+  registerProject(aiosPath, "sibling");
+  fs.writeFileSync(path.join(aiosPath, "projects", "sibling", "README.md"),
+    `---\n${"# metadata padding\n".repeat(1000)}id: selected-id\n---\n`);
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+      && error.cause?.code === "DOTAIOS_PROJECT_FRONTMATTER_INVALID"
+  );
+});
+
+test("This project distinguishes actual EOF from a truncated frontmatter delimiter", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  registerProject(aiosPath, "sibling");
+  const siblingReadme = path.join(aiosPath, "projects", "sibling", "README.md");
+  const opening = "---\nproject: sibling\n#";
+  const prefix = `${opening}${"x".repeat(16 * 1024 - Buffer.byteLength(`${opening}\n---`))}\n---`;
+  assert.equal(Buffer.byteLength(prefix), 16 * 1024);
+  fs.writeFileSync(siblingReadme, `${prefix}: ignored\nid: selected-id\n---\n`);
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+      && error.cause?.code === "DOTAIOS_PROJECT_FRONTMATTER_INVALID"
+  );
+
+  // A closing delimiter at the same byte bound is valid at the actual EOF.
+  fs.writeFileSync(siblingReadme, prefix);
+  const { context } = await buildWorkingContext(aiosPath, { project: "selected-id" }, { clock: fixedClock });
+  assert.equal(context.projectFilter, "selected");
+});
+
+test("This project resolves aliases and rejects cross-namespace collisions before reading bodies", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "selected");
+  registerProject(aiosPath, "sibling");
+  const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+  fs.writeFileSync(selectedReadme, "---\nproject_id: selected-id\nproject: work-alias\n---\n# Work\n\nSELECTED_ALIAS_BODY\n");
+  const aliased = await buildWorkingContext(aiosPath, { project: "work-alias" }, { clock: fixedClock });
+  assert.equal(aliased.context.projectFilter, "selected");
+  assert.match(aliased.rendered, /SELECTED_ALIAS_BODY/);
+
+  // Oversized bodies would cause a read error if selection did not stop first.
+  fs.appendFileSync(selectedReadme, "x".repeat(1024 * 1024));
+  fs.writeFileSync(path.join(aiosPath, "projects", "sibling", "README.md"),
+    `---\nid: work-alias\nproject: selected-id\n---\n${"x".repeat(1024 * 1024)}`);
+  for (const selector of ["work-alias", "selected-id"]) {
+    await assert.rejects(
+      () => buildWorkingContext(aiosPath, { project: selector }, { clock: fixedClock }),
+      (error) => error.code === "DOTAIOS_AMBIGUOUS_PROJECT"
+    );
+  }
+  await assert.rejects(
+    () => buildWorkingContext(aiosPath, { project: "unknown" }, { clock: fixedClock }),
+    (error) => error.code === "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"
+  );
+});
+
+test("This project refuses catalog identity changes across metadata and body reads", async (t) => {
+  for (const change of ["selected-identity", "sibling-alias", "new-collision"]) {
+    await t.test(change, async (t) => {
+      const aiosPath = tmpAios();
+      t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+      registerProject(aiosPath, "selected");
+      registerProject(aiosPath, "sibling");
+      const selectedReadme = path.join(aiosPath, "projects", "selected", "README.md");
+      const original = fs.readFileSync(selectedReadme, "utf8");
+      let changed = false;
+      const changingFilesystem = {
+        ...filesystem,
+        async open(file, ...args) {
+          const handle = await filesystem.open(file, ...args);
+          if (file !== selectedReadme) return handle;
+          let bytesRead = 0;
+          return {
+            stat: (...args) => handle.stat(...args),
+            async read(...args) {
+              const result = await handle.read(...args);
+              bytesRead += result.bytesRead;
+              return result;
+            },
+            async close() {
+              await handle.close();
+              const shouldChange = change === "selected-identity" ? bytesRead > 0 : bytesRead === Buffer.byteLength(original);
+              if (changed || !shouldChange) return;
+              changed = true;
+              if (change === "selected-identity") {
+                fs.writeFileSync(selectedReadme, original.replace("id: selected-id", "id: different-id"));
+              } else if (change === "sibling-alias") {
+                fs.appendFileSync(path.join(aiosPath, "projects", "sibling", "README.md"), "\nChanged after selection\n");
+                const sibling = path.join(aiosPath, "projects", "sibling", "README.md");
+                fs.writeFileSync(sibling, fs.readFileSync(sibling, "utf8").replace("project: sibling", "project: selected-id"));
+              } else {
+                registerProject(aiosPath, "new-collision", "selected-id");
+              }
+            }
+          };
+        }
+      };
+      await assert.rejects(
+        () => buildWorkingContext(aiosPath, { project: "selected-id" }, { filesystem: changingFilesystem, clock: fixedClock }),
+        (error) => error.code === "DOTAIOS_WORKING_CONTEXT_READ_FAILED"
+          && error.cause?.code === "DOTAIOS_CONTEXT_SOURCE_CHANGED"
+      );
+      assert.equal(changed, true, "the fixture must reach the source-change boundary");
+    });
+  }
+});
+
+test("selected README reports excerpt clipping with room left in the visible budget", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "project-a");
+  fs.appendFileSync(path.join(aiosPath, "projects", "project-a", "README.md"),
+    `\nOverview.\n\n${"Background detail. ".repeat(100)}\nLATE_CONSTRAINT: use the approved asset only.\n`);
+
+  const { context, rendered } = await buildWorkingContext(aiosPath,
+    { project: "project-a" }, { clock: fixedClock });
+
+  assert.doesNotMatch(rendered, /LATE_CONSTRAINT/);
+  assert.equal(context.budget.truncated, false);
+  assert.ok(context.budget.remaining > 3000);
+  assert.equal(context.activeProject.contextExcerptClipped, true);
+  assert.deepEqual(context.coverage.selectedProjectReadme, {
+    excerptClipped: true, budgetOmitted: false,
+  });
+  assert.equal(context.coverage.version, 1);
+  assert.match(context.coverage.notice, /README.*excerpt clipped/);
+  assert.match(context.coverage.notice, /Missing text may contain constraints/);
+});
+
+test("selected README distinguishes excerpt clipping from omission by the visible budget", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  for (const [body, excerptClipped] of [["Short constraint 🚀.", false], ["Detail. ".repeat(200), true]]) {
+    registerProject(aiosPath, "project-a");
+    fs.appendFileSync(path.join(aiosPath, "projects", "project-a", "README.md"), `\n${body}\n`);
+    for (const visibleCharacterBudget of [0, 80, 6000]) {
+      const { context, rendered } = await buildWorkingContext(aiosPath,
+        { project: "project-a", visibleCharacterBudget }, { clock: fixedClock });
+      const budgetOmitted = visibleCharacterBudget < 6000;
+      assert.deepEqual(context.coverage.selectedProjectReadme, { excerptClipped, budgetOmitted });
+      assert.equal(context.budget.truncated, budgetOmitted);
+      assert.ok(rendered.length <= visibleCharacterBudget);
+      if (budgetOmitted) assert.match(context.coverage.notice, /text omitted by output budget/);
+      if (!budgetOmitted && !excerptClipped) assert.equal(context.coverage.notice, null);
+    }
+  }
+});
+
+test("selected README coverage follows final rendering when the budget marker clips an accepted project", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "project-a");
+  fs.appendFileSync(path.join(aiosPath, "projects", "project-a", "README.md"),
+    "\nOverview.\n\nKeep the approved asset unchanged.\n");
+  const options = { project: "project-a" };
+  const baseline = await buildWorkingContext(aiosPath, options, { clock: fixedClock });
+  writeJsonl(path.join(aiosPath, "memory", "events.jsonl"), [
+    { ts: "2026-07-15T09:00:00.000Z", project: "project-a", summary: "A later event that will not fit." },
+  ]);
+
+  const cut = await buildWorkingContext(aiosPath,
+    { ...options, visibleCharacterBudget: baseline.rendered.length }, { clock: fixedClock });
+  assert.ok(cut.context.activeProject, "the selector accepted the project before the marker was added");
+  assert.doesNotMatch(cut.rendered, /Keep the approved asset unchanged\./);
+  assert.deepEqual(cut.context.coverage.selectedProjectReadme, { excerptClipped: false, budgetOmitted: true });
+
+  const intact = await buildWorkingContext(aiosPath,
+    { ...options, visibleCharacterBudget: baseline.rendered.length + 30 }, { clock: fixedClock });
+  assert.equal(intact.context.budget.truncated, true, "omitting a later event does not imply project omission");
+  assert.match(intact.rendered, /Keep the approved asset unchanged\./);
+  assert.deepEqual(intact.context.coverage.selectedProjectReadme, { excerptClipped: false, budgetOmitted: false });
+});
+
+test("README excerpt limits use UTF-16 units without splitting a Unicode character", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  for (const [body, expected, clipped] of [
+    ["é".repeat(1200), "é".repeat(1200), false],
+    ["🚀".repeat(600), "🚀".repeat(600), false],
+    ["🚀".repeat(601), `${"🚀".repeat(599)}…`, true],
+  ]) {
+    registerProject(aiosPath, "project-a");
+    const readmePath = path.join(aiosPath, "projects", "project-a", "README.md");
+    fs.writeFileSync(readmePath,
+      `---\nid: project-a-id\nproject: project-a\ndescription: Overview.\n---\n# project-a\n\n${body}\n`);
+    const { context } = await buildWorkingContext(aiosPath, { project: "project-a" }, { clock: fixedClock });
+    assert.equal(context.activeProject.contextExcerpt, expected);
+    assert.equal(context.coverage.selectedProjectReadme.excerptClipped, clipped);
+  }
+});
+
+test("coverage assesses only an explicitly selected README and stays absent with memory Off", async (t) => {
+  const aiosPath = tmpAios();
+  t.after(() => fs.rmSync(aiosPath, { recursive: true, force: true }));
+  registerProject(aiosPath, "project-a");
+  const inferred = await selectWorkingContext(aiosPath, { memory: "shared" });
+  assert.ok(inferred.activeProject);
+  assert.equal(Object.hasOwn(inferred, "coverage"), false);
+  const off = await selectWorkingContext("/must-not-open", { memory: "off", project: "project-a" }, {
+    filesystem: new Proxy({}, { get() { throw new Error("Off read a filesystem method"); } }),
+    clock: () => { throw new Error("Off read the clock"); },
+  });
+  assert.equal(Object.hasOwn(off, "coverage"), false);
+});
 
 test("project filter scopes sessions, namespaced signals, and events with stable ordering", async () => {
   const aiosPath = tmpAios();

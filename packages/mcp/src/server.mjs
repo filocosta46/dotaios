@@ -189,7 +189,7 @@ class DotaiosMcpServer {
       }
       throw error;
     }
-    const { digest, budget, generatedAt, projectFilter, operational, memoryMode, memoryReceipt } = envelope;
+    const { digest, budget, generatedAt, projectFilter, operational, memoryMode, memoryReceipt, coverage } = envelope;
     const metadata = {
       memory: memoryMode,
       receipt: memoryReceipt,
@@ -203,7 +203,9 @@ class DotaiosMcpServer {
     if (JSON.stringify(metadata, null, 2).length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
       throw new Error("Working-context metadata exceeded its fixed operational bound.");
     }
-    return JSON.stringify({ markdown: digest, ...metadata }, null, 2);
+    // The core envelope independently bounds coverage; keep the original
+    // operational metadata allowance and retrieval-completion meaning intact.
+    return JSON.stringify({ markdown: digest, ...metadata, ...(coverage ? { coverage } : {}) }, null, 2);
   }
 
   async resolveSkill(args, memoryPolicy) {

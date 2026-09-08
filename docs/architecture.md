@@ -93,12 +93,42 @@ budget. When the budget is reached, lower-priority items are omitted and the
 rendered projection says so. Compact CLI output, session-start hook JSON, and
 MCP wrap that unchanged projection in a read-only operational envelope.
 
+An explicit project selection also returns versioned, source-specific
+`coverage` metadata (`contextCoverage` in hook JSON). Version `1` contains
+`selectedProjectReadme: { excerptClipped, budgetOmitted }` and a fixed `notice`
+(null when neither flag is set). `excerptClipped` records shortening at the
+1,200 UTF-16-unit README excerpt limit, after removing the initial title and
+outer whitespace; clipping preserves Unicode surrogate pairs. `budgetOmitted`
+means some or all of the selected project block is absent from the final
+rendered projection, including clipping caused by the budget marker. These
+flags describe only that source and transformation, not coverage of all AIOS
+context. Coverage is absent without an explicit project selection and in Off
+mode; absence is not a completeness claim.
+
+The same coverage notice appears in compact text and hook context, and inside
+MCP's `coverage`. It warns that unavailable text may contain constraints and
+must not be inferred. Coverage has a separate fixed 512-character allowance,
+counting pretty JSON with the longest consumer key and the repeated text notice
+plus separator together. It does not consume the visible projection budget or
+the existing 1,024-character operational allowance. `budget.truncated` still
+reports visible-budget loss only; MCP `complete: true` still means retrieval
+completed successfully. Neither promises the entire README was included.
+
 Within a project-scoped projection, a timeline row is global only when both
 `project` and `project_id` are absent or null. Every present attribution field
 must agree with the selected catalog identity. A unique slug, project alias, or
 stable id may stand alone; an alias shared by multiple catalog records requires
 the matching unique `project_id`. Malformed, conflicting, or differently
 attributed rows are excluded rather than widened into global context.
+
+For This project, catalog discovery reads bounded README frontmatter before
+opening the selected project's body. Sibling bodies stay unread; their size
+does not spend the selected-file limit or prevent a valid brief. Catalog
+identity checks still include slug, project alias, and stable-ID collisions.
+Frontmatter is capped at 16 KiB per record, and an opening delimiter without a
+closing delimiter inside that bound fails closed. Catalog files and directories
+are revalidated around the selected body read so identity changes cannot reuse
+the earlier selection. Shared projection selection is unchanged.
 
 Projection work is bounded separately from visible output. One projection may
 open at most 512 source files and reserve at most 16 MiB of raw source bytes.

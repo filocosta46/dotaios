@@ -4,6 +4,7 @@ import { inspectMigrationState } from "./migrations.mjs";
 import { resolveCliInvocation } from "./bridges.mjs";
 
 export const WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT = 1024;
+const WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT = 512;
 
 /**
  * Build the canonical digest and its read-only operational state together.
@@ -33,16 +34,30 @@ export async function buildWorkingContextEnvelope(aiosPath, options = {}, depend
     : await Promise.resolve().then(() => invocationResolver()).catch(() => null);
   const operational = { migration: describeMigrationAction(migration, cli) };
 
-  const notice = renderOperationalNotice(operational);
-  if (notice && notice.length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
+  const operationalNotice = renderOperationalNotice(operational);
+  if (operationalNotice && operationalNotice.length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
     throw new Error("Working-context operational notice exceeded its fixed bound.");
   }
+  const coverage = digestResult.coverage;
+  assertWorkingContextCoverageBound(coverage);
+  const notice = [operationalNotice, coverage?.notice].filter(Boolean).join("\n\n") || null;
 
   return {
     ...digestResult,
     operational,
     notice
   };
+}
+
+function assertWorkingContextCoverageBound(coverage) {
+  // Count the longest consumer key, pretty JSON overhead, and the repeated
+  // notice plus separator in hook text against one separate fixed allowance.
+  const overhead = coverage
+    ? JSON.stringify({ contextCoverage: coverage }, null, 2).length + (coverage.notice?.length || 0) + 2
+    : 0;
+  if (overhead > WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT) {
+    throw new Error("Working-context coverage exceeded its fixed bound.");
+  }
 }
 
 function buildOffEnvelope(memoryPolicy) {
