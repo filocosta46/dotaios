@@ -4,6 +4,8 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+## [2.0.20] - 2026-09-09
+
 ### Added
 
 - Follow an exact context or selected-project Markdown source from a brief or
