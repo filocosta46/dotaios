@@ -35,8 +35,8 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Operating system, DotAIOS version, and assistant (for example, macOS 15, DotAIOS 2.0.19, Codex).
-      placeholder: macOS 15, DotAIOS 2.0.19, Codex
+      description: Operating system, DotAIOS version, and assistant (for example, macOS 15, DotAIOS 2.0.20, Codex).
+      placeholder: macOS 15, DotAIOS 2.0.20, Codex
     validations:
       required: true
 
