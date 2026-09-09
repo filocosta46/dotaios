@@ -1,5 +1,6 @@
 import localFilesystem from "node:fs/promises";
 import path from "node:path";
+import { sourceEvidence, sourceRootIdentity, renderSourceEvidence } from "./source-reference.mjs";
 
 import { isoDate, readSignals as readMemorySignals } from "./memory.mjs";
 import {
@@ -11,7 +12,7 @@ import {
   sameContainedFileSnapshot
 } from "./contained-read.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
-import { readProjectCatalog } from "./projects.mjs";
+import { readProjectCatalog, resolveProjectCatalogScope } from "./projects.mjs";
 import { readSection, readSubsection } from "./sections.mjs";
 
 export const DEFAULT_VISIBLE_CHARACTER_BUDGET = 6000;
@@ -99,7 +100,9 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     tooManyCode: "DOTAIOS_PROJECT_DIRECTORY_LIMIT_EXCEEDED"
   });
   let sources;
+  let rootIdentity;
   try {
+    rootIdentity = await sourceRootIdentity(aiosPath, filesystem);
     const authorityPath = path.join(aiosPath, "aios.json");
     const authorityBefore = await inspectContainedFile(aiosPath, authorityPath, { filesystem });
     if (authorityBefore === null) {
@@ -107,13 +110,13 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
     }
     sources = await Promise.all([
       includesSharedSurfaces
-        ? readText(filesystem, path.join(aiosPath, "context", "identity.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        ? readHeaderSource(filesystem, "context/identity.md", aiosPath, readBudget, rootIdentity)
         : "",
       includesSharedSurfaces
-        ? readText(filesystem, path.join(aiosPath, "context", "priorities.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        ? readHeaderSource(filesystem, "context/priorities.md", aiosPath, readBudget, rootIdentity)
         : "",
       includesSharedSurfaces
-        ? readText(filesystem, path.join(aiosPath, "context", "work.md"), aiosPath, readBudget, MAX_MARKDOWN_SOURCE_BYTES)
+        ? readHeaderSource(filesystem, "context/work.md", aiosPath, readBudget, rootIdentity)
         : "",
       includesSharedSurfaces
         ? readText(filesystem, path.join(aiosPath, "decisions", "log.md"), aiosPath, readBudget, MAX_DECISIONS_SOURCE_BYTES)
@@ -156,20 +159,25 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
         maxBytes: MAX_TIMELINE_SOURCE_BYTES,
         sourcePath: "memory/events.jsonl",
       }),
-      readProjectCatalog({ aiosPath, fs: projectFilesystem }),
+      readProjectCatalog({ aiosPath, fs: projectFilesystem, projectSelector: requestedProject, budget: readBudget }),
     ]);
+    if (rootIdentity !== await sourceRootIdentity(aiosPath, filesystem)) throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
     const authorityAfter = await inspectContainedFile(aiosPath, authorityPath, { filesystem });
     if (!sameContainedFileSnapshot(authorityBefore, authorityAfter)) {
       throw new ContainedReadError("DOTAIOS_CONTEXT_SOURCE_CHANGED");
     }
   } catch (cause) {
+    if (["DOTAIOS_AMBIGUOUS_PROJECT", "DOTAIOS_PROJECT_SELECTOR_UNKNOWN"].includes(cause?.code)) throw cause;
     const error = new Error("DotAIOS could not read working context safely.", { cause });
     error.code = "DOTAIOS_WORKING_CONTEXT_READ_FAILED";
     throw error;
   }
-  const [identity, priorities, workNote, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] = sources;
+  const [identitySource, prioritiesSource, workSource, decisionsLog, todayNote, yesterdayNote, sessionEntries, signalEntries, eventEntries, projects] = sources;
 
-  const projectScope = resolveProjectScope(requestedProject, projects);
+  const identity = identitySource?.content || "";
+  const priorities = prioritiesSource?.content || "";
+  const workNote = workSource?.content || "";
+  const projectScope = resolveProjectCatalogScope(requestedProject, projects);
   const projectFilter = projectScope?.filter || null;
   const sessions = stableSessionOrder(sessionEntries)
     .filter((session) => matchesProject(session, projectScope, memoryPolicy.mode))
@@ -187,6 +195,7 @@ export async function selectWorkingContext(aiosPath, options = {}, dependencies 
   const deduped = dedupeUpdateChannels(signals, events);
 
   const candidates = {
+    sources: { identity: identitySource?.evidence, priorities: prioritiesSource?.evidence, currentWork: workSource?.evidence },
     identity: compactHeader(stripMarkdownFrontmatter(identity)),
     priorities: compactHeader(stripMarkdownFrontmatter(priorities)),
     currentWork: compactHeader(readSection(workNote, "Current Work") || stripMarkdownFrontmatter(workNote)),
@@ -234,6 +243,7 @@ export function renderWorkingContext(context) {
 function applyVisibleCharacterBudget(base, candidates, limit) {
   let selected = {
     ...base,
+    sources: {},
     identity: "",
     priorities: "",
     currentWork: "",
@@ -248,7 +258,8 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
   let omittedForBudget = false;
 
   const consider = (candidate) => {
-    if (renderUnbounded(candidate).length > limit) {
+    const hasEvidence = Object.values(candidate.sources).some(Boolean) || candidate.activeProject?.sourceEvidence;
+    if (renderUnbounded(candidate).length + (hasEvidence ? 26 : 0) > limit) {
       omittedForBudget = true;
       return false;
     }
@@ -256,9 +267,9 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
     return true;
   };
 
-  if (candidates.identity) consider({ ...selected, identity: candidates.identity });
-  if (candidates.priorities) consider({ ...selected, priorities: candidates.priorities });
-  if (candidates.currentWork) consider({ ...selected, currentWork: candidates.currentWork });
+  for (const key of ["identity", "priorities", "currentWork"]) {
+    if (candidates[key]) consider({ ...selected, [key]: candidates[key], sources: { ...selected.sources, [key]: candidates.sources[key] } });
+  }
   if (candidates.decisions.length > 0) consider({ ...selected, decisions: candidates.decisions });
 
   if (base.projectFilter && candidates.activeProject) {
@@ -314,14 +325,38 @@ function applyVisibleCharacterBudget(base, candidates, limit) {
       truncated,
     },
   };
-  const used = renderWorkingContext(provisional).length;
+  const rendered = renderWorkingContext(provisional);
+  const used = rendered.length;
+  const coverage = projectReadmeCoverage(selected, candidates.activeProject, rendered);
   return {
     ...provisional,
+    ...(coverage ? { coverage } : {}),
     budget: {
       ...provisional.budget,
       used,
       remaining: Math.max(0, limit - used),
     },
+  };
+}
+
+function projectReadmeCoverage(context, candidate, rendered) {
+  if (!context.projectFilter || !candidate) return null;
+  const excerptClipped = candidate.contextExcerptClipped;
+  // Timeline sections follow the project. The final budget marker can cut
+  // an accepted excerpt, so check the complete rendered prefix through it.
+  const budgetOmitted = context.activeProject === null || !rendered.startsWith(renderUnbounded({
+    ...context, sessions: [], signals: [], events: [],
+  }));
+  const reasons = [];
+  if (excerptClipped) reasons.push("excerpt clipped");
+  if (budgetOmitted) reasons.push("text omitted by output budget");
+  const notice = reasons.length > 0
+    ? `> [DotAIOS] Selected project README context is incomplete: ${reasons.join("; ")}. Missing text may contain constraints. Do not infer it.`
+    : null;
+  return {
+    version: 1,
+    selectedProjectReadme: { excerptClipped, budgetOmitted },
+    notice,
   };
 }
 
@@ -359,9 +394,9 @@ function renderUnbounded(context) {
     : fallbackReceipt;
   const lines = [receipt, "", `## Active Context · ${today}`, ""];
 
-  if (context?.identity) lines.push("### Identity", context.identity, "");
-  if (context?.priorities) lines.push("### Priorities", context.priorities, "");
-  if (context?.currentWork) lines.push("### Current Work", context.currentWork, "");
+  for (const [key, title] of [["identity", "Identity"], ["priorities", "Priorities"], ["currentWork", "Current Work"]]) {
+    if (context?.[key]) lines.push(`### ${title}`, context[key], ...renderSourceEvidence(context.sources?.[key], { includeFollow: false }), "");
+  }
   if (context?.decisions?.length > 0) {
     lines.push("### Decisions", ...context.decisions.map((decision) => `- ${decision}`), "");
   }
@@ -446,6 +481,7 @@ function renderProject(project) {
   if (project.contextExcerpt && project.contextExcerpt !== project.description) {
     lines.push(...project.contextExcerpt.split(/\r?\n/).map((line) => line ? `> ${line}` : ">"));
   }
+  lines.push(...renderSourceEvidence(project.sourceEvidence, { includeFollow: false }));
   return lines;
 }
 
@@ -605,45 +641,6 @@ function dedupeUpdateChannels(signals, events) {
 
 function timelineKey(entry) {
   return [entry.type, entry.source, entry.project || "", entry.project_id || "", timelineSummary(entry)].join("\n");
-}
-
-function resolveProjectScope(reference, projects) {
-  if (!reference) return null;
-  const matches = projects.filter((project) =>
-    project.id === reference || project.slug === reference || project.project === reference);
-  if (matches.length > 1) {
-    const error = new TypeError(`Project reference "${reference}" is ambiguous. Use its stable id.`);
-    error.code = "DOTAIOS_AMBIGUOUS_PROJECT";
-    throw error;
-  }
-  if (matches.length === 0) {
-    const error = new TypeError("Project selector is unknown.");
-    error.code = "DOTAIOS_PROJECT_SELECTOR_UNKNOWN";
-    throw error;
-  }
-  const selected = matches[0];
-  const filter = selected.slug;
-  const aliases = projectAliases(selected);
-  const uniqueAliases = new Set(
-    [...aliases].filter((alias) => projects.filter((project) => projectAliases(project).has(alias)).length === 1)
-  );
-  const selectedId = typeof selected?.id === "string" && selected.id.length > 0 ? selected.id : null;
-  const id = selectedId && projects.filter((project) => project.id === selectedId).length === 1
-    ? selectedId
-    : null;
-  return {
-    aliases,
-    filter,
-    id,
-    uniqueAliases,
-  };
-}
-
-function projectAliases(project) {
-  return new Set(
-    [project?.slug, project?.project, project?.id]
-      .filter((value) => typeof value === "string" && value.length > 0)
-  );
 }
 
 function isOperationalDate(date, today, yesterday) {
@@ -810,4 +807,12 @@ function appendBudgetMarker(content, limit) {
   if (limit <= marker.length) return truncateVisible(marker.trimStart(), limit);
   const available = limit - marker.length;
   return `${content.slice(0, available).trimEnd()}${marker}`;
+}
+
+async function readHeaderSource(filesystem, source, root, budget, rootIdentity) {
+  const observed = await readContainedFile(root, path.join(root, source), {
+    filesystem, budget, encoding: "utf8", maxBytes: MAX_MARKDOWN_SOURCE_BYTES, returnSnapshot: true
+  });
+  if (!observed) return null;
+  return { content: observed.content, evidence: sourceEvidence({ ...observed, source, rootIdentity }) };
 }

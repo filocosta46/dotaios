@@ -120,7 +120,7 @@ export async function briefCommand(args) {
   });
 
   if (options.compact) {
-    const { digest, budget, notice } = await buildWorkingContextEnvelope(target, {
+    const { digest, budget, notice, coverage, sources } = await buildWorkingContextEnvelope(target, {
       memory: memoryPolicy.mode,
       project: memoryPolicy.projectSelector,
       visibleCharacterBudget: options.budget
@@ -134,7 +134,9 @@ export async function briefCommand(args) {
           mode: memoryPolicy.mode,
           project: memoryPolicy.projectSelector
         },
-        contextBudget: budget
+        contextBudget: budget,
+        ...(coverage ? { contextCoverage: coverage } : {}),
+        ...(sources ? { contextSources: sources } : {}),
       }) + "\n");
     } else {
       process.stdout.write(additionalContext + "\n");

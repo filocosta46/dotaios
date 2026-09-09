@@ -4,8 +4,51 @@ All notable changes to DotAIOS will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Follow an exact context or selected-project Markdown source from a brief or
+  search excerpt through `search --follow` or the existing read-only MCP search
+  tool. Bounded literal pages retain source version and byte coverage, refuse
+  changed sources, and recheck memory scope on every request.
+- Retain public HTML/text originals and readable research sources with
+  `ingest --workdir`, with qualified destinations and bounded fetching.
+- Discover and resume research with `plan start/checkpoint/inspect --workdir`.
+  The work folder preserves progress, verifies source/result versions and
+  refuses stale updates without writing personal AIOS memory.
+
+### Changed
+
+- The compact brief renders readable `> Source: <path> (excerpt; sha256:...)`
+  provenance only. Follow references move beside the projection as
+  `contextSources` in compact CLI and hook JSON, so the fixed visible budget is
+  not spent on opaque locators. Search text output still prints its `> Follow:`
+  value, and the MCP working-context result is unchanged.
+- Implicit project resolution from the current directory now requires the
+  registered project to be `status: active`, alongside its existing verified
+  mapping and root-identity checks. **Upgrade impact:** a project whose README
+  frontmatter is `status: paused` (or any non-active status) stops identifying
+  implicitly from its own folder; select it explicitly by id or slug, or set it
+  back to `active`.
+- `search <query> --json` is now rejected as an unsupported combination instead
+  of being silently ignored. Use the follow mode or plain query output.
+
+### Removed
+
+- The bundled `research` skill no longer writes its report to
+  `vault/research/deep/<date>-<slug>.md`. Results are retained in the authorized
+  work folder under `research/results/`; when no work folder is available the
+  skill offers a destination instead of saving automatically. **Existing files in
+  `vault/research/deep/` are left untouched** and remain searchable.
+
 ### Fixed
 
+- Project identification reports `Memory: Shared` only inside a validated AIOS
+  folder outside its managed workspace shelf. A unique active verified project
+  still wins; malformed roots plus unsafe, conflicting, or unverified mappings
+  stay closed, and the two-field JSON response remains compatible.
+- Generated global bridges bind AIOS CLI calls to their configured AIOS folder,
+  while portable project bridges reuse that host-managed path suffix without
+  publishing a machine-local path.
 - Managed upgrades recognize exact generated schedule commands from every
   supported predecessor release instead of refusing legitimate installs newer
   than 2.0.11.

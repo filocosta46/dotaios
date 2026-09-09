@@ -598,8 +598,8 @@
         {
           "path": "SKILL.md",
           "mode": 420,
-          "bytes": 2853,
-          "packed_sha256": "3769121161266bdc8c6813937b739ad64cf47812e3ee2d51d6a9f8f913df1120",
+          "bytes": 6533,
+          "packed_sha256": "aeb74f1fa9f0d20b2d63d737f4d9e63b04aa85a023feb325a3f74d9ebcda4ed7",
           "render": {
             "kind": "verbatim"
           },

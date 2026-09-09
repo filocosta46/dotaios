@@ -14,7 +14,8 @@ import {
 import { inspectMigrationState } from "../../packages/core/src/migrations.mjs";
 import {
   buildWorkingContextEnvelope,
-  renderOperationalNotice
+  renderOperationalNotice,
+  WORKING_CONTEXT_SOURCES_OVERHEAD_LIMIT
 } from "../../packages/core/src/working-context-envelope.mjs";
 
 const packageVersion = JSON.parse(await fs.readFile(new URL("../../package.json", import.meta.url), "utf8")).version;
@@ -64,6 +65,46 @@ test("the operational envelope keeps the canonical digest and budget unchanged",
   assert.match(envelope.notice, /schema 1\.1\.0.*1\.2\.0/s);
   assert.doesNotMatch(envelope.digest, /\[DotAIOS\]|schema_outdated|dotaios migrate/);
   assert.ok(envelope.notice.length < 512);
+});
+
+test("coverage bounds include metadata and the repeated text notice together", async () => {
+  const coverage = {
+    version: 1,
+    selectedProjectReadme: { excerptClipped: true, budgetOmitted: true },
+    notice: "x".repeat(250),
+  };
+  assert.ok(JSON.stringify({ contextCoverage: coverage }, null, 2).length < 512);
+  await assert.rejects(buildWorkingContextEnvelope("/not-opened", {}, {
+    buildSessionDigest: async () => ({ digest: "Short digest.", coverage }),
+    inspectMigrationState: async () => ({ status: "current" }),
+  }), /coverage exceeded its fixed bound/);
+});
+
+test("all selected README coverage states fit beside a full operational notice", async (t) => {
+  const aiosPath = await makeAios(t, "1.1.0");
+  const directory = path.join(aiosPath, "projects", "coverage-demo");
+  await fs.mkdir(directory, { recursive: true });
+  const migration = { status: "schema_outdated", folder_schema_version: "1.1.0", supported_schema_version: "1.2.0" };
+  const action = { command: "x migrate", path_scope: "configured_aios" };
+  const baseNotice = renderOperationalNotice({ migration: { ...migration, action } });
+  const exactCli = "x".repeat(1024 - baseNotice.length + 1);
+  for (const [body, excerptClipped] of [["Short constraint.", false], ["Detail. ".repeat(200), true]]) {
+    await fs.writeFile(path.join(directory, "README.md"),
+      `---\nid: coverage-id\nproject: coverage-demo\ndescription: Overview.\n---\n# Demo\n\n${body}\n`);
+    for (const visibleCharacterBudget of [0, 6000]) {
+      const envelope = await buildWorkingContextEnvelope(aiosPath,
+        { project: "coverage-id", visibleCharacterBudget }, { resolveCliInvocation: () => exactCli });
+      const operationalNotice = renderOperationalNotice(envelope.operational);
+      assert.equal(operationalNotice.length, 1024);
+      assert.deepEqual(envelope.coverage.selectedProjectReadme, {
+        excerptClipped, budgetOmitted: visibleCharacterBudget === 0,
+      });
+      const { coverage } = envelope;
+      assert.ok(JSON.stringify({ contextCoverage: coverage }, null, 2).length + (coverage.notice?.length || 0) + 2 <= 512);
+      assert.ok(envelope.notice.length <= 1024 + 512);
+      assert.ok(envelope.digest.length <= visibleCharacterBudget);
+    }
+  }
 });
 
 test("the envelope forwards its injected filesystem to migration inspection", async (t) => {
@@ -1454,3 +1495,68 @@ function configBytes(size) {
     suffix
   ]);
 }
+
+
+test("follow references leave the visible projection and stay bounded beside it", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-sources-envelope-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, "context"), { recursive: true });
+  await fs.writeFile(path.join(root, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  for (const [file, heading] of [["identity", "Identity"], ["priorities", "Priorities"], ["work", "Current Work"]]) {
+    await fs.writeFile(
+      path.join(root, "context", `${file}.md`),
+      `# ${heading}\n\n## ${heading}\n${"Durable sentence. ".repeat(40)}\n`
+    );
+  }
+
+  const envelope = await buildWorkingContextEnvelope(root, { memory: "shared" });
+
+  // The visible projection keeps readable provenance and spends nothing on locators.
+  assert.doesNotMatch(envelope.digest, /ds1\./);
+  assert.doesNotMatch(envelope.digest, /^> Follow:/m);
+  assert.match(envelope.digest, /^> Source: context\/identity\.md \(excerpt; sha256:[0-9a-f]{64}\)$/m);
+
+  // Every published reference belongs to a section that survived the budget.
+  assert.ok(envelope.sources.length >= 3);
+  for (const entry of envelope.sources) {
+    assert.match(entry.follow, /^ds1\./);
+    assert.match(envelope.digest, new RegExp(`^> Source: ${entry.source.replace("/", "\\/")} `, "m"));
+  }
+  assert.deepEqual(
+    envelope.sources.map((entry) => entry.section),
+    ["identity", "priorities", "currentWork"]
+  );
+
+  // The block carries its own fixed allowance and never enters the visible budget.
+  const overhead = JSON.stringify({ contextSources: envelope.sources }, null, 2).length;
+  assert.ok(overhead <= WORKING_CONTEXT_SOURCES_OVERHEAD_LIMIT);
+  assert.equal(envelope.budget.used, envelope.digest.length);
+});
+
+test("a section omitted by the visible budget publishes no follow reference", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-sources-omitted-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, "context"), { recursive: true });
+  await fs.writeFile(path.join(root, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  for (const [file, heading] of [["identity", "Identity"], ["priorities", "Priorities"]]) {
+    await fs.writeFile(
+      path.join(root, "context", `${file}.md`),
+      `# ${heading}\n\n## ${heading}\n${"Durable sentence. ".repeat(20)}\n`
+    );
+  }
+
+  const full = await buildWorkingContextEnvelope(root, { memory: "shared" });
+  assert.deepEqual(full.sources.map((entry) => entry.section), ["identity", "priorities"]);
+
+  // Whatever the budget drops, the published references must match exactly the
+  // sections that survived into the visible projection.
+  const headings = { identity: "### Identity", priorities: "### Priorities" };
+  for (const budget of [full.digest.length - 1, full.digest.indexOf("### Priorities"), 200]) {
+    const clipped = await buildWorkingContextEnvelope(root, { memory: "shared", visibleCharacterBudget: budget });
+    const rendered = Object.entries(headings)
+      .filter(([, heading]) => clipped.digest.includes(heading))
+      .map(([section]) => section);
+    assert.deepEqual((clipped.sources || []).map((entry) => entry.section), rendered, `budget ${budget}`);
+  }
+  assert.ok(full.digest.length > 200);
+});

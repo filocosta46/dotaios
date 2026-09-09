@@ -1,4 +1,6 @@
 import path from "node:path";
+import { shouldSkipEntry } from "./search-eligibility.mjs";
+import { sourceEvidence } from "./source-reference.mjs";
 import { createEvidenceReader, EvidenceReadError } from "./evidence-reader.mjs";
 import { resolveMemoryPolicy } from "./memory-policy.mjs";
 import { isPathWithinLexically } from "./paths.mjs";
@@ -14,15 +16,6 @@ const DEFAULT_LIMIT = 20;
 // memory" to the person asking, so a memory search has to read both. Missing
 // directories yield no files, so listing them here is safe on a fresh AIOS.
 const MEMORY_NOTE_DIRS = ["daily", "inbox"];
-
-const SKIP_DIR_NAMES = new Set([".git", "node_modules", ".obsidian", ".trash"]);
-const SECRET_FILE_PATTERNS = [
-  /^\.env(?:\.|$)/,
-  /^credentials(?:\.|$)/i,
-  /^token(?:\.|$)/i,
-  /\.pem$/i,
-  /\.key$/i
-];
 
 // --- Ranking ---
 //
@@ -359,7 +352,8 @@ function markdownScopeConfig(scope, { aiosPath, vaultPath, vaultRoot, projectIde
       dir: path.join(aiosPath, "projects", projectIdentity.slug),
       root: aiosPath,
       sourcePrefix: `projects/${projectIdentity.slug}`,
-      extensions: [".md"]
+      extensions: [".md"],
+      projectId: projectIdentity.id
     });
   }
   if (scope === "decisions") {
@@ -720,17 +714,18 @@ async function searchPreparedMarkdownDir(prepared, config, query, { limit, reade
       config.dir,
       query,
       config.sourcePrefix,
-      limit
+      limit,
+      config.projectId
     )
   );
 }
 
-async function rankMarkdownTransaction(transaction, dir, query, sourcePrefix, limit) {
+async function rankMarkdownTransaction(transaction, dir, query, sourcePrefix, limit, projectId = null) {
   // Every accepted file is observed once by the transaction. Matching,
   // snippet construction, corpus statistics, and ranking all stay inside
   // its callback, so no derived result can escape before final validation.
   const observedFiles = await transaction.mapFiles((observed) =>
-    collectSearchFile(observed, dir, query, sourcePrefix)
+    collectSearchFile(observed, dir, query, sourcePrefix, projectId)
   );
   const docs = [];
   const candidates = [];
@@ -763,11 +758,13 @@ async function rankMarkdownTransaction(transaction, dir, query, sourcePrefix, li
     .map(({ result }) => result);
 }
 
-function collectSearchFile({ filePath, content, mtimeMs }, dir, query, sourcePrefix) {
+function collectSearchFile({ filePath, content, mtimeMs, stats, rootIdentity }, dir, query, sourcePrefix, projectId) {
   const snippets = buildMarkdownSnippets(content, query);
   if (snippets.length === 0) return { content, candidate: null };
 
   const relative = path.relative(dir, filePath);
+  const portableRelative = relative.split(path.sep).join("/");
+  const evidence = sourceEvidence({ source: `${sourcePrefix}/${portableRelative}`, content, stats, rootIdentity, projectId });
   const title = readTitle(content) || relative;
   const pathMatch = matchQuery(relative, query);
   const titleMatch = matchQuery(title, query);
@@ -787,7 +784,8 @@ function collectSearchFile({ filePath, content, mtimeMs }, dir, query, sourcePre
         source: `${sourcePrefix}/${relative}`,
         file: relative,
         title,
-        matches: snippets.slice(0, 5)
+        matches: snippets.slice(0, 5),
+        ...(evidence ? { evidence } : {})
       }
     }
   };
@@ -961,10 +959,7 @@ function markdownStructuralBoost({ snippets, pathMatch, titleMatch }) {
   return areaBoost + titleBoost + pathBoost;
 }
 
-function shouldSkipEntry(name) {
-  if (name.startsWith(".") || SKIP_DIR_NAMES.has(name)) return true;
-  return SECRET_FILE_PATTERNS.some((pattern) => pattern.test(name));
-}
+
 
 
 function readTitle(content) {

@@ -4,6 +4,11 @@ import { inspectMigrationState } from "./migrations.mjs";
 import { resolveCliInvocation } from "./bridges.mjs";
 
 export const WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT = 1024;
+const WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT = 512;
+// Follow references are published beside the visible projection, so they need
+// their own explicit ceiling. At most four sections carry one reference each,
+// and source-reference.mjs already caps a single reference at 1,536 characters.
+export const WORKING_CONTEXT_SOURCES_OVERHEAD_LIMIT = 8192;
 
 /**
  * Build the canonical digest and its read-only operational state together.
@@ -33,16 +38,40 @@ export async function buildWorkingContextEnvelope(aiosPath, options = {}, depend
     : await Promise.resolve().then(() => invocationResolver()).catch(() => null);
   const operational = { migration: describeMigrationAction(migration, cli) };
 
-  const notice = renderOperationalNotice(operational);
-  if (notice && notice.length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
+  const operationalNotice = renderOperationalNotice(operational);
+  if (operationalNotice && operationalNotice.length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
     throw new Error("Working-context operational notice exceeded its fixed bound.");
   }
+  const coverage = digestResult.coverage;
+  assertWorkingContextCoverageBound(coverage);
+  assertWorkingContextSourcesBound(digestResult.sources);
+  const notice = [operationalNotice, coverage?.notice].filter(Boolean).join("\n\n") || null;
 
   return {
     ...digestResult,
     operational,
     notice
   };
+}
+
+function assertWorkingContextCoverageBound(coverage) {
+  // Count the longest consumer key, pretty JSON overhead, and the repeated
+  // notice plus separator in hook text against one separate fixed allowance.
+  const overhead = coverage
+    ? JSON.stringify({ contextCoverage: coverage }, null, 2).length + (coverage.notice?.length || 0) + 2
+    : 0;
+  if (overhead > WORKING_CONTEXT_COVERAGE_OVERHEAD_LIMIT) {
+    throw new Error("Working-context coverage exceeded its fixed bound.");
+  }
+}
+
+function assertWorkingContextSourcesBound(sources) {
+  // Count the longest consumer key and pretty JSON overhead against one separate
+  // fixed allowance. This block never enters the visible projection budget.
+  const overhead = sources ? JSON.stringify({ contextSources: sources }, null, 2).length : 0;
+  if (overhead > WORKING_CONTEXT_SOURCES_OVERHEAD_LIMIT) {
+    throw new Error("Working-context source references exceeded their fixed bound.");
+  }
 }
 
 function buildOffEnvelope(memoryPolicy) {

@@ -1,4 +1,6 @@
 import path from "node:path";
+import { followSourceEvidence } from "../../../core/src/source-evidence.mjs";
+import { renderSourceEvidence } from "../../../core/src/source-reference.mjs";
 import { defaultAiosPath, ensureAiosFolder, expandHome, resolveVaultPath } from "../../../core/src/paths.mjs";
 import { createEvidenceReader } from "../../../core/src/evidence-reader.mjs";
 import { resolveMemoryPolicy } from "../../../core/src/memory-policy.mjs";
@@ -17,6 +19,20 @@ export async function searchCommand(args) {
 
   const options = parseOptions(args);
   const query = options.positionals.join(" ");
+  if (options.follow !== null) {
+    if (query || options.queryFilters) throw new Error("--follow cannot be combined with query text, scope, limit, or session filters.");
+    const result = await followSourceEvidence({
+      aiosPath: path.resolve(expandHome(options.path || defaultAiosPath())),
+      memory: options.memory, project: options.projectSelector,
+      follow: options.follow, budget: options.budget ?? undefined
+    });
+    // The exact JSON envelope is also the bounded text representation. This
+    // preserves range/reference accounting for both human and machine callers.
+    console.log(JSON.stringify(result));
+    if (result.status === "refused") process.exitCode = 2;
+    return;
+  }
+  if (options.budget !== null || options.json) throw new Error("--budget and --json are supported with --follow only.");
 
   if (!query) {
     throw new Error("Usage: dotaios search <query> [--scope memory|vault|context|sessions|skills|references|plugins|all]");
@@ -101,6 +117,10 @@ export async function searchCommand(args) {
 function parseOptions(args = []) {
   const options = {
     limit: 20,
+    follow: null,
+    budget: null,
+    json: false,
+    queryFilters: false,
     path: null,
     positionals: [],
     scope: null,
@@ -113,7 +133,18 @@ function parseOptions(args = []) {
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
-    if (arg === "--scope") {
+    if (["--scope", "--limit", "--agent", "--session-project", "--since"].includes(arg)) options.queryFilters = true;
+    if (arg === "--follow") {
+      options.follow = readOptionValue(args, index, "--follow");
+      index++;
+    } else if (arg === "--budget") {
+      const value = readOptionValue(args, index, "--budget");
+      if (!/^\d+$/.test(value)) throw new Error("--budget must be a whole number.");
+      options.budget = Number(value);
+      index++;
+    } else if (arg === "--json") {
+      options.json = true;
+    } else if (arg === "--scope") {
       options.scope = readOptionValue(args, index, "--scope");
       index += 1;
     } else if (arg === "--limit") {
@@ -179,6 +210,11 @@ Examples:
   dotaios search "launch timing" --agent claude-code --since 7d
 
 Options:
+  --follow <ref>   Read the exact source version from a brief/search Follow value.
+                   Start here when an excerpt omits task-relevant constraints; repeat next until covered.
+                   Cannot combine with query text, scope, limit or session filters.
+  --budget <n>     Whole follow-response character budget (3530–32000; default 6000)
+  --json           Explicit structured follow output (follow always returns bounded JSON)
   --scope <s>      Limit search: sessions, memory, vault, context, skills, references, plugins, or all (default: all)
   --agent <name>   Filter sessions by agent (e.g. claude-code, manual)
   --memory <mode>  Use shared, project, or off memory (default: shared)
@@ -238,6 +274,7 @@ function printSessionResult(result, query) {
 }
 
 function printMarkdownResult(result, query) {
+  for (const line of renderSourceEvidence(result.evidence)) console.log(`  ${line}`);
   console.log(`  ${result.title} (${result.file})`);
   for (const match of result.matches) {
     const lineLabel = match.lineEnd && match.lineEnd !== match.line ? `L${match.line}-${match.lineEnd}` : `L${match.line}`;

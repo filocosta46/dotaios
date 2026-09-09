@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import readline from "node:readline";
+import { followSourceEvidence, SOURCE_REFERENCE_MAX_CHARS, SOURCE_FOLLOW_MIN_BUDGET } from "../../core/src/source-evidence.mjs";
 
 import {
   WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT,
@@ -121,6 +122,12 @@ class DotaiosMcpServer {
   async callTool(name, args) {
     validateMcpToolArguments(name, args);
     const memoryPolicy = resolveMcpMemoryPolicy(args);
+    if (name === "search_aios" && args.follow !== undefined) {
+      return JSON.stringify(await followSourceEvidence({
+        aiosPath: this.aiosPath, memory: memoryPolicy.mode,
+        project: memoryPolicy.projectSelector, follow: args.follow, budget: args.budget
+      }));
+    }
     if (memoryPolicy.mode === "off") return serializeOffToolResult(name, args, memoryPolicy);
     await this.assertAios();
     if (name === "read_working_context") {
@@ -128,7 +135,7 @@ class DotaiosMcpServer {
       return this.readWorkingContext(args, memoryPolicy);
     }
     if (name === "search_aios") {
-      assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+      assertAllowedArguments(args, ["memory", "query", "follow", "scope", "project", "limit", "budget"]);
       return this.searchAios(args, memoryPolicy);
     }
     if (name === "resolve_skill") {
@@ -189,7 +196,7 @@ class DotaiosMcpServer {
       }
       throw error;
     }
-    const { digest, budget, generatedAt, projectFilter, operational, memoryMode, memoryReceipt } = envelope;
+    const { digest, budget, generatedAt, projectFilter, operational, memoryMode, memoryReceipt, coverage } = envelope;
     const metadata = {
       memory: memoryMode,
       receipt: memoryReceipt,
@@ -203,7 +210,9 @@ class DotaiosMcpServer {
     if (JSON.stringify(metadata, null, 2).length > WORKING_CONTEXT_OPERATIONAL_OVERHEAD_LIMIT) {
       throw new Error("Working-context metadata exceeded its fixed operational bound.");
     }
-    return JSON.stringify({ markdown: digest, ...metadata }, null, 2);
+    // The core envelope independently bounds coverage; keep the original
+    // operational metadata allowance and retrieval-completion meaning intact.
+    return JSON.stringify({ markdown: digest, ...metadata, ...(coverage ? { coverage } : {}) }, null, 2);
   }
 
   async resolveSkill(args, memoryPolicy) {
@@ -339,6 +348,7 @@ function tools() {
         properties: {
           memory: memoryModeSchema(),
           query: { type: "string", minLength: 1, maxLength: 500 },
+          follow: { type: "string", minLength: 1, maxLength: SOURCE_REFERENCE_MAX_CHARS, description: "Read this exact brief/search source, or its next part. Do not guess hidden query terms; retain current memory scope." },
           scope: { type: "string", enum: SEARCH_SCOPES, default: "all" },
           project: {
             type: "string",
@@ -350,13 +360,16 @@ function tools() {
           limit: { type: "integer", minimum: 1, maximum: 20, default: 10 },
           budget: {
             type: "integer",
-            minimum: MIN_SEARCH_RESULT_BUDGET,
+            minimum: SOURCE_FOLLOW_MIN_BUDGET,
             maximum: 32000,
             default: DEFAULT_RESULT_BUDGET,
             description: "Character budget for the complete serialized search response, including full omission metadata.",
           },
         },
-        required: ["query"],
+        oneOf: [
+          { required: ["query"], not: { required: ["follow"] }, properties: { budget: { minimum: MIN_SEARCH_RESULT_BUDGET } } },
+          { required: ["follow"], not: { anyOf: [{ required: ["query"] }, { required: ["scope"] }, { required: ["limit"] }] } }
+        ],
       },
     },
     {
@@ -403,7 +416,14 @@ function validateMcpToolArguments(name, args) {
     return;
   }
   if (name === "search_aios") {
-    assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+    assertAllowedArguments(args, ["memory", "query", "follow", "scope", "project", "limit", "budget"]);
+    if (args.follow !== undefined) {
+      requireString(args.follow, "follow", SOURCE_REFERENCE_MAX_CHARS);
+      if (["query", "scope", "limit"].some((key) => Object.hasOwn(args, key))) throw protocolError(-32602, "follow cannot be combined with query, scope or limit");
+      optionalString(args.project, "project", 200);
+      if (args.budget !== undefined) boundedInteger(args.budget, "budget", SOURCE_FOLLOW_MIN_BUDGET, 32000);
+      return;
+    }
     requireString(args.query, "query", 500);
     const project = args.project === undefined
       ? undefined
@@ -473,7 +493,7 @@ function serializeOffToolResult(name, args, policy) {
     }, null, 2);
   }
   if (name === "search_aios") {
-    assertAllowedArguments(args, ["memory", "query", "scope", "project", "limit", "budget"]);
+    assertAllowedArguments(args, ["memory", "query", "follow", "scope", "project", "limit", "budget"]);
     return JSON.stringify({
       query: typeof args.query === "string" ? args.query : "",
       scope: typeof args.scope === "string" ? args.scope : "all",
@@ -525,6 +545,11 @@ function serializeBoundedSearchResults({ query, scope, scopeDetail, groups, omis
   outer: for (const group of groups) {
     for (const rawResult of group.results || []) {
       const result = sanitizeResultValue(rawResult);
+      if ((group.scope === "context" || group.scope === "projects") && rawResult.evidence) {
+        // Generated provenance is already bounded; truncating an opaque value
+        // would leave an apparently actionable but invalid source reference.
+        result.evidence = rawResult.evidence;
+      }
       const candidate = [...selected, { scope: group.scope, ...result }];
       const candidateText = serializeSearchEnvelope({
         query, scope, scopeDetail, results: candidate, complete, omissions, memoryPolicy, limit, truncated: false

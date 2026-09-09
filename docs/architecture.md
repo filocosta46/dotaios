@@ -93,12 +93,42 @@ budget. When the budget is reached, lower-priority items are omitted and the
 rendered projection says so. Compact CLI output, session-start hook JSON, and
 MCP wrap that unchanged projection in a read-only operational envelope.
 
+An explicit project selection also returns versioned, source-specific
+`coverage` metadata (`contextCoverage` in hook JSON). Version `1` contains
+`selectedProjectReadme: { excerptClipped, budgetOmitted }` and a fixed `notice`
+(null when neither flag is set). `excerptClipped` records shortening at the
+1,200 UTF-16-unit README excerpt limit, after removing the initial title and
+outer whitespace; clipping preserves Unicode surrogate pairs. `budgetOmitted`
+means some or all of the selected project block is absent from the final
+rendered projection, including clipping caused by the budget marker. These
+flags describe only that source and transformation, not coverage of all AIOS
+context. Coverage is absent without an explicit project selection and in Off
+mode; absence is not a completeness claim.
+
+The same coverage notice appears in compact text and hook context, and inside
+MCP's `coverage`. It warns that unavailable text may contain constraints and
+must not be inferred. Coverage has a separate fixed 512-character allowance,
+counting pretty JSON with the longest consumer key and the repeated text notice
+plus separator together. It does not consume the visible projection budget or
+the existing 1,024-character operational allowance. `budget.truncated` still
+reports visible-budget loss only; MCP `complete: true` still means retrieval
+completed successfully. Neither promises the entire README was included.
+
 Within a project-scoped projection, a timeline row is global only when both
 `project` and `project_id` are absent or null. Every present attribution field
 must agree with the selected catalog identity. A unique slug, project alias, or
 stable id may stand alone; an alias shared by multiple catalog records requires
 the matching unique `project_id`. Malformed, conflicting, or differently
 attributed rows are excluded rather than widened into global context.
+
+For This project, catalog discovery reads bounded README frontmatter before
+opening the selected project's body. Sibling bodies stay unread; their size
+does not spend the selected-file limit or prevent a valid brief. Catalog
+identity checks still include slug, project alias, and stable-ID collisions.
+Frontmatter is capped at 16 KiB per record, and an opening delimiter without a
+closing delimiter inside that bound fails closed. Catalog files and directories
+are revalidated around the selected body read so identity changes cannot reuse
+the earlier selection. Shared projection selection is unchanged.
 
 Projection work is bounded separately from visible output. One projection may
 open at most 512 source files and reserve at most 16 MiB of raw source bytes.
@@ -139,6 +169,53 @@ a bounded `operational.migration` sibling;
 `search_aios` is the bounded on-demand search path with canonical project-corpus
 selection, and `resolve_skill` routes
 workflow intent. There are no compatibility aliases.
+
+### Following a source
+
+Supported context and selected-project Markdown excerpts carry a source version
+and opaque follow reference derived from the same accepted read as the excerpt.
+`source-reference.mjs` owns this observation format; `source-evidence.mjs` owns
+the bounded follow read. The existing CLI `search --follow` and MCP `search_aios`
+follow mode call that operation without introducing another tool or store.
+Working context renders each excerpt with a readable `> Source:` provenance line
+inside its visible budget, and publishes the matching follow reference beside the
+projection as `contextSources` in compact CLI/hook JSON. Only sections that
+survived the budget are listed, so text and reference stay atomic without
+spending the visible budget on a locator. The MCP working-context result is
+unchanged: its non-memory metadata keeps its fixed 1,024-character bound, and an
+MCP caller reaches a follow reference through `search_aios` query results. Query
+ranking is unchanged.
+
+A reference is a locator, not an access grant. Each read rechecks the requested
+memory scope, canonical project identity when applicable, contained source
+membership, root identity, file generation, and content hash. Off returns before
+any filesystem access. A changed or replaced source refuses with no text and
+requires fresh discovery. Unrelated edits between requests do not stale the
+reference. The existing in-request filesystem checks and their race limitations
+still apply.
+
+Follow pages report literal UTF-8 byte ranges, with an advancing `next` reference
+or `null`. The entire serialized JSON response fits the caller's character
+budget. Context headers and portable project READMEs retain a 1 MiB ceiling;
+other eligible context/project Markdown retains a 4 MiB ceiling. Each page
+rereads and validates the bounded source; there is no cache. Unsupported source
+families have no follow reference. See [the source follow contract](source-follow.md)
+for caller examples, coverage semantics, and explicit limits.
+
+### Research progress in a work folder
+
+The explicit `plan --workdir` mode owns one section of the work folder's current
+`plan.md`. It records the agreed goal and limits, completed steps, source/result
+versions and next action. `work-plan.mjs` owns validation, locking, atomic
+publication and local evidence verification. The CLI is an adapter; this path
+does not read or write ambient AIOS or trigger its sync hook.
+
+Work-folder ingestion qualifies public text URLs in the CLI adapter, retains
+originals and readable derivatives, and returns references for the plan. The
+host agent researches and authors the result using its available tools. The
+bundled research skill connects these commands without adding an execution
+runtime. See [research continuation](research-continuation.md) for the caller
+contract and limits.
 
 ### On-demand search
 

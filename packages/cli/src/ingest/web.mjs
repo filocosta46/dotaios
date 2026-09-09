@@ -238,7 +238,7 @@ async function fetchWithTimeout(url, { timeoutMs, fetchImpl }) {
   }
 }
 
-async function extractArticle(html, sourceUrl) {
+export async function extractArticle(html, sourceUrl) {
   const { parseHTML, Readability, TurndownService } = await loadDeps();
 
   const { document } = parseHTML(html);

@@ -13,6 +13,38 @@ const server = path.join(repoRoot, "packages", "mcp", "src", "server.mjs");
 const releaseVersion = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")).version;
 const SEARCH_RESULT_BUDGET_FLOOR = 3530;
 
+test("MCP and hook JSON agree on bounded selected README coverage while retrieval stays complete", (t) => {
+  const { aiosPath, tempRoot } = setupAios();
+  t.after(() => fs.rmSync(tempRoot, { recursive: true, force: true }));
+  const project = "coverage-demo";
+  const directory = path.join(aiosPath, "projects", project);
+  fs.mkdirSync(directory, { recursive: true });
+  for (const [body, clipped] of [["Short constraint 🚀.", false], ["Background 🚀. ".repeat(120), true]]) {
+    fs.writeFileSync(path.join(directory, "README.md"),
+      `---\nid: coverage-id\nproject: ${project}\ndescription: Overview.\n---\n# Demo\n\n${body}\n`);
+    for (const budget of [256, 6000]) {
+      const [response] = runMcp(aiosPath, [{ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: "read_working_context", arguments: { project, budget } } }]);
+      const payload = JSON.parse(toolText(response));
+      const hookResult = spawnSync(process.execPath,
+        [cli, "brief", "--compact", "--json", "--project", project, "--budget", String(budget), "--path", aiosPath],
+        { encoding: "utf8" });
+      assert.equal(hookResult.status, 0, hookResult.stderr);
+      const hook = JSON.parse(hookResult.stdout);
+      assert.equal(payload.complete, true);
+      assert.ok(payload.coverage, "MCP must carry the source coverage envelope");
+      assert.deepEqual(payload.coverage, hook.contextCoverage);
+      assert.deepEqual(payload.coverage.selectedProjectReadme, {
+        excerptClipped: clipped, budgetOmitted: budget === 256,
+      });
+      assert.deepEqual(payload.budget, hook.contextBudget);
+      const expected = payload.coverage.notice ? `${payload.coverage.notice}\n\n${payload.markdown}` : payload.markdown;
+      assert.equal(hook.hookSpecificOutput.additionalContext, expected);
+      assert.ok(JSON.stringify({ coverage: payload.coverage }, null, 2).length <= 512);
+    }
+  }
+});
+
 test("MCP Off mode returns before inspecting a missing AIOS folder", () => {
   const missingAios = path.join(os.tmpdir(), `dotaios-mcp-off-${process.pid}-${Date.now()}`);
   const responses = runMcp(missingAios, [
@@ -220,7 +252,7 @@ test("read_working_context preserves visible identity and priorities but omits f
     jsonrpc: "2.0",
     id: 1,
     method: "tools/call",
-    params: { name: "read_working_context", arguments: { budget: 1000 } }
+    params: { name: "read_working_context", arguments: { budget: 2200 } }
   }]);
   const markdown = JSON.parse(toolText(response)).markdown;
 
@@ -390,7 +422,7 @@ test("search_aios stabilizes budget metadata across the pretty-to-compact bounda
   const { aiosPath } = setupAios();
   for (let index = 0; index < 20; index += 1) {
     fs.writeFileSync(
-      path.join(aiosPath, "context", `boundary-${index}.md`),
+      path.join(aiosPath, "vault", `boundary-${index}.md`),
       `# Boundary ${index}\n\nserialization-boundary ${"x".repeat(193)}\n`,
     );
   }
@@ -401,7 +433,7 @@ test("search_aios stabilizes budget metadata across the pretty-to-compact bounda
     method: "tools/call",
     params: {
       name: "search_aios",
-      arguments: { query: "serialization-boundary", scope: "context", limit: 20, budget: 32000 },
+      arguments: { query: "serialization-boundary", scope: "vault", limit: 20, budget: 32000 },
     },
   };
   const [fullResponse] = runMcp(aiosPath, [request]);
@@ -1370,7 +1402,7 @@ test("read_working_context preserves opaque stable project identifiers", () => {
     method: "tools/call",
     params: {
       name: "read_working_context",
-      arguments: { project: "café:client/01", budget: 512 }
+      arguments: { project: "café:client/01", budget: 2000 }
     },
   }]);
   const payload = JSON.parse(toolText(response));
@@ -1576,7 +1608,7 @@ function toolText(response) {
 }
 
 function workingContextMetadataText(payload) {
-  const { markdown: _markdown, ...metadata } = payload;
+  const { markdown: _markdown, coverage: _coverage, ...metadata } = payload;
   return JSON.stringify(metadata, null, 2);
 }
 

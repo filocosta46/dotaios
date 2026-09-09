@@ -7,6 +7,8 @@ import { ingestUrl, IngestError } from "../ingest/web.mjs";
 import { ingestDocument } from "../ingest/pdf.mjs";
 import { ingestText } from "../ingest/text.mjs";
 import { ingestBinary } from "../ingest/binary.mjs";
+import { ingestResearchSource } from "../ingest/research.mjs";
+import { assertPublicSourceUrl } from "../ingest/public-source.mjs";
 import { SHELVES, isShelf, isDurableShelf, shelfNeedsName } from "../ingest/placement.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
 
@@ -32,6 +34,9 @@ Shelf routing:
   no Terminal (an agent or script), it keeps today's behavior: saves to vault/raw.
 
 Options:
+  --workdir <dir>   Retain a public HTML/text research source inside this work
+                    folder, independently of personal AIOS (no shelf flags)
+  --json            Structured output for --workdir mode
   --path <dir>      Use an AIOS folder other than ~/aios
   --overwrite       Replace an existing destination (default skips)
   --dry-run         Classify the input and print the plan without writing
@@ -56,17 +61,37 @@ Note:
 `;
 
 export async function ingestCommand(args) {
+  try {
+    return await runIngestCommand(args);
+  } catch (error) {
+    if (!args.some((arg) => arg === "--workdir" || arg.startsWith("--workdir=")) || !args.includes("--json")) throw error;
+    const known = /^(DOTAIOS_PUBLIC_SOURCE_|RESEARCH_)/.test(error.code || "");
+    const message = error.code && !known ? "The research work folder or source could not be read or updated." : error.message;
+    console.log(JSON.stringify({ status: "error", code: known ? error.code : "INGEST_FAILED", message: message.slice(0, 300) }));
+    process.exitCode = 1;
+  }
+}
+
+async function runIngestCommand(args) {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(HELP_TEXT);
     return;
   }
 
+  if (args.some((arg) => arg.startsWith("--workdir="))) throw new Error("Use --workdir <dir> as separate arguments.");
+  if (args.includes("--workdir")) {
+    const flags = args.filter((arg) => arg.startsWith("--"));
+    if (new Set(flags).size !== flags.length) throw new Error("Duplicate work-folder ingestion options are unsupported.");
+  }
   const options = parseOptions(args);
   const [input] = options.positionals;
 
   if (!input) {
     throw new Error("Usage: dotaios ingest <input>");
   }
+
+  if (options.workdir) return ingestWorkdir(options, input);
+  if (options.json) throw new Error("--json requires --workdir for research ingestion.");
 
   if (options.to && !isShelf(options.to)) {
     throw new Error(`Unknown shelf: ${options.to}. Use one of: ${SHELVES.join(", ")}`);
@@ -189,6 +214,18 @@ export async function ingestCommand(args) {
   }
 }
 
+async function ingestWorkdir(options, input) {
+  if (options.positionals.length !== 1 || options.path || options.project || options.to || options.name || options.apply || options.overwrite) {
+    throw new Error("Work-folder ingestion accepts one public URL, --workdir, --timeout, --dry-run and --json.");
+  }
+  const result = options.dryRun
+    ? { status: "preview", url: assertPublicSourceUrl(input).href, destination: "research/sources", network: "not_checked" }
+    : await ingestResearchSource(input, { workdir: expandHome(options.workdir), timeoutMs: options.timeoutMs ?? undefined });
+  if (options.json) console.log(JSON.stringify(result));
+  else if (result.status === "preview") console.log(`Research source preview: ${result.url}\nDestination: ${result.destination}`);
+  else console.log(`Research source saved: ${result.source.path}\nOriginal: ${result.original.path}\nOrigin: ${result.source.origin}`);
+}
+
 async function promptShelf() {
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -303,6 +340,8 @@ function printPlan(result) {
 function parseOptions(args = []) {
   const options = {
     path: null,
+    workdir: null,
+    json: false,
     overwrite: false,
     dryRun: false,
     timeoutMs: null,
@@ -318,6 +357,11 @@ function parseOptions(args = []) {
     if (arg === "--path") {
       options.path = readOptionValue(args, index, "--path");
       index += 1;
+    } else if (arg === "--workdir") {
+      options.workdir = readOptionValue(args, index, "--workdir");
+      index += 1;
+    } else if (arg === "--json") {
+      options.json = true;
     } else if (arg === "--overwrite") {
       options.overwrite = true;
     } else if (arg === "--dry-run") {

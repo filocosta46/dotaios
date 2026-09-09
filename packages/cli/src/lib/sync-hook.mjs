@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { isSyncEnabled } from "../../../core/src/sync-config.mjs";
 
 export function skipsPortableMirrorSync(command, args = []) {
+  if ((command === "ingest" || command === "plan") && args.some((arg) => arg === "--workdir" || arg.startsWith("--workdir="))) return true;
   if (command === "upgrade") return true;
   if (command === "brief" && (args.includes("--compact") || args.includes("--lean"))) return true;
   if (command === "search") return true;
