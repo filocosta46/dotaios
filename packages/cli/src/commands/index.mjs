@@ -17,35 +17,60 @@ export async function indexCommand(args) {
   const target = path.resolve(expandHome(options.path || defaultAiosPath()));
   await ensureAiosFolder(target);
 
-  const config = await readJson(path.join(target, "aios.json"), {});
-  const vaultPath = resolveVaultPath(config, target);
-  const indexPath = path.join(target, "_index.md");
+  const built = await buildIndexOutput(target);
 
-  const sections = [];
-  sections.push(await buildSection("context", path.join(target, "context"), target));
-
-  if (await pathExists(vaultPath)) {
-    sections.push(await buildSection("vault", vaultPath, target));
+  if (options.dryRun) {
+    console.log(`(dry run — would write ${built.indexPath})\n`);
+    console.log(built.output);
+    return;
   }
 
-  const projectsPath = path.join(target, "projects");
+  await fs.writeFile(built.indexPath, built.output, "utf8");
+  console.log(`Indexed ${built.totalFiles} markdown file(s) across ${built.sectionCount} section(s).`);
+  console.log(`Wrote ${built.indexPath}`);
+}
+
+/**
+ * Render the index for an AIOS folder without writing anything.
+ * Split out of indexCommand so other commands can reuse it.
+ */
+export async function buildIndexOutput(aiosPath) {
+  const config = await readJson(path.join(aiosPath, "aios.json"), {});
+  const vaultPath = resolveVaultPath(config, aiosPath);
+
+  const sections = [];
+  sections.push(await buildSection("context", path.join(aiosPath, "context"), aiosPath));
+
+  if (await pathExists(vaultPath)) {
+    sections.push(await buildSection("vault", vaultPath, aiosPath));
+  }
+
+  const projectsPath = path.join(aiosPath, "projects");
   if (await pathExists(projectsPath)) {
-    sections.push(await buildSection("projects", projectsPath, target));
+    sections.push(await buildSection("projects", projectsPath, aiosPath));
   }
 
   const totalFiles = sections.reduce((sum, s) => sum + s.entries.length, 0);
   const generatedAt = new Date().toISOString().slice(0, 10);
-  const output = renderIndex(sections, generatedAt);
 
-  if (options.dryRun) {
-    console.log(`(dry run — would write ${indexPath})\n`);
-    console.log(output);
-    return;
-  }
+  return {
+    output: renderIndex(sections, generatedAt),
+    indexPath: path.join(aiosPath, "_index.md"),
+    totalFiles,
+    sectionCount: sections.length
+  };
+}
 
-  await fs.writeFile(indexPath, output, "utf8");
-  console.log(`Indexed ${totalFiles} markdown file(s) across ${sections.length} section(s).`);
-  console.log(`Wrote ${indexPath}`);
+/**
+ * Rewrite _index.md in place and return what was written.
+ *
+ * Commands that add a file the index is meant to list call this so the table
+ * of contents cannot silently drift away from the folder it describes.
+ */
+export async function refreshIndex(aiosPath) {
+  const built = await buildIndexOutput(aiosPath);
+  await fs.writeFile(built.indexPath, built.output, "utf8");
+  return built;
 }
 
 async function buildSection(name, dir, aiosPath) {

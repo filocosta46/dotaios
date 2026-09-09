@@ -11,6 +11,7 @@ import { ingestResearchSource } from "../ingest/research.mjs";
 import { assertPublicSourceUrl } from "../ingest/public-source.mjs";
 import { SHELVES, isShelf, isDurableShelf, shelfNeedsName } from "../ingest/placement.mjs";
 import { resolveProjectContext } from "../../../core/src/projects.mjs";
+import { refreshIndex } from "./index.mjs";
 
 const HELP_TEXT = `Usage:
   dotaios ingest <input> [options]
@@ -41,6 +42,8 @@ Options:
   --overwrite       Replace an existing destination (default skips)
   --dry-run         Classify the input and print the plan without writing
   --timeout <secs>  URL fetch timeout (default 10)
+  --no-index        Skip refreshing _index.md after a successful save. Use it
+                    inside a bulk loop, then run dotaios index once at the end.
   --project <slug-or-id>  Attribute the ingest to a registered project
 
 Examples:
@@ -159,9 +162,11 @@ async function runIngestCommand(args) {
     dryRun: options.dryRun
   };
 
+  let result = null;
+
   try {
     if (classification.kind === "web") {
-      const result = await ingestUrl(input, {
+      result = await ingestUrl(input, {
         rawDir,
         assetsDir,
         eventsPath,
@@ -169,48 +174,68 @@ async function runIngestCommand(args) {
         ...shelfOptions,
         ...(options.timeoutMs != null ? { timeoutMs: options.timeoutMs } : {})
       });
-      reportResult(result, { routedByDefault });
-      return;
-    }
-
-    if (classification.kind === "document") {
-      const result = await ingestDocument(classification.target, {
+    } else if (classification.kind === "document") {
+      result = await ingestDocument(classification.target, {
         rawDir,
         assetsDir,
         eventsPath,
         ...flags,
         ...shelfOptions
       });
-      reportResult(result, { routedByDefault });
-      return;
-    }
-
-    if (classification.kind === "text") {
-      const result = await ingestText(classification.target, {
+    } else if (classification.kind === "text") {
+      result = await ingestText(classification.target, {
         rawDir,
         eventsPath,
         ...flags,
         ...shelfOptions
       });
-      reportResult(result, { routedByDefault });
-      return;
-    }
-
-    if (classification.kind === "binary") {
-      const result = await ingestBinary(classification.target, {
+    } else if (classification.kind === "binary") {
+      result = await ingestBinary(classification.target, {
         assetsDir,
         eventsPath,
         ...flags,
         ...shelfOptions
       });
-      reportResult(result, { routedByDefault });
-      return;
     }
   } catch (error) {
     if (error instanceof IngestError) {
       throw new Error(error.message);
     }
     throw error;
+  }
+
+  if (!result) return;
+
+  reportResult(result, { routedByDefault });
+
+  if (options.index && wroteMarkdown(result)) {
+    await refreshIndexQuietly(aiosPath);
+  }
+}
+
+/**
+ * True when this ingest actually put a markdown file where `dotaios index`
+ * looks. Dry runs, previews, skips, and binary-only assets did not, so they
+ * leave the index alone.
+ */
+function wroteMarkdown(result) {
+  if (result.action !== "written" && result.action !== "appended") return false;
+  return Boolean(result.destination);
+}
+
+/**
+ * Keep _index.md in step with the vault after a save.
+ *
+ * This never fails the ingest. The file is already on disk and the event is
+ * already logged; a stale index is a nuisance that `dotaios index` fixes,
+ * while a thrown error here would misreport a save that actually succeeded.
+ */
+async function refreshIndexQuietly(aiosPath) {
+  try {
+    await refreshIndex(aiosPath);
+  } catch (error) {
+    console.log(`[warn] Saved, but could not refresh _index.md: ${error.message}`);
+    console.log("[warn] Run `dotaios index` to rebuild it.");
   }
 }
 
@@ -344,6 +369,7 @@ function parseOptions(args = []) {
     json: false,
     overwrite: false,
     dryRun: false,
+    index: true,
     timeoutMs: null,
     to: null,
     name: null,
@@ -366,6 +392,8 @@ function parseOptions(args = []) {
       options.overwrite = true;
     } else if (arg === "--dry-run") {
       options.dryRun = true;
+    } else if (arg === "--no-index") {
+      options.index = false;
     } else if (arg === "--apply") {
       options.apply = true;
     } else if (arg === "--to") {
