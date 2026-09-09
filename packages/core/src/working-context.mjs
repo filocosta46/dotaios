@@ -395,7 +395,7 @@ function renderUnbounded(context) {
   const lines = [receipt, "", `## Active Context · ${today}`, ""];
 
   for (const [key, title] of [["identity", "Identity"], ["priorities", "Priorities"], ["currentWork", "Current Work"]]) {
-    if (context?.[key]) lines.push(`### ${title}`, context[key], ...renderSourceEvidence(context.sources?.[key]), "");
+    if (context?.[key]) lines.push(`### ${title}`, context[key], ...renderSourceEvidence(context.sources?.[key], { includeFollow: false }), "");
   }
   if (context?.decisions?.length > 0) {
     lines.push("### Decisions", ...context.decisions.map((decision) => `- ${decision}`), "");
@@ -481,7 +481,7 @@ function renderProject(project) {
   if (project.contextExcerpt && project.contextExcerpt !== project.description) {
     lines.push(...project.contextExcerpt.split(/\r?\n/).map((line) => line ? `> ${line}` : ">"));
   }
-  lines.push(...renderSourceEvidence(project.sourceEvidence));
+  lines.push(...renderSourceEvidence(project.sourceEvidence, { includeFollow: false }));
   return lines;
 }
 

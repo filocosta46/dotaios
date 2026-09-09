@@ -14,7 +14,8 @@ import {
 import { inspectMigrationState } from "../../packages/core/src/migrations.mjs";
 import {
   buildWorkingContextEnvelope,
-  renderOperationalNotice
+  renderOperationalNotice,
+  WORKING_CONTEXT_SOURCES_OVERHEAD_LIMIT
 } from "../../packages/core/src/working-context-envelope.mjs";
 
 const packageVersion = JSON.parse(await fs.readFile(new URL("../../package.json", import.meta.url), "utf8")).version;
@@ -1494,3 +1495,68 @@ function configBytes(size) {
     suffix
   ]);
 }
+
+
+test("follow references leave the visible projection and stay bounded beside it", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-sources-envelope-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, "context"), { recursive: true });
+  await fs.writeFile(path.join(root, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  for (const [file, heading] of [["identity", "Identity"], ["priorities", "Priorities"], ["work", "Current Work"]]) {
+    await fs.writeFile(
+      path.join(root, "context", `${file}.md`),
+      `# ${heading}\n\n## ${heading}\n${"Durable sentence. ".repeat(40)}\n`
+    );
+  }
+
+  const envelope = await buildWorkingContextEnvelope(root, { memory: "shared" });
+
+  // The visible projection keeps readable provenance and spends nothing on locators.
+  assert.doesNotMatch(envelope.digest, /ds1\./);
+  assert.doesNotMatch(envelope.digest, /^> Follow:/m);
+  assert.match(envelope.digest, /^> Source: context\/identity\.md \(excerpt; sha256:[0-9a-f]{64}\)$/m);
+
+  // Every published reference belongs to a section that survived the budget.
+  assert.ok(envelope.sources.length >= 3);
+  for (const entry of envelope.sources) {
+    assert.match(entry.follow, /^ds1\./);
+    assert.match(envelope.digest, new RegExp(`^> Source: ${entry.source.replace("/", "\\/")} `, "m"));
+  }
+  assert.deepEqual(
+    envelope.sources.map((entry) => entry.section),
+    ["identity", "priorities", "currentWork"]
+  );
+
+  // The block carries its own fixed allowance and never enters the visible budget.
+  const overhead = JSON.stringify({ contextSources: envelope.sources }, null, 2).length;
+  assert.ok(overhead <= WORKING_CONTEXT_SOURCES_OVERHEAD_LIMIT);
+  assert.equal(envelope.budget.used, envelope.digest.length);
+});
+
+test("a section omitted by the visible budget publishes no follow reference", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-sources-omitted-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.mkdir(path.join(root, "context"), { recursive: true });
+  await fs.writeFile(path.join(root, "aios.json"), '{"schema_version":"1.2.0"}\n');
+  for (const [file, heading] of [["identity", "Identity"], ["priorities", "Priorities"]]) {
+    await fs.writeFile(
+      path.join(root, "context", `${file}.md`),
+      `# ${heading}\n\n## ${heading}\n${"Durable sentence. ".repeat(20)}\n`
+    );
+  }
+
+  const full = await buildWorkingContextEnvelope(root, { memory: "shared" });
+  assert.deepEqual(full.sources.map((entry) => entry.section), ["identity", "priorities"]);
+
+  // Whatever the budget drops, the published references must match exactly the
+  // sections that survived into the visible projection.
+  const headings = { identity: "### Identity", priorities: "### Priorities" };
+  for (const budget of [full.digest.length - 1, full.digest.indexOf("### Priorities"), 200]) {
+    const clipped = await buildWorkingContextEnvelope(root, { memory: "shared", visibleCharacterBudget: budget });
+    const rendered = Object.entries(headings)
+      .filter(([, heading]) => clipped.digest.includes(heading))
+      .map(([section]) => section);
+    assert.deepEqual((clipped.sources || []).map((entry) => entry.section), rendered, `budget ${budget}`);
+  }
+  assert.ok(full.digest.length > 200);
+});

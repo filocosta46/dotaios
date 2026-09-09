@@ -1,8 +1,8 @@
 ---
 name: research
-triggers: deep research, research this, look this up properly, compare the options, what's the latest on, continue this research
+triggers: deep research, research this, look this up properly, compare the options, what's the latest on, find out everything about, continue this research
 description: Research a question across primary sources, save a cited result with an authorized work folder, and resume existing research from that folder's current plan. Use for comparisons, current research, or continuing a saved research result.
-when_to_use: deep research · research this · look this up properly · compare the options · what's the latest on · continue this research
+when_to_use: deep research · research this · look this up properly · compare the options · what's the latest on · find out everything about · continue this research
 ---
 
 # research
@@ -10,6 +10,19 @@ when_to_use: deep research · research this · look this up properly · compare 
 Produce a useful answer with inspectable sources and a clear next step. The host
 agent supplies search and browsing tools; DotAIOS organizes the local evidence
 and continuation record. Use tools that are actually available in this session.
+
+## Start here (plain language)
+
+Just say what you want to know, in ordinary words. For example:
+
+- "Research the best budget espresso machines in 2026."
+- "Find out everything about that company before my interview."
+- "Compare the options for a small-business accounting tool."
+
+You get back the answer first, the details with links you can click, and an
+honest note on anything unclear. The sources and the write-up are kept as
+ordinary files next to the work, so you or another agent can pick it up later.
+You are told where it was saved, and nothing is saved without somewhere to put it.
 
 ## Start or resume
 
@@ -34,8 +47,10 @@ and continuation record. Use tools that are actually available in this session.
    `plan.md`; surrounding user prose is preserved. The work-folder mode uses
    `--workdir`, independently of the AIOS `--path` mode.
 
-If the session cannot read or write an authorized work folder, provide the cited
-answer in the conversation and state that local continuation was not saved.
+If no authorized work folder is available, still give the cited answer in the
+conversation, then offer one concrete destination — a work folder to authorize,
+or an explicit save into AIOS memory — and say plainly that nothing has been
+saved yet. Do not leave the user holding an unsaved result with no next step.
 Saving to durable AIOS memory requires the user's explicit request and selected
 scope; the research task alone does not authorize memory promotion.
 

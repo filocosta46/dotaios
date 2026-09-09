@@ -1,13 +1,26 @@
 # Follow the source behind an excerpt
 
 Briefs and search results are excerpts. When a task depends on a rule or detail
-that may have been omitted, use the returned `Follow` value to inspect that same
-source version. Following does not change memory or approve an action.
+that may have been omitted, use the returned follow reference to inspect that
+same source version. Following does not change memory or approve an action.
+
+The visible brief carries readable provenance only — one `> Source: <path>
+(excerpt; sha256:…)` line per excerpt. Its follow references are published beside
+the projection in `contextSources`, so the fixed visible budget is never spent on
+opaque locators. Read them from the JSON envelope:
 
 ```sh
-dotaios brief --compact --memory shared
-dotaios search --follow '<Follow value>' --memory shared --budget 6000 --json
+dotaios brief --compact --memory shared --json   # contextSources[].follow
+dotaios search --follow '<follow reference>' --memory shared --budget 6000 --json
 ```
+
+Each `contextSources` entry names the `section` it belongs to (`identity`,
+`priorities`, `currentWork`, `activeProject`), its `source`, its content
+`version`, and either `follow` or a `reason`. Only sections that survived the
+visible budget are listed, so a reference is never offered for text the caller
+cannot see. Search results still print their `> Follow:` value in text output,
+and an MCP caller obtains one from `search_aios` query results — the MCP
+working-context result keeps its existing fixed metadata bound and is unchanged.
 
 For project evidence, retain the selected project scope:
 
@@ -24,8 +37,10 @@ The optional MCP adapter uses its existing `search_aios` tool:
 
 Query and follow are mutually exclusive. Follow accepts memory scope, project,
 and budget; query scope, limit, and session filters are rejected. CLI follow
-always emits the compact JSON envelope, including without `--json`. Existing
-query text output and ranking remain unchanged.
+always emits the compact JSON envelope, including without `--json`. Query ranking
+is unchanged; eligible context and project hits now print a `> Source:` and a
+`> Follow:` line beneath the excerpt. `search <query> --json` is now rejected
+rather than silently ignored.
 
 ## Read and continue
 

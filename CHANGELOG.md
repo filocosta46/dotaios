@@ -16,6 +16,30 @@ All notable changes to DotAIOS will be documented in this file.
   The work folder preserves progress, verifies source/result versions and
   refuses stale updates without writing personal AIOS memory.
 
+### Changed
+
+- The compact brief renders readable `> Source: <path> (excerpt; sha256:...)`
+  provenance only. Follow references move beside the projection as
+  `contextSources` in compact CLI and hook JSON, so the fixed visible budget is
+  not spent on opaque locators. Search text output still prints its `> Follow:`
+  value, and the MCP working-context result is unchanged.
+- Implicit project resolution from the current directory now requires the
+  registered project to be `status: active`, alongside its existing verified
+  mapping and root-identity checks. **Upgrade impact:** a project whose README
+  frontmatter is `status: paused` (or any non-active status) stops identifying
+  implicitly from its own folder; select it explicitly by id or slug, or set it
+  back to `active`.
+- `search <query> --json` is now rejected as an unsupported combination instead
+  of being silently ignored. Use the follow mode or plain query output.
+
+### Removed
+
+- The bundled `research` skill no longer writes its report to
+  `vault/research/deep/<date>-<slug>.md`. Results are retained in the authorized
+  work folder under `research/results/`; when no work folder is available the
+  skill offers a destination instead of saving automatically. **Existing files in
+  `vault/research/deep/` are left untouched** and remain searchable.
+
 ### Fixed
 
 - Project identification reports `Memory: Shared` only inside a validated AIOS

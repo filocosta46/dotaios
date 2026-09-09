@@ -26,9 +26,21 @@ test('CLI and existing MCP search follow the same brief source without query gue
   fs.writeFileSync(path.join(root, 'context', 'work.md'), source);
   const brief = run(root, ['brief', '--compact', '--memory', 'shared', '--json']);
   assert.equal(brief.status, 0, brief.stderr);
-  const markdown = JSON.parse(brief.stdout).hookSpecificOutput.additionalContext;
-  const follow = /^> Follow: (\S+)$/m.exec(markdown)?.[1];
+  const briefJson = JSON.parse(brief.stdout);
+  const markdown = briefJson.hookSpecificOutput.additionalContext;
+  // The visible projection carries readable provenance only; the locator is
+  // published beside it so the brief never spends its budget on base64.
+  assert.match(markdown, /^> Source: context\/work\.md \(excerpt; sha256:[0-9a-f]{64}\)$/m);
+  assert.doesNotMatch(markdown, /ds1\./);
+  assert.doesNotMatch(markdown, /^> Follow:/m);
+  const currentWork = briefJson.contextSources.find((entry) => entry.section === 'currentWork');
+  assert.equal(currentWork.source, 'context/work.md');
+  const follow = currentWork.follow;
   assert.ok(follow);
+  // The compact text mode carries the same visible projection and no locator.
+  const text = run(root, ['brief', '--compact', '--memory', 'shared']);
+  assert.equal(text.status, 0, text.stderr);
+  assert.doesNotMatch(text.stdout, /ds1\./);
   const result = run(root, ['search', '--follow', follow, '--memory', 'shared', '--json']);
   assert.equal(result.status, 0, result.stderr);
   const fromCli = JSON.parse(result.stdout);

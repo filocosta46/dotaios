@@ -51,10 +51,28 @@ export function eligibleSource(source) {
 
 export const encodeSourceReference = (reference) => `ds1.${Buffer.from(JSON.stringify(reference)).toString('base64url')}`;
 
-export function renderSourceEvidence(evidence) {
+// The visible projection carries human-readable provenance only. Follow
+// references are locators for an agent, so the session-start brief passes
+// includeFollow: false and publishes them through the structured envelope
+// instead of spending its fixed visible budget on opaque base64.
+export function renderSourceEvidence(evidence, { includeFollow = true } = {}) {
   if (!evidence) return [];
-  return [
-    `> Source: ${evidence.source} (excerpt; ${evidence.version})`,
-    evidence.follow ? `> Follow: ${evidence.follow}` : `> Exact follow unavailable: ${evidence.reason}`
-  ];
+  const lines = [`> Source: ${evidence.source} (excerpt; ${evidence.version})`];
+  if (!includeFollow) return lines;
+  lines.push(evidence.follow ? `> Follow: ${evidence.follow}` : `> Exact follow unavailable: ${evidence.reason}`);
+  return lines;
+}
+
+// Structured companion to the rendered `> Source:` lines. Only sections that
+// survived the visible budget are listed, so a reference is never offered for
+// text the caller cannot see.
+export function collectSourceReferences(context) {
+  const references = [];
+  for (const section of ["identity", "priorities", "currentWork"]) {
+    const evidence = context?.sources?.[section];
+    if (evidence) references.push({ section, ...evidence });
+  }
+  const project = context?.activeProject?.sourceEvidence;
+  if (project) references.push({ section: "activeProject", ...project });
+  return references;
 }

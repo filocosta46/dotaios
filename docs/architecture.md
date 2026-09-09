@@ -177,8 +177,14 @@ and opaque follow reference derived from the same accepted read as the excerpt.
 `source-reference.mjs` owns this observation format; `source-evidence.mjs` owns
 the bounded follow read. The existing CLI `search --follow` and MCP `search_aios`
 follow mode call that operation without introducing another tool or store.
-Working context includes each excerpt and its reference atomically within its
-budget; query ranking is unchanged.
+Working context renders each excerpt with a readable `> Source:` provenance line
+inside its visible budget, and publishes the matching follow reference beside the
+projection as `contextSources` in compact CLI/hook JSON. Only sections that
+survived the budget are listed, so text and reference stay atomic without
+spending the visible budget on a locator. The MCP working-context result is
+unchanged: its non-memory metadata keeps its fixed 1,024-character bound, and an
+MCP caller reaches a follow reference through `search_aios` query results. Query
+ranking is unchanged.
 
 A reference is a locator, not an access grant. Each read rechecks the requested
 memory scope, canonical project identity when applicable, contained source
