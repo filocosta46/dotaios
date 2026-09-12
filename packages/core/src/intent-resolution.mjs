@@ -82,7 +82,10 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
     });
   }
   if (!toolRequested && projectRoute.status !== "ready") {
-    return budgetedProjectRoute({ limit: visibleCharacterBudget, intent, projectRoute });
+    const skill = ["no_match", "unsupported_by_host"].includes(projectRoute.status)
+      ? await resolveUnroutedSkill(aiosPath, intent)
+      : null;
+    return budgetedProjectRoute({ limit: visibleCharacterBudget, intent, projectRoute, skill });
   }
   const refuse = (reason, recovery, refusedRoute = projectRoute) => budgetedRefusal({
     limit: visibleCharacterBudget,
@@ -112,31 +115,7 @@ export async function resolveIntentResolution(options = {}, dependencies = {}) {
   }
 
   const { selected, portable, skills, configured } = authority;
-  const rankedSkills = rankSkillMatches(intent, skills, { skillsDir: "skills" });
-  const matchedSkill = rankedSkills[0] || null;
-  const skill = matchedSkill?.ambiguous
-    ? {
-        status: "ambiguous",
-        name: null,
-        resource: null,
-        confidence: matchedSkill.confidence,
-        reason: "low_separation",
-        candidates: rankedSkills.slice(0, 2)
-          .map((candidate) => ({
-            name: candidate.name,
-            resource: path.posix.join("skills", candidate.dir, "SKILL.md"),
-            score: candidate.score
-          }))
-      }
-    : matchedSkill
-      ? {
-        status: "matched",
-        name: matchedSkill.name,
-        resource: path.posix.join("skills", matchedSkill.dir, "SKILL.md"),
-        confidence: matchedSkill.confidence,
-        reason: matchedSkill.reason
-      }
-    : { status: "no_match", name: null, resource: null, confidence: 0, reason: "no_governing_skill" };
+  const skill = resolveGoverningSkill(intent, skills);
 
   const tool = toolRequested
     ? resolveConnectionTool({
@@ -358,8 +337,10 @@ export function renderIntentResolution(value) {
   const readable = JSON.stringify(value, null, 2);
   if (
     Object.hasOwn(value || {}, "project_route")
-    && value?.status === "refused"
-    && value.next_action?.summary === "fixed_envelope_exceeds_budget"
+    && (
+      value?.skill?.routed === false
+      || (value?.status === "refused" && value.next_action?.summary === "fixed_envelope_exceeds_budget")
+    )
     && Number.isInteger(value.budget?.limit)
     && readable.length > value.budget.limit
   ) {
@@ -595,33 +576,123 @@ function compactCandidateEnvelope(envelope) {
   envelope.location = null;
 }
 
-function budgetedProjectRoute({ limit, intent, projectRoute }) {
+function resolveGoverningSkill(intent, skills) {
+  const rankedSkills = rankSkillMatches(intent, skills, { skillsDir: "skills" });
+  const matchedSkill = rankedSkills[0] || null;
+  return matchedSkill?.ambiguous
+    ? {
+        status: "ambiguous",
+        name: null,
+        resource: null,
+        confidence: matchedSkill.confidence,
+        reason: "low_separation",
+        candidates: rankedSkills.slice(0, 2)
+          .map((candidate) => ({
+            name: candidate.name,
+            resource: path.posix.join("skills", candidate.dir, "SKILL.md"),
+            score: candidate.score
+          }))
+      }
+    : matchedSkill
+      ? {
+        status: "matched",
+        name: matchedSkill.name,
+        resource: path.posix.join("skills", matchedSkill.dir, "SKILL.md"),
+        confidence: matchedSkill.confidence,
+        reason: matchedSkill.reason
+      }
+    : { status: "no_match", name: null, resource: null, confidence: 0, reason: "no_governing_skill" };
+}
+
+async function resolveUnroutedSkill(aiosPath, intent) {
+  let skill;
+  try {
+    skill = resolveGoverningSkill(intent, await collectSkills(aiosPath));
+  } catch {
+    skill = {
+      status: "not_evaluated",
+      name: null,
+      resource: null,
+      confidence: 0,
+      reason: "aios_skills_unreadable"
+    };
+  }
+  return { ...skill, provenance: "aios_skills", routed: false };
+}
+
+function budgetedProjectRoute({ limit, intent, projectRoute, skill = null }) {
   const failed = projectRoute.status === "refused" || projectRoute.status === "unsupported_by_host";
   const envelope = {
     schema: SCHEMA,
     status: failed ? "refused" : "partial",
     project: null,
     project_route: projectRoute,
-    memory: { receipt: "Memory: Off", scope: null, generated_at: null, context: "", truncated: false },
-    skill: {
+    memory: {
+      receipt: skill ? null : "Memory: Off",
+      ...(skill ? { notice: "Project context was not loaded. AIOS skill metadata was accessed separately." } : {}),
+      scope: null,
+      generated_at: null,
+      context: "",
+      truncated: false
+    },
+    skill: skill || {
       status: "not_evaluated",
       name: null,
       resource: null,
       confidence: 0,
       reason: "project_route_not_ready"
     },
-    omissions: ["project_context", "governing_skill", "configured_tool", "primary_location"],
+    omissions: [
+      "project_context",
+      ...(skill?.status === "matched" ? [] : [
+        skill?.status === "ambiguous" ? "governing_skill_ambiguous"
+          : skill?.status === "no_match" ? "governing_skill_no_match" : "governing_skill"
+      ]),
+      "configured_tool",
+      "primary_location"
+    ],
     recovery: projectRouteRecovery(projectRoute),
     next_action: projectRouteNextAction(intent, projectRoute),
     budget: { limit, used: 0, truncated: false },
     location: null
   };
+  if (skill && renderWithStableUsed(envelope).length > limit) compactUnroutedEnvelope(envelope);
   if (renderWithStableUsed(envelope).length > limit) {
     if (projectRoute.status === "candidate") compactCandidateEnvelope(envelope);
     if (renderWithStableUsed(envelope).length > limit) compactRefusalEnvelope(envelope);
   }
   stabilizeBudgetUsed(envelope);
   return envelope;
+}
+
+function compactUnroutedEnvelope(envelope) {
+  envelope.project_route = {
+    status: envelope.project_route.status,
+    reason: envelope.project_route.reason
+  };
+  envelope.memory = {
+    receipt: null,
+    notice: "Only AIOS skill metadata accessed."
+  };
+  const { reason, confidence, candidates, ...skill } = envelope.skill;
+  envelope.skill = {
+    ...skill,
+    ...(skill.status === "matched" || skill.status === "ambiguous" ? {} : { reason }),
+    ...(candidates ? {
+      candidates: candidates.map(({ name, resource }) => ({ name, resource }))
+    } : {})
+  };
+  const reasonCode = envelope.project_route.reason;
+  envelope.next_action.summary = envelope.project_route.status === "unsupported_by_host"
+    ? "Use a supported host and a fresh rooted context."
+    : reasonCode === "no_registered_projects"
+      ? "Use project add preview and proof-bound apply, then retry the stable ID."
+      : reasonCode === "concrete_action_required"
+        ? "Try a concrete action, then rerun implicit discovery; do not reconnect the folder."
+        : "Use project list, name a project and action, then rerun discovery.";
+  envelope.recovery.action = null;
+  envelope.omissions = ["resolution_details"];
+  envelope.budget.truncated = true;
 }
 
 function projectRouteRecovery(projectRoute) {

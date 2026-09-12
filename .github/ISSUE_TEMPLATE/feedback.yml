@@ -7,6 +7,8 @@ body:
       value: |
         Thanks for testing DotAIOS on real work. Please remove personal context, credentials, tokens, and local paths before posting.
 
+        **Security vulnerability?** Follow the [private reporting policy](https://github.com/filocosta46/dotaios/blob/main/SECURITY.md). Do not include vulnerability details in this public issue.
+
   - type: textarea
     id: goal
     attributes:

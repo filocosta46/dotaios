@@ -183,14 +183,14 @@ test("EPR-012: implicit project candidate does not evaluate memory, AIOS skills,
   assert.match(result.next_action.summary, /changing directory.*insufficient/i);
 });
 
-test("EPR-012: an unsupported host receives path-free guidance before memory or skill composition", async (t) => {
+test("EPR-012: an unsupported host receives an unrouted AIOS skill without project context", async (t) => {
   const { resolveIntentResolution, renderIntentResolution } = await import(
     "../../packages/core/src/intent-resolution.mjs"
   );
   const fixture = await makeFixture(t);
   await fs.writeFile(
     path.join(fixture.aiosPath, "skills", "plan-today", "SKILL.md"),
-    "---\nname: [this would fail if read\n---\n"
+    "---\nname: plan-today\ntriggers: [Prepare the client's approved launch.]\n---\n"
   );
 
   const result = await resolveIntentResolution({
@@ -206,7 +206,13 @@ test("EPR-012: an unsupported host receives path-free guidance before memory or 
   assert.equal(result.project_route.reason, "no_supported_convention");
   assert.equal(result.location, null);
   assert.equal(result.memory.context, "");
-  assert.equal(result.skill.status, "not_evaluated");
+  assert.equal(result.skill.status, "matched");
+  assert.equal(result.skill.resource, "skills/plan-today/SKILL.md");
+  assert.equal(result.skill.provenance, "aios_skills");
+  assert.equal(result.skill.routed, false);
+  assert.equal(result.memory.receipt, null);
+  assert.match(result.memory.notice, /skill metadata/i);
+  assert.ok(!result.omissions.includes("governing_skill"));
   assert.equal(Object.hasOwn(result, "tool"), false);
   assert.doesNotMatch(
     rendered,
@@ -214,8 +220,135 @@ test("EPR-012: an unsupported host receives path-free guidance before memory or 
   );
 });
 
-test("R4 and R6: unresolved project routes restart safely without inventing an exact project", async () => {
+test("unmatched project routing still evaluates installed AIOS skills", async (t) => {
   const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  const result = await resolveIntentResolution({
+    ...fixture,
+    intent: "plan my day",
+    supportedConventionKinds: ["agents-md"]
+  });
+
+  assert.equal(result.project_route.status, "no_match");
+  assert.equal(result.project_route.reason, "no_registered_project_match");
+  assert.equal(result.status, "partial");
+  assert.equal(result.skill.status, "matched");
+  assert.equal(result.skill.name, "plan-today");
+  assert.equal(result.skill.resource, "skills/plan-today/SKILL.md");
+  assert.equal(result.skill.provenance, "aios_skills");
+  assert.equal(result.skill.routed, false);
+  assert.equal(result.memory.receipt, null);
+  assert.equal(result.memory.context, "");
+  assert.equal(result.location, null);
+  assert.equal(Object.hasOwn(result, "tool"), false);
+  assert.ok(!result.omissions.includes("governing_skill"));
+});
+
+test("unrouted skill matches, ties, and failures retain provenance within the minimum budget", async (t) => {
+  const { resolveIntentResolution, renderIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  for (const kind of ["matched", "ambiguous", "no_match", "unreadable"]) {
+    if (kind === "ambiguous") {
+      await fs.mkdir(path.join(fixture.aiosPath, "skills", "other-plan"));
+      await fs.writeFile(path.join(fixture.aiosPath, "skills", "other-plan", "SKILL.md"),
+        "---\nname: other-plan\ndescription: Plan the day.\ntriggers: [plan my day]\n---\n");
+    }
+    if (kind === "unreadable") {
+      await fs.writeFile(path.join(fixture.aiosPath, "skills", "other-plan", "SKILL.md"),
+        "---\nname: [invalid metadata\n---\n");
+    }
+    for (const routeStatus of ["no_match", "unsupported_by_host"]) {
+      for (const budget of [1024, 8000]) {
+        await t.test(`${kind} on ${routeStatus} at ${budget}`, async () => {
+          const result = await resolveIntentResolution({
+            ...fixture,
+            intent: kind === "no_match" ? "repair the telescope" : "plan my day",
+            visibleCharacterBudget: budget
+          }, {
+            resolveProjectRoute: async () => ({
+              status: routeStatus,
+              reason: routeStatus === "no_match" ? "no_registered_projects" : "no_supported_convention",
+              project: null, match: null, routability: null, route: null
+            })
+          });
+          const rendered = renderIntentResolution(result);
+          assert.ok(rendered.length <= budget, `${rendered.length} must fit ${budget}`);
+          assert.equal(result.budget.used, rendered.length);
+          assert.equal(result.project_route.status, routeStatus);
+          assert.equal(result.status, routeStatus === "no_match" ? "partial" : "refused");
+          assert.notEqual(result.next_action.summary, "fixed_envelope_exceeds_budget");
+          assert.equal(result.skill.status, kind === "unreadable" ? "not_evaluated" : kind);
+          assert.equal(result.skill.provenance, "aios_skills");
+          assert.equal(result.skill.routed, false);
+          assert.equal(result.memory.receipt, null);
+          assert.equal(result.location, null);
+          assert.ok(!rendered.includes(fixture.root));
+          if (kind === "matched") assert.equal(result.skill.resource, "skills/plan-today/SKILL.md");
+          if (kind === "ambiguous") {
+            assert.equal(result.skill.resource, null);
+            assert.deepEqual(result.skill.candidates.map(({ name }) => name), ["other-plan", "plan-today"]);
+          }
+          if (kind === "unreadable") assert.equal(result.skill.reason, "aios_skills_unreadable");
+        });
+      }
+    }
+  }
+});
+
+test("refused and ambiguous project routes keep AIOS skill metadata unread", async (t) => {
+  const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  await fs.writeFile(path.join(fixture.aiosPath, "skills", "plan-today", "SKILL.md"),
+    "---\nname: [invalid metadata\n---\n");
+  for (const status of ["refused", "ambiguous"]) {
+    const result = await resolveIntentResolution({ ...fixture, intent: "plan my day" }, {
+      resolveProjectRoute: async () => ({
+        status, reason: "project_identity_unverified",
+        project: null, match: null, routability: null, route: null
+      })
+    });
+    assert.equal(result.skill.status, "not_evaluated");
+    assert.equal(result.skill.reason, "project_route_not_ready");
+    assert.equal(result.memory.receipt, "Memory: Off");
+    assert.equal(Object.hasOwn(result.skill, "provenance"), false);
+  }
+});
+
+test("maximum-length unrouted skill identities fit the minimum budget without losing a tie", async (t) => {
+  const { resolveIntentResolution, renderIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
+  await fs.rm(path.join(fixture.aiosPath, "skills", "plan-today"), { recursive: true });
+  const names = ["a".repeat(64), "b".repeat(64)];
+  for (const name of names) {
+    await fs.mkdir(path.join(fixture.aiosPath, "skills", name));
+    await fs.writeFile(path.join(fixture.aiosPath, "skills", name, "SKILL.md"),
+      `---\nname: ${name}\ntriggers: [plan my day]\n---\n`);
+  }
+  for (const [status, reason] of [
+    ["no_match", "no_registered_projects"],
+    ["no_match", "no_registered_project_match"],
+    ["no_match", "concrete_action_required"],
+    ["unsupported_by_host", "no_supported_convention"]
+  ]) {
+    const result = await resolveIntentResolution({
+      ...fixture, intent: "plan my day", visibleCharacterBudget: 1024
+    }, {
+      resolveProjectRoute: async () => ({
+        status, reason,
+        project: null, match: null, routability: null, route: null
+      })
+    });
+    assert.equal(result.status, status === "no_match" ? "partial" : "refused");
+    assert.equal(result.skill.status, "ambiguous");
+    assert.equal(result.skill.routed, false);
+    assert.deepEqual(result.skill.candidates.map(({ name }) => name), names);
+    assert.ok(renderIntentResolution(result).length <= 1024);
+  }
+});
+
+test("R4 and R6: unresolved project routes restart safely without inventing an exact project", async (t) => {
+  const { resolveIntentResolution } = await import("../../packages/core/src/intent-resolution.mjs");
+  const fixture = await makeFixture(t);
   const routes = [
     {
       status: "ambiguous",
@@ -289,6 +422,7 @@ test("R4 and R6: unresolved project routes restart safely without inventing an e
 
   for (const projectRoute of routes) {
     const result = await resolveIntentResolution({
+      ...fixture,
       intent: "Prepare the approved launch."
     }, {
       resolveProjectRoute: async () => projectRoute
@@ -296,7 +430,7 @@ test("R4 and R6: unresolved project routes restart safely without inventing an e
     const guidance = `${result.recovery.action || ""} ${result.next_action.summary || ""}`;
 
     assert.equal(result.project, null, projectRoute.status);
-    assert.equal(result.memory.receipt, "Memory: Off", projectRoute.status);
+    assert.equal(result.memory.receipt, projectRoute.status === "no_match" ? null : "Memory: Off", projectRoute.status);
     assert.equal(result.location, null, projectRoute.status);
     assert.match(guidance, /implicit discovery|discover again|rerun discovery|connect|project list|project doctor/i, projectRoute.reason);
     if (projectRoute.reason === "no_registered_projects") {

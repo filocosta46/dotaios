@@ -255,6 +255,28 @@ test("dotaios resolve Memory Off evaluates no project, context, skill, or path",
   assert.deepEqual(JSON.parse(captured.lines[0]), result);
 });
 
+test("dotaios resolve returns an unrouted skill when the project does not match", async (t) => {
+  const { resolveCommand } = await import("../../packages/cli/src/commands/resolve.mjs");
+  const fixture = await makeFixture(t);
+  const captured = captureOutput();
+  const result = await resolveCommand([
+    "plan my day", "--path", fixture.aiosPath, "--home", fixture.homePath,
+    "--budget", "1024"
+  ], { output: captured.output });
+
+  assert.equal(result.project_route.status, "no_match");
+  assert.equal(result.project_route.reason, "no_registered_project_match");
+  assert.equal(result.skill.status, "matched");
+  assert.equal(result.skill.resource, "skills/plan-today/SKILL.md");
+  assert.equal(result.skill.provenance, "aios_skills");
+  assert.equal(result.skill.routed, false);
+  assert.equal(result.memory.receipt, null);
+  assert.match(result.memory.notice, /skill metadata/i);
+  assert.equal(result.location, null);
+  assert.ok(captured.lines[0].length <= 1024);
+  assert.deepEqual(JSON.parse(captured.lines[0]), result);
+});
+
 test("dotaios resolve help is readable and promises recommendation without execution", async () => {
   const { resolveCommand } = await import("../../packages/cli/src/commands/resolve.mjs");
   const captured = captureOutput();

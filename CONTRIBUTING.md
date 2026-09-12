@@ -2,6 +2,11 @@
 
 DotAIOS is early. Keep changes small, local-first, and easy to inspect.
 
+## Security reports
+
+Report vulnerabilities through the [private reporting policy](SECURITY.md).
+Do not include vulnerability details in public issues or pull requests.
+
 ## Development
 
 ```bash

@@ -83,6 +83,34 @@ take precedence over project-native discovery. Either path is a read-only
 recommendation, never approval. A decline performs no proposed work and no
 further AIOS write.
 
+### Skill recommendations when routing is incomplete
+
+With memory enabled, `resolve` also ranks the installed AIOS skills when
+`project_route.status` is `no_match` or `unsupported_by_host`. It reads the same
+bounded `skills/` metadata used by `skills resolve`; it does not read project
+context, repository skill bodies, other machine skill roots, or configured tools
+on this path. A result carries `skill.provenance: "aios_skills"` and
+`skill.routed: false`. A skill match neither supplies a project route nor approves
+execution. Follow the project recovery guidance before entering a work folder.
+
+The envelope's `memory.receipt` is `null` on this path, with a notice explaining
+the separate skill metadata access. It does not claim `Memory: Off` after an AIOS
+read, or claim verified project memory without a ready route. A malformed skill
+catalog reports `aios_skills_unreadable` while preserving the project recovery.
+Small budgets may omit explanations and route metadata, while retaining skill
+resources, provenance, routing status, and bounded recovery guidance.
+
+This deliberately amends the EPR-012 ordering contract for `no_match` and
+`unsupported_by_host` only. Candidates awaiting approval, ambiguous project
+matches, and refused routes still skip skill evaluation. Explicit
+`--memory off` remains the earlier no-read return, including no skill reads.
+Exact routes and explicit tool requests keep their existing composition order.
+
+Project routing still checks three independent gates: a registered local path,
+a project metadata match, then recognition of a concrete action. Accepting more
+task verbs does not change project ranking. A handle-free phrase can still
+return `no_registered_project_match` even when a skill matches it.
+
 ## Reach a connected folder
 
 Connect a folder once, then let the assistant open it:
