@@ -1,26 +1,29 @@
 const ROUTE_ACTION_VERBS = new Set([
-  "add", "analyze", "approve", "archive", "assess", "audit", "bill", "build", "change",
-  "check", "clean", "collect", "commit", "compare", "configure", "connect", "convert",
+  "add", "analyze", "answer", "apply", "approve", "archive", "ask", "assess", "audit",
+  "bill", "book", "build", "cancel", "change", "check", "choose", "clean", "collect",
+  "commit", "compare", "compile", "configure", "connect", "convert",
   "coordinate", "copy", "create", "debug", "delete", "deploy", "design", "document",
-  "draft", "edit", "evaluate", "explain", "export", "fix", "generate", "import", "implement",
+  "draft", "edit", "email", "enrol", "evaluate", "explain", "export", "file", "find",
+  "finish", "fix", "follow", "generate", "handle", "import", "implement",
   "inspect", "install", "integrate", "investigate", "launch", "maintain", "measure",
-  "merge", "migrate", "monitor", "move", "open", "optimize", "organize", "package",
-  "patch", "plan", "prepare", "publish", "pull", "push", "read", "reconcile", "refactor",
-  "release", "remove", "rename", "report", "research", "resolve", "restore", "review",
-  "run", "scan", "schedule", "search", "secure", "ship", "simplify", "summarize", "sync",
-  "test", "track", "translate", "troubleshoot", "update", "upgrade", "validate", "verify", "write",
+  "list", "merge", "migrate", "monitor", "move", "open", "optimize", "organize", "package",
+  "patch", "pay", "pick", "plan", "post", "prepare", "publish", "pull", "push", "read",
+  "reconcile", "refactor", "release", "remove", "rename", "reply", "report", "request",
+  "research", "resolve", "respond", "restore", "review", "run", "scan", "schedule",
+  "search", "secure", "send", "set", "ship", "sign", "simplify", "sort", "start", "submit",
+  "summarize", "sync", "test", "tidy", "track", "translate", "troubleshoot", "try",
+  "update", "upgrade", "use", "validate", "verify", "withdraw", "wrap", "write",
   "aggiorna", "correggi", "riassumi", "summarise"
 ]);
 const OPEN_ACTION_OBJECT_TOKENS = new Set([
   "branch", "document", "file", "issue", "pr", "pull", "readme", "request", "ticket"
 ]);
-const REQUEST_FILLER_TOKENS = new Set(["hey", "kindly", "please"]);
+const REQUEST_FILLER_TOKENS = new Set(["hey", "kindly", "ora", "please"]);
 const TASK_RELATION_TOKENS = new Set([
   "must", "need", "needed", "needs", "require", "required", "requires", "should"
 ]);
 const ACTION_AUXILIARY_TOKENS = new Set(["be", "to"]);
 const NEGATION_TOKENS = new Set(["never", "no", "non", "not"]);
-const POST_HANDLE_ACTION_VERBS = new Set(["aggiorna", "correggi", "riassumi"]);
 const ACTION_REQUEST_PREFIXES = Object.freeze([
   ["can", "you"],
   ["could", "you"],
@@ -30,6 +33,7 @@ const ACTION_REQUEST_PREFIXES = Object.freeze([
   ["i", "need", "you", "to"],
   ["i", "want", "you", "to"],
   ["let", "s"],
+  ["per", "favore"],
   ["we", "need", "to"],
   ["will", "you"],
   ["would", "you"]
@@ -87,13 +91,18 @@ export function hasConcreteAction(intent, project, { requireHandle = true } = {}
     && actionAllowedAt(naturalActionIndex, actionTokens, handleTokenPositions)
   ) return true;
   const lastHandleIndex = Math.max(...handleTokenPositions);
-  const postHandleActionIndex = actionTokens.findIndex((token, index) => (
-    index > lastHandleIndex
-    && !handleTokenPositions.has(index)
-    && POST_HANDLE_ACTION_VERBS.has(token)
-  ));
+  const requestStart = actionRequestStart(actionTokens);
+  const handlePrefixesCommand = firstHandleIndex === requestStart
+    || (firstHandleIndex === requestStart + 1 && ["in", "for"].includes(actionTokens[requestStart]));
+  const postHandleActionIndex = lastHandleIndex + 1
+    + actionRequestStart(actionTokens.slice(lastHandleIndex + 1));
+  // A bare "dashboard release notes" names an artifact; a request prefix disambiguates it.
+  const namesReleaseNotes = postHandleActionIndex === lastHandleIndex + 1
+    && tokensStartWith(actionTokens.slice(postHandleActionIndex), ["release", "notes"]);
   if (
-    postHandleActionIndex !== -1
+    handlePrefixesCommand
+    && !namesReleaseNotes
+    && ROUTE_ACTION_VERBS.has(actionTokens[postHandleActionIndex])
     && actionAllowedAt(postHandleActionIndex, actionTokens, handleTokenPositions)
   ) return true;
   return hasDeclarativeTaskClause(actionTokens, handleTokenPositions)
