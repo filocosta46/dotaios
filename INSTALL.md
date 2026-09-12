@@ -569,6 +569,8 @@ the current session may retain instructions it loaded before the files changed.
 
 ## Troubleshooting
 
+- Security vulnerabilities: follow the [private reporting policy](SECURITY.md).
+  Do not post vulnerability details in a public issue.
 - `npx: command not found`: install the Node.js LTS release from
   [nodejs.org](https://nodejs.org), then run `node --version` again.
 - Existing `~/aios`: do not delete it blindly. Run

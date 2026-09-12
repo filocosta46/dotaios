@@ -63,6 +63,11 @@ async function trackedPublicEntries(root) {
   return entries;
 }
 
+async function trackedHandoffPaths(root) {
+  const { stdout } = await run("git", ["-C", root, "ls-files", "-z", "--", "docs/handoff"]);
+  return stdout.split("\0").filter(Boolean);
+}
+
 function findPrivateIdentifierOffenders(entries) {
   const offenders = [];
   for (const { relative, content } of entries) {
@@ -126,6 +131,27 @@ test("optional Lightpanda download discloses its separate AGPL license before co
     assert.match(content, /Lightpanda[\s\S]{0,500}AGPL-3\.0/i, relative);
     assert.match(content, /github\.com\/lightpanda-io\/browser/i, relative);
   }
+});
+
+test("security disclosure provides a private channel from public support entrypoints", async () => {
+  const policy = await fs.readFile(path.join(repoRoot, "SECURITY.md"), "utf8");
+  assert.match(policy, /https:\/\/github\.com\/filocosta46\/dotaios\/security\/advisories\/new/);
+  assert.match(policy.replace(/\s+/g, " "), /Do not post vulnerability details in a public issue or pull request/i);
+  assert.match(policy, /\]\(docs\/security\.md\)/);
+  assert.deepEqual(findPrivateIdentifierOffenders([
+    { relative: "SECURITY.md", content: Buffer.from(policy) },
+  ]), []);
+
+  for (const relative of ["README.md", "INSTALL.md", "CONTRIBUTING.md", ".github/ISSUE_TEMPLATE/feedback.yml"]) {
+    const content = await fs.readFile(path.join(repoRoot, relative), "utf8");
+    assert.match(content, /\]\((?:https:\/\/github\.com\/filocosta46\/dotaios\/blob\/main\/)?SECURITY\.md\)/, relative);
+  }
+});
+
+test("the npm package ships the security reporting policy and boundary guide", async () => {
+  const packedFiles = await npmPackDryRun();
+  assert.ok(packedFiles.includes("SECURITY.md"), "package must ship its private reporting policy");
+  assert.ok(packedFiles.includes("docs/security.md"), "policy must link to a shipped boundary guide");
 });
 
 test("README leads with the nondeveloper continuity outcome before technical reference", async () => {
@@ -689,15 +715,10 @@ test("commercial delivery and internal launch gates stay outside the public core
     );
   }
 
-  let handoffFiles = [];
-  try {
-    handoffFiles = await fs.readdir(path.join(repoRoot, "docs", "handoff"));
-  } catch (error) {
-    if (error.code !== "ENOENT") throw error;
-  }
-  assert.deepEqual(handoffFiles, [], "internal handoff documents stay outside the public repository");
+  assert.deepEqual(await trackedHandoffPaths(repoRoot), [], "internal handoff documents stay untracked");
 
   const packedFiles = await npmPackDryRun();
+  assert.equal(packedFiles.some((relative) => relative.startsWith("docs/handoff/")), false);
   assert.equal(packedFiles.includes("packages/cli/src/lib/pilot-metrics.mjs"), false);
 
   const textExtensions = new Set([".hbs", ".json", ".md", ".mjs", ".txt", ".yaml", ".yml"]);
@@ -711,6 +732,20 @@ test("commercial delivery and internal launch gates stay outside the public core
   assert.doesNotMatch(corpus, /gumroad|lemonsqueezy|checkout_url|product_id|paid packages?|paid plugins?/i);
   assert.doesNotMatch(corpus, /pilot-(?:score|report)|ship_pilot|go_public/i);
   assert.doesNotMatch(corpusWithoutLegacyRecoveryFilename, /\bpilot\b|Pilot health/i);
+});
+
+test("handoff inventory permits ignored local notes and detects tracked notes", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "dotaios-handoff-inventory-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await run("git", ["-C", root, "init", "--quiet"]);
+  await fs.writeFile(path.join(root, ".gitignore"), "docs/handoff/\n");
+  await fs.mkdir(path.join(root, "docs", "handoff"), { recursive: true });
+  const relative = "docs/handoff/private-note.md";
+  await fs.writeFile(path.join(root, relative), "Private handoff fixture.\n");
+
+  assert.deepEqual(await trackedHandoffPaths(root), []);
+  await run("git", ["-C", root, "add", "--force", "--", relative]);
+  assert.deepEqual(await trackedHandoffPaths(root), [relative]);
 });
 
 test("public context guidance documents only the current MCP tools and one memory projection", async () => {
@@ -948,7 +983,7 @@ const INTERNAL_PROGRAMME_DOCS = Object.freeze(
 
 function readmeDocLinks(markdown) {
   return Array.from(
-    markdown.matchAll(/\[[^\]]+\]\((docs\/[^)\s]*|INSTALL\.md)\)/g),
+    markdown.matchAll(/\[[^\]]+\]\((docs\/[^)\s]*|INSTALL\.md|SECURITY\.md)\)/g),
     (match) => match[1]
   );
 }
@@ -975,6 +1010,7 @@ test("the README guides section sends readers to user guides, not the internal p
     "docs/security.md",
     "docs/getting-started.md",
     "INSTALL.md",
+    "SECURITY.md",
   ]) {
     assert.ok(links.includes(guide), `README must link the ${guide} user guide`);
   }
