@@ -58,6 +58,7 @@
     "syntax-check": "node scripts/syntax-check.mjs",
     "verify:npm": "node scripts/verify-npm-freshness.mjs",
     "smoke": "node scripts/smoke.mjs",
+    "skill:drift": "node scripts/skill-drift.mjs",
     "test": "node --test tests/**/*.test.mjs",
     "pack:admission": "node scripts/onboarding-release-acceptance.mjs --build-package",
     "pack:check": "npm run pack:admission -- --dry-run",
