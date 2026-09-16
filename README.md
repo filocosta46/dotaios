@@ -13,8 +13,7 @@ and no hosted DotAIOS memory service.
 
 ## Who this is for
 
-An independent consultant or freelancer who already moves between AI chats
-and local agents, and does not want to build a memory system.
+Whoever non technical who already moves between AI chats or local agents, and does not want to build a memory system.
 
 The expensive part of changing tools is not the new interface. It is having
 to retell the useful context again.
